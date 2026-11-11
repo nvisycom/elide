@@ -9,7 +9,7 @@
 //!
 //! [`TestOrchestrator`]: super::orchestrator::TestOrchestrator
 
-use elide::codec::{DocumentPart, FormatRegistry, TypedStream};
+use elide::codec::{FormatRegistry, TypedStream};
 use elide::detection::Analyzer;
 use elide::entity::{Entity, Label, LabelCatalog, builtins};
 #[cfg(feature = "stt")]
@@ -338,7 +338,6 @@ impl Fixture {
         M: TextRecognizable,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,
@@ -367,7 +366,6 @@ impl Fixture {
         M: TextRecognizable,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,
@@ -383,8 +381,8 @@ impl Fixture {
         // Drive embedded images too when the image recognizer is available.
         #[cfg(all(feature = "image", feature = "llm"))]
         let builder = builder.with_image(image_analyzer()?, Anonymizer::new());
-        // A container's text sub-parts (an XLSX comment or drawing, surfaced as
-        // an XML part) are the Text modality, so register a Text pipeline to
+        // A container's text streams (an XLSX workbook's comments and
+        // drawings) are the Text modality, so register a Text pipeline to
         // drive them. When the body modality already is Text this re-registers
         // the same pipeline, which is a no-op; when it is Tabular it adds the
         // pipeline the container parts need.
@@ -432,18 +430,14 @@ impl Fixture {
         registry: &FormatRegistry,
         policy: HiddenContentPolicy,
     ) -> Result<Document> {
-        let document = registry
+        let mut document = registry
             .document_with(DOC, self.extension, self.source, policy)
             .await?;
         let body_is_m = document
             .document
-            .parts()
-            .iter()
-            .find_map(|part| match part {
-                DocumentPart::Stream { handle, .. } => Some(handle.is::<M>()),
-                DocumentPart::Blob { .. } => None,
-            })
-            .unwrap_or(false);
+            .streams_mut()
+            .first()
+            .is_some_and(|(_, stream)| stream.is::<M>());
         if !body_is_m {
             return Err(Error::capability_unavailable(format!(
                 "{} did not resolve to the {} modality",

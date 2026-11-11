@@ -1,10 +1,10 @@
 //! Per-modality pipeline and its type-erased form, used by the
-//! [`Orchestrator`] to drive a document's stream parts across two phases
+//! [`Orchestrator`] to drive a document's streams across two phases
 //! (analyze, then apply).
 //!
 //! [`ModalityPipeline`] is the concrete typed pipeline (an [`Analyzer`] + an
 //! [`Anonymizer`]); [`erased`] boxes it behind [`ErasedPipeline`] so the
-//! orchestrator can store one per modality and match a stream part to it
+//! orchestrator can store one per modality and match a stream to it
 //! without naming the modality, and runs [`flagged`] beside the analyzer to
 //! make entities of the hidden content a format labels; [`outcome`] holds the
 //! result type the erased analyze method returns; [`metadata`] holds the
@@ -29,7 +29,7 @@ pub(crate) use self::outcome::BoxFuture;
 
 /// The concrete analyze + redact pipeline for one modality `M`: the
 /// [`Analyzer`] and [`Anonymizer`] the erased layer drives against a matched
-/// stream part.
+/// stream.
 ///
 /// The anonymizer always ends in [`flagged::erase_rule`], so flagged hidden
 /// content no caller rule covers is erased rather than kept.

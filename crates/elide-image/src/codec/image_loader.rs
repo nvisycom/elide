@@ -2,21 +2,16 @@
 //! stream, plus the `#exif` metadata stream when metadata is treated as content.
 
 use elide_codec::content::ContentData;
-use elide_codec::{
-    Document, DocumentLoader, DocumentPart, ErasedStream, FormatId, LocalId, Stream,
-    StrippedContent,
-};
+use elide_codec::{Document, DocumentLoader, FormatId, StrippedContent};
 use elide_core::Result;
-use elide_core::modality::metadata::Metadata;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
 use super::exif_stream::ExifStream;
-use super::image_recombine::ImageRecombine;
+use super::image_document::ImageDocument;
 use super::image_state::ImageState;
 use super::image_stream::PixelStream;
-use super::{EXIF_PART_ID, PIXEL_PART_ID};
 use crate::ImageBuffer;
-use crate::modality::{Image, ImageFormat};
+use crate::modality::ImageFormat;
 
 /// A loader that decodes image bytes into a [`Document`]: the pixel stream, plus
 /// the `#exif` metadata stream when the [`HiddenContentPolicy`] treats metadata
@@ -56,29 +51,23 @@ impl DocumentLoader for ImageDocumentLoader {
         stripped.record(HiddenContent::Thumbnail, None, removed.thumbnails);
         let state = ImageState::new(buffer);
 
-        let pixels: Box<dyn Stream<Image>> = Box::new(PixelStream {
-            state: state.clone(),
-            format_id: self.format_id,
-        });
-        let mut parts = vec![DocumentPart::Stream {
-            id: LocalId::new(PIXEL_PART_ID),
-            handle: ErasedStream::new(pixels),
-        }];
-        if policy.metadata.treats_as_content() {
-            let exif: Box<dyn Stream<Metadata>> =
-                Box::new(ExifStream::new(state.clone(), self.format_id)?);
-            parts.push(DocumentPart::Stream {
-                id: LocalId::new(EXIF_PART_ID),
-                handle: ErasedStream::new(exif),
-            });
-        }
-
-        let recombine = ImageRecombine {
-            state,
+        // The `#exif` stream edits the same buffer as the pixel stream, so it
+        // holds a handle to it.
+        let exif = if policy.metadata.treats_as_content() {
+            Some(ExifStream::new(state.clone(), self.format_id)?)
+        } else {
+            None
+        };
+        let native = ImageDocument {
+            pixels: PixelStream {
+                state,
+                format_id: self.format_id,
+            },
+            exif,
             format: self.format,
             metadata: policy.metadata,
         };
-        Ok(Document::new(self.format_id, parts, Box::new(recombine)).with_stripped(stripped))
+        Ok(Document::new(self.format_id, native, Vec::new()).with_stripped(stripped))
     }
 }
 
@@ -88,15 +77,17 @@ impl DocumentLoader for ImageDocumentLoader {
 #[cfg(all(test, feature = "fixtures"))]
 mod tests {
     use bytes::Bytes;
-    use elide_core::modality::metadata::{MetadataLocation, MetadataReplacement};
+    use elide_codec::TypedStream;
+    use elide_core::modality::metadata::{Metadata, MetadataLocation, MetadataReplacement};
     use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
 
     use super::*;
+    use crate::codec::EXIF_PART_ID;
     use crate::fixtures;
-    use crate::modality::{ImageLocation, ImageReplacement};
+    use crate::modality::{Image, ImageLocation, ImageReplacement};
     use crate::primitive::{BoundingBox, Color, Dimensions, Point};
 
     const JPEG: &str = "elide.image.jpeg";
@@ -120,26 +111,18 @@ mod tests {
             .expect("decode")
     }
 
-    /// The document's pixel stream part, downcast to `Image`.
-    fn pixels(doc: &mut Document) -> &mut elide_codec::TypedStream<Image> {
-        match &mut doc.parts_mut()[0] {
-            DocumentPart::Stream { handle, .. } => {
-                handle.downcast_mut::<Image>().expect("pixel stream")
-            }
-            _ => panic!("part 0 is the pixel stream"),
-        }
+    /// The document's pixel stream, as `Image`.
+    fn pixels(doc: &mut Document) -> TypedStream<'_, Image> {
+        let (_, stream) = doc.streams_mut().into_iter().next().expect("pixels");
+        stream.downcast::<Image>().expect("pixel stream")
     }
 
-    /// The document's `#exif` metadata stream, downcast to `Metadata`.
-    fn exif(doc: &mut Document) -> &mut elide_codec::TypedStream<Metadata> {
-        doc.parts_mut()
-            .iter_mut()
-            .find_map(|part| match part {
-                DocumentPart::Stream { id, handle } if id.as_str() == EXIF_PART_ID => {
-                    handle.downcast_mut::<Metadata>()
-                }
-                _ => None,
-            })
+    /// The document's `#exif` metadata stream, as `Metadata`.
+    fn exif(doc: &mut Document) -> TypedStream<'_, Metadata> {
+        doc.streams_mut()
+            .into_iter()
+            .find(|(id, _)| *id == EXIF_PART_ID)
+            .and_then(|(_, stream)| stream.downcast::<Metadata>())
             .expect("#exif stream")
     }
 
@@ -165,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn decode_stream_reports_full_frame() {
         let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
-        assert_eq!(doc.parts().len(), 1);
+        assert_eq!(doc.streams_mut().len(), 1);
         let stream = pixels(&mut doc);
         assert_eq!(stream.format().as_str(), PNG);
         let chunks = stream.chunks().unwrap();
@@ -181,14 +164,14 @@ mod tests {
         assert_eq!(
             decode(JPEG, Disposition::KeepOnlyEssential, jpeg())
                 .await
-                .parts()
+                .streams_mut()
                 .len(),
             1
         );
         assert_eq!(
             decode(JPEG, Disposition::ScanAsContent, jpeg())
                 .await
-                .parts()
+                .streams_mut()
                 .len(),
             2
         );

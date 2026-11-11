@@ -1,4 +1,4 @@
-//! Codec adapters: the OOXML formats (DOCX, PPTX, XLSX) on the parts model.
+//! Codec adapters: the OOXML formats (DOCX, PPTX, XLSX).
 //!
 //! `docx` and `pptx` are thin `OoxmlCodec` seams — a marker plus a `format()` —
 //! over the shared element-text `ooxml` adapter; `xlsx` is its own codec

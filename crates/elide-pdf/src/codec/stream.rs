@@ -1,8 +1,6 @@
 //! The PDF body [`Stream<Text>`]: yields each page's text as a chunk and records
 //! per-page redactions onto the shared [`PdfState`].
 
-use bytes::Bytes;
-use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -15,7 +13,7 @@ use super::state::PdfState;
 
 /// The body [`Stream<Text>`] of a PDF: yields each page's text as a chunk and
 /// records per-page redactions onto the shared [`PdfState`], which the
-/// [`PdfRecombine`](super::recombine::PdfRecombine) applies on encode.
+/// [`PdfDocument`](super::document::PdfDocument) applies on encode.
 pub(super) struct PdfStream {
     pub(super) state: PdfState,
 }
@@ -25,19 +23,15 @@ impl Stream<Text> for PdfStream {
         FORMAT_ID
     }
 
-    fn encode(&self) -> Result<ContentData> {
-        // The document re-serialisation lives in `PdfRecombine`, which reads the
-        // shared state; this part's own bytes are ignored by the recombiner.
-        Ok(ContentData::new(Bytes::new()))
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         // One chunk per page, each addressed in its *own* page-local byte space
         // (`0..len`). A whole-page rendered anchor carries which page the chunk
         // is on (so `lift` and redaction know it) without a document-wide offset;
         // detection runs per chunk, so a span can never straddle a page boundary.
-        Ok((0..self.state.page_count())
-            .filter_map(|i| self.state.page(i))
+        Ok(self
+            .state
+            .pages()
+            .iter()
             .map(|page| Chunk {
                 location: TextLocation::rendered(
                     0..page.text.len(),

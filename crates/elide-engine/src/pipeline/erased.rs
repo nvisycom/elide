@@ -1,14 +1,14 @@
 //! [`ErasedPipeline`]: the type-erased pipeline the [`Orchestrator`] stores per
-//! modality, so a document's stream part can be offered to each pipeline until
+//! modality, so a document's stream can be offered to each pipeline until
 //! one matches without the orchestrator naming the modality statically.
 //!
 //! [`Orchestrator`]: crate::Orchestrator
 
 use std::any::Any;
 
-use elide_codec::{ErasedStream, TypedStream};
+use elide_codec::StreamMut;
 use elide_core::entity::Entity;
-use elide_core::modality::{ChunkReader, DataReader, DataWriter, Modality};
+use elide_core::modality::Modality;
 use elide_core::recognition::Scope;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
@@ -19,7 +19,7 @@ use crate::analysis::{ArtifactGroup, EntityGroup};
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
-/// Every document stream part is an [`ErasedStream`] the orchestrator buckets by
+/// Every document stream is a [`StreamMut`] the orchestrator buckets by
 /// modality ([`matches`]) so it never names the modality statically. The analyze
 /// phase is seeded with the group's prior enrichment artifact, `NoArtifact` on a
 /// first pass, a restored artifact on a re-run, so the same path serves both. The
@@ -36,9 +36,9 @@ pub(crate) trait ErasedPipeline: Send + Sync {
     /// Whether `handle` carries this pipeline's modality — a non-mutating probe
     /// the orchestrator uses to bucket parts by modality before dispatching a
     /// batch, without a destructive try-each-pipeline downcast.
-    fn matches(&self, handle: &ErasedStream) -> bool;
+    fn matches(&self, handle: &StreamMut<'_>) -> bool;
 
-    /// Analyze several stream parts of this pipeline's modality together,
+    /// Analyze several streams of this pipeline's modality together,
     /// coalescing enrichment into one batched provider round-trip, and return one
     /// [`PartAnalysis`] per handle in order. Each handle is paired with its prior
     /// enrichment `seed` (`NoArtifact` on a first pass), and its flagged hidden
@@ -47,17 +47,17 @@ pub(crate) trait ErasedPipeline: Send + Sync {
     /// [`matches`](Self::matches) first); a non-matching handle is a caller error.
     fn analyze_streams<'a>(
         &'a self,
-        handles: &'a mut [&'a mut ErasedStream],
+        handles: &'a mut [StreamMut<'_>],
         scope: &'a Scope,
         policy: HiddenContentPolicy,
         seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>>;
 
-    /// Redact a matched stream part in place with its (possibly edited) boxed
+    /// Redact a matched stream in place with its (possibly edited) boxed
     /// entities; the document re-encodes the stream itself on `encode`.
     fn apply_stream<'a>(
         &'a self,
-        handle: &'a mut ErasedStream,
+        handle: &'a mut StreamMut<'_>,
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
     ) -> BoxFuture<'a, Result<()>>;
@@ -80,15 +80,14 @@ where
     M: Modality,
     Vec<Entity<M>>: EntityGroup,
     M::Artifact: ArtifactGroup,
-    TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
 {
-    fn matches(&self, handle: &ErasedStream) -> bool {
+    fn matches(&self, handle: &StreamMut<'_>) -> bool {
         handle.is::<M>()
     }
 
     fn analyze_streams<'a>(
         &'a self,
-        handles: &'a mut [&'a mut ErasedStream],
+        handles: &'a mut [StreamMut<'_>],
         scope: &'a Scope,
         policy: HiddenContentPolicy,
         seeds: &'a [&'a dyn ArtifactGroup],
@@ -96,13 +95,14 @@ where
         Box::pin(async move {
             // The orchestrator grouped these handles by `matches`, so every one
             // downcasts; a `None` here would mean a caller mixed modalities.
-            let mut streams = Vec::with_capacity(handles.len());
+            let mut typed = Vec::with_capacity(handles.len());
             for handle in handles.iter_mut() {
                 let stream = handle.downcast_mut::<M>().ok_or_else(|| {
                     Error::malformed(format!("batched part is not {} despite matching", M::NAME))
                 })?;
-                streams.push(stream);
+                typed.push(stream);
             }
+            let mut streams: Vec<_> = typed.iter_mut().collect();
             let flagged = streams
                 .iter()
                 .map(|stream| flagged::entities(stream, scope, policy))
@@ -136,7 +136,7 @@ where
 
     fn apply_stream<'a>(
         &'a self,
-        handle: &'a mut ErasedStream,
+        handle: &'a mut StreamMut<'_>,
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
     ) -> BoxFuture<'a, Result<()>> {
@@ -146,7 +146,7 @@ where
             // deserialized report. Such a report can key a part under one modality
             // while the stream there is another, so a mismatch is malformed input,
             // not an invariant break.
-            let Some(stream) = handle.downcast_mut::<M>() else {
+            let Some(mut stream) = handle.downcast_mut::<M>() else {
                 return Err(Error::malformed(format!(
                     "report keys this part as {} but its stream is not",
                     M::NAME
@@ -158,7 +158,9 @@ where
                     M::NAME
                 )));
             };
-            self.anonymizer.anonymize(stream, entities, scope).await
+            self.anonymizer
+                .anonymize(&mut stream, entities, scope)
+                .await
         })
     }
 

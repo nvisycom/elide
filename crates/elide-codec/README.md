@@ -9,11 +9,12 @@ The codec contracts for reading and redacting documents across file formats.
 Detection works on text, but real documents arrive as files: plain text, JSON,
 HTML, XML, images, audio, PDFs, and Office documents. This crate defines the
 contracts that bridge the two. A format's `DocumentLoader` decodes its bytes
-into a `Document`: an ordered set of parts, each either a `Stream` of one
-modality (a text body, an image's pixels, an audio clip) that detection reads
-and redaction edits in place, or a blob, an embedded file decoded as a document
-of its own. The format's `Recombine` assembles the redacted parts back into
-native bytes and checks the result. A `Format` names the format and the
+into a `Document`: the format's `Native` document, which owns the document's
+`Stream`s, one per modality it carries (a text body, an image's pixels, an
+audio clip), and the blobs embedded in it, each a file decoded as a document of
+its own. Detection reads the streams and redaction edits them in place; the
+native document then writes itself back into native bytes, with the blobs'
+redacted bytes, and checks the result. A `Format` names the format and the
 extensions and content types it is found by.
 
 It ships no formats of its own. Each format is implemented against these

@@ -4,12 +4,11 @@
 //! file format.
 //!
 //! The mock document is a [`Document`] of a body [`Stream`] plus any number of
-//! [`Blob`](DocumentPart::Blob) sub-parts: [`MockStream`] streams the body as one
-//! chunk and redacts it by byte range, and [`MockRecombine`] re-serializes the
-//! body with the (possibly redacted) blob bytes. Each blob carries a decoder
-//! [`hint`](DocumentPart::Blob) independent of its id, so a test can key a part
-//! by an extensionless id yet still name a real hint — the shape a container fold
-//! must honor.
+//! [`Blob`]s: [`MockStream`] streams the body as one chunk and redacts it by
+//! byte range, and [`MockDocument`] re-serializes the body with the (possibly
+//! redacted) blob bytes. Each blob carries a decoder [`hint`](Blob::hint)
+//! independent of its id, so a test can key a part by an extensionless id yet
+//! still name a real hint — the shape a container fold must honor.
 //!
 //! # Wire format
 //!
@@ -27,10 +26,7 @@ use elide_core::redaction::{HiddenContentPolicy, Redactions};
 
 use crate::content::ContentData;
 use crate::string::RedactRange;
-use crate::{
-    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId, LocalId,
-    Recombine, Stream,
-};
+use crate::{Blob, Document, DocumentLoader, Format, FormatId, LocalId, Native, Stream, StreamMut};
 
 /// Stable [`FormatId`] for the mock format.
 pub const MOCK_FORMAT_ID: FormatId = FormatId::new("elide.test.mock");
@@ -38,9 +34,9 @@ pub const MOCK_FORMAT_ID: FormatId = FormatId::new("elide.test.mock");
 /// The extension the registry resolves the mock format on.
 pub const MOCK_EXT: &str = "mock";
 
-/// One embedded blob part of a mock document: its local id, its decoder hint,
-/// and its raw bytes. The hint is stored independent of the id so a part can be
-/// keyed by an extensionless id yet still carry a real hint.
+/// One embedded file of a mock document: its local id, its decoder hint, and its
+/// raw bytes. The hint is stored independent of the id so a file can be keyed by
+/// an extensionless id yet still carry a real hint.
 #[derive(Clone, Debug)]
 pub struct MockPart {
     /// The part's container-local id.
@@ -95,12 +91,12 @@ pub fn decode_mock(bytes: &[u8]) -> (String, Vec<MockPart>) {
     (body, parts)
 }
 
-/// The stream part id of a mock document's body.
+/// The id of a mock document's body stream.
 pub const MOCK_BODY_ID: &str = "body";
 
 /// The body [`Stream`] of a mock document: an editable text line, yielded as one
-/// chunk and redacted by byte range. Its [`encode`](Stream::encode) yields the
-/// body alone; [`MockRecombine`] re-attaches the blob parts.
+/// chunk and redacted by byte range. [`MockDocument`] writes it out with the
+/// blobs.
 #[derive(Debug)]
 pub struct MockStream {
     body: String,
@@ -109,11 +105,6 @@ pub struct MockStream {
 impl Stream<Text> for MockStream {
     fn format(&self) -> FormatId {
         MOCK_FORMAT_ID
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        // The body only; the recombiner re-attaches the blob parts.
-        Ok(ContentData::from_text(self.body.clone()))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
@@ -154,35 +145,32 @@ impl DataWriter<Text> for MockStream {
     }
 }
 
-/// The recombiner for a mock document: re-serialize the body (the [`MockStream`]'s
-/// re-encoded bytes) with each blob part's `@PART <id> <hint> <hex>` line, using
-/// the decode-time hints. A blob's bytes are its current (possibly redacted) ones.
+/// The native mock document: the body [`MockStream`], re-serialized with each
+/// blob's `@PART <id> <hint> <hex>` line. A blob's bytes are its current
+/// (possibly redacted) ones; a removed blob is not written.
 #[derive(Debug)]
-pub struct MockRecombine {
-    /// The `(id, hint)` of each blob part, in document order, captured at decode.
-    hints: Vec<(String, String)>,
+pub struct MockDocument {
+    body: MockStream,
 }
 
-impl Recombine for MockRecombine {
-    fn assemble(&self, parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
-        let body = parts
+impl Native for MockDocument {
+    fn streams(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
+        vec![(
+            LocalId::new(MOCK_BODY_ID),
+            StreamMut::new::<Text, _>(&mut self.body),
+        )]
+    }
+
+    fn encode(&self, blobs: &[Blob], _removed: &[LocalId]) -> Result<ContentData> {
+        let parts: Vec<MockPart> = blobs
             .iter()
-            .find(|p| p.id.as_str() == MOCK_BODY_ID)
-            .map(|p| String::from_utf8_lossy(&p.bytes).into_owned())
-            .unwrap_or_default();
-        let blobs: Vec<MockPart> = self
-            .hints
-            .iter()
-            .filter_map(|(id, hint)| {
-                let bytes = parts.iter().find(|p| p.id.as_str() == id)?.bytes.clone();
-                Some(MockPart {
-                    id: id.clone(),
-                    hint: hint.clone(),
-                    bytes,
-                })
+            .map(|blob| MockPart {
+                id: blob.id.as_str().to_owned(),
+                hint: blob.hint.clone(),
+                bytes: blob.bytes.clone(),
             })
             .collect();
-        Ok(ContentData::new(encode_mock(&body, &blobs)))
+        Ok(ContentData::new(encode_mock(&self.body.body, &parts)))
     }
 
     /// The mock wire format carries no hidden content, so there is nothing to
@@ -193,7 +181,7 @@ impl Recombine for MockRecombine {
 }
 
 /// A [`DocumentLoader`] that decodes the mock wire format into a [`Document`]: a
-/// body [`MockStream`] plus one [`Blob`](DocumentPart::Blob) per embedded part.
+/// [`MockDocument`] plus one [`Blob`] per embedded part.
 #[derive(Debug)]
 pub struct MockLoader;
 
@@ -201,29 +189,18 @@ pub struct MockLoader;
 impl DocumentLoader for MockLoader {
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
         let (body, parts) = decode_mock(content.as_bytes());
-        let hints = parts
-            .iter()
-            .map(|p| (p.id.clone(), p.hint.clone()))
+        let blobs = parts
+            .into_iter()
+            .map(|part| Blob {
+                id: LocalId::new(part.id),
+                bytes: part.bytes,
+                hint: part.hint,
+            })
             .collect();
-
-        let mut document_parts = Vec::with_capacity(parts.len() + 1);
-        document_parts.push(DocumentPart::Stream {
-            id: LocalId::new(MOCK_BODY_ID),
-            handle: ErasedStream::new(Box::new(MockStream { body }) as Box<dyn Stream<Text>>),
-        });
-        for p in parts {
-            document_parts.push(DocumentPart::Blob {
-                id: LocalId::new(p.id),
-                bytes: p.bytes,
-                hint: p.hint,
-            });
-        }
-
-        Ok(Document::new(
-            MOCK_FORMAT_ID,
-            document_parts,
-            Box::new(MockRecombine { hints }),
-        ))
+        let native = MockDocument {
+            body: MockStream { body },
+        };
+        Ok(Document::new(MOCK_FORMAT_ID, native, blobs))
     }
 }
 

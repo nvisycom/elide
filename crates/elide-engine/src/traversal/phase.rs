@@ -3,7 +3,7 @@
 //! report entry in place, fold changed blob children back, remove unreadable
 //! ones).
 
-use elide_codec::ErasedStream;
+use elide_codec::StreamMut;
 use elide_core::Result;
 use elide_core::modality::NoArtifact;
 use elide_core::recognition::Scope;
@@ -15,7 +15,7 @@ use crate::analysis::{ArtifactGroup, ArtifactSet, PartReport, Report, StrippedRe
 use crate::part_id::PartId;
 use crate::pipeline::BoxFuture;
 
-/// The analysis phase: batch each level's stream parts through the pipeline for
+/// The analysis phase: batch each level's streams through the pipeline for
 /// their modality and scatter the findings and enrichment artifact into the
 /// report, keyed by part id. Blob children never fold back (analysis mutates the
 /// report, not the document).
@@ -37,7 +37,7 @@ impl PartVisitor for Analyze<'_> {
     fn visit_streams<'a>(
         &'a mut self,
         orchestrator: &'a Orchestrator,
-        mut streams: Vec<(PartId, &'a mut ErasedStream)>,
+        mut streams: Vec<(PartId, StreamMut<'a>)>,
         policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
@@ -53,7 +53,7 @@ impl PartVisitor for Analyze<'_> {
                 if mine.is_empty() {
                     continue;
                 }
-                let (ids, mut handles): (Vec<PartId>, Vec<&mut ErasedStream>) =
+                let (ids, mut handles): (Vec<PartId>, Vec<StreamMut<'_>>) =
                     mine.into_iter().unzip();
                 let seeds: Vec<&dyn ArtifactGroup> = ids
                     .iter()
@@ -95,7 +95,7 @@ impl PartVisitor for Analyze<'_> {
     }
 }
 
-/// The redaction phase: redact each stream part in place through its report
+/// The redaction phase: redact each stream in place through its report
 /// entry, marking the document changed, fold a changed blob child's re-encoded
 /// bytes back into its parent, and remove a blob no codec can read.
 pub(crate) struct Redact<'p> {
@@ -109,12 +109,12 @@ impl PartVisitor for Redact<'_> {
     fn visit_streams<'a>(
         &'a mut self,
         orchestrator: &'a Orchestrator,
-        streams: Vec<(PartId, &'a mut ErasedStream)>,
+        streams: Vec<(PartId, StreamMut<'a>)>,
         _policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
             let mut changed = false;
-            for (part_id, handle) in streams {
+            for (part_id, mut handle) in streams {
                 let Some(entry) = self.report.parts.get_mut(&part_id) else {
                     continue; // no findings for this stream
                 };
@@ -122,7 +122,7 @@ impl PartVisitor for Redact<'_> {
                     continue; // pipeline for this modality is gone
                 };
                 pipeline
-                    .apply_stream(handle, entry.entities.as_mut(), orchestrator.scope())
+                    .apply_stream(&mut handle, entry.entities.as_mut(), orchestrator.scope())
                     .await?;
                 changed = true;
             }

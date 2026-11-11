@@ -1,5 +1,5 @@
-//! [`ImageState`]: the decoded image shared between the pixel stream, the EXIF
-//! stream, and the recombiner.
+//! [`ImageState`]: the decoded image shared between the pixel stream and the
+//! EXIF stream.
 
 use std::sync::{Arc, Mutex};
 
@@ -12,11 +12,10 @@ use crate::ImageBuffer;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::Dimensions;
 
-/// The decoded image, shared between the pixel stream, the EXIF stream, and the
-/// recombiner so a redaction on either stream is visible when the recombiner
-/// re-encodes. `Clone`
-/// shares the one buffer (an `Arc` bump); the lock is held only inside these
-/// methods.
+/// The decoded image, shared between the pixel stream and the EXIF stream, which
+/// both edit the one buffer: a redaction on either is in the image the
+/// native document encodes from the pixel stream. `Clone` shares the one buffer (an
+/// `Arc` bump); the lock is held only inside these methods.
 #[derive(Clone)]
 pub(super) struct ImageState(Arc<Mutex<ImageBuffer>>);
 
@@ -34,11 +33,6 @@ impl ImageState {
     /// Encode the current pixels to bytes with the source's metadata.
     pub(super) fn encode(&self) -> Result<Bytes> {
         self.0.lock().unwrap().encode()
-    }
-
-    /// The source container as the metadata edits so far left it.
-    pub(super) fn source_bytes(&self) -> Bytes {
-        self.0.lock().unwrap().source_bytes()
     }
 
     /// Each surfaced EXIF field the image carries.

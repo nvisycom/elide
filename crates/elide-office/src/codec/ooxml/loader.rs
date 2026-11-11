@@ -1,38 +1,32 @@
-//! [`OoxmlLoader`] + [`decode_document`]: build a parts-model [`Document`] from a
-//! text-only OOXML package.
+//! [`OoxmlLoader`] + [`decode_document`]: build a [`Document`] from a text-only
+//! OOXML package.
 
-use std::iter;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::extract::{ExtractStream, SharedSplice};
-use elide_codec::{
-    Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream, StrippedContent,
-};
-use elide_core::modality::text::Text;
+use elide_codec::extract::ExtractStream;
+use elide_codec::{Blob, Document, DocumentLoader, LocalId, StrippedContent};
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
 use elide_core::{Error, Result};
 
 use super::addresser::OoxmlAddresser;
-use super::recombine::OoxmlRecombine;
-use super::{BODY_PART_ID, OoxmlAddress, OoxmlCodec, items};
-use crate::codec::props::doc_props_parts;
+use super::document::OoxmlDocument;
+use super::{OoxmlCodec, items};
+use crate::codec::props::DocProps;
 use crate::ooxml::{OoxmlFormat, OoxmlPackage};
 use crate::opc::sanitize::sanitize;
 
-/// The body of a decoded OOXML package: its text stream, the recombiner sharing
-/// its item state, and the parts surfaced beside it.
+/// A decoded OOXML package: its native document, its embedded blobs, and what
+/// decode stripped.
 struct Decoded<C: OoxmlCodec> {
-    stream: ExtractStream<OoxmlAddress>,
-    recombine: OoxmlRecombine<C>,
-    parts: Vec<DocumentPart>,
+    native: OoxmlDocument<C>,
+    blobs: Vec<Blob>,
     stripped: StrippedContent,
 }
 
 /// Sanitize the package under `policy`, extract its text blocks and
-/// embeddings, and build its body stream, recombiner, and the parts beside it.
+/// embeddings, and build its native document and blobs.
 ///
 /// **Fail-closed:** a non-empty [`issues`](crate::opc::Extraction::issues) list
 /// means a text-bearing part could not be read into blocks, so its text would
@@ -54,9 +48,9 @@ fn decode_package<C: OoxmlCodec>(
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
     let properties = match policy.metadata {
         Disposition::ScanAsContent | Disposition::FlagEverything => {
-            doc_props_parts(|path| pkg.part_bytes(path))
+            DocProps::read(|path| pkg.part_bytes(path))
         }
-        Disposition::KeepOnlyEssential => Vec::new(),
+        Disposition::KeepOnlyEssential => DocProps::default(),
     };
     let extraction = pkg.extract();
 
@@ -73,39 +67,40 @@ fn decode_package<C: OoxmlCodec>(
         )));
     }
 
-    let state: SharedSplice<OoxmlAddress> = SharedSplice::new(items(extraction.blocks));
-    let stream = ExtractStream::new(C::FORMAT_ID, state.clone(), Arc::new(OoxmlAddresser));
+    let body = ExtractStream::new(C::FORMAT_ID, items(extraction.blocks), OoxmlAddresser);
 
     // Each binary embedding the engine classifies (images, media, embedded
-    // objects), keyed by its zip entry path and hinted by its extension; then
-    // each document-property part's metadata stream.
-    let embeddings = extraction.embeddings.into_iter().map(|embedding| {
-        let id = LocalId::new(embedding.part.as_str().to_owned());
-        let hint = id.extension().unwrap_or_default().to_owned();
-        DocumentPart::Blob {
-            id,
-            bytes: embedding.bytes,
-            hint,
-        }
-    });
+    // objects), keyed by its zip entry path and hinted by its extension.
+    let blobs = extraction
+        .embeddings
+        .into_iter()
+        .map(|embedding| {
+            let id = LocalId::new(embedding.part.as_str().to_owned());
+            let hint = id.extension().unwrap_or_default().to_owned();
+            Blob {
+                id,
+                bytes: embedding.bytes,
+                hint,
+            }
+        })
+        .collect();
 
     Ok(Decoded {
-        stream,
-        recombine: OoxmlRecombine {
+        native: OoxmlDocument {
+            body,
+            properties,
             archive,
-            state,
             policy,
             _codec: PhantomData,
         },
-        parts: embeddings.chain(properties).collect(),
+        blobs,
         stripped,
     })
 }
 
-/// Decode `content` into the parts-model [`Document`]: a body
-/// [`ExtractStream`] plus a [`Blob`](DocumentPart::Blob) per surfaced embedding
-/// and a metadata stream per document-property part. Shared by the DOCX and
-/// PPTX loaders.
+/// Decode `content` into a [`Document`]: an [`OoxmlDocument`] (a body
+/// [`ExtractStream`] and a metadata stream per document-property part) plus a
+/// [`Blob`] per surfaced embedding. Shared by the DOCX and PPTX loaders.
 ///
 /// # Errors
 ///
@@ -117,15 +112,7 @@ pub(crate) fn decode_document<C: OoxmlCodec>(
     policy: HiddenContentPolicy,
 ) -> Result<Document> {
     let decoded = decode_package::<C>(content, policy)?;
-    let body = DocumentPart::Stream {
-        id: LocalId::new(BODY_PART_ID),
-        handle: ErasedStream::new(Box::new(decoded.stream) as Box<dyn Stream<Text>>),
-    };
-    let parts = iter::once(body).chain(decoded.parts).collect();
-    Ok(
-        Document::new(C::FORMAT_ID, parts, Box::new(decoded.recombine))
-            .with_stripped(decoded.stripped),
-    )
+    Ok(Document::new(C::FORMAT_ID, decoded.native, decoded.blobs).with_stripped(decoded.stripped))
 }
 
 /// A [`DocumentLoader`] for one text-only OOXML format, decoding via
@@ -147,16 +134,13 @@ impl<C: OoxmlCodec> DocumentLoader for OoxmlLoader<C> {
     }
 }
 
-/// Test-only: decode `content` under `policy` into the body [`ExtractStream`]
-/// and its [`OoxmlRecombine`], sharing one item state, so a test can drive the
-/// concrete stream (its `TextLocation`-based [`Stream::lift`]) and re-pack
-/// through the recombiner, the same pair the [`Document`] holds but without the
-/// erasure.
+/// Test-only: decode `content` under `policy` into its [`OoxmlDocument`], so a
+/// test can drive the concrete body stream (its `TextLocation`-based
+/// `Stream::lift`) and write the document without the output check.
 #[cfg(test)]
-pub(crate) fn decode_parts<C: OoxmlCodec>(
+pub(crate) fn decode_native<C: OoxmlCodec>(
     content: ContentData,
     policy: HiddenContentPolicy,
-) -> Result<(ExtractStream<OoxmlAddress>, OoxmlRecombine<C>)> {
-    let decoded = decode_package::<C>(content, policy)?;
-    Ok((decoded.stream, decoded.recombine))
+) -> Result<OoxmlDocument<C>> {
+    Ok(decode_package::<C>(content, policy)?.native)
 }

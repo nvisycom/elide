@@ -1,7 +1,7 @@
-//! [`MarkupRecombine`]: re-serialising a redacted markup document, and
-//! [`markup_document`], which assembles one.
+//! [`MarkupDocument`]: a decoded markup document, its body stream and how it is
+//! re-serialised, and [`markup_document`], which assembles one.
 //!
-//! Re-serialisation preserves the document **verbatim**: [`MarkupRecombine`]
+//! Re-serialisation preserves the document **verbatim**: [`MarkupDocument`]
 //! writes back only the stretch of each item's value a redaction changed,
 //! escaped for where it lands, leaving the declaration, whitespace, attribute
 //! quoting, character references, and everything outside the redacted
@@ -10,39 +10,41 @@
 
 use std::cmp::Reverse;
 use std::ops::Range;
-use std::sync::Arc;
 
 use elide_codec::content::ContentData;
-use elide_codec::extract::{ExtractStream, Passage, SharedSplice};
-use elide_codec::{
-    Document, DocumentPart, EncodedPart, ErasedStream, FormatId, LocalId, Recombine, Stream,
-};
+use elide_codec::extract::{ExtractStream, Passage};
+use elide_codec::{Blob, Document, FormatId, LocalId, Native, StreamMut};
 use elide_core::modality::text::Text;
 use elide_core::{Error, Result};
 
 use super::address::{MarkupAddresser, XmlItem, XmlSpan};
 use crate::sanitize::MarkupSanitizer;
 
-/// Re-serialises a markup document by splicing each item's current value back at
-/// its source span into the retained raw string. Holds the shared item state the
-/// [`ExtractStream`] redacts in place, and
-/// the sanitizer the output is checked against.
-#[derive(Debug)]
-pub(crate) struct MarkupRecombine {
+/// The id of a markup document's one stream.
+const BODY_ID: &str = "body";
+
+/// A decoded markup document: its body [`ExtractStream`] over the retained raw
+/// source, re-serialised by splicing each item back at its source span, then
+/// checked against the sanitizer the decode applied.
+pub(crate) struct MarkupDocument {
+    /// The body items.
+    body: ExtractStream<XmlSpan>,
     /// The retained (sanitized) raw document.
-    pub(crate) raw: String,
-    /// The (redacted-in-place) item stream, shared with the body stream.
-    pub(crate) state: SharedSplice<XmlSpan>,
+    raw: String,
     /// The sanitizer the decode applied, which the output must pass.
-    pub(crate) sanitizer: MarkupSanitizer,
+    sanitizer: MarkupSanitizer,
 }
 
-impl Recombine for MarkupRecombine {
-    fn assemble(&self, _parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
-        // The body stream's `EncodedPart` bytes are the ignored marker (a spliced
-        // body has no standalone bytes); the redacted items live in the shared
-        // state, spliced back over the retained raw source.
-        let out = self.state.with_items(|items| splice(&self.raw, items))?;
+impl Native for MarkupDocument {
+    fn streams(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
+        vec![(
+            LocalId::new(BODY_ID),
+            StreamMut::new::<Text, _>(&mut self.body),
+        )]
+    }
+
+    fn encode(&self, _blobs: &[Blob], _removed: &[LocalId]) -> Result<ContentData> {
+        let out = splice(&self.raw, self.body.items())?;
         Ok(ContentData::new(out.into_bytes().into()))
     }
 
@@ -51,30 +53,21 @@ impl Recombine for MarkupRecombine {
     }
 }
 
-/// Assemble a leaf markup [`Document`] under `format_id` from the parsed
-/// `items` over the retained (sanitized) `raw` source: one body
-/// [`ExtractStream`] sharing its item state with a [`MarkupRecombine`] that
-/// checks its output against `sanitizer`. Shared by the XML and HTML loaders.
+/// Assemble a markup [`Document`] under `format_id` from the parsed `items` over
+/// the retained (sanitized) `raw` source, checked on encode against
+/// `sanitizer`. Shared by the XML and HTML loaders.
 pub(crate) fn markup_document(
     format_id: FormatId,
     raw: String,
     items: Vec<XmlItem>,
     sanitizer: MarkupSanitizer,
 ) -> Document {
-    let state: SharedSplice<XmlSpan> = SharedSplice::new(items);
-    let stream = ExtractStream::new(format_id, state.clone(), Arc::new(MarkupAddresser));
-    Document::new(
-        format_id,
-        vec![DocumentPart::Stream {
-            id: LocalId::new("body"),
-            handle: ErasedStream::new(Box::new(stream) as Box<dyn Stream<Text>>),
-        }],
-        Box::new(MarkupRecombine {
-            raw,
-            state,
-            sanitizer,
-        }),
-    )
+    let native = MarkupDocument {
+        body: ExtractStream::new(format_id, items, MarkupAddresser),
+        raw,
+        sanitizer,
+    };
+    Document::new(format_id, native, Vec::new())
 }
 
 /// Write each item's current value back into `raw`, returning the rebuilt
@@ -118,43 +111,35 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use elide_codec::Stream;
     use elide_core::ErrorKind;
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{SourceRef, TextLocation, TextReplacement};
-    use elide_core::redaction::{HiddenContentPolicy, Redactions};
+    use elide_core::redaction::Redactions;
 
     use super::*;
     use crate::engine::config::MarkupConfig;
     use crate::engine::parser::build_items;
-    use crate::sanitize::Dialect;
     use crate::xml::FORMAT_ID;
 
-    /// A markup body stream paired with the recombiner that re-serialises it,
-    /// both over one shared item state (so a redaction on the stream is visible
-    /// on `encode`). Mirrors the `(ExtractStream, MarkupRecombine)` split the
-    /// loader assembles into a `Document`.
+    /// A markup body stream over its raw source, spliced back the way
+    /// [`MarkupDocument`] does.
     struct Doc {
         stream: ExtractStream<XmlSpan>,
-        recombine: MarkupRecombine,
+        raw: String,
     }
 
     impl Doc {
         fn new(raw: &str, config: MarkupConfig<'_>) -> Self {
             let items = build_items(raw, config).expect("markup decode succeeds");
-            let state: SharedSplice<XmlSpan> = SharedSplice::new(items);
-            let stream = ExtractStream::new(FORMAT_ID, state.clone(), Arc::new(MarkupAddresser));
             Doc {
-                stream,
-                recombine: MarkupRecombine {
-                    raw: raw.to_owned(),
-                    state,
-                    sanitizer: MarkupSanitizer::new(Dialect::Xml, HiddenContentPolicy::default()),
-                },
+                stream: ExtractStream::new(FORMAT_ID, items, MarkupAddresser),
+                raw: raw.to_owned(),
             }
         }
 
         fn encoded(&self) -> String {
-            self.recombine.assemble(&[], &[]).unwrap().decode().unwrap()
+            splice(&self.raw, self.stream.items()).unwrap()
         }
     }
 

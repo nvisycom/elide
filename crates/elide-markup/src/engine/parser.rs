@@ -1,6 +1,6 @@
 //! Markup parser: a single streaming pass over an XML (or, leniently, HTML)
 //! document into the shared [`ExtractedItem`] stream, recording each item's
-//! source byte span so the [`MarkupRecombine`] can splice mutated values back
+//! source byte span so the [`MarkupDocument`] can splice mutated values back
 //! **verbatim**.
 //!
 //! Emits items for element text content, attribute values, comment bodies, and
@@ -16,7 +16,7 @@
 //! the parser itself knows nothing of `<script>` or "block level".
 //!
 //! [`ExtractedItem`]: elide_codec::extract::ExtractedItem
-//! [`MarkupRecombine`]: super::recombine::MarkupRecombine
+//! [`MarkupDocument`]: super::document::MarkupDocument
 //! [`MarkupConfig`]: super::config::MarkupConfig
 
 use std::ops::Range;
@@ -534,10 +534,9 @@ fn attach_sibling_hints(group: &mut [TextRecord]) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use elide_codec::Stream;
-    use elide_codec::extract::{ExtractStream, SharedSplice};
+    use elide_codec::extract::ExtractStream;
     use elide_core::modality::Chunk;
 
     use super::*;
@@ -548,8 +547,7 @@ mod tests {
     /// out what the parser extracted (values and hints).
     fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<XmlSpan> {
         let items = build_items(raw, config).expect("markup decode succeeds");
-        let state = SharedSplice::new(items);
-        ExtractStream::new(FORMAT_ID, state, Arc::new(MarkupAddresser))
+        ExtractStream::new(FORMAT_ID, items, MarkupAddresser)
     }
 
     fn xml(raw: &str) -> ExtractStream<XmlSpan> {

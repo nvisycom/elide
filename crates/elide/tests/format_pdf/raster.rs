@@ -16,8 +16,8 @@
 //! it is images, and none of the original PII survives.
 
 use elide::Result;
+use elide::codec::FormatRegistry;
 use elide::codec::pdf::{RasterMode, pdf_format_with};
-use elide::codec::{DocumentPart, FormatRegistry};
 use elide::modality::ChunkReader;
 use elide::modality::text::Text;
 use elide::redaction::HiddenContentPolicy;
@@ -39,10 +39,7 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let mut document = registry
         .decode(pdf, "pdf", HiddenContentPolicy::default())
         .await?;
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("the pdf codec yields a text body stream")
-    };
-    let stream = handle.downcast_mut::<Text>().expect("pdf is text");
+    let stream = document.stream_mut::<Text>("body").expect("pdf is text");
     let mut text = String::new();
     for chunk in stream.chunks()? {
         text.push_str(chunk.data.as_str());

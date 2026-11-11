@@ -44,7 +44,7 @@ where
 /// value; an item of a text stream is not, since recognizers scan it like body
 /// text.
 pub(crate) fn entities<M: Modality>(
-    stream: &TypedStream<M>,
+    stream: &TypedStream<'_, M>,
     scope: &Scope,
     policy: HiddenContentPolicy,
 ) -> Result<Vec<Entity<M>>> {

@@ -1,27 +1,24 @@
 //! Throwaway unit-test doubles shared across the `contract` unit tests: a
-//! minimal one-string [`Stream<Text>`] and a concatenating [`Recombine`]. These
-//! are crate-internal, not the cross-crate mock surface (see `crate::mocks`).
+//! minimal one-string [`Stream<Text>`] and a native document that only joins its
+//! blobs. These are crate-internal, not the cross-crate mock surface (see
+//! `crate::mocks`).
 
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
-use super::{EncodedPart, FormatId, LocalId, Recombine, Stream};
+use super::{Blob, Encode, FormatId, LocalId, Native, Stream, StreamMut};
 use crate::content::ContentData;
 
-/// A minimal text stream holding one editable string. Its `encode` returns the
-/// string; it yields no chunks and reads nothing (the tests exercise wiring, not
-/// chunking).
+/// A minimal text stream holding one editable string, which it encodes as the
+/// document. It yields no chunks and reads nothing (the tests exercise wiring,
+/// not chunking).
 pub(crate) struct StrStream(pub String);
 
 impl Stream<Text> for StrStream {
     fn format(&self) -> FormatId {
         FormatId::new("elide.test.str")
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::from_text(self.0.clone()))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
@@ -43,15 +40,25 @@ impl DataWriter<Text> for StrStream {
     }
 }
 
-/// A recombiner that concatenates every part's bytes, so a test can assert the
-/// assembled order and the blob-fold.
-pub(crate) struct JoinRecombine;
+impl Encode for StrStream {
+    fn encode(&self) -> Result<ContentData> {
+        Ok(ContentData::from_text(self.0.clone()))
+    }
+}
 
-impl Recombine for JoinRecombine {
-    fn assemble(&self, parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
+/// A native document with no streams that concatenates its blobs' bytes, so a
+/// test can assert the blob order and the fold.
+pub(crate) struct JoinBlobs;
+
+impl Native for JoinBlobs {
+    fn streams(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
+        Vec::new()
+    }
+
+    fn encode(&self, blobs: &[Blob], _removed: &[LocalId]) -> Result<ContentData> {
         let mut out = Vec::new();
-        for part in parts {
-            out.extend_from_slice(&part.bytes);
+        for blob in blobs {
+            out.extend_from_slice(&blob.bytes);
         }
         Ok(ContentData::from(out))
     }

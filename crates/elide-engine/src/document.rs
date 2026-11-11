@@ -13,7 +13,7 @@ use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 use elide_format::FormatRegistry;
 
-/// One document the engine redacts: its name and its decoded parts.
+/// One document the engine redacts: its name and its decoded document.
 ///
 /// A report describes a slice of these, analyzed and redacted as one logical
 /// unit ([`analyze`] / [`anonymize_with`]); a single document is a one-element
@@ -31,8 +31,8 @@ pub struct Document {
     /// and the key of its own content in the report. Must be unique within the
     /// slice.
     pub name: String,
-    /// The document's decoded parts. Stream parts are redacted in place; blob
-    /// sub-parts fold back on its `encode`.
+    /// The decoded document. Its streams are redacted in place; its blobs fold
+    /// back on its `encode`.
     pub document: CodecDocument,
 }
 

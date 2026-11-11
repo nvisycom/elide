@@ -1,7 +1,6 @@
 //! [`PixelStream`]: the pixel body part — reads the frame as one chunk, redacts
 //! regions in place, and re-encodes just the pixels.
 
-use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -11,9 +10,9 @@ use super::image_state::ImageState;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::{BoundingBox, Dimensions, Point};
 
-/// The pixel stream part: yields the whole frame as one chunk, redacts regions in
-/// place on the shared [`ImageState`], and encodes the image (its metadata
-/// edited by the `#exif` stream on the same buffer).
+/// The pixel stream: yields the whole frame as one chunk and redacts regions in
+/// place on the shared [`ImageState`], which the `#exif` stream edits too and
+/// the image's document encodes.
 pub(super) struct PixelStream {
     pub(super) state: ImageState,
     pub(super) format_id: FormatId,
@@ -22,10 +21,6 @@ pub(super) struct PixelStream {
 impl Stream<Image> for PixelStream {
     fn format(&self) -> FormatId {
         self.format_id
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(self.state.encode()?))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {

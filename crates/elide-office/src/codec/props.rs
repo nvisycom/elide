@@ -3,26 +3,25 @@
 //! shared by docx, pptx, and xlsx.
 //!
 //! When metadata is treated as content, every OOXML package surfaces its
-//! property parts as metadata stream parts beside its body. Each stream yields
+//! property parts as metadata streams beside its body. Each stream yields
 //! one chunk per property field, labelled with what it is (an author, a
 //! timestamp, a company), applies each redaction to the field's value via
 //! [`write_at`] (the whole value, or the part a span narrows to), and rewrites
 //! the property XML with the edited fields, a field left blank removed, which
-//! the owning package's recombiner writes back.
+//! the owning package's document writes back.
 //!
 //! [`Metadata`]: elide_core::modality::metadata::Metadata
 //! [`write_at`]: elide_core::modality::DataWriter::write_at
 
 use bytes::Bytes;
-use elide_codec::content::ContentData;
 use elide_codec::metadata::MetadataFields;
-use elide_codec::{DocumentPart, ErasedStream, FlaggedItem, FormatId, LocalId, Stream};
+use elide_codec::{FlaggedItem, FormatId, LocalId, Stream, StreamMut};
 use elide_core::Result;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
-use crate::opc::props;
+use crate::opc::{PartPath, PartReplacement, props};
 
 /// Stable [`FormatId`] for an OOXML property part's metadata stream.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.office.docprops");
@@ -34,24 +33,42 @@ const DOCPROPS_PARTS: &[&str] = &[
     "docProps/custom.xml",
 ];
 
-/// The document-property parts a package carries, via its `part_bytes`
-/// accessor, each as a metadata stream part keyed by its zip entry path.
-/// Shared by every OOXML loader (docx, pptx, xlsx). A part the package lacks
-/// is skipped.
-pub(crate) fn doc_props_parts(
-    mut part_bytes: impl FnMut(&str) -> Option<Bytes>,
-) -> Vec<DocumentPart> {
-    DOCPROPS_PARTS
-        .iter()
-        .filter_map(|path| {
-            let stream: Box<dyn Stream<Metadata>> =
-                Box::new(DocPropsStream::new(part_bytes(path)?));
-            Some(DocumentPart::Stream {
-                id: LocalId::new(*path),
-                handle: ErasedStream::new(stream),
+/// A package's document-property parts, each a metadata stream keyed by its
+/// zip entry path. Shared by every OOXML document (docx, pptx, xlsx).
+#[derive(Debug, Default)]
+pub(crate) struct DocProps(Vec<(LocalId, DocPropsStream)>);
+
+impl DocProps {
+    /// The property parts a package carries, read through its `part_bytes`
+    /// accessor. A part the package lacks is skipped.
+    pub(crate) fn read(mut part_bytes: impl FnMut(&str) -> Option<Bytes>) -> Self {
+        Self(
+            DOCPROPS_PARTS
+                .iter()
+                .filter_map(|path| {
+                    Some((LocalId::new(*path), DocPropsStream::new(part_bytes(path)?)))
+                })
+                .collect(),
+        )
+    }
+
+    /// Lend each property stream, with its id.
+    pub(crate) fn streams(&mut self) -> impl Iterator<Item = (LocalId, StreamMut<'_>)> {
+        self.0
+            .iter_mut()
+            .map(|(id, stream)| (id.clone(), StreamMut::new::<Metadata, _>(stream)))
+    }
+
+    /// Each property part's (possibly redacted) XML, as a replacement for the
+    /// package part it was read from.
+    pub(crate) fn replacements(&self) -> Vec<PartReplacement> {
+        self.0
+            .iter()
+            .map(|(id, stream)| {
+                PartReplacement::new(PartPath::from(id.as_str()), stream.xml.to_vec())
             })
-        })
-        .collect()
+            .collect()
+    }
 }
 
 /// Stream for an OOXML property part: yields its labelled fields and rewrites
@@ -81,10 +98,6 @@ impl DocPropsStream {
 impl Stream<Metadata> for DocPropsStream {
     fn format(&self) -> FormatId {
         FORMAT_ID
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(self.xml.clone()))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {
@@ -163,7 +176,7 @@ mod tests {
             TextReplacement::Removed.into(),
         );
         stream.write_at(redactions).await.unwrap();
-        let xml = stream.encode().unwrap().into_bytes();
+        let xml = stream.xml.clone();
         let fields = props::fields(&xml);
         assert!(
             fields

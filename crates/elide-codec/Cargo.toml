@@ -65,6 +65,9 @@ hex = { workspace = true, optional = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["tabular"] }
+
 # (De)serialization
 serde_json = { workspace = true, features = [] }
 

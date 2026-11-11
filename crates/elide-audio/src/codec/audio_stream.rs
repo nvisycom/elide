@@ -1,7 +1,6 @@
 //! [`AudioStream`]: the clip body part — streams the whole clip as one chunk,
 //! accumulates redactions, and re-encodes on demand.
 
-use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -10,8 +9,8 @@ use elide_core::redaction::Redactions;
 use crate::AudioBuffer;
 use crate::modality::{Audio, AudioData, AudioLocation};
 
-/// The clip stream part. Holds the clip as an [`AudioBuffer`]; redaction
-/// accumulates on it and `encode` applies the batch and re-serializes to the
+/// The clip stream. Holds the clip as an [`AudioBuffer`]; redaction accumulates
+/// on it, and the document's encode applies the batch and re-serializes to the
 /// original format. All sample work delegates to the [`AudioBuffer`] engine.
 #[derive(Debug)]
 pub(super) struct AudioStream {
@@ -22,10 +21,6 @@ pub(super) struct AudioStream {
 impl Stream<Audio> for AudioStream {
     fn format(&self) -> FormatId {
         self.format_id
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(self.clip.encode()?))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Audio>>> {

@@ -16,9 +16,8 @@ use super::{ExtractedItem, ItemEdit};
 /// The default addresses nothing (empty / `None`), for a stream whose address
 /// carries no source pre-image.
 ///
-/// Held behind `Arc<dyn SourceAddresser<A>>` and shared by an
-/// [`ExtractStream`](super::ExtractStream); it is stateless (the item stream is
-/// passed in), so it is cheap to share.
+/// Owned by an [`ExtractStream`](super::ExtractStream); it is stateless (the
+/// item stream is passed in).
 pub trait SourceAddresser<A>: Send + Sync {
     /// The exact raw source byte range(s) that `local` (a byte range within
     /// `item`'s decoded value) came from.

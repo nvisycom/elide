@@ -1,7 +1,7 @@
 //! [`Walk`]: the one recursive part-tree walk both phases drive.
 
 use bytes::Bytes;
-use elide_codec::{Document as CodecDocument, DocumentPart, ErasedStream, LocalId};
+use elide_codec::{Document as CodecDocument, LocalId};
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -14,7 +14,7 @@ use crate::pipeline::BoxFuture;
 /// leaf.
 ///
 /// Bundles the two things constant across the recursion — the `orchestrator`
-/// (for decoding blob sub-parts) and the `visitor` (the per-phase leaf behavior)
+/// (for decoding blobs) and the `visitor` (the per-phase leaf behavior)
 /// — so [`parts`](Self::parts) recurses on `self` with only the document, prefix,
 /// and depth as its moving cursor.
 pub(crate) struct Walk<'a, V: PartVisitor> {
@@ -34,8 +34,8 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
     /// Walk `document`'s part tree under `prefix`, driving the visitor at each
     /// leaf.
     ///
-    /// Stream parts of a level are collected and handed to
-    /// [`visit_streams`](PartVisitor::visit_streams) together; blob sub-parts are
+    /// Streams of a level are collected and handed to
+    /// [`visit_streams`](PartVisitor::visit_streams) together; blobs are
     /// decoded (through the orchestrator's registry) into their own child
     /// documents and recursed (post-order), each child then offered to
     /// [`fold_child`](PartVisitor::fold_child). Returns whether anything in this
@@ -52,9 +52,6 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
         depth: usize,
     ) -> BoxFuture<'s, Result<bool>> {
         Box::pin(async move {
-            // One pass over this level's parts: stream handles kept as `&mut` for
-            // the leaf action, blob work cloned out so no borrow is held across the
-            // recursion (which needs a fresh `&mut document` to fold back).
             // What decode stripped from this document, each item at the part it
             // came from or with.
             let stripped = self.visitor.stripped();
@@ -67,24 +64,27 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             // Every embedded document is decoded under its parent's policy, so
             // one policy governs the whole tree.
             let policy = document.hidden_content_policy();
-            let mut streams: Vec<(PartId, &mut ErasedStream)> = Vec::new();
-            let mut blobs: Vec<(LocalId, PartId, Bytes, String)> = Vec::new();
+            // The blobs are cloned out so no borrow is held across the recursion,
+            // which needs a fresh `&mut document` to fold back; the streams are
+            // then lent for the leaf action.
+            let blobs: Vec<(LocalId, PartId, Bytes, String)> = document
+                .blobs()
+                .iter()
+                .map(|blob| {
+                    (
+                        blob.id.clone(),
+                        prefix.child(blob.id.clone()),
+                        blob.bytes.clone(),
+                        blob.hint.clone(),
+                    )
+                })
+                .collect();
             let mut body_seen = false;
-            for part in document.parts_mut() {
-                match part {
-                    DocumentPart::Stream { id, handle } => {
-                        streams.push((body_part_id(prefix, id, &mut body_seen), handle));
-                    }
-                    DocumentPart::Blob { id, bytes, hint } => {
-                        blobs.push((
-                            id.clone(),
-                            prefix.child(id.clone()),
-                            bytes.clone(),
-                            hint.clone(),
-                        ));
-                    }
-                }
-            }
+            let streams = document
+                .streams_mut()
+                .into_iter()
+                .map(|(id, stream)| (body_part_id(prefix, &id, &mut body_seen), stream))
+                .collect();
 
             let mut changed = self
                 .visitor
@@ -93,7 +93,7 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
 
             // Blobs are nested containers: decode, recurse, fold back. Post-order,
             // so a child re-encodes its own subtree before its parent assembles it.
-            // `replace_part` needs a fresh `&mut document`, so the folds are staged
+            // `replace_blob` needs a fresh `&mut document`, so the folds are staged
             // and applied after the recursion releases the borrow.
             let mut folds: Vec<(LocalId, Fold)> = Vec::new();
             for (id, part_id, bytes, hint) in blobs {
@@ -130,11 +130,11 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
                 match fold {
                     Fold::Keep => {}
                     Fold::Replace(bytes) => {
-                        document.replace_part(&id, bytes)?;
+                        document.replace_blob(&id, bytes)?;
                         changed = true;
                     }
                     Fold::Remove => {
-                        document.remove_part(&id)?;
+                        document.remove_blob(&id)?;
                         changed = true;
                     }
                 }

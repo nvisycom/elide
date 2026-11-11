@@ -27,7 +27,6 @@
 //! [`NerRecognizer`]: elide::recognition::ner::NerRecognizer
 //! [`LlmRecognizer`]: elide::recognition::llm::LlmRecognizer
 
-use elide::codec::DocumentPart;
 use elide::prelude::operators::*;
 use elide::prelude::*;
 use elide::recognition::llm::LlmRecognizer;
@@ -61,24 +60,20 @@ async fn main() -> Result<()> {
     let scope = Scope::new()
         .with_language(en)
         .with_catalog(LabelCatalog::with_builtins());
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("the txt codec yields a text stream")
-    };
-    let stream = handle
-        .downcast_mut::<Text>()
+    let mut stream = document
+        .stream_mut::<Text>("body")
         .expect("the txt codec yields a text document");
-    let analysis = analyzer.analyze_stream(stream, &scope).await?;
+    let analysis = analyzer.analyze_stream(&mut stream, &scope).await?;
     let mut entities = analysis.entities;
 
     // 5. Redact: apply each entity's operator back into the document,
     //    then re-encode.
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("the txt codec yields a text stream")
-    };
-    let stream = handle
-        .downcast_mut::<Text>()
+    let mut stream = document
+        .stream_mut::<Text>("body")
         .expect("the txt codec yields a text document");
-    anonymizer.anonymize(stream, &mut entities, &scope).await?;
+    anonymizer
+        .anonymize(&mut stream, &mut entities, &scope)
+        .await?;
     let encoded = document.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes());
 

@@ -4,10 +4,9 @@
 //! Streams each privacy-relevant EXIF field as a [`Metadata`] chunk labelled
 //! with what it is, applies each redaction to the field's value (the whole
 //! value, or the part a span narrows to), and writes the edited fields to the
-//! image's shared buffer, a field left blank removed. The recombiner then
+//! image's shared buffer, a field left blank removed. The document then
 //! encodes the buffer once, carrying both the pixel and the metadata edits.
 
-use elide_codec::content::ContentData;
 use elide_codec::metadata::MetadataFields;
 use elide_codec::{FlaggedItem, FormatId, Stream};
 use elide_core::Result;
@@ -41,10 +40,6 @@ impl ExifStream {
 impl Stream<Metadata> for ExifStream {
     fn format(&self) -> FormatId {
         self.format_id
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(self.state.source_bytes()))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {

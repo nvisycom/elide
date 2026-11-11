@@ -1,7 +1,7 @@
 //! [`check`]: confirm an encoded OOXML package carries nothing the codec
 //! should not ship.
 //!
-//! The check a recombiner runs on its output before returning it: sanitizing
+//! The check a document runs on its output before returning it: sanitizing
 //! the output again removes nothing, every relationship and every element
 //! naming one resolves, every XML part speaks only reviewed vocabularies, and
 //! no part the format never extracts carries text.

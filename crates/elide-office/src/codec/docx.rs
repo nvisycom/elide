@@ -5,7 +5,7 @@
 //! a body [`ExtractStream`](elide_codec::extract::ExtractStream) over the
 //! element-text blocks [`OoxmlPackage::extract`](crate::ooxml::OoxmlPackage::extract)
 //! recovers plus its embedding / document-property blobs, re-packed via the
-//! shared `OoxmlRecombine`.
+//! shared `OoxmlDocument`.
 
 use elide_codec::{Format, FormatId};
 
@@ -39,13 +39,13 @@ pub fn format() -> Format {
 mod tests {
     use elide_codec::content::ContentData;
     use elide_codec::extract::ExtractStream;
-    use elide_codec::{Recombine, Stream};
+    use elide_codec::{Native, Stream};
     use elide_core::modality::Chunk;
     use elide_core::modality::text::{SourceRef, Text, TextLocation};
     use elide_core::redaction::HiddenContentPolicy;
 
     use super::*;
-    use crate::codec::ooxml::{OoxmlAddress, OoxmlRecombine, decode_parts};
+    use crate::codec::ooxml::{OoxmlAddress, OoxmlDocument, decode_native};
     use crate::fixtures;
 
     const BODY_PART: &str = "word/document.xml";
@@ -66,9 +66,9 @@ mod tests {
         ContentData::new(package.into())
     }
 
-    /// Decode `content` into the DOCX body stream and its recombiner.
-    fn decode(content: ContentData) -> (ExtractStream<OoxmlAddress>, OoxmlRecombine<DocxCodec>) {
-        decode_parts::<DocxCodec>(content, HiddenContentPolicy::default()).unwrap()
+    /// Decode `content` into its native DOCX document.
+    fn decode(content: ContentData) -> OoxmlDocument<DocxCodec> {
+        decode_native::<DocxCodec>(content, HiddenContentPolicy::default()).unwrap()
     }
 
     /// The first chunk whose decoded text equals `value`.
@@ -87,8 +87,9 @@ mod tests {
         // over the whole decoded text must point back at the raw bytes including
         // the `&amp;`, one contiguous raw range, entity bytes and all.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
-        let chunk = chunk_for(&stream, "Alice & Bob");
+        let doc = decode(docx_with_body("Alice &amp; Bob"));
+        let stream = &doc.body;
+        let chunk = chunk_for(stream, "Alice & Bob");
 
         // Decoded "Alice & Bob" is 11 bytes; lift the whole value.
         let lifted = stream
@@ -110,8 +111,9 @@ mod tests {
         // Redacting only the decoded `&` (offset 6..7) must point at all 5 raw
         // bytes of `&amp;`, never an empty or partial range.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
-        let chunk = chunk_for(&stream, "Alice & Bob");
+        let doc = decode(docx_with_body("Alice &amp; Bob"));
+        let stream = &doc.body;
+        let chunk = chunk_for(stream, "Alice & Bob");
 
         let lifted = stream
             .lift(&chunk, TextLocation::inline(6..7))
@@ -126,8 +128,9 @@ mod tests {
     #[tokio::test]
     async fn source_span_of_a_finding_before_the_entity_is_one_run() {
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
-        let chunk = chunk_for(&stream, "Alice & Bob");
+        let doc = decode(docx_with_body("Alice &amp; Bob"));
+        let stream = &doc.body;
+        let chunk = chunk_for(stream, "Alice & Bob");
 
         // Decoded "Alice" is 0..5, wholly before the entity → a single raw run.
         let lifted = stream
@@ -150,7 +153,7 @@ mod tests {
         use elide_core::redaction::Redactions;
 
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (mut stream, recombine) = decode(docx_with_body("Alice Bob"));
+        let mut doc = decode(docx_with_body("Alice Bob"));
 
         // The raw span of "Bob" in the part, what a DOM selection yields. The
         // reviewer has no decoded-stream range, only this raw span, so the
@@ -161,10 +164,10 @@ mod tests {
 
         let mut redactions = Redactions::new();
         redactions.push(location, TextReplacement::substituted("[NAME]"));
-        stream.write_at(redactions).await.unwrap();
+        doc.body.write_at(redactions).await.unwrap();
 
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
-        let out = recombine.assemble(&[], &[]).unwrap();
+        let out = Native::encode(&doc, &[], &[]).unwrap();
         // The output is an OPC package; the body part contains the replacement.
         let body_bytes = fixtures::read_part(out.as_bytes(), BODY_PART).expect("body part present");
         let body = String::from_utf8(body_bytes).expect("body part is UTF-8");

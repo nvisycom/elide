@@ -8,7 +8,7 @@
 use std::assert_matches;
 
 use elide::Result;
-use elide::codec::{DocumentPart, FormatRegistry};
+use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
 use elide::modality::ChunkReader;
@@ -27,10 +27,7 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let mut document = registry
         .decode(pdf, "pdf", HiddenContentPolicy::default())
         .await?;
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("the pdf codec yields a text body stream")
-    };
-    let stream = handle.downcast_mut::<Text>().expect("pdf is text");
+    let stream = document.stream_mut::<Text>("body").expect("pdf is text");
     let mut text = String::new();
     for chunk in stream.chunks()? {
         text.push_str(chunk.data.as_str());

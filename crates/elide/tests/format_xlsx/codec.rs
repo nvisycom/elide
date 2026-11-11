@@ -4,7 +4,7 @@
 
 use bytes::Bytes;
 use elide::codec::office::xlsx_format;
-use elide::codec::{ContentData, Document, DocumentPart, LocalId, TypedStream};
+use elide::codec::{ContentData, Document, LocalId, TypedStream};
 use elide::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide::modality::text::{Text, TextReplacement};
 use elide::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
@@ -41,14 +41,9 @@ async fn decode_redacting_comments(bytes: &'static [u8]) -> Document {
     decode_with(bytes, policy).await
 }
 
-/// The document's cell body stream, downcast to `Tabular`.
-fn body(doc: &mut Document) -> &mut TypedStream<Tabular> {
-    match &mut doc.parts_mut()[0] {
-        DocumentPart::Stream { handle, .. } => {
-            handle.downcast_mut::<Tabular>().expect("cell body stream")
-        }
-        _ => panic!("part 0 is the cell body stream"),
-    }
+/// The document's cell body stream, as `Tabular`.
+fn body(doc: &mut Document) -> TypedStream<'_, Tabular> {
+    doc.stream_mut::<Tabular>("body").expect("cell body stream")
 }
 
 /// Every cell the body stream yields, as `(sheet, row, column, text)`.
@@ -249,12 +244,9 @@ async fn a_sheetless_ambiguous_redaction_fails_closed() {
     assert!(body(&mut doc).write_at(batch).await.is_err());
 }
 
-/// The document's non-cell text stream part, downcast to `Text`.
-fn text(doc: &mut Document) -> &mut TypedStream<Text> {
-    match &mut doc.parts_mut()[1] {
-        DocumentPart::Stream { handle, .. } => handle.downcast_mut::<Text>().expect("text stream"),
-        _ => panic!("part 1 is the text stream"),
-    }
+/// The document's non-cell text stream, as `Text`.
+fn text(doc: &mut Document) -> TypedStream<'_, Text> {
+    doc.stream_mut::<Text>("text").expect("text stream")
 }
 
 #[tokio::test]
@@ -271,11 +263,7 @@ async fn streams_non_cell_text_beside_the_cells() {
         "comment text missing: {values:?}"
     );
     // No part is surfaced as a generic XML blob.
-    assert!(
-        !doc.parts()
-            .iter()
-            .any(|p| matches!(p, DocumentPart::Blob { hint, .. } if hint == "xml"))
-    );
+    assert!(!doc.blobs().iter().any(|blob| blob.hint == "xml"));
 }
 
 #[tokio::test]

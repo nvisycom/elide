@@ -80,7 +80,7 @@ impl PartId {
 
     /// This path's last segment as a [`LocalId`], the typed local id in its
     /// *immediate* container, the value passed to that container's
-    /// `replace_part`. `None` for the empty (top-level) path.
+    /// `replace_blob`. `None` for the empty (top-level) path.
     #[must_use]
     pub fn last_segment_id(&self) -> Option<&LocalId> {
         self.0.last()

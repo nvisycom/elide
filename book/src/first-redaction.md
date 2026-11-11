@@ -47,7 +47,6 @@ let anonymizer = Anonymizer::<Text>::new()
 ## The redaction
 
 ```rust
-use elide::codec::DocumentPart;
 use elide::prelude::operators::*;
 use elide::prelude::*;
 use elide::recognition::pattern::PatternRecognizer;
@@ -81,13 +80,12 @@ async fn main() -> Result<()> {
         .with_language(LanguageTag::parse("en")?)
         .with_catalog(LabelCatalog::with_builtins());
 
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        unreachable!("a text file is one text stream");
-    };
-    let stream = handle.downcast_mut::<Text>().expect("a text stream");
+    let mut stream = document
+        .stream_mut::<Text>("body")
+        .expect("a text stream");
 
-    let mut entities = analyzer.analyze_stream(stream, &scope).await?.entities;
-    anonymizer.anonymize(stream, &mut entities, &scope).await?;
+    let mut entities = analyzer.analyze_stream(&mut stream, &scope).await?.entities;
+    anonymizer.anonymize(&mut stream, &mut entities, &scope).await?;
 
     let redacted = document.encode()?;
     assert_eq!(redacted.as_bytes(), b"Contact Dana at [EMAIL] or [PHONE].");

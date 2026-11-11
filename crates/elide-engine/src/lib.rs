@@ -11,10 +11,9 @@ mod traversal;
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use elide_codec::TypedStream;
 use elide_core::entity::Entity;
+use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
-use elide_core::modality::{ChunkReader, DataReader, DataWriter, Modality};
 use elide_core::recognition::Scope;
 use elide_core::redaction::Operator;
 use elide_core::{Error, Result};
@@ -156,7 +155,6 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -185,7 +183,6 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -210,7 +207,6 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -239,14 +235,13 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(TypeId::of::<M>(), Box::new(pipeline));
         self.groups.register::<M>();
     }
 
     /// The registered pipelines, keyed by modality [`TypeId`], for the part-walk
-    /// phases to classify and drive stream parts.
+    /// phases to classify and drive streams.
     pub(crate) fn pipelines(&self) -> impl Iterator<Item = (&TypeId, &Box<dyn ErasedPipeline>)> {
         self.pipelines.iter()
     }
@@ -261,7 +256,7 @@ impl Orchestrator {
         &self.scope
     }
 
-    /// The format registry used to decode container blob parts, for the part-walk.
+    /// The format registry used to decode container blobs, for the part-walk.
     pub(crate) fn registry(&self) -> &FormatRegistry {
         &self.registry
     }
@@ -355,8 +350,8 @@ impl Orchestrator {
 
         // Each document is a tree of parts keyed under its own name, so two
         // documents sharing a local part id stay distinct paths. The analysis
-        // phase batches each level's same-modality stream parts and scatters the
-        // findings; blob sub-parts decode into their own child documents and
+        // phase batches each level's same-modality streams and scatters the
+        // findings; blobs decode into their own child documents and
         // recurse.
         let mut visitor = Analyze {
             prior,
@@ -378,17 +373,17 @@ impl Orchestrator {
     }
 
     /// Apply a (possibly edited) [`Report`] back onto the same `documents`:
-    /// redact each stream part in place and fold each blob sub-part's redacted
+    /// redact each stream in place and fold each blob's redacted
     /// bytes back up its document's part tree, then re-encode each document
     /// (`document.encode()`) to serialize the result. `documents` must be the
     /// same set the report describes.
     ///
-    /// A stream part is redacted in place through the pipeline for its modality;
-    /// a blob sub-part is decoded into its own child document, redacted the same
-    /// way, re-encoded, and folded back into its parent via its `replace_part`. A
-    /// document's own `encode` then assembles the redacted parts post-order, so a
-    /// nested document re-encodes (carrying its *own* body redaction) before the
-    /// level above assembles it.
+    /// A stream is redacted in place through the pipeline for its modality;
+    /// a blob is decoded into its own child document, redacted the same
+    /// way, re-encoded, and folded back into its parent via its `replace_blob`. A
+    /// document's own `encode` then writes it out post-order, so a nested
+    /// document re-encodes (carrying its *own* body redaction) before the level
+    /// above writes it.
     ///
     /// Returns the report, now applied: redaction stamps a redaction event into
     /// each entity's provenance, so the returned report's entities carry the full
@@ -404,8 +399,8 @@ impl Orchestrator {
         let documents = documents.as_documents_mut();
         // Applying mutates the entities (each gains a redaction event), so it
         // happens on `report`'s own groups, which are returned as the audit
-        // trail. Each document redacts its stream parts in place and folds its
-        // blob sub-parts bottom-up through the recursion.
+        // trail. Each document redacts its streams in place and folds its
+        // blobs bottom-up through the recursion.
         // The applied report's stripped section is what this walk saw, whatever
         // the report passed in carried.
         let mut visitor = Redact {
