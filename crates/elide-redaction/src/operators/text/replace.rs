@@ -8,7 +8,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -41,8 +42,8 @@ pub struct Replace {
 
 impl Replace {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("replace", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("replace", "1.0.0")
     }
 
     /// A [`Replace`] with the given template (see the type docs for
@@ -76,7 +77,7 @@ impl Replace {
 
 #[async_trait::async_trait]
 impl Operator<Text> for Replace {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Replace::id()
     }
 
@@ -94,7 +95,7 @@ impl Operator<Text> for Replace {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Replace {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Replace::id()
     }
 
@@ -114,7 +115,7 @@ impl Operator<Tabular> for Replace {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Replace {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Replace::id()
     }
 
@@ -127,6 +128,6 @@ impl Operator<Metadata> for Replace {
         entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(self.render(entity, data.value()).into())
+        Ok(self.render(entity, data.as_str()).into())
     }
 }

@@ -2,7 +2,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 use elide_image::primitive::Color;
 #[cfg(feature = "serde")]
@@ -43,8 +44,8 @@ impl Default for Blackbox {
 
 #[async_trait::async_trait]
 impl Operator<Image> for Blackbox {
-    fn id(&self) -> OperatorId {
-        OperatorId::new("blackbox", "1.0.0")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("blackbox", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {

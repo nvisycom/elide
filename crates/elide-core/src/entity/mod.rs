@@ -16,10 +16,14 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::audit::{AuditEvent, AuditLog};
+#[cfg(feature = "fixtures")]
+use self::audit::PatternEvent;
+use self::audit::{AuditEvent, AuditLog, Manual, ManualIntent};
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
+#[cfg(feature = "fixtures")]
+use crate::modality::text::{Text, TextLocation};
 use crate::primitive::{Confidence, LanguageTag};
 
 /// Detected piece of sensitive information within some medium.
@@ -34,7 +38,7 @@ use crate::primitive::{Confidence, LanguageTag};
 /// A recognizer emits an entity directly, carrying a single recognition
 /// [`AuditEvent`] (its own finding) in the entity's [`audit`] trail. When
 /// several recognizers find the same thing, a fusion step (in
-/// `elide`) combines their entities into one: the survivor's
+/// `elide-detection`) combines their entities into one: the survivor's
 /// [`location`] and [`confidence`] are the *fused* values, and every
 /// contributing recognition event, plus a deduplication event, is
 /// retained in its audit trail. The entity therefore carries its full
@@ -185,8 +189,8 @@ impl<M: Modality> Entity<M> {
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
-    pub fn record_manual(&mut self, manual: audit::Manual<M>, actor: Option<&str>) -> bool {
-        if manual.intent == audit::ManualIntent::Suppress && self.is_suppressed() {
+    pub fn record_manual(&mut self, manual: Manual<M>, actor: Option<&str>) -> bool {
+        if manual.intent == ManualIntent::Suppress && self.is_suppressed() {
             return false;
         }
         let source = actor.unwrap_or("manual").to_owned();
@@ -216,7 +220,7 @@ impl<M: Modality> Entity<M> {
 /// Test fixtures, behind the `fixtures` feature.
 #[cfg(feature = "fixtures")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
-impl Entity<crate::modality::text::Text> {
+impl Entity<Text> {
     /// A text entity for `label` over the byte range `loc`, born from a pattern
     /// recognition at `Confidence::MAX`, the standard test fixture.
     pub fn fixture(label: &str, loc: (usize, usize)) -> Self {
@@ -226,9 +230,6 @@ impl Entity<crate::modality::text::Text> {
     /// Like [`fixture`](Self::fixture), but at an explicit `confidence`, for
     /// confidence-gated selection tests.
     pub fn fixture_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Self {
-        use crate::entity::audit::PatternEvent;
-        use crate::modality::text::TextLocation;
-
         let location = TextLocation::inline(loc.0..loc.1);
         let event = AuditEvent::pattern(
             "test",
@@ -242,7 +243,7 @@ impl Entity<crate::modality::text::Text> {
 
 #[cfg(test)]
 mod tests {
-    use super::audit::{Attribution, Manual, ManualIntent, PatternEvent};
+    use super::audit::{Attribution, PatternEvent};
     use super::*;
     use crate::modality::text::{Text, TextLocation};
 

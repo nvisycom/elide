@@ -20,7 +20,6 @@
 mod generator;
 mod hidden_content;
 mod leak_profile;
-mod operator_id;
 mod redactions;
 
 use std::sync::Arc;
@@ -30,11 +29,11 @@ pub use self::hidden_content::{
     Disposition, HiddenContent, HiddenContentKind, HiddenContentPolicy,
 };
 pub use self::leak_profile::LeakProfile;
-pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
+use crate::primitive::ComponentId;
 
 /// Redaction operator: computes what should replace an entity to remove
 /// or obscure it.
@@ -60,7 +59,7 @@ use crate::modality::Modality;
 #[async_trait::async_trait]
 pub trait Operator<M: Modality>: Send + Sync {
     /// This operator's identity (name + version).
-    fn id(&self) -> OperatorId;
+    fn id(&self) -> ComponentId;
 
     /// How much this operator's output leaks about the original it replaces,
     /// for policy authoring and audit reporting.
@@ -77,7 +76,7 @@ where
     M: Modality,
     T: Operator<M> + ?Sized,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         (**self).id()
     }
 
@@ -96,7 +95,7 @@ where
     M: Modality,
     T: Operator<M> + ?Sized,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         (**self).id()
     }
 

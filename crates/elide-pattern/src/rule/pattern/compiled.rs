@@ -81,7 +81,6 @@ impl CompiledPattern {
                 name: self.name.clone().into(),
                 regex: Some(self.regex.as_str().into()),
                 validator: self.validator.as_ref().map(|_| self.name.clone().into()),
-                contextual: false,
             },
         }
     }

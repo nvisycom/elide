@@ -3,7 +3,7 @@
 //! A [`Recognizer`] inspects content and emits entities, each carrying a
 //! recognition [`AuditEvent`] in its provenance (its location, confidence,
 //! and pattern/model detail). When several recognizers find the same
-//! thing, a fusion step (in `elide`) combines their entities into
+//! thing, a fusion step (in `elide-detection`) combines their entities into
 //! one, concatenating their events and appending a deduplication event.
 //!
 //! [`AuditEvent`]: crate::entity::audit::AuditEvent
@@ -13,6 +13,8 @@ mod label;
 mod languages;
 mod scope;
 mod subject;
+
+use std::sync::Arc;
 
 pub use self::context::Context;
 pub use self::label::LabelMap;
@@ -34,7 +36,7 @@ use crate::primitive::ComponentId;
 /// A recognizer does **not** resolve conflicts or fuse across
 /// recognizers; it reports what it sees, in modality-local coordinates.
 /// Combining the findings of multiple recognizers is the job of the
-/// fusion step in `elide`; pruning and orchestration belong to a
+/// fusion step in `elide-detection`; pruning and orchestration belong to a
 /// higher layer, not to the recognizer itself.
 ///
 /// Per call, a recognizer receives the [`Subject`] (the chunk's payload plus
@@ -114,14 +116,14 @@ where
 
 /// A shared recognizer is a recognizer.
 ///
-/// Both methods take `&self`, so an [`Arc`](std::sync::Arc) forwards them
+/// Both methods take `&self`, so an [`Arc`] forwards them
 /// without interior mutability. This is what lets a caller build an
 /// expensive recognizer once and attach the same instance to
 /// several analyzers: the built-in pattern set compiles a large
 /// regex set, and a deployment running four modalities would
 /// otherwise pay for it four times per request.
 #[async_trait::async_trait]
-impl<M, R> Recognizer<M> for std::sync::Arc<R>
+impl<M, R> Recognizer<M> for Arc<R>
 where
     M: Modality,
     R: Recognizer<M> + ?Sized,

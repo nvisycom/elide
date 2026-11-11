@@ -20,7 +20,7 @@
 #[doc(inline)]
 pub use elide_core::redaction::{
     Disposition, HiddenContent, HiddenContentKind, HiddenContentPolicy, LeakProfile, Operator,
-    OperatorId, Redactions, ReversibleOperator,
+    Redactions, ReversibleOperator,
 };
 #[doc(inline)]
 pub use elide_redaction::{

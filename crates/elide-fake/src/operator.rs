@@ -10,8 +10,8 @@ use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::primitive::LanguageTag;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::redaction::{LeakProfile, Operator};
 
 /// Locale-aware fake-data operator.
 ///
@@ -51,8 +51,8 @@ pub struct Fake<F> {
 
 impl<F> Fake<F> {
     /// Operator id stamped on every redaction event.
-    fn op_id() -> OperatorId {
-        OperatorId::new("fake", "1.0.0")
+    fn op_id() -> ComponentId {
+        ComponentId::new("fake", "1.0.0")
     }
 
     /// Build a `Fake` operator with `fallback` as the operator
@@ -94,7 +94,7 @@ impl<F> Operator<Text> for Fake<F>
 where
     F: Operator<Text>,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::op_id()
     }
 
@@ -118,7 +118,7 @@ impl<F> Operator<Tabular> for Fake<F>
 where
     F: Operator<Tabular>,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::op_id()
     }
 

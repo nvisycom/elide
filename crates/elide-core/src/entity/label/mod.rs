@@ -26,9 +26,6 @@ pub use self::category::Category;
 pub use self::reference::LabelRef;
 use crate::primitive::{LanguageTag, LocalizedText};
 
-// `LabelLocale` is public API (part of a `Label`); re-exported at the
-// module root below.
-
 /// A label's human-facing text in one language: a display name and an
 /// optional fuller description.
 ///
@@ -267,7 +264,6 @@ impl From<&Label> for LabelRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::LanguageTag;
 
     #[test]
     fn localization_falls_back_to_english() {
@@ -294,7 +290,7 @@ mod tests {
         // to empty/None rather than panicking.
         let label = Label {
             id: HipStr::from_static("orphan"),
-            localizations: LocalizedText::from_iter(std::iter::empty()),
+            localizations: LocalizedText::from_iter([]),
             category: None,
             tags: Vec::new(),
         };

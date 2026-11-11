@@ -95,8 +95,8 @@ mod tests {
         let label = |key: &str| {
             fields
                 .iter()
-                .find(|field| field.key() == key)
-                .map(|field| field.label().clone())
+                .find(|field| field.key == key)
+                .map(|field| field.label.clone())
         };
         assert_eq!(
             label("GPSLatitude"),

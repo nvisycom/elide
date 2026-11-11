@@ -100,13 +100,6 @@ pub struct Tokens(Vec<Token>);
 impl ModalityArtifact for Tokens {}
 
 impl Tokens {
-    /// Construct an empty token sequence. Use this when the producer has no
-    /// tokenizer (language-only engines).
-    #[must_use]
-    pub fn empty() -> Self {
-        Self::default()
-    }
-
     /// Construct from an owned vector. The caller is responsible for ensuring
     /// tokens are sorted by `offset.start`.
     #[must_use]

@@ -9,7 +9,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 use jiff::civil::{Date, DateTime, Time};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -102,8 +103,8 @@ const DATETIME_SEPARATORS: [char; 3] = ['T', 't', ' '];
 
 impl GeneralizeDate {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("generalize_date", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("generalize_date", "1.0.0")
     }
 
     /// A generalizer reducing to `granularity`, accepting ISO-8601 input.
@@ -208,7 +209,7 @@ impl GeneralizeDate {
 
 #[async_trait::async_trait]
 impl Operator<Text> for GeneralizeDate {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         GeneralizeDate::id()
     }
 
@@ -241,7 +242,7 @@ impl TryOperator<Text> for GeneralizeDate {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for GeneralizeDate {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         GeneralizeDate::id()
     }
 
@@ -278,7 +279,7 @@ impl TryOperator<Tabular> for GeneralizeDate {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for GeneralizeDate {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         GeneralizeDate::id()
     }
 
@@ -307,7 +308,7 @@ impl TryOperator<Metadata> for GeneralizeDate {
         data: &MetadataData,
     ) -> Result<Option<MetadataReplacement>> {
         Ok(self
-            .render(data.value())
+            .render(data.as_str())
             .map(|text| TextReplacement::substituted(text).into()))
     }
 }

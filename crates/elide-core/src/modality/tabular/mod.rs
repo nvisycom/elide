@@ -21,7 +21,7 @@ use super::text_recognizable::TextRecognizable;
 /// Tabular modality: cells hold text, so data is [`TextData`] and
 /// replacements are [`TabularReplacement`]; only [`TabularLocation`] is
 /// tabular-specific.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Tabular;
 

@@ -15,20 +15,10 @@ use uuid::Uuid;
 ///
 /// [`Report::part`]: super::Report::part
 /// [`Report::document`]: super::Report::document
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Part<'r, M: Modality> {
     entities: &'r [Entity<M>],
 }
-
-// Manual `Clone`/`Copy`: `derive` would add a spurious `M: Clone` bound, but
-// the view only holds a shared slice.
-impl<M: Modality> Clone for Part<'_, M> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<M: Modality> Copy for Part<'_, M> {}
 
 impl<'r, M: Modality> Part<'r, M> {
     pub(crate) fn new(entities: &'r [Entity<M>]) -> Self {

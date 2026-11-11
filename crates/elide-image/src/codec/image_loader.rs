@@ -274,7 +274,7 @@ mod tests {
     async fn the_exif_stream_yields_labelled_fields() {
         let mut doc = decode(JPEG, Disposition::ScanAsContent, fixtures::jpeg_with_gps()).await;
         let chunks = exif(&mut doc).chunks().unwrap();
-        assert!(chunks.iter().any(|chunk| chunk.data.key() == "GPSLatitude"));
+        assert!(chunks.iter().any(|chunk| chunk.data.key == "GPSLatitude"));
     }
 
     /// Under `ScanAsContent` a field nothing redacts stays.

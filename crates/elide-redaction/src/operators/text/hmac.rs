@@ -13,7 +13,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 use hmac::{Hmac, KeyInit, Mac};
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -53,8 +54,8 @@ pub struct HmacHash {
 
 impl HmacHash {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("hmac", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("hmac", "1.0.0")
     }
 
     /// An HMAC operator over `algorithm`, drawing keys from `keys`.
@@ -105,7 +106,7 @@ impl fmt::Debug for HmacHash {
 
 #[async_trait::async_trait]
 impl Operator<Text> for HmacHash {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         HmacHash::id()
     }
 
@@ -126,7 +127,7 @@ impl Operator<Text> for HmacHash {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for HmacHash {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         HmacHash::id()
     }
 
@@ -146,7 +147,7 @@ impl Operator<Tabular> for HmacHash {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for HmacHash {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         HmacHash::id()
     }
 
@@ -159,7 +160,7 @@ impl Operator<Metadata> for HmacHash {
         entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.digest(&entity.label, data.value())?).into())
+        Ok(TextReplacement::substituted(self.digest(&entity.label, data.as_str())?).into())
     }
 }
 

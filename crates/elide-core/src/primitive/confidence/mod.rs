@@ -63,7 +63,8 @@ impl Confidence {
 
     /// Construct a score, clamping out-of-range values into `[0, 1]`.
     ///
-    /// A non-finite input clamps to [`Confidence::MIN`].
+    /// NaN clamps to [`Confidence::MIN`]; an infinity clamps to the bound on
+    /// its side.
     pub fn clamped(score: f32) -> Self {
         if score.is_nan() {
             Self::MIN

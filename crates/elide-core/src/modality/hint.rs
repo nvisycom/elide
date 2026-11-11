@@ -1,7 +1,5 @@
 //! [`Hint<M>`]: a located piece of out-of-band context for recognition.
 
-use std::fmt;
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -16,10 +14,7 @@ use super::Modality;
 /// prompt reads the hint's text back from the source at that location, and a
 /// confidence boost records *which* hint lifted a score and *where* it came
 /// from — provenance a review consumer can resolve back to the document.
-///
-/// [`Entity`]: crate::entity::Entity
-// `Clone`/`Debug`/`PartialEq`/`Eq` are bound on `M::Location`, not on the marker
-// `M` (which is none of those), so they're impl'd below rather than derived.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -45,33 +40,6 @@ impl<M: Modality> Hint<M> {
     }
 }
 
-impl<M: Modality> Clone for Hint<M> {
-    fn clone(&self) -> Self {
-        Self {
-            location: self.location.clone(),
-        }
-    }
-}
-
-impl<M: Modality> fmt::Debug for Hint<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Hint")
-            .field("location", &self.location)
-            .finish()
-    }
-}
-
-impl<M: Modality> PartialEq for Hint<M>
-where
-    M::Location: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
-    }
-}
-
-impl<M: Modality> Eq for Hint<M> where M::Location: Eq {}
-
 /// A [`Hint`] paired with the content at its location, the transient form a
 /// recognizer sees.
 ///
@@ -92,6 +60,7 @@ impl<M: Modality> Eq for Hint<M> where M::Location: Eq {}
 /// [`Data`]: Modality::Data
 /// [`as_text`]: super::TextRecognizable::as_text
 /// [`Chunk`]: super::Chunk
+#[derive(Debug, Clone)]
 pub struct ResolvedHint<M: Modality> {
     /// The located hint recorded on a boost's audit trail.
     pub hint: Hint<M>,
@@ -109,24 +78,8 @@ impl<M: Modality> ResolvedHint<M> {
     }
 }
 
-impl<M: Modality> Clone for ResolvedHint<M> {
-    fn clone(&self) -> Self {
-        Self {
-            hint: self.hint.clone(),
-            data: self.data.clone(),
-        }
-    }
-}
-
-impl<M: Modality> fmt::Debug for ResolvedHint<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ResolvedHint")
-            .field("hint", &self.hint)
-            .field("data", &self.data)
-            .finish()
-    }
-}
-
+// Hand-written: a derive bounds only `M` and the `M::Data` projection, not the
+// `M::Location` that comparing the nested `Hint<M>` needs.
 impl<M: Modality> PartialEq for ResolvedHint<M>
 where
     M::Location: PartialEq,

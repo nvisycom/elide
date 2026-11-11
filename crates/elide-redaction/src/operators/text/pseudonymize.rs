@@ -9,7 +9,8 @@ use elide_core::modality::Modality;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{Generator, LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{Generator, LeakProfile, Operator};
 
 use crate::vault::Vault;
 
@@ -72,8 +73,8 @@ impl<V, G> Pseudonymize<V, G> {
     }
 
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("pseudonymize", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("pseudonymize", "1.0.0")
     }
 }
 
@@ -111,7 +112,7 @@ where
     V: Vault<PseudonymizeKey, TextReplacement>,
     G: Generator<Text>,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::id()
     }
 
@@ -141,7 +142,7 @@ where
     V: Vault<PseudonymizeKey, TextReplacement>,
     G: Generator<Tabular>,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::id()
     }
 

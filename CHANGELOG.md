@@ -10,195 +10,139 @@ and this project adheres to
 
 ### Added
 
-- Multimodal detection-and-redaction toolkit for PII/PHI across text, images,
-  audio, and tabular data
-- File-format codecs for plain-text, JSON, HTML, XML, DOCX, PDF, RTF, PNG, JPEG,
-  TIFF, WAV, MP3, CSV, and XLSX
-- Pattern-based entity detection with regex and dictionary recognizers
-- Post-match validators (Luhn checksum, SSN format) to reduce false positives
-- Built-in dictionaries for nationalities, religions, currencies,
-  cryptocurrencies, and languages
-- Language detection and keyword-boost context enhancement over recognized
-  entities
-- LLM/VLM-mediated recognizers (text NER and image VLM) via a pluggable rig
-  backend
-- Speech-to-text and OCR enrichers that lift audio and images into a
-  text-recognizable surface
-- Composable recognizer/redaction registries, deduplication layers, and
-  validation checks
-- Coreference-aware pseudonymization with a vault for stable replacements
+#### Toolkit
+
+- Multimodal detection-and-redaction toolkit for PII/PHI across text, tabular
+  data, document metadata, images, and audio
+- Every detected entity carries a tamper-evident audit trail: the recognizers
+  that found it, how overlapping findings were reconciled, confidence
+  adjustments, reviewer decisions, the operator picked to hide it, and the
+  redaction applied, verifiable as a hash-linked DAG
+- Recognizers, enrichers, and redaction operators share one name-and-version
+  identity (`ComponentId`), recorded in the audit trail
+- WebAssembly bindings (`elide-wasm`) that run the detect-and-redact pipeline
+  in a browser
+
+#### Formats
+
+- Codecs for TXT, JSON, CSV, HTML, XML, DOCX, XLSX, PPTX, PDF, PNG, JPEG, TIFF,
+  WAV, and MP3, registered in a `FormatRegistry` resolved by extension, MIME
+  type, or content sniffing
+- Embedded documents (an image in a DOCX, a file in a PDF) are decoded as
+  parts of their container, under their parent's policy, and analyzed and
+  redacted through the pipeline registered for their modality; an embedded
+  file no codec can read is removed
 - Optional PDF page rendering to images via the native PDFium library
   (`pdf-render` feature)
-- Hidden-content sanitizing: every codec strips metadata, comments and
-  tracked revisions, previews, external references, active content, and
-  editor fingerprints at decode, under a per-document `HiddenContentPolicy`
-  whose metadata and collaboration `Disposition` is `KeepOnlyEssential`,
-  `ScanAsContent`, or `FlagEverything`;
-  embedded documents are decoded under their parent's policy, every encode
-  checks the output carries none, and an office document with an
-  unrecognized part or XML vocabulary is refused
-- PDF sanitizing refuses a document encrypted with a user password, keeps an
-  allowlist of catalog, page, and trailer entries (removing signature data,
-  web-capture and portfolio entries, page timestamps, and page labels),
-  strips marked content's alternate text from the content streams, reduces
-  kept internal links to their navigation and removes ones that chain an
-  action, and gives embedded files neutral names
-- PDF images stored as raw samples (every lossless image) are decoded and
-  surfaced to the image pipeline as PNG, JPEG images surface in every build,
-  and images that cannot be surfaced (fax, JBIG2, stencil masks, inline
-  images) are removed rather than shipped unscanned; an image or scanned page
-  no codec can read is removed or cleared instead of replaced with a blank
-- Office documents surface the text they keep in attributes and outside a
-  workbook's cells: comment and change authors and a comment's title (under
-  collaboration `ScanAsContent`), sheet, table, table-column, and defined names and
-  Word bookmarks (fitted to their format's naming rules and kept unique when
-  redacted, with the hyperlinks to them following), dropdown entries,
-  data-validation messages, section names, worksheet headers and footers,
-  validation lists, formulas, defined-name formulas, and phonetic readings;
-  they strip alternative text, tooltips, form-field and content-control
-  labels, and optional collaboration dates, set required ones to a neutral
-  date, always strip a workbook's revision log, drop a stripped comment's
-  legacy note shape, and accept Excel threaded comments and PowerPoint modern
-  comments under `ScanAsContent`
-- HTML sanitizing reads URLs the way a browser does (character references
-  decoded, tabs and line breaks dropped), and also strips frames, `<meta>`
-  redirects and cookies, conditional comments, remote resource loads and
-  pings, `<template>` and `hidden` elements; XML strips `xml-stylesheet` and
-  XInclude references and refuses an external DTD
-- Metadata is built into every orchestrator: each codec labels the fields it
-  surfaces by its format's schema (`MetadataData::label`, required), and the
-  label is the field's detection, so a field whose label the request's
-  catalog declares is redacted with nothing registered, replacing the
-  per-format `ExifRecognizer` and `DocPropsRecognizer`; under
-  `ScanAsContent` an unlabelled field is stripped at decode. Selected fields
-  are erased by default, or treated by a caller's `Anonymizer<Metadata>`:
-  `Replace` and `Mask` overwrite a field that holds text. An image's EXIF and
-  an office document's properties are metadata streams of their document,
-  not sub-parts decoded through a format of their own
-- `Metadata` is `TextRecognizable`: a metadata analyzer's recognizers read
-  each field's value, and a `MetadataLocation` narrowed to a byte range of the
-  value (`with_span`) is spliced into the field when written back, so a
-  finding inside a free-text field is redacted and the rest of the field
-  kept, and a field left blank is removed. `MetadataReplacement` is a text
-  treatment of the value (`Value(TextReplacement)`) or `Unchanged`, and every
-  text operator a tabular cell takes treats a field's value too. An
-  office document now surfaces its keywords, category, template path,
-  hyperlink base, each entry of `TitlesOfParts` and `HeadingPairs`, and its
-  custom properties
-  (`docProps/custom.xml`) as free-text fields instead of stripping them.
-  `ImageBuffer::edit_metadata` takes each field's new value, and a metadata
-  stream keeps its fields in `elide_codec::metadata::MetadataFields`, which
-  reads, redacts, and reports them. A docProps key is unique in its part: a
-  repeated element is keyed `name#2`, the part lists `TitlesOfParts/<n>` and
-  `HeadingPairs/<n>`, and a custom property by its position, `property/<n>`,
-  with its name a field of its own (`property/<n>/name`) that is scanned and
-  rewritten like its value
-- Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
-  read from: the members of a field's group no field reads (the lens tags,
-  destination coordinates, altitude, modify dates, time offsets) are stripped
-  at decode instead of following the field's decision unscanned. A capture
-  time is read from `DateTimeOriginal` alone, so `CreateDate` is stripped
-  like `ModifyDate` instead of standing in for a missing capture time
-- Hidden-content dispositions are `KeepOnlyEssential` (the default),
-  `ScanAsContent`, and `FlagEverything`, which also makes every item a format
-  labels an entity whatever the catalog declares: each metadata field, and
-  each comment, comment or revision author, and tracked deletion of an office
-  document, each markup comment, and each HTML `<meta>` field, redacted
-  whole; a stream reports its labelled hidden content through
-  `Stream::flagged`, and the audit records it as a `Flagged` event naming its
-  kind, replacing the metadata-only event
-- Every orchestrator drives text out of the box, with no recognizers, so
-  flagged hidden content in a text stream is erased with nothing registered
-- Every pipeline's anonymizer erases a flagged entity no rule covers, so
-  flagged hidden content is never kept for want of a rule; registering a
-  pipeline requires `Erase: Operator<M>`, and `Keep` and the new
-  `MetadataReplacement::Unchanged` leave a metadata field as it is; an EXIF
-  field goes with its group when another of the group is redacted, though its
-  audit still shows the `Keep`; a finding inside a kept flagged item takes the
-  whole item
-- Office documents always lose their XML comments, and a workbook with a legacy
-  VML drawing, whose root has no namespace, is no longer refused at encode
-- An EXIF tag of a logical group (a destination coordinate, a lens, a modify
-  date) is stripped when the image carries no field of that group, since it
-  could not reach detection
-- HTML `<meta>` names are read with character references decoded, so an encoded
-  redirect is removed; a tag naming a field is metadata even when it also sets
-  a character set or rendering directive, and a character set does not keep a
-  `content` beside it; a tag repeating a classifying attribute is metadata too,
-  and every `content` it carries is flagged
-- Overwriting an EXIF field with blank text removes it
-- Hidden-content audit: every stripped item is recorded on the `Report`
-  (`stripped()`) by part, item, and count in a format-neutral
-  `HiddenContent` vocabulary, filled by `analyze` and replaced by what
-  `anonymize_with` saw, and serialized (output only) as the report's
-  `stripped` section
-- HTML and XML have their own engine crate, `elide-markup`, which also owns
-  character reference decoding (`decode_references`, `CharacterReferences`)
-  for any format that reads XML; their constructors move from
-  `elide::codec::plain` to `elide::codec::markup`, and `elide-plain` keeps
-  TXT, JSON, and CSV, one module per format
-- `elide-operator` is merged into `elide-redaction`: the operators, vault,
-  and generators are `elide_redaction::{operators, vault, generator}`, beside
-  the `Anonymizer` and `Deanonymizer`; the facade's `elide::redaction` paths
-  are unchanged
-- The recognizer decorators share one module per decorator under
-  `elide::recognition::decorator`: `resilient`, `chunked`, and `escalation`
+
+#### Detection
+
+- Pattern-based detection with regex and dictionary recognizers, post-match
+  validators (Luhn checksum, SSN format), and built-in dictionaries for
+  nationalities, religions, currencies, cryptocurrencies, and languages
+- Language detection, and keyword-boost context enhancement over the in-text
+  window and out-of-band hints (a column header, a JSON key)
+- LLM/VLM-mediated recognizers (text NER and image VLM) over a pluggable rig
+  backend
+- Speech-to-text and OCR enrichers that make audio and images text-recognizable
+- An `Analyzer` per modality that runs enrichers, then recognizers, then the
+  deduplication layers that fuse and arbitrate their findings; recognizer
+  decorators `resilient`, `chunked`, and `escalation`
+- A caller's `Scope` names the entity types to detect (an empty catalog
+  detects nothing), the asserted languages and jurisdictions, and free-form
+  document tags, purpose, and audience
+
+#### Review
+
 - A `Report` is read and edited through typed part views: `part` and
   `document` return a `Part` (`entities`, `entity`, `suppressed`,
   `unsuppressed`), `part_mut` and `document_mut` a `PartMut` whose edits
-  (`include`, `relabel`, `relocate`, `suppress`, `suppress_within`) are all
-  recorded as `Manual` audit
-  events attributed to its `by` and `because`. An unknown part or a modality
-  mismatch is a `NotFound` error (a new `ErrorKind`). `suppress_within`
-  suppresses every entity a region contains and records the region on each.
-  They replace `entities`, `entities_mut`, `entity`, `entity_mut`,
-  `part_entities`, `part_entities_mut`, `part_entity`, `part_entity_mut`,
-  `include_part`, `include_custom`, `include_custom_at`, `suppress_part`,
-  `for_each_part_mut`, `try_for_each_part_mut`, and `CustomEntity`
-  (`Entity::custom`); `Entity::record_manual` takes the `Manual` decision to
-  record and is the one way to record a reviewer's decision, at the entity's
-  own confidence, replacing `Entity::suppress` and
-  `AuditEvent::manual_flag` / `manual_suppress`
-- An `Entity` is built with `Entity::new(label, location)` and `with_*`
-  setters (`with_event`, `with_coref`, `with_language`,
-  `with_recognized_range`); `with_event` and its in-place `record` record an
-  audit event and set the confidence from it, so the confidence always
-  matches the trail's last event. An entity
-  with no event is a located label with no provenance, at `MAX` confidence.
-  `EntityBuilder` (`Entity::builder`) and the three-argument
-  `Entity::new(label, location, audit)` are removed
-- `Orchestrator::pick(&mut report)` records on every entity the operator
-  `anonymize_with` will apply, as a `Selection` event, through each part's
-  registered anonymizer and the orchestrator's scope, so a review can show the
-  plan before anything is applied
-- Caller region annotations are removed: `recognition::annotation`
-  (`Annotations`, `Inclusion`, `Exclusion`), `Directives`,
-  `Analyzer::analyze_with` / `analyze_stream_with` (with `analyze_in` and
-  `analyze_stream_in`: an analyzer runs `analyze`, `analyze_stream`, or the
-  batched, seeded `analyze_streams`), and the LLM prompts'
-  inclusion hints. Their coordinates applied to every part of a modality;
-  `PartMut::suppress_within` replaces exclusions per part, after analysis.
-  `Orchestrator::analyze`, `re_analyze`, and `anonymize` take only the
-  documents (and prior artifacts), and use the orchestrator's `with_scope`.
-  `Context` is no longer generic over the modality
-- `TabularLocation` narrows to part of a cell with one `span:
-  Option<Range<usize>>` (`with_span`), like `TextLocation`, replacing
-  `start_offset`/`end_offset` and `with_range`
+  (`include`, `relabel`, `relocate`, `suppress`, `suppress_within`) are
+  recorded as `Manual` audit events attributed to its `by` and `because`
+- `Orchestrator::pick` records on every entity the operator `anonymize_with`
+  will apply, as a `Selection` event, so a review can show the plan before
+  anything is applied
+
+#### Redaction
+
+- Redaction operators for text (replace, mask, erase, hash, HMAC, encrypt,
+  truncate, clamp, date generalization, pseudonymize, keep), tabular cells
+  (drop row, drop column), images (blackbox, blur, pixelate), and audio
+  (silence, beep), selected per entity by an `Anonymizer`'s ordered rules
+- Coreference-aware pseudonymization with a vault for stable replacements, and
+  a `Deanonymizer` for reversible operators
+- Every pipeline's anonymizer erases a flagged entity no rule covers, so
+  flagged hidden content is never kept for want of a rule
+
+#### Hidden content
+
+- Every codec handles hidden content at decode, under a per-document
+  `HiddenContentPolicy` whose metadata and collaboration `Disposition` is
+  `KeepOnlyEssential` (the default), `ScanAsContent`, or `FlagEverything`.
+  Previews, external references, active content, and editor fingerprints are
+  always stripped, every encode checks the output carries none, and a
+  document with structure its codec does not recognize is refused
+- `FlagEverything` makes every item a format labels an entity whatever the
+  catalog declares: each metadata field, each office comment, comment or
+  revision author, and tracked deletion, each markup comment, and each HTML
+  `<meta>` field, recorded as a `Flagged` audit event naming its kind
+- Every stripped item is recorded on the `Report` (`stripped()`) by part,
+  item, and count in the format-neutral `HiddenContent` vocabulary
+- Metadata is a modality of its own (`Metadata`): an image's EXIF and an
+  office document's core, app, and custom properties are keyed text fields
+  that each codec labels by its format's schema. Every orchestrator drives
+  them with no recognizer: a field whose label the request's catalog declares
+  is redacted by that label alone. A caller's `Analyzer<Metadata>` adds
+  recognizers that read each value, so a finding inside a free-text field is
+  spliced out and the rest kept; a field left blank is removed
+- Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
+  read from, and an EXIF tag goes with its group when another of the group is
+  redacted
+- PDF: a document encrypted with a user password is refused; catalog, page,
+  and trailer entries are kept by allowlist; marked content's alternate text
+  is stripped; kept internal links are reduced to their navigation; embedded
+  files get neutral names; images are surfaced to the image pipeline, and one
+  that cannot be (fax, JBIG2, stencil masks, inline images) is removed rather
+  than shipped unscanned
+- Office documents surface the text they keep in attributes and outside a
+  workbook's cells (authors, sheet, table, and defined names, bookmarks,
+  dropdown entries, validation messages, headers and footers, formulas,
+  phonetic readings), keep renamed names unique and valid with the links to
+  them following, and strip alternative text, tooltips, control labels, XML
+  comments, and a workbook's revision log
+- HTML reads URLs the way a browser does and strips frames, `<meta>`
+  redirects and cookies, conditional comments, remote resource loads and
+  pings, `<template>` and `hidden` elements; XML strips `xml-stylesheet` and
+  XInclude references and refuses an external DTD
 
 ### Crates
 
-- **elide-core:** Domain types, traits, and errors for the toolkit
-- **elide-pattern:** Pattern and dictionary recognizers for PII/PHI detection,
-  with keyword-boost context enhancement
+- **elide:** Facade re-exporting the toolkit: recognizers, dedup layers,
+  redaction operators, and codecs
+- **elide-core:** Domain types, traits, and errors
+- **elide-detection:** The `Analyzer` and its deduplication layers
+- **elide-pattern:** Pattern and dictionary recognizers, with keyword-boost
+  context enhancement
 - **elide-ner:** NER traits and language detection
-- **elide-llm:** LLM-mediated entity recognizer (text NER + image VLM)
-- **elide-stt:** Speech-to-text backends and transcription types
-- **elide-ocr:** OCR backends and recognized-text types
-- **elide-codec:** Codec traits and format handlers for reading and redacting
-  documents
-- **elide-markup:** HTML and XML format handlers, the markup sanitizer, and
-  character reference decoding
-- **elide:** Composable component library for pipelines: recognizers, dedup
-  layers, checks, redaction strategies
+- **elide-lingua:** Lingua-backed language detection
+- **elide-llm:** LLM-mediated entity recognizer (text NER and image VLM)
+- **elide-backend:** Backend decorators: usage metering, observability sinks,
+  rate limiting, routing, and failover
+- **elide-redaction:** The operators, the `Anonymizer` and `Deanonymizer`
+  that select and apply them, the key vault, and pseudonym generators
+- **elide-fake:** Locale-aware fake-data operator
+- **elide-engine:** Document orchestration across multi-part containers
+- **elide-codec:** Codec traits and the shared extract engine
+- **elide-format:** Format registry and the built-in handlers
+- **elide-plain:** TXT, JSON, and CSV handlers
+- **elide-markup:** HTML and XML handlers, the markup sanitizer, and character
+  reference decoding
+- **elide-office:** DOCX, XLSX, and PPTX extraction and byte-faithful redaction
+- **elide-pdf:** PDF text extraction and born-digital redaction
+- **elide-image:** Raster image decode and encode, EXIF read and strip, and
+  pixel-region redaction, with OCR enrichment
+- **elide-audio:** Audio decode and encode and time-span redaction, with
+  speech-to-text enrichment
+- **elide-wasm:** WebAssembly bindings for the browser
 
 [Unreleased]: https://github.com/nvisycom/elide/commits/main

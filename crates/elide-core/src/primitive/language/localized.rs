@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn empty_map_resolves_to_none_without_panicking() {
-        let text: LocalizedText<String> = LocalizedText::from_iter(std::iter::empty());
+        let text: LocalizedText<String> = LocalizedText::from_iter([]);
         assert!(text.is_empty());
         assert!(text.resolve(&LanguageTag::english()).is_none());
     }

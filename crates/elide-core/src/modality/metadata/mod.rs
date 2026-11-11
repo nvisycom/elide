@@ -34,7 +34,7 @@ use super::{Modality, NoArtifact, TextRecognizable};
 /// [`MetadataLocation`] holding [`MetadataData`], hidden by a
 /// [`MetadataReplacement`]. Which artifact a field belongs to is a matter of the
 /// entity's `PartId`, not the modality.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Metadata;
 
@@ -49,7 +49,7 @@ impl Modality for Metadata {
 
 impl TextRecognizable for Metadata {
     fn as_text<'a>(data: &'a MetadataData, _artifact: Option<&'a NoArtifact>) -> Option<&'a str> {
-        Some(data.value())
+        Some(data.as_str())
     }
 
     fn locate(

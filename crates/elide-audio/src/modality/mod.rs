@@ -18,7 +18,7 @@ pub use self::transcription::{TranscriptSegment, TranscriptWord, Transcription};
 
 /// Audio modality: data is [`AudioData`], locations are
 /// [`AudioLocation`] time ranges, replacements are [`AudioReplacement`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Audio;
 

@@ -4,7 +4,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::TextData;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -24,8 +25,8 @@ pub struct DropColumn;
 
 #[async_trait::async_trait]
 impl Operator<Tabular> for DropColumn {
-    fn id(&self) -> OperatorId {
-        OperatorId::new("drop_column", "1.0.0")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("drop_column", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {

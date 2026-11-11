@@ -1,4 +1,4 @@
-//! [`Context<M>`]: the analysis-wide inputs an [`Enricher`] and [`Recognizer`]
+//! [`Context`]: the analysis-wide inputs an [`Enricher`] and [`Recognizer`]
 //! read alongside each [`Subject`].
 //!
 //! [`Enricher`]: crate::enrichment::Enricher
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::entity::{Label, LabelCatalog, LabelRef};
 use crate::modality::Modality;
-use crate::primitive::{CountryCode, LanguageTag};
+use crate::primitive::CountryCode;
 use crate::recognition::{Languages, Scope, Subject};
 
 /// The analysis-wide inputs handed to an enricher or recognizer alongside the
@@ -61,21 +61,6 @@ impl<'a> Context<'a> {
         &self.scope.metadata.tags
     }
 
-    /// The caller-asserted business purpose driving this request (e.g.
-    /// `"fraud_detection"`), or `None` if unasserted. A recognizer may bias
-    /// detection on it.
-    #[must_use]
-    pub fn purpose(&self) -> Option<&HipStr<'static>> {
-        self.scope.metadata.purpose.as_ref()
-    }
-
-    /// Who the redacted output is for (e.g. `"auditor"`). A recognizer may
-    /// bias detection on it.
-    #[must_use]
-    pub fn audience(&self) -> &[HipStr<'static>] {
-        &self.scope.metadata.audience
-    }
-
     /// The [`LabelCatalog`] of entity types to detect, the caller's request.
     /// A zero-shot NER model requests exactly these labels; an LLM prompt lists
     /// them as the types to find. On the `Analyzer::analyze*` path this is
@@ -112,41 +97,13 @@ impl<'a> Context<'a> {
         self.scope.correlation_id
     }
 
-    /// Whether the caller asserted any language on the scope.
-    ///
-    /// An enricher consults this to decide whether to run detection: a
-    /// caller assertion is authoritative, so detection can be skipped.
-    #[must_use]
-    pub fn has_asserted_language(&self) -> bool {
-        !self.scope.languages.is_empty()
-    }
-
-    /// The caller-asserted language tags, in the order given.
-    ///
-    /// A detection enricher reads these to decide and scope its work: one
-    /// asserted language is monolingual, so detection can be skipped and every
-    /// entity attributed to it; two or more means the document is mixed, so
-    /// detection still runs — restricted to this set — to attribute each entity
-    /// to the asserted language its own text is in.
-    #[must_use]
-    pub fn asserted_languages(&self) -> Vec<LanguageTag> {
-        self.scope
-            .languages
-            .iter()
-            .map(|claim| claim.language.clone())
-            .collect()
-    }
-
     /// The call's languages — the caller-asserted ones (scope) and the ones a
     /// detector found (on `subject`) — as a [`Languages`] view to query
     /// together: which is primary, whether a language-scoped rule applies, and
     /// span-based entity attribution.
     #[must_use]
     pub fn languages<'s, M: Modality>(&'s self, subject: &'s Subject<M>) -> Languages<'s> {
-        Languages::new(
-            self.scope.languages.as_slice(),
-            subject.detected_languages(),
-        )
+        Languages::new(self.scope.languages(), subject.detected_languages())
     }
 
     /// Whether a recognizer rule scoped to `allowed` countries should run

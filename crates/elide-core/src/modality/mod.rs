@@ -13,12 +13,13 @@
 //! available for serialization and logging.
 //!
 //! The core defines the traits and ships [`text`] unconditionally, with
-//! `image`, `audio`, and `tabular` behind their own features so a
-//! text-only consumer doesn't pay for them. Each modality defines its
-//! marker type, its data/location/replacement types, and the `impl
-//! Modality` that ties them together (tabular reuses the text payload and
-//! replacement, varying only the location); an out-of-tree medium can do
-//! the same in its own crate, needing no change here.
+//! `tabular` and `metadata` behind their own features so a text-only
+//! consumer doesn't pay for them. Each modality defines its marker type,
+//! its data/location/replacement types, and the `impl Modality` that ties
+//! them together (tabular and metadata reuse the text payload or
+//! replacement, varying the location); image and audio live in their own
+//! crates (`elide-image`, `elide-audio`), and any other medium can do the
+//! same, needing no change here.
 //!
 //! [`Data`]: Modality::Data
 //! [`Location`]: Modality::Location
@@ -81,8 +82,8 @@ pub enum Overlap {
 /// Location within a modality's medium: *where* an entity sits.
 ///
 /// The extension point that makes the model multimodal at the coordinate
-/// level: a text crate's `TextSpan { start, end }`, an image crate's
-/// pixel box, an audio crate's time range.
+/// level: a byte span in text, a pixel box in an image, a time range in
+/// audio.
 ///
 /// Beyond being a marker, a location must answer three spatial
 /// questions: how it [*overlaps*] another (to group co-located findings,
@@ -215,13 +216,15 @@ impl ModalityArtifact for NoArtifact {}
 ///
 /// Implemented by a modality crate's marker type, binding the medium's
 /// [`Data`], [`Location`], [`Replacement`], and [`Artifact`] types together at
-/// compile time.
+/// compile time. The marker is a zero-sized unit struct, so it is `Copy`,
+/// `Debug`, and `Eq`; that lets the generic types built over it derive their
+/// impls instead of hand-writing them around a missing marker bound.
 ///
 /// [`Data`]: Modality::Data
 /// [`Location`]: Modality::Location
 /// [`Replacement`]: Modality::Replacement
 /// [`Artifact`]: Modality::Artifact
-pub trait Modality: Send + Sync + 'static {
+pub trait Modality: Copy + fmt::Debug + Eq + Send + Sync + 'static {
     /// Payload a recognizer inspects for this medium.
     type Data: ModalityData;
 

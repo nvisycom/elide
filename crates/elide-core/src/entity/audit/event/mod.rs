@@ -6,8 +6,6 @@
 //! combined and scored), and [`apply`] (the redaction decision and human
 //! overrides). Each payload owns its fields, its `new` / `with_*` builders, its
 //! central `TAG` discriminant, and how it folds into the hash.
-//!
-//! [`AuditKind`]: AuditKind
 
 mod kind;
 
@@ -57,7 +55,6 @@ use crate::primitive::Confidence;
 /// [`confidence`], recovered from the DAG.
 ///
 /// [`AuditLog`]: crate::entity::audit::AuditLog
-/// [`AuditLog::record_fusion`]: crate::entity::audit::AuditLog::record_fusion
 /// [`AuditLog::verify`]: crate::entity::audit::AuditLog::verify
 /// [`kind`]: AuditEvent::kind
 /// [`parents`]: AuditEvent::parents

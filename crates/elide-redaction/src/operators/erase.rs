@@ -10,7 +10,8 @@ use elide_core::modality::metadata::{Metadata, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "image")]
 use elide_image::modality::{Image, ImageReplacement};
 #[cfg(feature = "serde")]
@@ -29,14 +30,14 @@ pub struct Erase;
 
 impl Erase {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("erase", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("erase", "1.0.0")
     }
 }
 
 #[async_trait::async_trait]
 impl Operator<Text> for Erase {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Erase::id()
     }
 
@@ -56,7 +57,7 @@ impl Operator<Text> for Erase {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Erase {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Erase::id()
     }
 
@@ -77,7 +78,7 @@ impl Operator<Tabular> for Erase {
 #[cfg(feature = "audio")]
 #[async_trait::async_trait]
 impl Operator<Audio> for Erase {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Erase::id()
     }
 
@@ -97,7 +98,7 @@ impl Operator<Audio> for Erase {
 #[cfg(feature = "image")]
 #[async_trait::async_trait]
 impl Operator<Image> for Erase {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Erase::id()
     }
 
@@ -117,7 +118,7 @@ impl Operator<Image> for Erase {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Erase {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Erase::id()
     }
 
