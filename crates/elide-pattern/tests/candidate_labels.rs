@@ -29,8 +29,8 @@ fn address_recognizer() -> PatternRecognizer {
 /// The single label emitted for the one match in `"12 Main St"` under `scope`.
 async fn emitted_label(recognizer: &PatternRecognizer, scope: &Scope) -> LabelRef {
     let data = TextData::new("12 Main St".to_owned());
-    let ctx = Context::<Text>::new(scope);
-    let subject = Subject::new(data);
+    let ctx = Context::new(scope);
+    let subject = Subject::<Text>::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await

@@ -48,8 +48,7 @@ impl<M: Modality> Layer<M> for CalibrateLayer {
             if let Some(m) = multiplier {
                 let before = entity.confidence;
                 let after = Confidence::clamped((before.get() as f64 * m) as f32);
-                entity.confidence = after;
-                entity.audit.record(AuditEvent::calibration(after, m));
+                entity.record(AuditEvent::calibration(after, m));
             }
         }
 

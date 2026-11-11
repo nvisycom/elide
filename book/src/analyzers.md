@@ -61,7 +61,7 @@ let scope = Scope::new()
 |---|---|
 | `analyze(data, &scope)` | One payload in memory, such as a `TextData` |
 | `analyze_stream(stream, &scope)` | A decoded document's stream, chunk by chunk |
-| `analyze_with`, `analyze_stream_with` | The same, with regions to include or exclude |
+| `analyze_streams(streams, &scope, seeds)` | Several streams together, enriched in one batch, with one seed per stream: `None` for a first pass, or a prior run's enrichment to skip redoing it |
 
 ```rust
 use elide::modality::text::TextData;

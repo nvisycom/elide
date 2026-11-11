@@ -116,7 +116,7 @@ tabular = ["elide-core/tabular", "elide-redaction/tabular", "elide-engine?/tabul
 codec = ["dep:elide-codec", "dep:elide-format"]
 
 ## Re-export the orchestration engine: the `engine` module (`Orchestrator`,
-## `Report`, `Directives`). Implies `codec` (the orchestrator decodes documents
+## `Report`, `PartMut`). Implies `codec` (the orchestrator decodes documents
 ## through it), `serde` (`elide-engine` requires it — a `Report` exists to be
 ## serialized for review and reconstructed with `deserialize_report`), and
 ## `metadata` (every orchestrator redacts a document's metadata).

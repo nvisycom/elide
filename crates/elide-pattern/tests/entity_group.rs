@@ -24,8 +24,8 @@ fn rule_with(variant: Variant) -> Pattern {
 /// The text of every `label` entity `recognizer` finds in `text`.
 async fn found(recognizer: &PatternRecognizer, text: &str, label: LabelRef) -> Vec<String> {
     let scope = Scope::new();
-    let ctx = Context::<Text>::new(&scope);
-    let subject = Subject::new(TextData::new(text.to_owned()));
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(TextData::new(text.to_owned()));
     recognizer
         .recognize(&subject, &ctx)
         .await

@@ -8,7 +8,6 @@
 //!
 //! [`AuditEvent`]: crate::entity::audit::AuditEvent
 
-pub mod annotation;
 mod context;
 mod label;
 mod languages;
@@ -40,8 +39,8 @@ use crate::primitive::ComponentId;
 ///
 /// Per call, a recognizer receives the [`Subject`] (the chunk's payload plus
 /// its enrichment, detected languages, and hints) and a
-/// [`Context<M>`] (the analysis-wide languages, jurisdictions, label
-/// and annotation state), and returns the entities it found.
+/// [`Context`] (the analysis-wide languages, jurisdictions, and labels),
+/// and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
 /// [`AuditEvent`]: crate::entity::audit::AuditEvent
@@ -55,8 +54,7 @@ where
 
     /// Inspect the [`Subject`] in the given context and return the recognized
     /// entities, in modality-local coordinates.
-    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_, M>)
-    -> Result<Vec<Entity<M>>>;
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>>;
 
     /// Recognize over a batch of `subjects` under one shared context, returning
     /// one entity list per subject in the same order.
@@ -78,7 +76,7 @@ where
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         let mut per_subject = Vec::with_capacity(subjects.len());
         for subject in subjects {
@@ -101,18 +99,14 @@ where
         (**self).id()
     }
 
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         (**self).recognize(subject, ctx).await
     }
 
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         (**self).recognize_batch(subjects, ctx).await
     }
@@ -136,18 +130,14 @@ where
         (**self).id()
     }
 
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         (**self).recognize(subject, ctx).await
     }
 
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         (**self).recognize_batch(subjects, ctx).await
     }

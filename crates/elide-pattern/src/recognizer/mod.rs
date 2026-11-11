@@ -106,7 +106,7 @@ impl PatternRecognizer {
         matches: &mut [RawMatch],
         text: &str,
         subject: &Subject<M>,
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Vec<context::Boost> {
         if self.contexts.is_empty() {
             return Vec::new();
@@ -153,14 +153,9 @@ impl PatternRecognizer {
         let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
         let event = AuditEvent::pattern("pattern", raw.score, location.clone(), raw.pattern);
         Some(
-            Entity::builder()
-                .with_label(raw.label)
-                .with_location(location)
-                .with_confidence(raw.confidence)
+            Entity::new(raw.label, location)
                 .with_recognized_range(raw.range)
-                .with_event(event)
-                .build()
-                .expect("required fields provided"),
+                .with_event(event),
         )
     }
 }
@@ -171,11 +166,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         ComponentId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): nothing to match.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
@@ -281,7 +272,7 @@ fn record_boost<M: TextRecognizable>(
     if let Some(location) = location {
         refinement = refinement.with_location(location);
     }
-    entity.audit.record(AuditEvent::refinement(
+    entity.record(AuditEvent::refinement(
         boost.source,
         boost.confidence,
         refinement,

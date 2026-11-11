@@ -95,7 +95,7 @@ impl Operator<Audio> for Beep {
 mod tests {
     use elide_audio::modality::AudioLocation;
     use elide_audio::primitive::TimeSpan;
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::primitive::Confidence;
 
@@ -109,7 +109,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        Entity::new(LabelRef::new("PERSON"), location, AuditLog::new(event))
+        Entity::new(LabelRef::new("PERSON"), location).with_event(event)
     }
 
     #[tokio::test]

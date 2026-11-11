@@ -4,7 +4,7 @@
 //! fusion step would.
 
 use elide_core::Result;
-use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, ModelEvent, PatternEvent};
+use elide_core::entity::audit::{AuditEvent, AuditKind, ModelEvent, PatternEvent};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::{
@@ -16,7 +16,7 @@ use fixtures::{Text, TextData, TextLocation, TextReplacement};
 
 /// Build a single-recognition entity, the way a recognizer would.
 fn recognized(label: &LabelRef, location: TextLocation, event: AuditEvent<Text>) -> Entity<Text> {
-    Entity::new(label.clone(), location, AuditLog::new(event))
+    Entity::new(label.clone(), location).with_event(event)
 }
 
 /// A trivial "highest confidence wins" fusion: absorb every other entity's
@@ -204,10 +204,10 @@ fn recognizer_context_scopes_by_language_and_country() {
     let scope = Scope::new()
         .with_language(en_us.clone())
         .with_country(CountryCode::from_alpha2("US").unwrap());
-    let ctx: Context<'_, Text> = Context::new(&scope);
+    let ctx: Context<'_> = Context::new(&scope);
     // The language queries combine the scope's asserted languages with a
     // subject's detected ones; here the subject detected nothing.
-    let subject = Subject::new(TextData::new(""));
+    let subject = Subject::<Text>::new(TextData::new(""));
 
     // The asserted language is the primary one.
     assert_eq!(ctx.languages(&subject).primary(), Some(&en_us));
@@ -241,8 +241,8 @@ fn a_detected_language_never_filters() {
     // No asserted language; a detector reports Spanish with high confidence
     // onto the subject.
     let scope = Scope::new();
-    let ctx: Context<'_, Text> = Context::new(&scope);
-    let mut subject = Subject::new(TextData::new(""));
+    let ctx: Context<'_> = Context::new(&scope);
+    let mut subject = Subject::<Text>::new(TextData::new(""));
     subject.detect_language(LanguageClaim::detected(es, Confidence::clamped(0.9)));
 
     // A German-scoped rule still runs: detection is unreliable and must never
@@ -261,41 +261,6 @@ fn a_detected_language_never_filters() {
         1,
         "detection is still recorded"
     );
-}
-
-#[test]
-fn recognizer_context_carries_annotations() {
-    use elide_core::entity::LabelRef;
-    use elide_core::modality::text::TextLocation;
-    use elide_core::primitive::Confidence;
-    use elide_core::recognition::annotation::{Annotations, Exclusion, Inclusion};
-    use elide_core::recognition::{Context, Scope};
-
-    let inclusion = Inclusion::new(TextLocation::inline(0..5))
-        .with_name("uploaded selection")
-        .with_label(LabelRef::new("PERSON"))
-        .with_confidence(Confidence::new(0.9).unwrap());
-    let exclusion = Exclusion::new(TextLocation::inline(10..20));
-    let scope = Scope::new();
-    let annotations: Annotations<Text> = Annotations::new()
-        .with_inclusions(vec![inclusion])
-        .with_exclusions(vec![exclusion]);
-    let ctx = Context::new(&scope).with_annotations(&annotations);
-
-    assert_eq!(ctx.inclusions().len(), 1);
-    assert_eq!(ctx.inclusions()[0].location, TextLocation::inline(0..5));
-    assert_eq!(
-        ctx.inclusions()[0].name.as_deref(),
-        Some("uploaded selection")
-    );
-    assert_eq!(ctx.inclusions()[0].label, Some(LabelRef::new("PERSON")));
-    assert_eq!(
-        ctx.inclusions()[0].confidence,
-        Some(Confidence::new(0.9).unwrap())
-    );
-
-    assert_eq!(ctx.exclusions().len(), 1);
-    assert_eq!(ctx.exclusions()[0].location, TextLocation::inline(10..20));
 }
 
 #[test]

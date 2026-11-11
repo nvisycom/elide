@@ -668,8 +668,9 @@ mod tests {
         let back = round_trip(&report, &text_registry());
 
         let entities = back
-            .entities::<Text>()
-            .expect("sole document reconstructed");
+            .document::<Text>()
+            .expect("sole document reconstructed")
+            .entities();
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
         assert!(
@@ -691,8 +692,9 @@ mod tests {
             .deserialize(&mut de)
             .expect("rebuilt");
         let entities = back
-            .entities::<Text>()
-            .expect("sole document reconstructed");
+            .document::<Text>()
+            .expect("sole document reconstructed")
+            .entities();
         assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
     }
 
@@ -705,10 +707,11 @@ mod tests {
             .insert_part::<Text>(nested.clone(), vec![text_entity("B")]);
         let back = round_trip(&report, &text_registry());
 
-        assert!(back.entities::<Text>().is_some(), "sole document present");
+        assert!(back.document::<Text>().is_ok(), "sole document present");
         let p = back
-            .part_entities::<Text>(&nested)
-            .expect("nested part reconstructed by its full path");
+            .part::<Text>(&nested)
+            .expect("nested part reconstructed by its full path")
+            .entities();
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].label, LabelRef::new("B"));
     }
@@ -726,11 +729,15 @@ mod tests {
         let back = round_trip(&report, &text_registry());
 
         assert_eq!(
-            back.part_entities::<Text>(&a).map(|e| e[0].label.as_str()),
+            back.part::<Text>(&a)
+                .ok()
+                .map(|p| p.entities()[0].label.as_str()),
             Some("A"),
         );
         assert_eq!(
-            back.part_entities::<Text>(&b).map(|e| e[0].label.as_str()),
+            back.part::<Text>(&b)
+                .ok()
+                .map(|p| p.entities()[0].label.as_str()),
             Some("B"),
         );
     }
@@ -793,7 +800,10 @@ mod tests {
             Ok(report) => report,
             Err(e) => panic!("key order must not matter: {e}"),
         };
-        let entities = report.entities::<Text>().expect("entry reconstructed");
+        let entities = report
+            .document::<Text>()
+            .expect("entry reconstructed")
+            .entities();
         assert_eq!(entities.len(), 1, "the buffered entity survived reordering");
         assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
         assert!(entities[0].audit.verify().is_ok(), "audit data survived");

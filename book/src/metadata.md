@@ -27,7 +27,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry);
     orchestrator
-        .anonymize(&mut document, &Directives::new())
+        .anonymize(&mut document)
         .await?;
     Ok(())
 }

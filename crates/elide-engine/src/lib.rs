@@ -3,7 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 mod analysis;
-mod directives;
 mod document;
 mod part_id;
 mod pipeline;
@@ -24,9 +23,10 @@ use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
 use elide_redaction::operators::Erase;
 
-pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer, StrippedItem};
+pub use self::analysis::{
+    AnalyzedDocument, ArtifactSet, Part, PartMut, Report, ReportDeserializer, StrippedItem,
+};
 use self::analysis::{ModalityRegistry, StrippedRecord};
-pub use self::directives::Directives;
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
 use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
@@ -127,13 +127,9 @@ impl Orchestrator {
     /// jurisdictions, tags, catalog, correlation id).
     ///
     /// A `Scope` is modality-free, so one drives the body and every
-    /// container part alike; no need to repeat it per [`with_modality`]. A
-    /// single analysis can override it with [`Directives::with_scope`], and
-    /// supplies its region annotations on the same [`Directives`] passed to
-    /// [`analyze`].
+    /// container part alike; no need to repeat it per [`with_modality`].
     ///
     /// [`with_modality`]: Self::with_modality
-    /// [`analyze`]: Self::analyze
     #[must_use]
     pub fn with_scope(mut self, scope: Scope) -> Self {
         self.scope = scope;
@@ -280,10 +276,7 @@ impl Orchestrator {
     /// to persist across a review gap and pass to [`re_analyze`], which reuses
     /// them instead of re-enriching.
     ///
-    /// `directives` applies to the whole set: the region [`Annotations`] for
-    /// each modality present, and an optional [`Scope`] override for this call
-    /// (falling back to the orchestrator's run-wide [`with_scope`] default).
-    /// Pass [`Directives::new`] for none.
+    /// The orchestrator's [`with_scope`] applies to the whole set.
     ///
     /// Every document is a top-level file: its own content is analyzed and keyed
     /// under its [`name`](Document::name) as a depth-1 part, and its container
@@ -293,42 +286,29 @@ impl Orchestrator {
     /// pipeline analyzes it. A document or part with no matching pipeline (or
     /// that no codec can decode) passes through untouched.
     ///
-    /// Read a part with [`part_entities`] keyed by its name; edit the report
-    /// ([`part_entities`], [`part_entities_mut`]) before applying. For the
-    /// common single-document case, [`entities`] reads the sole document's own
-    /// entities directly.
+    /// Read a part with [`Report::part`] keyed by its name, and edit it with
+    /// [`Report::part_mut`] before applying. For the common single-document
+    /// case, [`Report::document`] reads the sole document directly.
     ///
-    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
     /// [`with_scope`]: Self::with_scope
     /// [`anonymize_with`]: Self::anonymize_with
     /// [`re_analyze`]: Self::re_analyze
     /// [`report`]: AnalyzedDocument::report
     /// [`artifacts`]: AnalyzedDocument::artifacts
-    /// [`entities`]: Report::entities
-    /// [`part_entities`]: Report::part_entities
-    /// [`part_entities_mut`]: Report::part_entities_mut
-    pub async fn analyze(
-        &self,
-        mut documents: impl AsDocuments,
-        directives: &Directives,
-    ) -> Result<AnalyzedDocument> {
+    pub async fn analyze(&self, mut documents: impl AsDocuments) -> Result<AnalyzedDocument> {
         // A first pass is a re-run seeded with nothing: every document and part
         // starts from the empty (default) artifact, so it enriches from scratch.
         // Sharing the driver keeps the two entry points from drifting.
-        self.drive(
-            documents.as_documents_mut(),
-            &ArtifactSet::new(),
-            directives,
-        )
-        .await
+        self.drive(documents.as_documents_mut(), &ArtifactSet::new())
+            .await
     }
 
     /// Re-detect over `documents`, seeding each group's recognition with the
     /// enrichment artifact from `prior` so the OCR/transcript is reused rather
     /// than recomputed. The re-run counterpart to [`analyze`](Self::analyze),
     /// for detection separated in time from a first pass: after the review gap,
-    /// re-run recognition (e.g. under a narrowed `scope` to add one recognizer)
-    /// without paying for OCR/STT again.
+    /// re-run recognition (with another recognizer, say) without paying for
+    /// OCR/STT again.
     ///
     /// A group `prior` has no artifact for, a document or part it never
     /// analyzed, re-runs from an empty (default) artifact, i.e. it re-enriches.
@@ -337,10 +317,8 @@ impl Orchestrator {
         &self,
         mut documents: impl AsDocuments,
         prior: &ArtifactSet,
-        directives: &Directives,
     ) -> Result<AnalyzedDocument> {
-        self.drive(documents.as_documents_mut(), prior, directives)
-            .await
+        self.drive(documents.as_documents_mut(), prior).await
     }
 
     /// The shared analyze driver behind [`analyze`](Self::analyze) and
@@ -356,13 +334,9 @@ impl Orchestrator {
         &self,
         documents: &mut [Document],
         prior: &ArtifactSet,
-        directives: &Directives,
     ) -> Result<AnalyzedDocument> {
         let mut report = Report::new();
         let mut artifacts = ArtifactSet::new();
-        // Per-call scope override wins; else the run-wide default.
-        let scope = directives.scope.as_ref().unwrap_or(&self.scope);
-        let annotations = &directives.annotations;
 
         // A document's name is its depth-1 `PartId`, the key its own content and
         // every nested part hang under. Two documents sharing a name would key to
@@ -386,8 +360,7 @@ impl Orchestrator {
         // recurse.
         let mut visitor = Analyze {
             prior,
-            scope,
-            annotations,
+            scope: &self.scope,
             report: &mut report,
             artifacts: &mut artifacts,
             stripped: StrippedRecord::default(),
@@ -450,6 +423,35 @@ impl Orchestrator {
         Ok(report)
     }
 
+    /// Record on every entity of `report` the operator [`anonymize_with`] will
+    /// apply to it, as a `Selection` event, without touching any document.
+    ///
+    /// Each part is picked by the anonymizer registered for its modality, under
+    /// the orchestrator's [`with_scope`], the same ones [`anonymize_with`]
+    /// applies with, so the plan a reviewer sees is the plan that runs.
+    /// Overlapping entities resolve to one operator, as they will at apply. A
+    /// part of a modality with no pipeline is skipped, as [`anonymize_with`]
+    /// passes it through. Picking again after a review edit records only what
+    /// changed: an entity whose latest pick already names the same operator
+    /// gains nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`](elide_core::ErrorKind::MalformedInput) when a part's
+    /// entities are not of the modality the report keys it under (a hand-built
+    /// or deserialized report).
+    ///
+    /// [`anonymize_with`]: Self::anonymize_with
+    /// [`with_scope`]: Self::with_scope
+    pub fn pick(&self, report: &mut Report) -> Result<()> {
+        for part in report.parts.values_mut() {
+            if let Some(pipeline) = self.pipelines.get(&part.modality) {
+                pipeline.pick(part.entities.as_mut(), &self.scope)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Convenience: [`analyze`] then [`anonymize_with`] with no editing
     /// step, redact a whole set of documents in one call. Returns the applied
     /// [`Report`], whose entities carry the full audit trail (recognition
@@ -461,15 +463,11 @@ impl Orchestrator {
     ///
     /// [`analyze`]: Self::analyze
     /// [`anonymize_with`]: Self::anonymize_with
-    pub async fn anonymize(
-        &self,
-        mut documents: impl AsDocuments,
-        directives: &Directives,
-    ) -> Result<Report> {
+    pub async fn anonymize(&self, mut documents: impl AsDocuments) -> Result<Report> {
         // Resolve the slice once, then reuse it across both phases (a
         // `&mut [Document]` is itself `AsDocuments`).
         let documents = documents.as_documents_mut();
-        let analyzed = self.analyze(&mut *documents, directives).await?;
+        let analyzed = self.analyze(&mut *documents).await?;
         self.anonymize_with(&mut *documents, analyzed.report).await
     }
 

@@ -12,7 +12,7 @@ use elide::entity::Entity;
 use elide::modality::image::{Image, ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::redaction::HiddenContentPolicy;
-use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Result};
+use elide::{Orchestrator, PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
 
@@ -42,7 +42,9 @@ fn orchestrator(registry: FormatRegistry, backend: MockBackend) -> Result<Orches
 fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {
     analyzed
         .report
-        .entities::<Image>()
+        .document::<Image>()
+        .ok()
+        .map(|part| part.entities())
         .map(<[_]>::to_vec)
         .unwrap_or_default()
 }
@@ -64,7 +66,7 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let analyzed = first.analyze(&mut document, &Directives::new()).await?;
+    let analyzed = first.analyze(&mut document).await?;
 
     let found = image_entities(&analyzed);
     assert_eq!(found.len(), 1, "the email is detected in the OCR text");
@@ -84,7 +86,7 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
     let reanalyzed = second
-        .re_analyze(&mut document, &analyzed.artifacts, &Directives::new())
+        .re_analyze(&mut document, &analyzed.artifacts)
         .await?;
 
     let again = image_entities(&reanalyzed);
@@ -108,9 +110,7 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let analyzed = orchestrator
-        .analyze(&mut document, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut document).await?;
     assert!(
         image_entities(&analyzed).is_empty(),
         "an empty OCR backend yields no text, so nothing is detected",
@@ -134,7 +134,7 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let analyzed = first.analyze(&mut document, &Directives::new()).await?;
+    let analyzed = first.analyze(&mut document).await?;
     assert_eq!(image_entities(&analyzed).len(), 1);
     let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
 
@@ -147,9 +147,7 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let reanalyzed = second
-        .re_analyze(&mut document, &restored, &Directives::new())
-        .await?;
+    let reanalyzed = second.re_analyze(&mut document, &restored).await?;
 
     assert_eq!(
         image_entities(&reanalyzed).len(),

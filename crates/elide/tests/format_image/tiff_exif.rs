@@ -15,7 +15,7 @@ use elide::modality::image::Image;
 use elide::recognition::Scope;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 use elide_image::fixtures::{has_gps_tiff, is_valid_image, tiff_with_gps};
 
 #[tokio::test]
@@ -39,10 +39,7 @@ async fn tiff_gps_is_stripped_through_the_facade() {
         .expect("decode tiff");
     let mut documents = [Document::new("photo.tiff", handle)];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-        .expect("analyze");
+    let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
     orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await

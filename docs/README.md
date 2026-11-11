@@ -36,7 +36,7 @@ below reflects the flow of a document through the toolkit.
 | Document                  | Subject                                                                                                                                                                                                                                                                                                  |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Ingestion](INGESTION.md) | How raw bytes become a typed, addressable handle on which the rest of the toolkit operates: format resolution, the decoder-and-handle split, streaming by chunk, the decode-redact-encode loop, and the uniform promotion of chunk-local coordinates to source coordinates.                              |
-| [Detection](DETECTION.md) | The composition of rule-based, statistical, and generative recognizers into a single layer that produces a unified set of entity annotations, including the per-call scope, caller-supplied include and exclude regions, and the treatment of overlap, disagreement, and confidence between recognizers. |
+| [Detection](DETECTION.md) | The composition of rule-based, statistical, and generative recognizers into a single layer that produces a unified set of entity annotations, including the per-call scope, the treatment of overlap, disagreement, and confidence between recognizers, and a reviewer's recorded corrections. |
 | [Redaction](REDACTION.md) | The translation of detected entities into concrete rewrites or removals on the original document, the catalogue of operator kinds, the leak profile that classifies each, the per-modality replacement semantics, and the reversible-operator boundary.                                                  |
 | [Comparison](COMPARISON.md) | How `elide` relates to Presidio, the closest prior art: the shared recognizer/operator model, the differences by design (multimodal core, format ownership, provenance-first audit, Rust/WASM), and an honest account of where Presidio is more complete today.                                  |
 
@@ -82,5 +82,4 @@ They are conceptual definitions, not references to any particular interface.
   where the original redaction was declared reversible and the reverser holds
   the requisite authority.
 - **Scope**: the per-call set of controls the caller asserts: languages,
-  jurisdictions, document labels, and the include and exclude regions that steer
-  recognition.
+  jurisdictions, document labels, and the catalog of entity types to find.

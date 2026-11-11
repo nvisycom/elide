@@ -8,18 +8,14 @@
 //!
 //! # Template variables
 //!
-//! - `hints`: list of `{ name, kind, value, snippet }` (text) or
-//!   `{ name, kind, bbox: { x, y, width, height } }` (image)
 //! - `tags`: document classification tags (e.g. `medical`)
 //! - `target_labels`: the entity types to emit
 //! - `text`: the source text (text modality only)
 
 use std::fs;
 use std::marker::PhantomData;
-use std::ops::Range;
 use std::path::Path;
 
-use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
 use elide_core::recognition::{Context, Subject};
 use elide_core::{Error, Result};
@@ -27,9 +23,6 @@ use elide_image::modality::Image;
 use minijinja::{Environment, context};
 
 use super::Prompt;
-
-/// Half-width of the snippet rendered around a hint's location.
-const HINT_SNIPPET_HALF_WIDTH: usize = 80;
 
 /// Jinja2-template-driven [`Prompt`] impl.
 ///
@@ -80,29 +73,9 @@ impl<M> Jinja2Prompt<M> {
 }
 
 impl Prompt<Text> for Jinja2Prompt<Text> {
-    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_, Text>) -> String {
-        let text = subject.data().text.as_str();
-        let hints: Vec<_> = ctx
-            .inclusions()
-            .iter()
-            .filter_map(|h| {
-                // The template quotes a snippet of the decoded `text`; a
-                // source-only hint has no decoded range to locate, so skip it.
-                let range = h.location.range()?;
-                let range = range.start..range.end;
-                let value = value_at(text, range.clone());
-                let snippet = snippet_around(text, range);
-                Some(context! {
-                    name => h.name.as_deref().unwrap_or(""),
-                    kind => h.label.as_ref().map(|l| l.as_str().to_owned()).unwrap_or_else(|| "unknown".to_owned()),
-                    value => value,
-                    snippet => snippet,
-                })
-            })
-            .collect();
+    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_>) -> String {
         self.render(context! {
-            text => text,
-            hints => hints,
+            text => subject.data().text.as_str(),
             tags => tag_names(ctx),
             target_labels => target_label_names(ctx),
         })
@@ -110,56 +83,19 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
 }
 
 impl Prompt<Image> for Jinja2Prompt<Image> {
-    fn build(&self, _subject: &Subject<Image>, ctx: &Context<'_, Image>) -> String {
-        let hints: Vec<_> = ctx
-            .inclusions()
-            .iter()
-            .map(|h| {
-                let bbox = &h.location.bounding_box;
-                context! {
-                    name => h.name.as_deref().unwrap_or(""),
-                    kind => h.label.as_ref().map(|l| l.as_str().to_owned()).unwrap_or_else(|| "unknown".to_owned()),
-                    bbox => context! {
-                        x => bbox.min.x,
-                        y => bbox.min.y,
-                        width => bbox.width(),
-                        height => bbox.height(),
-                    },
-                }
-            })
-            .collect();
+    fn build(&self, _subject: &Subject<Image>, ctx: &Context<'_>) -> String {
         self.render(context! {
-            hints => hints,
             tags => tag_names(ctx),
             target_labels => target_label_names(ctx),
         })
     }
 }
 
-fn value_at(text: &str, range: Range<usize>) -> &str {
-    let Range { start, end } = range;
-    if start < end
-        && end <= text.len()
-        && text.is_char_boundary(start)
-        && text.is_char_boundary(end)
-    {
-        &text[start..end]
-    } else {
-        ""
-    }
-}
-
-fn snippet_around(text: &str, range: Range<usize>) -> &str {
-    let lo = floor_char_boundary(text, range.start.saturating_sub(HINT_SNIPPET_HALF_WIDTH));
-    let hi = ceil_char_boundary(text, (range.end + HINT_SNIPPET_HALF_WIDTH).min(text.len()));
-    &text[lo..hi]
-}
-
 /// The catalog's target label ids, for the `{{ target_labels }}` template
 /// variable. Ids (not localized names) so a custom template keys on the
 /// stable identifier the model must return; the template author controls
 /// their own wording and localization.
-fn target_label_names<M: Modality>(ctx: &Context<'_, M>) -> Vec<String> {
+fn target_label_names(ctx: &Context<'_>) -> Vec<String> {
     ctx.target_labels()
         .iter()
         .map(|l| l.as_str().to_owned())
@@ -169,20 +105,6 @@ fn target_label_names<M: Modality>(ctx: &Context<'_, M>) -> Vec<String> {
 /// The context's tags as owned strings, the shape a template value takes
 /// (minijinja builds a `Value` from `String`, not from the `HipStr` the context
 /// stores them in).
-fn tag_names<M: Modality>(ctx: &Context<'_, M>) -> Vec<String> {
+fn tag_names(ctx: &Context<'_>) -> Vec<String> {
     ctx.tags().iter().map(|t| t.as_str().to_owned()).collect()
-}
-
-fn floor_char_boundary(s: &str, mut pos: usize) -> usize {
-    while pos > 0 && !s.is_char_boundary(pos) {
-        pos -= 1;
-    }
-    pos
-}
-
-fn ceil_char_boundary(s: &str, mut pos: usize) -> usize {
-    while pos < s.len() && !s.is_char_boundary(pos) {
-        pos += 1;
-    }
-    pos
 }

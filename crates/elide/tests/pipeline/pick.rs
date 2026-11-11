@@ -16,7 +16,7 @@ use elide::entity::audit::AuditKind;
 use elide::modality::image::Image;
 use elide::modality::text::Text;
 use elide::redaction::HiddenContentPolicy;
-use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
+use elide::{Orchestrator, PartId, RegistryDocumentExt, Report, Result};
 
 use crate::support::orchestrator::TestOrchestrator;
 
@@ -42,14 +42,13 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let mut doc = registry
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let report = orchestrator
-        .analyze(&mut doc, &Directives::new())
-        .await?
-        .report;
+    let report = orchestrator.analyze(&mut doc).await?.report;
     let report = orchestrator.anonymize_with(&mut doc, report).await?;
 
     let body = report
-        .entities::<Text>()
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
         .expect("the docx body is text and its pipeline is registered");
     assert!(!body.is_empty(), "the body detected entities to redact");
 
@@ -94,6 +93,64 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     Ok(())
 }
 
+/// `pick` previews the plan before anything is applied: every body entity
+/// records the operator it will get, and applying afterwards runs exactly that
+/// operator without recording a second, identical pick.
+#[tokio::test]
+async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = orchestrator(registry.clone())?;
+
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
+    let mut report = orchestrator.analyze(&mut doc).await?.report;
+    orchestrator.pick(&mut report)?;
+
+    let planned: Vec<(uuid::Uuid, String)> = report
+        .document::<Text>()?
+        .entities()
+        .iter()
+        .map(|entity| {
+            let selection = entity.audit.selection().expect("every entity is planned");
+            assert!(entity.audit.redaction().is_none(), "nothing is applied yet");
+            (entity.id, selection.operator.name.to_string())
+        })
+        .collect();
+    assert!(!planned.is_empty(), "the body detected entities to plan");
+
+    // Picking again records nothing new.
+    let events = |report: &Report| -> usize {
+        report
+            .document::<Text>()
+            .map(|part| part.entities().iter().map(|e| e.audit.events().len()).sum())
+            .unwrap_or_default()
+    };
+    let before = events(&report);
+    orchestrator.pick(&mut report)?;
+    assert_eq!(events(&report), before, "a repeated pick adds nothing");
+
+    let applied = orchestrator.anonymize_with(&mut doc, report).await?;
+    let body = applied.document::<Text>()?;
+    for (id, operator) in planned {
+        let entity = body.entity(id).expect("the planned entity is still there");
+        let selections = entity
+            .audit
+            .events()
+            .iter()
+            .filter(|event| matches!(event.kind, AuditKind::Selection(_)))
+            .count();
+        assert_eq!(selections, 1, "applying does not repeat the pick");
+        let redaction = entity.audit.redaction().expect("applied");
+        assert_eq!(
+            redaction.operator.name.as_str(),
+            operator,
+            "the planned operator ran"
+        );
+    }
+    Ok(())
+}
+
 /// A part with no detected entities routes through its pipeline and records no
 /// picks, nothing to redact, no error. Built from a rebuilt report so the part
 /// is present regardless of what the mock image backend detected.
@@ -118,7 +175,9 @@ async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
         "the report carries no document own-content, only the nested image part",
     );
     let part = report
-        .part_entities::<Image>(&image)
+        .part::<Image>(&image)
+        .ok()
+        .map(|part| part.entities())
         .expect("the image part routes to the image pipeline");
     assert!(part.is_empty(), "no entities on the part → no picks");
     Ok(())

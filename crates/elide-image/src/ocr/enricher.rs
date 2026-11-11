@@ -98,7 +98,7 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(&self, subject: &mut Subject<Image>, ctx: &Context<'_, Image>) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<Image>, ctx: &Context<'_>) -> Result<()> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
@@ -110,11 +110,7 @@ where
         Ok(())
     }
 
-    async fn enrich_batch(
-        &self,
-        subjects: &mut [Subject<Image>],
-        ctx: &Context<'_, Image>,
-    ) -> Result<()> {
+    async fn enrich_batch(&self, subjects: &mut [Subject<Image>], ctx: &Context<'_>) -> Result<()> {
         // One OCR request per not-yet-enriched subject, dispatched together; the
         // already-enriched ones (a re-run's restored layouts) are skipped so the
         // model is never re-invoked. `targets` keeps the subject index aligned
@@ -151,7 +147,7 @@ where
 }
 
 /// Build the per-call OCR request from a subject's decoded image.
-fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &'a Context<'_, Image>) -> OcrRequest<'a> {
+fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &'a Context<'_>) -> OcrRequest<'a> {
     let data = subject.data();
     OcrRequest {
         image: data.source(),

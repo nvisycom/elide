@@ -10,9 +10,9 @@ the observation that no single recognition technique is adequate across all
 categories of personally identifiable information (PII), all content encodings,
 and all confidence regimes. Multiple recognizer families run concurrently
 against decomposed document fragments; their findings are lifted into a shared
-coordinate system and reconciled through a deterministic layer pipeline;
-caller annotations then shape the surviving candidates into the reconciled set
-of entities the toolkit hands to redaction. This is the second paper in a series
+coordinate system and reconciled through a deterministic layer pipeline into
+the set of entities the toolkit hands, through a reviewer's corrections, to
+redaction. This is the second paper in a series
 of three; ingestion and redaction are treated in their own papers.
 Implementation details and the extension surfaces are out of scope here and are
 covered by the API reference.
@@ -85,11 +85,8 @@ The generative recognizer prompts a large language model, or a vision-language
 model for visual payloads, to enumerate entities within a fragment. They are
 valuable for categories that resist both rule authorship and supervised
 training: open-class identifiers, paraphrased references to sensitive
-attributes, contextual mentions ("the patient," "my attorney"). They are also
-the path through which caller-supplied candidate regions are adjudicated, since
-a generative recognizer can confirm, relocate, or reject a region the caller
-only suspected. They are the most expensive recognition path and the least
-calibrated. Their utility is highest where the other families are weakest. As
+attributes, contextual mentions ("the patient," "my attorney"). They are the
+most expensive recognition path and the least calibrated. Their utility is highest where the other families are weakest. As
 with the statistical family, a mock backend exists so the surrounding machinery
 can run without a live model.
 
@@ -188,8 +185,8 @@ distinct kinds of state, separated by who owns them.
 
 The per-call scope holds what the _caller_ asserts about an entire analysis and
 is shared, immutable, across every payload of it: the languages and
-jurisdictions to honor, document-level classification labels, caller-supplied
-include and exclude regions, and a correlation id for tracing. It is built once
+jurisdictions to honor, document-level classification labels, the catalog of
+entity types to find, and a correlation id for tracing. It is built once
 and passed by reference into the find engine.
 
 The per-payload context is the working view a recognizer actually sees. It
@@ -211,23 +208,21 @@ The per-call scope versus the per-payload working context is a deliberate split:
 the caller's assertions are stated once and never mutate, while the state a
 recognizer accumulates is rebuilt for each payload and discarded with it.
 
-## 7. Annotations: Caller-Supplied Regions
+## 7. Corrections: After Detection, Before Redaction
 
-Caller-supplied annotations are first-class participants in detection, not a
-separate workflow. They live on the per-call scope, one per direction.
+A caller corrects detection on its result, not by steering it. Detection
+returns a report of the reconciled entities, keyed by the document part each
+lies in, and redaction applies that report. Between the two, a reviewer
+suppresses a false positive, suppresses every entity a region contains,
+includes an entity detection missed, or amends one's label or span.
 
-An include region adds a candidate: the caller believes an entity may lie here,
-optionally with a claimed label, name, and confidence. Recognizers that
-adjudicate include regions, typically the generative family, fold these into
-detection to confirm, relocate, or reject each one; recognizers that do not
-adjudicate them leave them alone. An include region amplifies a caller's belief
-about sensitivity without dictating the outcome.
-
-An exclude region marks a span that must not appear as a finding. Exclude
-regions are applied as a final filter, after reconciliation, removing any
-surviving entity whose location overlaps an excluded span regardless of which
-recognizer found it. They are how a caller corrects false positives without
-retraining a model or rewriting a rule.
+A correction is addressed to one part, in that part's own coordinates: a
+region of a page header never touches the body. A region spares only what it
+contains whole, so a finding that reaches past it is still redacted and
+nothing outside the region is spared. Each correction is recorded on the
+entity it touches as a human decision, with who made it and why, and a
+suppressed entity stays in the report rather than vanishing, so the record of
+what was found and what a person chose to keep is never lost.
 
 ## 8. Reconciliation and Conflict Resolution
 
@@ -306,8 +301,8 @@ comparisons commensurable. Merging same-label findings before arbitrating
 cross-label overlaps keeps concurring same-label evidence from being mistaken
 for a conflict. Filtering last means a low-confidence finding never displaces a
 high-confidence one on its way out. The pipeline is deterministic given the same
-inputs. After the stages run, the caller's exclude regions are applied as the
-final cull.
+inputs. What reaches redaction after it is the caller's to correct, on the
+report (section 7).
 
 ## 9. The Reconciled Entity Set
 
@@ -345,9 +340,9 @@ letting a reviewer override or correct it at the detection-redaction seam,
 persisting an audit record, or expressing policy as a service that projects the
 set onto an actionable subset, is out of scope here. The toolkit is a library:
 it finds, reconciles, and hands back an attributable set; the orchestration
-around that set belongs to its caller. The hooks the toolkit does offer for
-steering, the caller's include and exclude regions, are annotations carried
-in-band, not a review workflow.
+around that set belongs to its caller. The toolkit records a reviewer's
+corrections on the report it returns (section 7); the workflow that collects
+them is the caller's.
 
 Detection accuracy is bounded by the accuracy of its constituent recognizers.
 Rule-based recall is bounded by the rule set: an identifier format the rules do
@@ -366,11 +361,11 @@ leaves the backend to the deployment.
 
 The toolkit does not promise zero leakage. It promises that detection is
 pluralistic, that evidence is calibrated and reconciled deterministically, that
-caller annotations participate as first-class signals, and that the resulting
-entity set is attributable. These are engineering invariants, not statistical
+a reviewer's corrections are recorded rather than silent, and that the
+resulting entity set is attributable. These are engineering invariants, not statistical
 guarantees. A deployment that requires statistical guarantees must measure them
-on its own data and tune its recognizer population, calibration, thresholds, and
-annotations accordingly.
+on its own data and tune its recognizer population, calibration, and thresholds
+accordingly.
 
 The architecture is open at every layer where recall can fail: recognizers can
 be added, rules extended, models replaced, enhancers and layers reconfigured.
@@ -383,7 +378,7 @@ contracts is what allows pluralism in the recognizers.
 Detection is the concurrent evaluation of many fallible recognizers against a
 chunked decomposition of a document, followed by an optional context-boost pass,
 followed by deterministic reconciliation of the findings through a
-calibrate-reconcile-filter pipeline. Caller scope and annotations participate
-throughout. The product is an attributable set of entities, lifted into source
+calibrate-reconcile-filter pipeline, under the caller's scope; a reviewer's
+recorded corrections then decide what reaches redaction. The product is an attributable set of entities, lifted into source
 coordinates, that the toolkit hands to redaction. The model is conservative
 about what it guarantees and generous about what it allows to be extended.

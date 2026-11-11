@@ -38,7 +38,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .with(Rule::fallback(Blackbox::default())),
         );
 
-    orchestrator.anonymize(&mut document, &Directives::new()).await?;
+    orchestrator.anonymize(&mut document).await?;
 
     std::fs::write("contract.redacted.docx", document.document.encode()?.as_bytes())?;
     Ok(())
@@ -58,19 +58,3 @@ redact properties field by field instead.
 
 `analyze` and `anonymize` take one document or a slice of them, so a batch
 runs in one call.
-
-## Directives
-
-`Directives` carry input for one run: a `Scope` that replaces the
-orchestrator's default for this run, and regions to include or exclude per
-modality.
-
-```rust
-use elide::prelude::*;
-
-# fn main() -> Result<()> {
-let directives = Directives::new()
-    .with_scope(Scope::new().with_language(LanguageTag::parse("de")?));
-# Ok(())
-# }
-```

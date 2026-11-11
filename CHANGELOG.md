@@ -143,6 +143,44 @@ and this project adheres to
   are unchanged
 - The recognizer decorators share one module per decorator under
   `elide::recognition::decorator`: `resilient`, `chunked`, and `escalation`
+- A `Report` is read and edited through typed part views: `part` and
+  `document` return a `Part` (`entities`, `entity`, `suppressed`,
+  `unsuppressed`), `part_mut` and `document_mut` a `PartMut` whose edits
+  (`include`, `relabel`, `relocate`, `suppress`, `suppress_within`) are all
+  recorded as `Manual` audit
+  events attributed to its `by` and `because`. An unknown part or a modality
+  mismatch is a `NotFound` error (a new `ErrorKind`). `suppress_within`
+  suppresses every entity a region contains and records the region on each.
+  They replace `entities`, `entities_mut`, `entity`, `entity_mut`,
+  `part_entities`, `part_entities_mut`, `part_entity`, `part_entity_mut`,
+  `include_part`, `include_custom`, `include_custom_at`, `suppress_part`,
+  `for_each_part_mut`, `try_for_each_part_mut`, and `CustomEntity`
+  (`Entity::custom`); `Entity::record_manual` takes the `Manual` decision to
+  record and is the one way to record a reviewer's decision, at the entity's
+  own confidence, replacing `Entity::suppress` and
+  `AuditEvent::manual_flag` / `manual_suppress`
+- An `Entity` is built with `Entity::new(label, location)` and `with_*`
+  setters (`with_event`, `with_coref`, `with_language`,
+  `with_recognized_range`); `with_event` and its in-place `record` record an
+  audit event and set the confidence from it, so the confidence always
+  matches the trail's last event. An entity
+  with no event is a located label with no provenance, at `MAX` confidence.
+  `EntityBuilder` (`Entity::builder`) and the three-argument
+  `Entity::new(label, location, audit)` are removed
+- `Orchestrator::pick(&mut report)` records on every entity the operator
+  `anonymize_with` will apply, as a `Selection` event, through each part's
+  registered anonymizer and the orchestrator's scope, so a review can show the
+  plan before anything is applied
+- Caller region annotations are removed: `recognition::annotation`
+  (`Annotations`, `Inclusion`, `Exclusion`), `Directives`,
+  `Analyzer::analyze_with` / `analyze_stream_with` (with `analyze_in` and
+  `analyze_stream_in`: an analyzer runs `analyze`, `analyze_stream`, or the
+  batched, seeded `analyze_streams`), and the LLM prompts'
+  inclusion hints. Their coordinates applied to every part of a modality;
+  `PartMut::suppress_within` replaces exclusions per part, after analysis.
+  `Orchestrator::analyze`, `re_analyze`, and `anonymize` take only the
+  documents (and prior artifacts), and use the orchestrator's `with_scope`.
+  `Context` is no longer generic over the modality
 - `TabularLocation` narrows to part of a cell with one `span:
   Option<Range<usize>>` (`with_span`), like `TextLocation`, replacing
   `start_offset`/`end_offset` and `with_range`

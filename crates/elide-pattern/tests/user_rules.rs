@@ -43,8 +43,8 @@ async fn user_toml_rules_load_and_detect() {
     let text = include_str!("../testdata/inputs/internal.txt");
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
-    let ctx = Context::<Text>::new(&scope);
-    let subject = Subject::new(data);
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await

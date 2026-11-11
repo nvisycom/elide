@@ -31,6 +31,8 @@ pub enum ElideErrorKind {
     Sanitization,
     /// An integrity or consistency check failed.
     Integrity,
+    /// Something addressed is not there (a report part).
+    NotFound,
     /// A backing provider (a JS callback backend) failed.
     Provider,
     /// A transport / network step failed.
@@ -51,6 +53,7 @@ impl From<elide::ErrorKind> for ElideErrorKind {
             elide::ErrorKind::Redaction => Self::Redaction,
             elide::ErrorKind::Sanitization => Self::Sanitization,
             elide::ErrorKind::Integrity => Self::Integrity,
+            elide::ErrorKind::NotFound => Self::NotFound,
             elide::ErrorKind::Provider => Self::Provider,
             elide::ErrorKind::Transport => Self::Transport,
             _ => Self::Other,

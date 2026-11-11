@@ -65,14 +65,14 @@ pub use self::jinja2_prompt::Jinja2Prompt;
 /// The per-modality prompt wording.
 ///
 /// Renders the user prompt for one modality's [`Subject`] plus its
-/// [`Context<'_, M>`]. Wording only: the response shape and how
+/// [`Context<'_>`]. Wording only: the response shape and how
 /// candidates become entities are not the prompt's concern.
 pub trait Prompt<M>: Send + Sync + 'static
 where
     M: Modality,
 {
-    /// Render the user prompt for `subject` in `ctx`. Fold in hints, tags,
-    /// and any instruction the model needs; the source payload (text,
+    /// Render the user prompt for `subject` in `ctx`. Fold in tags, target
+    /// labels, and any instruction the model needs; the source payload (text,
     /// image bytes) is attached to the provider message by the backend.
-    fn build(&self, subject: &Subject<M>, ctx: &Context<'_, M>) -> String;
+    fn build(&self, subject: &Subject<M>, ctx: &Context<'_>) -> String;
 }

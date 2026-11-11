@@ -145,10 +145,7 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Re
     let mut document = registry
         .document_with("input", &hint, bytes, HiddenContentPolicy::default())
         .await?;
-    let report = pipeline
-        .core()
-        .anonymize(&mut document, &Directives::new())
-        .await?;
+    let report = pipeline.core().anonymize(&mut document).await?;
 
     // Each modality locates its entities in its own coordinate space, so the
     // `Location` is built per modality (a text byte span, an image box, an audio
@@ -218,10 +215,10 @@ fn collect<M: elide::modality::Modality>(
     modality: Modality,
     locate: impl Fn(&elide::entity::Entity<M>) -> Location,
 ) {
-    let Some(entities) = report.entities::<M>() else {
+    let Ok(part) = report.document::<M>() else {
         return;
     };
-    for entity in entities {
+    for entity in part.entities() {
         out.push(Entity {
             id: entity.id.to_string(),
             modality,

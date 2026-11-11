@@ -19,11 +19,11 @@ detects through the matching pipeline — then applies the (optionally edited)
 result back. The document is offered as an untyped handle, so the orchestrator
 discovers each part's modality by trial and the caller never names it. A run-wide
 scope (languages, jurisdictions, labels, catalog) is set once and shared across
-every pipeline; each analysis can layer on its own scope override and per-modality
-region annotations. A body or part whose modality has no pipeline is left as-is.
+every pipeline. A body or part whose modality has no pipeline is left as-is.
 
 Detection and redaction are two phases, so the entities can be inspected and
-edited in between — drop a false positive, retag, retarget a span — before the
+corrected in between — suppress a false positive, include a missed one, retag or
+retarget a span, each recorded on the entity's audit trail — before the
 edited result is applied back.
 
 ## The two views

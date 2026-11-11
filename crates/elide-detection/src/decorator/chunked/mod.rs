@@ -81,7 +81,7 @@ impl<R: Recognizer<Text>, C: Chunking> ChunkedRecognizer<R, C> {
         &self,
         subject: &Subject<Text>,
         windows: &[Window],
-        ctx: &Context<'_, Text>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
 
@@ -173,7 +173,7 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
     async fn recognize(
         &self,
         subject: &Subject<Text>,
-        ctx: &Context<'_, Text>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
         let windows = self.chunking.windows(text);
@@ -196,7 +196,7 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::{AuditEvent, ModelEvent};
-    use elide_core::entity::{Entity, EntityBuilder, LabelRef};
+    use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
@@ -244,14 +244,9 @@ mod tests {
                 location.clone(),
                 ModelEvent::default(),
             );
-            EntityBuilder::new()
-                .with_label(LabelRef::new(label))
-                .with_location(location)
-                .with_confidence(confidence)
+            Entity::new(LabelRef::new(label), location)
                 .with_recognized_range(span)
                 .with_event(event)
-                .build()
-                .expect("fields provided")
         }
     }
 
@@ -264,7 +259,7 @@ mod tests {
         async fn recognize(
             &self,
             subject: &Subject<Text>,
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<Vec<Entity<Text>>> {
             let text = subject.data().as_str();
             self.seen.lock().unwrap().push(text.to_owned());
@@ -408,7 +403,7 @@ mod tests {
         async fn recognize(
             &self,
             subject: &Subject<Text>,
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<Vec<Entity<Text>>> {
             self.per_window_hint_count
                 .lock()

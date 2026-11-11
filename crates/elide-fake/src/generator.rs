@@ -105,7 +105,7 @@ mod tests {
     use super::*;
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
-        let e = Entity::custom(LabelRef::new(label), TextLocation::inline(0..5)).build();
+        let e = Entity::new(LabelRef::new(label), TextLocation::inline(0..5));
         match coref {
             Some(c) => e.with_coref(EntityCoRef::new(c.to_owned())),
             None => e,

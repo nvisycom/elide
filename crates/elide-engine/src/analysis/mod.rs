@@ -19,6 +19,7 @@
 
 mod artifacts;
 mod group;
+mod part;
 mod registry;
 mod report;
 #[cfg(feature = "schema")]
@@ -28,7 +29,9 @@ mod serde;
 /// Shared helpers for the analysis unit tests (`report`, `serde`).
 #[cfg(test)]
 mod test_support {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    #[cfg(feature = "schema")]
+    use elide_core::entity::audit::{Manual, ManualIntent};
     use elide_core::entity::{Entity, LabelRef};
     #[cfg(feature = "schema")]
     use elide_core::modality::text::SourceRef;
@@ -41,7 +44,7 @@ mod test_support {
     pub(crate) fn text_entity(label: &str) -> Entity<Text> {
         let loc = TextLocation::inline(0..4);
         let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-        Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
+        Entity::new(LabelRef::new(label), loc).with_event(event)
     }
 
     /// A custom [`Text`] entity located only by source, the reviewer-add shape:
@@ -49,11 +52,10 @@ mod test_support {
     /// the source-only (`span: None`) wire arm.
     #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
-        Entity::custom(
-            LabelRef::new(label),
-            TextLocation::marked_source(SourceRef::new(0..4)),
-        )
-        .build()
+        let location = TextLocation::marked_source(SourceRef::new(0..4));
+        let manual = Manual::new(ManualIntent::Flag, location.clone());
+        let event = AuditEvent::manual("manual", Confidence::MAX, manual);
+        Entity::new(LabelRef::new(label), location).with_event(event)
     }
 
     /// A one-segment [`PartId`] naming the sole document under test.
@@ -64,6 +66,7 @@ mod test_support {
 
 pub use self::artifacts::ArtifactSet;
 pub(crate) use self::group::{ArtifactGroup, EntityGroup};
+pub use self::part::{Part, PartMut};
 pub(crate) use self::registry::ModalityRegistry;
 pub use self::registry::ReportDeserializer;
 pub(crate) use self::report::{PartReport, StrippedRecord};

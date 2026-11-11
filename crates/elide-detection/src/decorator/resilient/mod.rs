@@ -51,11 +51,7 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
         self.inner.id()
     }
 
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         match self.inner.recognize(subject, ctx).await {
             Ok(entities) => Ok(entities),
             Err(error) => {
@@ -72,7 +68,7 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         match self.inner.recognize_batch(subjects, ctx).await {
             Ok(per_subject) => Ok(per_subject),
@@ -112,7 +108,7 @@ mod tests {
         async fn recognize(
             &self,
             _subject: &Subject<Text>,
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<Vec<Entity<Text>>> {
             Err(Error::recognition("boom"))
         }

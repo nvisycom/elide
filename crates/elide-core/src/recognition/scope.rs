@@ -18,13 +18,10 @@ use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 /// correlation id, none of which depends on the medium, so one [`Scope`]
 /// drives a text, image, or audio analysis alike.
 ///
-/// Per-medium regions (caller-supplied inclusions and exclusions, which are
-/// `M::Location`-typed) live in [`Annotations`], attached to the analyzer
-/// of that modality. The per-payload working state (NLP artifacts, detected
-/// languages) lives on the context, not here.
+/// The per-payload working state (NLP artifacts, detected languages) lives on
+/// the context, not here.
 ///
 /// [`Context`]: super::Context
-/// [`Annotations`]: super::annotation::Annotations
 /// Free-form, caller-asserted request context: the *document* it is about and
 /// the *request* driving it.
 ///

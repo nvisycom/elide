@@ -2,7 +2,7 @@
 //! [`Text`] and [`Image`].
 //!
 //! Each impl renders the user prompt wording: shared system instructions,
-//! the target labels, and the caller's hints. The source payload (text,
+//! the target labels, and the caller's tags. The source payload (text,
 //! image bytes) is attached to the provider message by the backend, and
 //! the structured response shape is fixed per modality, so this is pure
 //! wording.
@@ -29,11 +29,10 @@ use super::text_prompt::TextPromptBuilder;
 pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
-    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_, Text>) -> String {
+    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_>) -> String {
         let target_labels = ctx.target_label_defs();
         TextPromptBuilder::new(
             subject.data().text.as_str(),
-            ctx.inclusions(),
             ctx.tags(),
             &target_labels,
             ctx.languages(subject).primary(),
@@ -43,14 +42,9 @@ impl Prompt<Text> for DefaultPrompt {
 }
 
 impl Prompt<Image> for DefaultPrompt {
-    fn build(&self, subject: &Subject<Image>, ctx: &Context<'_, Image>) -> String {
+    fn build(&self, subject: &Subject<Image>, ctx: &Context<'_>) -> String {
         let target_labels = ctx.target_label_defs();
-        ImagePromptBuilder::new(
-            ctx.inclusions(),
-            ctx.tags(),
-            &target_labels,
-            ctx.languages(subject).primary(),
-        )
-        .build()
+        ImagePromptBuilder::new(ctx.tags(), &target_labels, ctx.languages(subject).primary())
+            .build()
     }
 }

@@ -6,7 +6,7 @@ use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
-use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
+use elide_core::entity::audit::{AuditEvent, AuditKind, PatternEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -29,7 +29,7 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
             ..PatternEvent::default()
         },
     );
-    Entity::new(label, location, AuditLog::new(event))
+    Entity::new(label, location).with_event(event)
 }
 
 /// Like [`detected`], but the location also carries a raw source reference, the

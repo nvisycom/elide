@@ -11,62 +11,36 @@ use uuid::Uuid;
 use crate::entity::{Label, LabelCatalog, LabelRef};
 use crate::modality::Modality;
 use crate::primitive::{CountryCode, LanguageTag};
-use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
 use crate::recognition::{Languages, Scope, Subject};
 
 /// The analysis-wide inputs handed to an enricher or recognizer alongside the
 /// [`Subject`].
 ///
-/// Borrows the caller-asserted [`Scope`] (shared across every chunk of the
-/// analysis) and the per-modality region [`Annotations`]. Where the [`Subject`]
-/// carries the per-chunk working state (payload, enrichment, detected
-/// languages, hints), this carries what the caller fixed for the whole run: the
-/// target labels, jurisdictions, tags, inclusions, and exclusions. Both
-/// enrichers and recognizers read it — hence a neutral name, not one tied to
-/// either.
+/// Borrows the caller-asserted [`Scope`], shared across every chunk of the
+/// analysis and every modality. Where the [`Subject`] carries the per-chunk
+/// working state (payload, enrichment, detected languages, hints), this carries
+/// what the caller fixed for the whole run: the target labels, jurisdictions,
+/// and tags. Both enrichers and recognizers read it, hence a neutral name, not
+/// one tied to either.
 ///
-/// Query the call's languages, jurisdictions, labels, inclusions, and
-/// exclusions through the methods here rather than reaching into the scope
-/// directly: the language methods fold the caller's assertions together with
-/// what a detector found on the [`Subject`].
+/// Query the call's languages, jurisdictions, and labels through the methods
+/// here rather than reaching into the scope directly: the language methods fold
+/// the caller's assertions together with what a detector found on the
+/// [`Subject`].
 ///
 /// [`Scope`]: super::Scope
-/// [`Annotations`]: super::annotation::Annotations
-#[derive(Debug)]
-pub struct Context<'a, M: Modality> {
+#[derive(Debug, Clone, Copy)]
+pub struct Context<'a> {
     /// Caller-asserted, modality-free scope for the analysis (shared,
     /// immutable).
     scope: &'a Scope,
-    /// Caller-supplied per-modality region annotations (inclusions /
-    /// exclusions). `None` (the default) means none asserted, read as empty
-    /// slices by [`inclusions`] / [`exclusions`].
-    ///
-    /// [`inclusions`]: Self::inclusions
-    /// [`exclusions`]: Self::exclusions
-    annotations: Option<&'a Annotations<M>>,
 }
 
-impl<'a, M: Modality> Context<'a, M> {
-    /// Context over `scope` with no region annotations. Attach annotations with
-    /// [`with_annotations`].
-    ///
-    /// [`with_annotations`]: Self::with_annotations
+impl<'a> Context<'a> {
+    /// Context over `scope`.
     #[must_use]
     pub fn new(scope: &'a Scope) -> Self {
-        Self {
-            scope,
-            annotations: None,
-        }
-    }
-
-    /// Attach the caller's per-modality [`Annotations`] (inclusion /
-    /// exclusion regions) for this analysis.
-    ///
-    /// [`Annotations`]: super::annotation::Annotations
-    #[must_use]
-    pub fn with_annotations(mut self, annotations: &'a Annotations<M>) -> Self {
-        self.annotations = Some(annotations);
-        self
+        Self { scope }
     }
 
     /// Caller-asserted [`Scope`] this context borrows.
@@ -75,20 +49,6 @@ impl<'a, M: Modality> Context<'a, M> {
     #[must_use]
     pub fn scope(&self) -> &Scope {
         self.scope
-    }
-
-    /// Caller-supplied [`Inclusion`] regions for this analysis, or an empty
-    /// slice when none were asserted.
-    #[must_use]
-    pub fn inclusions(&self) -> &[Inclusion<M>] {
-        self.annotations.map_or(&[], |a| &a.inclusions)
-    }
-
-    /// Caller-supplied [`Exclusion`] regions for this analysis, or an empty
-    /// slice when none were asserted.
-    #[must_use]
-    pub fn exclusions(&self) -> &[Exclusion<M>] {
-        self.annotations.map_or(&[], |a| &a.exclusions)
     }
 
     /// Caller-asserted document-level classification tags for this
@@ -182,7 +142,7 @@ impl<'a, M: Modality> Context<'a, M> {
     /// together: which is primary, whether a language-scoped rule applies, and
     /// span-based entity attribution.
     #[must_use]
-    pub fn languages<'s>(&'s self, subject: &'s Subject<M>) -> Languages<'s> {
+    pub fn languages<'s, M: Modality>(&'s self, subject: &'s Subject<M>) -> Languages<'s> {
         Languages::new(
             self.scope.languages.as_slice(),
             subject.detected_languages(),

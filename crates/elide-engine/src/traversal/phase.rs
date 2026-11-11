@@ -12,7 +12,6 @@ use elide_core::redaction::HiddenContentPolicy;
 use super::{Child, Fold, PartVisitor};
 use crate::Orchestrator;
 use crate::analysis::{ArtifactGroup, ArtifactSet, PartReport, Report, StrippedRecord};
-use crate::directives::AnnotationSet;
 use crate::part_id::PartId;
 use crate::pipeline::BoxFuture;
 
@@ -24,10 +23,8 @@ pub(crate) struct Analyze<'p> {
     /// Prior enrichment to seed each part with (a re-run's restored artifacts, an
     /// empty set on a first pass).
     pub(crate) prior: &'p ArtifactSet,
-    /// The analysis scope (a per-call override, or the orchestrator default).
+    /// The orchestrator's analysis scope.
     pub(crate) scope: &'p Scope,
-    /// Per-request region annotations.
-    pub(crate) annotations: &'p AnnotationSet,
     /// The report this run writes its findings into.
     pub(crate) report: &'p mut Report,
     /// The enrichment artifacts this run produces.
@@ -68,7 +65,7 @@ impl PartVisitor for Analyze<'_> {
                     })
                     .collect();
                 let analyses = pipeline
-                    .analyze_streams(&mut handles, self.scope, policy, self.annotations, &seeds)
+                    .analyze_streams(&mut handles, self.scope, policy, &seeds)
                     .await?;
                 for (id, (entities, artifact)) in ids.into_iter().zip(analyses) {
                     let name = entities.modality_name();

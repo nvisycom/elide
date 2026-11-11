@@ -177,7 +177,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::entity::{EntityCoRef, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -194,7 +194,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        let entity = Entity::new(LabelRef::new(label), location, AuditLog::new(event));
+        let entity = Entity::new(LabelRef::new(label), location).with_event(event);
         match coref {
             Some(c) => entity.with_coref(EntityCoRef::new(c.to_owned())),
             None => entity,

@@ -88,25 +88,17 @@ impl TextRecognizable for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::{EntityBuilder, LabelRef};
+    use crate::entity::LabelRef;
     use crate::redaction::Redactions;
 
     fn text_entity(location: TextLocation) -> Entity<Text> {
-        EntityBuilder::new()
-            .with_label(LabelRef::new("US_SSN"))
-            .with_location(location)
-            .build()
-            .expect("label and location provided")
+        Entity::new(LabelRef::new("US_SSN"), location)
     }
 
     #[test]
     fn entity_offset_shifts_location_and_recognized_range_together() {
-        let entity = EntityBuilder::new()
-            .with_label(LabelRef::new("US_SSN"))
-            .with_location(TextLocation::inline(2..5))
-            .with_recognized_range(2..5)
-            .build()
-            .expect("label and location provided");
+        let entity = Entity::new(LabelRef::new("US_SSN"), TextLocation::inline(2..5))
+            .with_recognized_range(2..5);
         let moved = entity.offset(100).expect("inline location has a span");
         assert_eq!(moved.location.range(), Some(&(102..105)));
         assert_eq!(moved.recognized_range, Some(102..105));

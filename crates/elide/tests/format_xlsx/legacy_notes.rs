@@ -5,7 +5,7 @@ use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::modality::text::Text;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 use elide_office::fixtures::{pack_parts, read_part};
 
 const VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype><v:shape id="_x0000_s1025" type="#_x0000_t202" style='position:absolute;visibility:hidden' fillcolor="#ffffe1" o:insetmode="auto"><v:fill color2="#ffffe1"/><v:shadow color="black" obscured="t"/><v:path o:connecttype="none"/><v:textbox style='mso-direction-alt:auto'><div style='text-align:left'>private note</div></v:textbox><x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>1, 15, 0, 2, 3, 15, 4, 16</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape></xml>"##;
@@ -36,7 +36,7 @@ async fn drawing(collaboration: Disposition) -> String {
         .expect("decode xlsx");
     let mut documents = [Document::new("book.xlsx", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
     let out = documents[0].document.encode().expect("encode").to_bytes();

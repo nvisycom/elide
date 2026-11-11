@@ -15,7 +15,7 @@ use crate::primitive::LanguageClaim;
 /// out-of-band context [hints](ResolvedHint) its structural neighbours surface.
 ///
 /// This is the per-chunk half of a recognizer's input; the analysis-wide half
-/// (the caller's scope, target labels, jurisdictions, and region annotations) is
+/// (the caller's scope: target labels, jurisdictions, languages, and tags) is
 /// the [`Context`]. An enricher fills a subject in ([`&mut`]); a
 /// recognizer reads it. A fresh subject per chunk means working state never
 /// leaks between chunks.

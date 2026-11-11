@@ -105,6 +105,14 @@ impl Error {
         Self::new(ErrorKind::Sanitization, source)
     }
 
+    /// A [`NotFound`](ErrorKind::NotFound) error caused by `source`.
+    pub fn not_found<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::NotFound, source)
+    }
+
     /// An [`Integrity`](ErrorKind::Integrity) error caused by `source`.
     pub fn integrity<E>(source: E) -> Self
     where
@@ -284,6 +292,12 @@ pub enum ErrorKind {
     /// [`AuditLog`]: crate::entity::audit::AuditLog
     /// [`MalformedInput`]: Self::MalformedInput
     Integrity,
+    /// Something the caller addressed is not there: a part a report does not
+    /// hold, or holds as another modality. Distinct from [`MalformedInput`]:
+    /// nothing is corrupt, the caller asked for what does not exist.
+    ///
+    /// [`MalformedInput`]: Self::MalformedInput
+    NotFound,
     /// An external provider (an LLM service, a hosted model) returned an
     /// error response.
     Provider,
@@ -305,6 +319,7 @@ impl ErrorKind {
             Self::Redaction => "redaction failed",
             Self::Sanitization => "output failed its hidden-content check",
             Self::Integrity => "integrity verification failed",
+            Self::NotFound => "not found",
             Self::Provider => "provider returned an error",
             Self::Transport => "transport failure",
         }
@@ -331,6 +346,7 @@ impl ErrorKind {
             | Self::Redaction
             | Self::Sanitization
             | Self::Integrity
+            | Self::NotFound
             | Self::Provider => false,
         }
     }
@@ -361,6 +377,7 @@ mod tests {
             ErrorKind::Redaction,
             ErrorKind::Sanitization,
             ErrorKind::Integrity,
+            ErrorKind::NotFound,
             ErrorKind::Provider,
         ] {
             assert!(!kind.is_retryable(), "{kind} should not be retryable");

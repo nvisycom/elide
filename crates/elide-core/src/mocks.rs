@@ -51,11 +51,7 @@ where
         self.id.clone()
     }
 
-    async fn recognize(
-        &self,
-        _subject: &Subject<M>,
-        _ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, _subject: &Subject<M>, _ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         Ok(self.entities.clone())
     }
 }

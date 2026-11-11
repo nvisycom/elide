@@ -98,7 +98,7 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(&self, subject: &mut Subject<Audio>, ctx: &Context<'_, Audio>) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<Audio>, ctx: &Context<'_>) -> Result<()> {
         // Already transcribed (a second enricher pass, or a restored artifact on
         // a re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
@@ -110,11 +110,7 @@ where
         Ok(())
     }
 
-    async fn enrich_batch(
-        &self,
-        subjects: &mut [Subject<Audio>],
-        ctx: &Context<'_, Audio>,
-    ) -> Result<()> {
+    async fn enrich_batch(&self, subjects: &mut [Subject<Audio>], ctx: &Context<'_>) -> Result<()> {
         // One STT request per not-yet-transcribed subject, dispatched together;
         // the already-enriched ones (a re-run's restored transcripts) are skipped
         // so the model is never re-invoked. `targets` keeps the subject index
@@ -152,7 +148,7 @@ where
 }
 
 /// Build the per-call STT request from a subject's decoded audio.
-fn stt_request<'a>(subject: &'a Subject<Audio>, ctx: &'a Context<'_, Audio>) -> SttRequest<'a> {
+fn stt_request<'a>(subject: &'a Subject<Audio>, ctx: &'a Context<'_>) -> SttRequest<'a> {
     let data = subject.data();
     SttRequest {
         audio: &data.bytes,

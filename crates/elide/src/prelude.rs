@@ -67,9 +67,7 @@ pub use elide_detection::{
 };
 #[cfg(feature = "engine")]
 #[doc(no_inline)]
-pub use elide_engine::{
-    AsDocuments, Directives, Document, Orchestrator, PartId, RegistryDocumentExt, Report,
-};
+pub use elide_engine::{AsDocuments, Document, Orchestrator, PartId, RegistryDocumentExt, Report};
 #[cfg(feature = "codec")]
 #[doc(no_inline)]
 pub use elide_format::FormatRegistry;

@@ -2,8 +2,9 @@
 //! editable per part before [`anonymize_with`].
 //!
 //! Detection (`analyze`) and redaction (`anonymize_with`) are split so a
-//! caller can inspect and edit the entities in between, drop a
-//! false-positive, retag, retarget a span. A document set's entities span
+//! reviewer can inspect and edit the entities in between: suppress a false
+//! positive, include a missed one, retag or retarget a span, each recorded on
+//! the entity's audit trail. A document set's entities span
 //! several coordinate systems (each named document's own modality, plus every
 //! container part's), so the report keeps them separated: every part's entities
 //! are keyed by its [`PartId`] path, each editable through a typed accessor.
@@ -26,17 +27,15 @@
 
 use std::any::TypeId;
 use std::collections::{BTreeMap, HashMap};
-use std::ops::ControlFlow;
 
-#[cfg(doc)]
-use elide_core::entity::CustomEntity;
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
 use elide_core::modality::Modality;
 use elide_core::redaction::HiddenContent;
+use elide_core::{Error, Result};
 use uuid::Uuid;
 
 use super::group::EntityGroup;
+use super::part::{Part, PartMut};
 use super::registry::ReportDeserializer;
 use crate::PartId;
 
@@ -58,48 +57,32 @@ pub(crate) struct PartReport {
 ///
 /// Returned by [`analyze`] and consumed by [`anonymize_with`]. Every part,
 /// each named document's own content, and every container part within one, is
-/// keyed by its [`PartId`] path. Read a part's entities of modality `P` with
-/// [`part_entities`], returning a `&[Entity<_>]`; edit them with
-/// [`part_entities_mut`], returning a `&mut Vec<Entity<_>>` you can filter,
-/// retag, or extend before applying. When the report describes a **single**
-/// document, [`entities`] / [`entities_mut`] are a shorthand for its sole
-/// content (see below). To reach one entity by [`id`] use [`part_entity`] /
-/// [`part_entity_mut`] when the part is known, or [`entity_anywhere`] /
-/// [`entity_anywhere_mut`] when a review layer holds only the id and not the
-/// part it lives in. To walk a whole group in a single mutable pass (e.g. merging
-/// the applied report's provenance back onto a caller's records) use
-/// [`for_each_part_mut`], or its `try_` variant to stop the walk early.
-///
-/// The single-document shorthand: [`entities`] / [`entities_mut`] /
-/// [`entity`] / [`entity_mut`] read the *sole* document's content, the one
-/// depth-1 part, and return `None` when the report holds zero or more than one
-/// top-level document (a multi-document set: use [`part_entities`] with the
-/// document's name).
-///
-/// [`id`]: elide_core::entity::Entity::id
-/// [`entities`]: Report::entities
-/// [`entities_mut`]: Report::entities_mut
-/// [`entity`]: Report::entity
-/// [`entity_mut`]: Report::entity_mut
-/// [`part_entity`]: Report::part_entity
-/// [`part_entity_mut`]: Report::part_entity_mut
-/// [`entity_anywhere`]: Report::entity_anywhere
-/// [`entity_anywhere_mut`]: Report::entity_anywhere_mut
-/// [`for_each_part_mut`]: Report::for_each_part_mut
+/// keyed by its [`PartId`] path. Read a part as modality `M` with [`part`], or
+/// edit it with [`part_mut`]: the views resolve the part and check its modality
+/// once. [`document`] and [`document_mut`] reach the report's single top-level
+/// document. A reviewer's edits through a [`PartMut`] (including a missed
+/// entity, suppressing a false positive, suppressing everything a region
+/// contains) are recorded on the entities' own audit trails, so the report
+/// carries them to [`anonymize_with`] and to whoever audits it after. To reach
+/// an entity when only its [`id`] is known, use [`entity_anywhere`] /
+/// [`entity_anywhere_mut`].
 ///
 /// A report is **pure entity data**: it carries no live document state, so
 /// it can be built from scratch ([`new`] + [`insert_part`]) and, with the
 /// `serde` feature, serialized to a part-list `{ parts: [..] }` view, shipped
-/// elsewhere, and reconstructed there. To round-trip: serialize a report, edit
-/// the JSON, deserialize each group back into a `Vec<Entity<M>>` (the caller
-/// knows the modality), and rebuild with [`new`] + [`insert_part`].
-/// [`anonymize_with`] then re-decodes each part from the container it is applied
-/// to, so a rebuilt report redacts just as a freshly-analyzed one does.
+/// elsewhere, and reconstructed there. [`anonymize_with`] re-decodes each part
+/// from the container it is applied to, so a rebuilt report redacts just as a
+/// freshly-analyzed one does.
 ///
 /// [`analyze`]: crate::Orchestrator::analyze
 /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
-/// [`part_entities`]: Report::part_entities
-/// [`part_entities_mut`]: Report::part_entities_mut
+/// [`part`]: Report::part
+/// [`part_mut`]: Report::part_mut
+/// [`document`]: Report::document
+/// [`document_mut`]: Report::document_mut
+/// [`id`]: elide_core::entity::Entity::id
+/// [`entity_anywhere`]: Report::entity_anywhere
+/// [`entity_anywhere_mut`]: Report::entity_anywhere_mut
 /// [`new`]: Report::new
 /// [`insert_part`]: Report::insert_part
 #[derive(Default)]
@@ -227,304 +210,79 @@ impl Report {
         self
     }
 
-    /// The **sole document's** entities of modality `M`, read-only, a
-    /// shorthand for the single-document case. Returns `None` when the report
-    /// holds zero or more than one top-level document, or the sole document is a
-    /// different modality than `M`. For a multi-document set use
-    /// [`part_entities`] with the document's name. Use [`entities_mut`] to edit.
+    /// The part `id`, as modality `M`, to read.
     ///
-    /// [`part_entities`]: Self::part_entities
-    /// [`entities_mut`]: Self::entities_mut
-    pub fn entities<M: Modality>(&self) -> Option<&[Entity<M>]> {
-        let part = self.sole_document()?;
-        if part.modality != TypeId::of::<M>() {
-            return None;
-        }
-        part.entities
-            .as_any()
-            .downcast_ref::<Vec<Entity<M>>>()
-            .map(Vec::as_slice)
+    /// # Errors
+    ///
+    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
+    /// part `id`, or holds it as another modality.
+    pub fn part<M: Modality>(&self, id: &PartId) -> Result<Part<'_, M>> {
+        let part = self
+            .parts
+            .get(id)
+            .ok_or_else(|| Error::not_found(format!("the report holds no part `{id}`")))?;
+        Ok(Part::new(typed::<M>(id, part)?))
     }
 
-    /// The **sole document's** entities of modality `M`, for editing, the
-    /// `&mut` counterpart to [`entities`]. Returns `None` when the report holds
-    /// zero or more than one top-level document, or the sole document is a
-    /// different modality than `M`.
+    /// The part `id`, as modality `M`, to edit.
     ///
-    /// [`entities`]: Self::entities
-    pub fn entities_mut<M: Modality>(&mut self) -> Option<&mut Vec<Entity<M>>> {
-        let key = self.sole_document_id()?;
-        self.part_entities_mut::<M>(&key)
+    /// # Errors
+    ///
+    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
+    /// part `id`, or holds it as another modality.
+    pub fn part_mut<M: Modality>(&mut self, id: &PartId) -> Result<PartMut<'_, M>> {
+        let part = self
+            .parts
+            .get_mut(id)
+            .ok_or_else(|| Error::not_found(format!("the report holds no part `{id}`")))?;
+        Ok(PartMut::new(typed_mut::<M>(id, part)?))
     }
 
-    /// One entity of the **sole document**, of modality `M`, by its [`id`],
-    /// read-only. Returns `None` when the report holds zero or more than one
-    /// top-level document, the sole document is a different modality than `M`,
-    /// or no entity has that id.
+    /// The report's single top-level document, as modality `M`, to read.
     ///
-    /// The id-addressed counterpart to [`entities`], for a caller that holds an
-    /// entity's id (from the analyzed report) and wants to reach the same entity
-    /// in the applied report, e.g. to merge its post-redaction provenance back
-    /// onto its own record without scanning the whole group.
+    /// # Errors
     ///
-    /// [`id`]: elide_core::entity::Entity::id
-    /// [`entities`]: Self::entities
-    pub fn entity<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
-        self.entities::<M>()?.iter().find(|e| e.id == id)
+    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
+    /// top-level document or more than one, or holds it as another modality.
+    pub fn document<M: Modality>(&self) -> Result<Part<'_, M>> {
+        let id = self.sole_document_id()?;
+        self.part::<M>(&id)
     }
 
-    /// One entity of the **sole document**, of modality `M`, by its [`id`], for
-    /// editing, the `&mut` counterpart to [`entity`]. Returns `None` when the
-    /// report holds zero or more than one top-level document, the sole document
-    /// is a different modality than `M`, or no entity has that `id`.
+    /// The report's single top-level document, as modality `M`, to edit.
     ///
-    /// [`id`]: elide_core::entity::Entity::id
-    /// [`entity`]: Self::entity
-    pub fn entity_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
-        self.entities_mut::<M>()?.iter_mut().find(|e| e.id == id)
+    /// # Errors
+    ///
+    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
+    /// top-level document or more than one, or holds it as another modality.
+    pub fn document_mut<M: Modality>(&mut self) -> Result<PartMut<'_, M>> {
+        let id = self.sole_document_id()?;
+        self.part_mut::<M>(&id)
     }
 
     /// Find an entity of modality `M` by its [`id`] across **every** part,
-    /// read-only. For a caller that holds an entity id but not the part it lives
-    /// in, a reviewer whose edit addresses an entity by id alone (a
-    /// retag/suppress carries the id, not the part it was found in).
-    ///
-    /// Unlike [`entity`], this does not assume a single document: it scans every
-    /// part, so it resolves an entity inside a nested document (a DOCX's embedded
-    /// image) just as well as one in a single-file report. Parts of a modality
-    /// other than `M` are skipped. Returns `None` when no part holds an entity of
-    /// modality `M` with that `id`.
+    /// read-only, for a caller that holds an entity's id but not the part it
+    /// lives in. Parts of another modality are skipped.
     ///
     /// [`id`]: elide_core::entity::Entity::id
-    /// [`entity`]: Self::entity
     pub fn entity_anywhere<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
         self.parts
-            .values()
-            .filter(|part| part.modality == TypeId::of::<M>())
-            .find_map(|part| {
-                part.entities
-                    .as_any()
-                    .downcast_ref::<Vec<Entity<M>>>()?
-                    .iter()
-                    .find(|e| e.id == id)
-            })
+            .iter()
+            .filter_map(|(part_id, part)| typed::<M>(part_id, part).ok())
+            .find_map(|entities| entities.iter().find(|entity| entity.id == id))
     }
 
     /// Find an entity of modality `M` by its [`id`] across **every** part, for
-    /// editing, the `&mut` counterpart to [`entity_anywhere`]. For a reviewer
-    /// acting on an entity by id alone (retag, suppress) without tracking which
-    /// part it lives in.
-    ///
-    /// Unlike [`entity_mut`] (which addresses the sole document and returns
-    /// `None` for a multi-part report), this reaches an entity in any part, so a
-    /// reviewer edit applies to a nested document's entity too. Parts of a
-    /// modality other than `M` are skipped. Returns `None` when no part holds an
-    /// entity of modality `M` with that `id`.
+    /// editing, the `&mut` counterpart to [`entity_anywhere`]. Parts of another
+    /// modality are skipped.
     ///
     /// [`id`]: elide_core::entity::Entity::id
     /// [`entity_anywhere`]: Self::entity_anywhere
-    /// [`entity_mut`]: Self::entity_mut
     pub fn entity_anywhere_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
         self.parts
-            .values_mut()
-            .filter(|part| part.modality == TypeId::of::<M>())
-            .find_map(|part| {
-                part.entities
-                    .as_any_mut()
-                    .downcast_mut::<Vec<Entity<M>>>()?
-                    .iter_mut()
-                    .find(|e| e.id == id)
-            })
-    }
-
-    /// Manually add `entity` to the container part `part_id`, recording a
-    /// [`Manual`] event onto `entity` (unless it already carries one) so its
-    /// human origin is auditable: a reviewer including a detection the engine
-    /// missed is never mistaken for an automatic one. Returns `false` for an
-    /// unknown part or a modality mismatch, [`insert_part`](Self::insert_part)
-    /// seeds an empty part first.
-    ///
-    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
-    pub fn include_part<P: Modality>(&mut self, part_id: &PartId, mut entity: Entity<P>) -> bool {
-        ensure_manual(&mut entity);
-        match self.part_entities_mut::<P>(part_id) {
-            Some(entities) => {
-                entities.push(entity);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// Add a **custom** `entity` of modality `M` — one a reviewer marked between
-    /// detection and redaction — to the **sole document** this report describes.
-    ///
-    /// Takes a [`CustomEntity`] (or any `Entity<M>`), so the reviewer's actor and
-    /// rationale, set with [`by`](CustomEntity::by) / [`because`](CustomEntity::because),
-    /// ride along on its [`Manual`] audit event:
-    ///
-    /// ```no_run
-    /// # use elide_core::entity::{Entity, LabelRef};
-    /// # use elide_core::entity::audit::Attribution;
-    /// # use elide_core::modality::text::{Text, TextLocation};
-    /// # let mut report = elide_engine::Report::new();
-    /// report.include_custom::<Text>(
-    ///     Entity::custom(LabelRef::new("US_SSN"), TextLocation::inline(0..9))
-    ///         .by("reviewer-7")
-    ///         .because(Attribution::freeform("gdpr-art-17")),
-    /// );
-    /// ```
-    ///
-    /// Modality-agnostic in the entity's location. Returns `false` when the report
-    /// holds zero or more than one top-level document, or the sole document is a
-    /// different modality than `M`, address a specific part with
-    /// [`include_custom_at`](Self::include_custom_at) for a multi-document report.
-    ///
-    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
-    pub fn include_custom<M: Modality>(&mut self, entity: impl Into<Entity<M>>) -> bool {
-        match self.sole_document_id() {
-            Some(id) => self.include_part::<M>(&id, entity.into()),
-            None => false,
-        }
-    }
-
-    /// Add a **custom** `entity` of modality `M` — one a reviewer marked — to the
-    /// container part `part_id`. The part counterpart to
-    /// [`include_custom`](Self::include_custom): takes a [`CustomEntity`] (or any
-    /// `Entity<M>`) and includes it under `part_id`. Returns `false` for an
-    /// unknown part or a modality mismatch.
-    pub fn include_custom_at<M: Modality>(
-        &mut self,
-        part_id: &PartId,
-        entity: impl Into<Entity<M>>,
-    ) -> bool {
-        self.include_part::<M>(part_id, entity.into())
-    }
-
-    /// Manually suppress the entity `id` in the container part `part_id`, so a
-    /// reviewer can leave alone a false positive detected inside a part. Records
-    /// an auditable [`Manual`] event (the *why* is `attribution`, the *who* is
-    /// `actor`, recorded as the event's source). Idempotent: suppressing an
-    /// already-suppressed entity records nothing (see [`Entity::record_manual`]).
-    /// Returns `false` for an unknown part, a modality mismatch, or no entity
-    /// with that `id`.
-    ///
-    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
-    /// [`Entity::record_manual`]: elide_core::entity::Entity::record_manual
-    pub fn suppress_part<P: Modality>(
-        &mut self,
-        part_id: &PartId,
-        id: Uuid,
-        attribution: Option<Attribution>,
-        actor: Option<String>,
-    ) -> bool {
-        match self.part_entity_mut::<P>(part_id, id) {
-            Some(entity) => {
-                entity.record_manual(ManualIntent::Suppress, attribution, actor.as_deref());
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// The entities of the container part identified by `id`, as modality `P`,
-    /// read-only. Returns `None` for an unknown part or a modality mismatch. Use
-    /// [`part_entities_mut`] to edit them.
-    ///
-    /// [`part_entities_mut`]: Self::part_entities_mut
-    pub fn part_entities<P: Modality>(&self, id: &PartId) -> Option<&[Entity<P>]> {
-        let part = self.parts.get(id)?;
-        if part.modality != TypeId::of::<P>() {
-            return None;
-        }
-        part.entities
-            .as_any()
-            .downcast_ref::<Vec<Entity<P>>>()
-            .map(Vec::as_slice)
-    }
-
-    /// The entities of the container part `id`, as modality `P`, for editing,
-    /// the `&mut` counterpart to [`part_entities`]. Returns `None` for an
-    /// unknown part or a modality mismatch.
-    ///
-    /// [`part_entities`]: Self::part_entities
-    pub fn part_entities_mut<P: Modality>(&mut self, id: &PartId) -> Option<&mut Vec<Entity<P>>> {
-        let part = self.parts.get_mut(id)?;
-        if part.modality != TypeId::of::<P>() {
-            return None;
-        }
-        part.entities.as_any_mut().downcast_mut::<Vec<Entity<P>>>()
-    }
-
-    /// One entity of the container part `part_id`, as modality `P`, by its
-    /// [`id`]. Returns `None` for an unknown part, a modality mismatch, or no
-    /// entity with that id.
-    ///
-    /// The id-addressed counterpart to [`part_entities`].
-    ///
-    /// [`id`]: elide_core::entity::Entity::id
-    /// [`part_entities`]: Self::part_entities
-    pub fn part_entity_mut<P: Modality>(
-        &mut self,
-        part_id: &PartId,
-        id: Uuid,
-    ) -> Option<&mut Entity<P>> {
-        self.part_entities_mut::<P>(part_id)?
             .iter_mut()
-            .find(|e| e.id == id)
-    }
-
-    /// One entity of the container part `part_id`, as modality `P`, by its
-    /// [`id`], read-only, the `&` counterpart to [`part_entity_mut`]. Returns
-    /// `None` for an unknown part, a modality mismatch, or no entity with that
-    /// id.
-    ///
-    /// [`id`]: elide_core::entity::Entity::id
-    /// [`part_entity_mut`]: Self::part_entity_mut
-    pub fn part_entity<P: Modality>(&self, part_id: &PartId, id: Uuid) -> Option<&Entity<P>> {
-        self.part_entities::<P>(part_id)?
-            .iter()
-            .find(|e| e.id == id)
-    }
-
-    /// Run `f` over every entity of the container part `part_id`, as modality
-    /// `P`, in one pass. A no-op for an unknown part or a modality mismatch.
-    ///
-    /// The batch counterpart to [`part_entity_mut`]: a caller merging the
-    /// applied report's per-entity provenance back onto its own records walks the
-    /// group once here, keyed by [`id`] inside `f`, instead of an id-lookup per
-    /// record. One linear pass, no per-call dispatch.
-    ///
-    /// [`part_entity_mut`]: Self::part_entity_mut
-    /// [`id`]: elide_core::entity::Entity::id
-    pub fn for_each_part_mut<P: Modality>(
-        &mut self,
-        part_id: &PartId,
-        f: impl FnMut(&mut Entity<P>),
-    ) {
-        if let Some(entities) = self.part_entities_mut::<P>(part_id) {
-            entities.iter_mut().for_each(f);
-        }
-    }
-
-    /// Like [`for_each_part_mut`], but `f` returns a [`ControlFlow`] so the
-    /// walk can stop early, [`ControlFlow::Break`] halts and returns its value,
-    /// [`ControlFlow::Continue`] proceeds. Returns `ControlFlow::Continue(())` on
-    /// a full walk, an unknown part, or a modality mismatch.
-    ///
-    /// [`for_each_part_mut`]: Self::for_each_part_mut
-    // Returns a concrete `ControlFlow<B>` rather than being generic over
-    // `Try`, which is nightly-only (`try_trait_v2`); revisit when it
-    // stabilizes, see issue #139.
-    pub fn try_for_each_part_mut<P: Modality, B>(
-        &mut self,
-        part_id: &PartId,
-        f: impl FnMut(&mut Entity<P>) -> ControlFlow<B>,
-    ) -> ControlFlow<B> {
-        match self.part_entities_mut::<P>(part_id) {
-            Some(entities) => entities.iter_mut().try_for_each(f),
-            None => ControlFlow::Continue(()),
-        }
+            .filter_map(|(part_id, part)| typed_mut::<M>(part_id, part).ok())
+            .find_map(|entities| entities.iter_mut().find(|entity| entity.id == id))
     }
 
     /// The [`PartId`]s of the parts the report carries, paired with each part's
@@ -535,325 +293,292 @@ impl Report {
         self.parts.iter().map(|(id, p)| (id, p.modality))
     }
 
-    /// The single top-level (depth-1) document's entry, its [`PartId`] and its
-    /// part, if the report describes **exactly one** such document. The one
-    /// place the "exactly one depth-1 part" rule lives, so the read
-    /// ([`sole_document`](Self::sole_document)) and write
-    /// ([`sole_document_id`](Self::sole_document_id)) shorthands cannot drift.
-    /// `None` for zero or more than one top-level document (a multi-document set,
-    /// addressed by name via [`part_entities`](Self::part_entities)).
-    fn sole_document_entry(&self) -> Option<(&PartId, &PartReport)> {
-        let mut tops = self.parts.iter().filter(|(id, _)| id.depth() == 1);
-        tops.next().filter(|_| tops.next().is_none())
-    }
-
-    /// The single top-level document's part, if there is exactly one, the
-    /// backing for the [`entities`](Self::entities) single-document shorthand.
-    fn sole_document(&self) -> Option<&PartReport> {
-        self.sole_document_entry().map(|(_, part)| part)
-    }
-
-    /// The [`PartId`] of the single top-level document, if there is exactly one,
-    /// the `&mut` companion to [`sole_document`](Self::sole_document), which
-    /// hands back an owned key so the borrow of `self.parts` is released before
-    /// the caller re-borrows it mutably.
-    fn sole_document_id(&self) -> Option<PartId> {
-        self.sole_document_entry().map(|(id, _)| id.clone())
+    /// The [`PartId`] of the single top-level (depth-1) document.
+    fn sole_document_id(&self) -> Result<PartId> {
+        let mut tops = self.parts.keys().filter(|id| id.depth() == 1);
+        match (tops.next(), tops.next()) {
+            (Some(id), None) => Ok(id.clone()),
+            (None, _) => Err(Error::not_found("the report holds no document")),
+            (Some(_), Some(_)) => Err(Error::not_found(
+                "the report holds more than one document; address one with `part`",
+            )),
+        }
     }
 }
 
-/// Ensure `entity` carries a [`Manual`] event, recording one (from its own
-/// location and confidence) if it does not already have one. Used by
-/// [`Report::include_part`] so a manually-added entity is always auditable as a
-/// human decision, however the caller built it.
-///
-/// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
-fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
-    let has_manual = entity
-        .audit
-        .events()
-        .iter()
-        .any(|e| matches!(e.kind, AuditKind::Manual(_)));
-    if !has_manual {
-        let event = AuditEvent::manual_flag(entity.location.clone(), entity.confidence);
-        entity.audit.record(event);
+/// The entities of `part` (keyed `id`), as modality `M`.
+fn typed<'p, M: Modality>(id: &PartId, part: &'p PartReport) -> Result<&'p [Entity<M>]> {
+    if part.modality != TypeId::of::<M>() {
+        return Err(mismatch::<M>(id));
     }
+    part.entities
+        .as_any()
+        .downcast_ref::<Vec<Entity<M>>>()
+        .map(Vec::as_slice)
+        .ok_or_else(|| mismatch::<M>(id))
+}
+
+/// The entities of `part` (keyed `id`), as modality `M`, to edit.
+fn typed_mut<'p, M: Modality>(
+    id: &PartId,
+    part: &'p mut PartReport,
+) -> Result<&'p mut Vec<Entity<M>>> {
+    if part.modality != TypeId::of::<M>() {
+        return Err(mismatch::<M>(id));
+    }
+    part.entities
+        .as_any_mut()
+        .downcast_mut::<Vec<Entity<M>>>()
+        .ok_or_else(|| mismatch::<M>(id))
+}
+
+/// The error for a part `id` that is not of modality `M`.
+fn mismatch<M: Modality>(id: &PartId) -> Error {
+    Error::not_found(format!("part `{id}` is not {}", M::NAME))
 }
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::ManualIntent;
-    use elide_core::modality::text::Text;
+    use elide_core::entity::audit::{Attribution, AuditKind, ManualIntent};
+    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::primitive::Confidence;
 
     use super::super::test_support::{doc, text_entity};
     use super::*;
 
-    #[test]
-    fn entity_mut_addresses_the_sole_document_by_id() {
-        let a = text_entity("EMAIL_ADDRESS");
-        let b = text_entity("PHONE_NUMBER");
-        let (id_a, id_b) = (a.id, b.id);
-        // A single depth-1 part, the sole document `entity`/`entity_mut` read.
-        let mut report = Report::new().insert_part::<Text>(doc(), vec![a, b]);
-
-        // A present id resolves to that exact entity.
-        assert_eq!(
-            report.entity_mut::<Text>(id_b).map(|e| e.label.as_str()),
-            Some("PHONE_NUMBER")
-        );
-        assert_eq!(
-            report.entity_mut::<Text>(id_a).map(|e| e.label.as_str()),
-            Some("EMAIL_ADDRESS")
-        );
-        // An unknown id misses.
-        assert!(report.entity_mut::<Text>(Uuid::now_v7()).is_none());
+    /// A [`Text`] entity labelled `label` at `range`.
+    fn at(label: &str, range: std::ops::Range<usize>) -> Entity<Text> {
+        let mut entity = text_entity(label);
+        entity.location = TextLocation::inline(range);
+        entity
     }
 
     #[test]
-    fn entities_is_sole_document_shorthand() {
-        // Exactly one top-level document → `entities` reads it.
-        let report = Report::new().insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")]);
-        assert_eq!(report.entities::<Text>().map(<[_]>::len), Some(1));
+    fn a_part_is_read_and_edited_by_its_id() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id;
+        let part = doc().child("word/media/image1.png");
+        let mut report = Report::new().insert_part::<Text>(part.clone(), vec![entity]);
 
-        // Zero documents → None.
-        assert!(Report::new().entities::<Text>().is_none());
-
-        // More than one top-level document → None (a multi-document set; the
-        // caller must address a part by name via `part_entities`).
-        let two = Report::new()
-            .insert_part::<Text>(PartId::new("a.txt"), vec![text_entity("EMAIL_ADDRESS")])
-            .insert_part::<Text>(PartId::new("b.txt"), vec![text_entity("PHONE_NUMBER")]);
+        assert_eq!(report.part::<Text>(&part).unwrap().entities().len(), 1);
         assert!(
-            two.entities::<Text>().is_none(),
-            "a set has no sole document"
+            report
+                .part_mut::<Text>(&part)
+                .unwrap()
+                .relabel(id, "RETAGGED")
         );
-        // But each is reachable by name.
         assert_eq!(
-            two.part_entities::<Text>(&PartId::new("a.txt"))
-                .map(<[_]>::len),
-            Some(1)
+            report
+                .part::<Text>(&part)
+                .unwrap()
+                .entity(id)
+                .unwrap()
+                .label,
+            LabelRef::new("RETAGGED"),
         );
+    }
 
-        // A nested container part does not count as a top-level document, so a
-        // lone document with one nested part still has a sole document.
-        let nested = Report::new()
+    #[test]
+    fn an_unknown_part_or_another_modality_is_not_found() {
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![text_entity("X")]);
+        let missing = report.part::<Text>(&PartId::new("missing")).unwrap_err();
+        assert_eq!(missing.kind(), ErrorKind::NotFound);
+
+        #[derive(Debug)]
+        struct Other;
+        impl Modality for Other {
+            type Artifact = elide_core::modality::NoArtifact;
+            type Data = <Text as Modality>::Data;
+            type Location = <Text as Modality>::Location;
+            type Replacement = <Text as Modality>::Replacement;
+
+            const NAME: &'static str = "other";
+        }
+        assert_eq!(
+            report.part_mut::<Other>(&doc()).unwrap_err().kind(),
+            ErrorKind::NotFound,
+        );
+    }
+
+    #[test]
+    fn the_document_is_the_sole_top_level_part() {
+        // One top-level document with a nested part: the document is its own.
+        let report = Report::new()
             .insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")])
             .insert_part::<Text>(doc().child("word/media/image1.png"), vec![text_entity("X")]);
+        assert_eq!(report.document::<Text>().unwrap().entities().len(), 1);
+
+        // None, or more than one, is not found.
         assert_eq!(
-            nested.entities::<Text>().map(<[_]>::len),
-            Some(1),
-            "only the depth-1 part is the sole document",
+            Report::new().document::<Text>().unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        let two = Report::new()
+            .insert_part::<Text>(PartId::new("a.txt"), vec![text_entity("A")])
+            .insert_part::<Text>(PartId::new("b.txt"), vec![text_entity("B")]);
+        assert_eq!(
+            two.document::<Text>().unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            two.part::<Text>(&PartId::new("a.txt"))
+                .unwrap()
+                .entities()
+                .len(),
+            1
         );
     }
 
     #[test]
-    fn include_part_on_the_sole_document_is_manual_and_readable_via_entities() {
-        let mut report =
-            Report::new().insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")]);
-        let manual = text_entity("PHONE_NUMBER");
-        let manual_id = manual.id;
+    fn an_included_entity_is_a_reviewers_assertion() {
+        let mut report = Report::new().insert_part::<Text>(doc(), Vec::new());
+        let id = report
+            .document_mut::<Text>()
+            .unwrap()
+            .by("reviewer-7")
+            .because(Attribution::freeform("missed by detection"))
+            .include("PERSON_NAME", TextLocation::inline(4..12));
 
-        assert!(report.include_part::<Text>(&doc(), manual), "included");
-        assert_eq!(report.entities::<Text>().unwrap().len(), 2);
-        // The included entity, built here with only a Pattern event, now
-        // carries a Manual event, so it is auditable as a human decision.
-        let included = report.entity_mut::<Text>(manual_id).unwrap();
-        assert!(
-            included
-                .audit
-                .events()
-                .iter()
-                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
-            "include_part stamps a Manual event",
+        let part = report.document::<Text>().unwrap();
+        let entity = part.entity(id).expect("included");
+        assert_eq!(entity.confidence, Confidence::MAX);
+        let [event] = entity.audit.events() else {
+            panic!("one event");
+        };
+        assert_eq!(event.source.as_str(), "reviewer-7");
+        let AuditKind::Manual(manual) = &event.kind else {
+            panic!("a Manual event");
+        };
+        assert_eq!(manual.intent, ManualIntent::Flag);
+        assert_eq!(
+            manual.attribution,
+            Some(Attribution::freeform("missed by detection").into())
         );
-        assert!(included.audit.verify().is_ok());
-
-        // Including into an unknown part adds nothing and says so.
-        assert!(!Report::new().include_part::<Text>(&doc(), text_entity("X")));
+        assert!(entity.audit.verify().is_ok());
+        assert_eq!(part.unsuppressed().count(), 1);
     }
 
     #[test]
-    fn record_manual_amend_is_recorded_and_does_not_suppress() {
+    fn a_suppressed_entity_stays_in_the_part_and_is_audited() {
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id;
         let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
 
-        let e = report.entity_mut::<Text>(id).unwrap();
-        assert!(e.record_manual(ManualIntent::Amend, None, Some("reviewer-7")));
-        assert!(!e.is_suppressed(), "amend does not suppress");
-        assert!(e.audit.verify().is_ok());
+        let mut part = report.document_mut::<Text>().unwrap().by("reviewer-7");
+        assert!(part.suppress(id), "suppressed");
+        assert!(!part.suppress(id), "suppressing again records nothing");
+        assert!(
+            !part.suppress(Uuid::now_v7()),
+            "an unknown id is not suppressed"
+        );
+
+        let part = report.document::<Text>().unwrap();
+        assert_eq!(part.suppressed().count(), 1);
+        assert_eq!(part.unsuppressed().count(), 0);
+        let entity = part.entity(id).unwrap();
+        assert!(entity.audit.events().iter().any(|event| {
+            event.source.as_str() == "reviewer-7"
+                && matches!(&event.kind, AuditKind::Manual(m) if m.intent == ManualIntent::Suppress)
+        }));
+        assert!(entity.audit.verify().is_ok());
     }
 
     #[test]
-    fn suppress_part_marks_a_part_entity_and_audits_it() {
+    fn a_retag_or_retarget_is_an_audited_amendment() {
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id;
-        let part = PartId::new("word/media/image1.png");
-        let mut report = Report::new().insert_part::<Text>(part.clone(), vec![entity]);
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
 
-        assert!(report.suppress_part::<Text>(
-            &part,
-            id,
-            Some(Attribution::freeform("false positive").into()),
-            Some("reviewer-7".into()),
-        ));
-
-        let e = report.part_entity_mut::<Text>(&part, id).unwrap();
-        assert!(e.is_suppressed(), "the part entity is marked suppressed");
-        let has_manual = e.audit.events().iter().any(|ev| {
-            matches!(&ev.kind, elide_core::entity::audit::AuditKind::Manual(m)
-                if m.attribution == Some(Attribution::freeform("false positive").into()))
-        });
-        assert!(has_manual, "the suppression is audited");
-        assert!(e.audit.verify().is_ok());
-
-        // An unknown part, and an unknown id in a known part, both do nothing.
-        assert!(!report.suppress_part::<Text>(&PartId::new("missing"), id, None, None::<String>,));
-        assert!(!report.suppress_part::<Text>(&part, Uuid::now_v7(), None, None::<String>));
-    }
-
-    #[test]
-    fn include_part_adds_a_manual_entity_to_a_part() {
-        let part = PartId::new("word/media/image1.png");
-        let mut report = Report::new().insert_part::<Text>(part.clone(), Vec::new());
-
-        let included = text_entity("EMAIL_ADDRESS");
-        let included_id = included.id;
+        let mut part = report
+            .document_mut::<Text>()
+            .unwrap()
+            .by("reviewer-7")
+            .because(Attribution::freeform("misread"));
+        assert!(part.relabel(id, "PHONE_NUMBER"));
+        assert!(part.relocate(id, TextLocation::inline(1..3)));
         assert!(
-            report.include_part::<Text>(&part, included),
-            "included into the part",
+            !part.relabel(Uuid::now_v7(), "X"),
+            "an unknown id is not amended"
         );
-        let part_entities = report.part_entities::<Text>(&part).unwrap();
-        assert_eq!(part_entities.len(), 1);
-        // The included part entity is stamped with a Manual event.
-        assert!(
-            part_entities[0]
-                .audit
-                .events()
-                .iter()
-                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
-            "include_part stamps a Manual event",
-        );
-        assert_eq!(part_entities[0].id, included_id);
 
-        // An unknown part includes nothing.
-        assert!(!report.include_part::<Text>(&PartId::new("missing"), text_entity("X")));
-    }
-
-    #[test]
-    fn include_custom_adds_a_manual_entity_in_one_call() {
-        use elide_core::entity::Entity;
-        use elide_core::modality::text::{Text, TextLocation};
-
-        // include_custom targets the sole document: one depth-1 part. The
-        // reviewer's actor and rationale ride along on the entity.
-        let mut report = Report::new().insert_part::<Text>(doc(), Vec::new());
-        assert!(
-            report.include_custom::<Text>(
-                Entity::custom("US_SSN", TextLocation::inline(0..9))
-                    .by("reviewer-7")
-                    .because(Attribution::freeform("gdpr-art-17")),
-            ),
-            "custom entity added to the sole document",
-        );
-        let entities = report.entities::<Text>().expect("sole document entities");
-        assert_eq!(entities.len(), 1);
-        assert_eq!(entities[0].label.as_str(), "US_SSN");
-        // Built as a custom entity: MAX confidence + a Manual event carrying the
-        // actor and attribution.
-        assert_eq!(
-            entities[0].confidence,
-            elide_core::primitive::Confidence::MAX
-        );
-        let event = entities[0]
+        let part = report.document::<Text>().unwrap();
+        let entity = part.entity(id).unwrap();
+        assert_eq!(entity.label, LabelRef::new("PHONE_NUMBER"));
+        assert_eq!(entity.location, TextLocation::inline(1..3));
+        let amendments: Vec<_> = entity
             .audit
             .events()
             .iter()
-            .find(|e| matches!(e.kind, AuditKind::Manual(_)))
-            .expect("a Manual event");
-        assert_eq!(event.source, "reviewer-7");
-        let AuditKind::Manual(manual) = &event.kind else {
-            unreachable!()
-        };
+            .filter_map(|event| match &event.kind {
+                AuditKind::Manual(m) if m.intent == ManualIntent::Amend => {
+                    Some((event.source.as_str(), m.location.clone()))
+                }
+                _ => None,
+            })
+            .collect();
         assert_eq!(
-            manual.attribution,
-            Some(Attribution::freeform("gdpr-art-17").into()),
+            amendments,
+            [
+                ("reviewer-7", TextLocation::inline(0..4)),
+                ("reviewer-7", TextLocation::inline(1..3)),
+            ]
         );
-
-        // A multi-document report has no *sole* document, so include_custom
-        // returns false rather than guessing which document to add to.
-        let mut multi = Report::new()
-            .insert_part::<Text>(PartId::new("a.txt"), Vec::new())
-            .insert_part::<Text>(PartId::new("b.txt"), Vec::new());
-        assert!(
-            !multi.include_custom::<Text>(Entity::custom("US_SSN", TextLocation::inline(0..9))),
-            "no sole document to add to",
-        );
-        // But include_custom_at addresses a specific part.
-        assert!(multi.include_custom_at::<Text>(
-            &PartId::new("a.txt"),
-            Entity::custom("US_SSN", TextLocation::inline(0..9)),
-        ));
-        assert_eq!(
-            multi
-                .part_entities::<Text>(&PartId::new("a.txt"))
-                .unwrap()
-                .len(),
-            1,
-        );
-        // An unknown part adds nothing.
-        assert!(!multi.include_custom_at::<Text>(
-            &PartId::new("missing"),
-            Entity::custom("US_SSN", TextLocation::inline(0..9)),
-        ));
+        assert!(!entity.is_suppressed(), "an amendment does not suppress");
+        assert!(entity.audit.verify().is_ok());
     }
 
     #[test]
-    fn part_entity_mut_addresses_a_part_by_id() {
-        let entity = text_entity("EMAIL_ADDRESS");
-        let id = entity.id;
-        let part = PartId::new("word/media/image1.png");
-        let mut report = Report::new().insert_part::<Text>(part.clone(), vec![entity]);
+    fn a_region_suppresses_only_what_it_contains() {
+        let inside = at("EMAIL_ADDRESS", 4..10);
+        let crossing = at("PERSON_NAME", 15..25);
+        let outside = at("PHONE_NUMBER", 30..40);
+        let (inside_id, crossing_id, outside_id) = (inside.id, crossing.id, outside.id);
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![inside, crossing, outside]);
 
-        assert_eq!(
-            report
-                .part_entity_mut::<Text>(&part, id)
-                .map(|e| e.label.as_str()),
-            Some("EMAIL_ADDRESS")
-        );
-        // An unknown part and an unknown id both miss.
+        let region = TextLocation::inline(0..20);
+        let spared = report
+            .document_mut::<Text>()
+            .unwrap()
+            .suppress_within(&region);
+        assert_eq!(spared, [inside_id]);
+
+        let part = report.document::<Text>().unwrap();
+        assert!(part.entity(inside_id).unwrap().is_suppressed());
+        // A finding reaching outside the region is not spared.
+        assert!(!part.entity(crossing_id).unwrap().is_suppressed());
+        assert!(!part.entity(outside_id).unwrap().is_suppressed());
+        // The decision records the region it covered.
+        let recorded = part
+            .entity(inside_id)
+            .unwrap()
+            .audit
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                AuditKind::Manual(manual) => Some(manual.location.clone()),
+                _ => None,
+            });
+        assert_eq!(recorded, Some(region.clone()));
+
+        // A second pass over the same region spares nothing new.
         assert!(
             report
-                .part_entity_mut::<Text>(&PartId::new("nope"), id)
-                .is_none()
-        );
-        assert!(
-            report
-                .part_entity_mut::<Text>(&part, Uuid::now_v7())
-                .is_none()
+                .document_mut::<Text>()
+                .unwrap()
+                .suppress_within(&region)
+                .is_empty()
         );
     }
 
     #[test]
     fn entity_anywhere_reaches_a_nested_part_by_id_alone() {
-        // A review layer holds only an entity id (a retag/suppress addresses the
-        // entity, not the part it lives in). The entity lives in a *nested*
-        // depth-2 part, so the report is not a single sole document.
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id;
         let nested = PartId::new("report.docx").child("word/media/image1.png");
         let mut report = Report::new().insert_part::<Text>(nested.clone(), vec![entity]);
 
-        // The sole-document sugar cannot see it (the report is not a single
-        // depth-1 document), so a caller relying on `entity_mut` would silently
-        // find nothing — exactly why `entity_anywhere` exists.
-        assert!(
-            report.entity_mut::<Text>(id).is_none(),
-            "entity_mut is sole-document sugar and must not resolve a nested part",
-        );
-
-        // `entity_anywhere` finds it by id alone, and `_mut` edits it in place.
         assert_eq!(
             report.entity_anywhere::<Text>(id).map(|e| e.label.as_str()),
             Some("EMAIL_ADDRESS"),
@@ -863,88 +588,14 @@ mod tests {
             .expect("nested entity is reachable by id alone")
             .label = LabelRef::new("RETAGGED");
         assert_eq!(
-            report.part_entity::<Text>(&nested, id).unwrap().label,
-            LabelRef::new("RETAGGED"),
-            "the edit applied to the nested part",
-        );
-
-        // An unknown id resolves nowhere.
-        assert!(report.entity_anywhere::<Text>(Uuid::now_v7()).is_none());
-    }
-
-    #[test]
-    fn for_each_part_mut_visits_every_entity_once() {
-        let part = doc();
-        let mut report = Report::new().insert_part::<Text>(
-            part.clone(),
-            vec![text_entity("EMAIL_ADDRESS"), text_entity("PHONE_NUMBER")],
-        );
-
-        // The pass mutates in place and visits each entity exactly once.
-        let mut count = 0;
-        report.for_each_part_mut::<Text>(&part, |e| {
-            count += 1;
-            e.label = LabelRef::new("REDACTED");
-        });
-        assert_eq!(count, 2);
-        assert!(
             report
-                .part_entities::<Text>(&part)
+                .part::<Text>(&nested)
                 .unwrap()
-                .iter()
-                .all(|e| e.label.as_str() == "REDACTED")
+                .entity(id)
+                .unwrap()
+                .label,
+            LabelRef::new("RETAGGED"),
         );
-
-        // An unknown part → the closure never runs.
-        let mut ran = false;
-        report.for_each_part_mut::<Text>(&PartId::new("nope"), |_| ran = true);
-        assert!(!ran);
-    }
-
-    #[test]
-    fn try_for_each_part_mut_breaks_early() {
-        let a = text_entity("EMAIL_ADDRESS");
-        let target = a.id;
-        let part = doc();
-        let mut report =
-            Report::new().insert_part::<Text>(part.clone(), vec![a, text_entity("PHONE_NUMBER")]);
-
-        // Break carries a value out and halts the walk at the first match.
-        let mut visited = 0;
-        let found = report.try_for_each_part_mut::<Text, &'static str>(&part, |e| {
-            visited += 1;
-            if e.id == target {
-                ControlFlow::Break("hit")
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
-        assert_eq!(found, ControlFlow::Break("hit"));
-        assert_eq!(visited, 1, "the walk stops at the first break");
-
-        // A full walk (never breaking) returns Continue.
-        let done = report.try_for_each_part_mut::<Text, ()>(&part, |_| ControlFlow::Continue(()));
-        assert_eq!(done, ControlFlow::Continue(()));
-
-        // An unknown part → vacuously Continue.
-        let empty = report
-            .try_for_each_part_mut::<Text, ()>(&PartId::new("nope"), |_| ControlFlow::Break(()));
-        assert_eq!(empty, ControlFlow::Continue(()));
-    }
-
-    #[test]
-    fn for_each_part_mut_visits_a_part() {
-        let part = PartId::new("word/media/image1.png");
-        let mut report =
-            Report::new().insert_part::<Text>(part.clone(), vec![text_entity("EMAIL_ADDRESS")]);
-
-        let mut count = 0;
-        report.for_each_part_mut::<Text>(&part, |_| count += 1);
-        assert_eq!(count, 1);
-
-        // An unknown part → the closure never runs.
-        let mut ran = false;
-        report.for_each_part_mut::<Text>(&PartId::new("nope"), |_| ran = true);
-        assert!(!ran);
+        assert!(report.entity_anywhere::<Text>(Uuid::now_v7()).is_none());
     }
 }

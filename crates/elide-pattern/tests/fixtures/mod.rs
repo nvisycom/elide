@@ -44,7 +44,7 @@ async fn scan_scoped(text: &str, scope: Scope) -> (String, Vec<Entity<Text>>) {
         .expect("shipped recognizer builds");
     let data = TextData::new(text.to_owned());
     let ctx = Context::new(&scope);
-    let subject = Subject::new(data);
+    let subject = Subject::<Text>::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await

@@ -9,7 +9,7 @@ use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::modality::text::Text;
 use elide::redaction::HiddenContentPolicy;
-use elide::{Directives, PartId, RegistryDocumentExt, Report, Result};
+use elide::{PartId, RegistryDocumentExt, Report, Result};
 
 use super::{BODY_PART, FIXTURE};
 use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
@@ -30,12 +30,11 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     let mut doc = registry
         .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
         .await?;
-    let report = orchestrator
-        .analyze(&mut doc, &Directives::new())
-        .await?
-        .report;
+    let report = orchestrator.analyze(&mut doc).await?.report;
     let body = report
-        .entities::<Text>()
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
         .map(|v| v.to_vec())
         .unwrap_or_default();
     assert!(!body.is_empty(), "the document should detect entities");
@@ -64,7 +63,9 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // report had no cached handles): the applied body entities each end with
     // a redaction event.
     let audited = applied
-        .entities::<Text>()
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
         .map(|v| v.to_vec())
         .unwrap_or_default();
     assert!(
