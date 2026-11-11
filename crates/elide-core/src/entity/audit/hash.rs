@@ -104,10 +104,7 @@ impl fmt::Debug for AuditHash {
 
 impl fmt::Display for AuditHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in &self.0.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        f.write_str(&hex::encode(self.0.0))
     }
 }
 

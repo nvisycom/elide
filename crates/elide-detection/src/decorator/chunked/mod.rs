@@ -99,7 +99,7 @@ impl<R: Recognizer<Text>, C: Chunking> ChunkedRecognizer<R, C> {
             .iter()
             .map(|w| {
                 Subject::new(TextData::new(text[w.span()].to_owned()))
-                    .with_hints(subject.hints.clone())
+                    .with_hints(subject.hints().to_vec())
             })
             .collect();
         let per_window = self.inner.recognize_batch(&subjects, ctx).await?;
@@ -408,7 +408,7 @@ mod tests {
             self.per_window_hint_count
                 .lock()
                 .unwrap()
-                .push(subject.hints.len());
+                .push(subject.hints().len());
             Ok(Vec::new())
         }
     }

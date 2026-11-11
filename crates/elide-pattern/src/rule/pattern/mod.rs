@@ -2,7 +2,7 @@
 
 mod compiled;
 
-use derive_builder::Builder;
+use derive_builder::{Builder, UninitializedFieldError};
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, Result};
@@ -157,7 +157,7 @@ fn default_score() -> Confidence {
     name = "PatternBuilder",
     pattern = "owned",
     setter(into, strip_option, prefix = "with"),
-    build_fn(error = "Error")
+    build_fn(private, name = "try_build", error = "UninitializedFieldError")
 )]
 pub struct Pattern {
     /// Human-readable identifier surfaced in trail provenance (e.g.
@@ -189,6 +189,18 @@ pub struct Pattern {
     #[builder(default)]
     #[serde(default)]
     pub countries: Vec<CountryCode>,
+}
+
+impl PatternBuilder {
+    /// Build the pattern.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Configuration`](elide_core::ErrorKind::Configuration) if
+    /// `name`, `labels`, or `variants` is unset.
+    pub fn build(self) -> Result<Pattern> {
+        self.try_build().map_err(Error::configuration)
+    }
 }
 
 impl Pattern {

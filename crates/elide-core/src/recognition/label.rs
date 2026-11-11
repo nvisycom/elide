@@ -1,4 +1,6 @@
-//! [`LabelMap`] raw-to-canonical label translation table.
+//! Label handling at the recognizer boundary: the [`LabelMap`], which
+//! translates a backend's raw label vocabulary into the toolkit's canonical
+//! entity labels.
 
 use std::collections::HashMap;
 

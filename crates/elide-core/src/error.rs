@@ -169,16 +169,6 @@ impl From<ErrorKind> for Error {
     }
 }
 
-impl From<derive_builder::UninitializedFieldError> for Error {
-    /// Bridge `derive_builder`'s missing-required-field error into a
-    /// [`ErrorKind::Configuration`] failure, so generated builders that
-    /// declare `build_fn(error = "Error")` fail with the crate-wide error
-    /// type.
-    fn from(err: derive_builder::UninitializedFieldError) -> Self {
-        Self::new(ErrorKind::Configuration, err)
-    }
-}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.source {
