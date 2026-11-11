@@ -58,7 +58,6 @@ mocks = []
 serde = { workspace = true, features = ["derive"], optional = true }
 
 # Derive macros & error handling
-derive_builder = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }

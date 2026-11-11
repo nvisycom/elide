@@ -42,7 +42,7 @@ pub struct Subject<M: Modality> {
     /// key), each paired with its content, for a context enhancer to match
     /// keywords against. A codec surfaces these per chunk; recognizers without
     /// an enhancer ignore them. Empty when the source has no such metadata.
-    pub hints: Vec<ResolvedHint<M>>,
+    hints: Vec<ResolvedHint<M>>,
 }
 
 impl<M: Modality> Subject<M> {
@@ -107,6 +107,12 @@ impl<M: Modality> Subject<M> {
     /// [`with_span`](LanguageClaim::with_span)).
     pub fn detect_language(&mut self, language: LanguageClaim) {
         self.detected_languages.push(language);
+    }
+
+    /// The chunk's out-of-band context hints, each paired with its content.
+    #[must_use]
+    pub fn hints(&self) -> &[ResolvedHint<M>] {
+        &self.hints
     }
 
     /// The languages a detector found for this chunk, in detection order.

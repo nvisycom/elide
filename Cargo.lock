@@ -1166,7 +1166,6 @@ dependencies = [
  "async-trait",
  "blake3",
  "celes",
- "derive_builder",
  "hex",
  "hipstr",
  "jiff",

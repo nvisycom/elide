@@ -115,7 +115,7 @@ impl PatternRecognizer {
         // its content is read through the modality's text view, and a hint
         // with none is skipped.
         let hints: Vec<(usize, &str)> = subject
-            .hints
+            .hints()
             .iter()
             .enumerate()
             .filter_map(|(i, h)| M::as_text(&h.data, subject.artifact()).map(|t| (i, t)))
@@ -259,7 +259,7 @@ fn record_boost<M: TextRecognizable>(
     boost: context::Boost,
     subject: &Subject<M>,
 ) {
-    let hint = boost.hint.map(|i| &subject.hints[i]);
+    let hint = boost.hint.map(|i| &subject.hints()[i]);
     let location = match (hint, boost.keyword_range) {
         (Some(hint), _) => Some(hint.hint.location.clone()),
         (None, Some(range)) => M::locate(range, subject.data(), subject.artifact()),

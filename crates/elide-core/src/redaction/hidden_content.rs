@@ -59,6 +59,13 @@ impl HiddenContentPolicy {
         self
     }
 
+    /// This policy with its collaboration disposition set to `collaboration`.
+    #[must_use]
+    pub const fn with_collaboration(mut self, collaboration: Disposition) -> Self {
+        self.collaboration = collaboration;
+        self
+    }
+
     /// The disposition this policy sets for hidden content of `kind`, or `None`
     /// for a kind it does not choose for, which is always stripped.
     pub const fn disposition(&self, kind: HiddenContentKind) -> Option<Disposition> {
@@ -67,13 +74,6 @@ impl HiddenContentPolicy {
             HiddenContentKind::Collaboration => Some(self.collaboration),
             _ => None,
         }
-    }
-
-    /// This policy with its collaboration disposition set to `collaboration`.
-    #[must_use]
-    pub const fn with_collaboration(mut self, collaboration: Disposition) -> Self {
-        self.collaboration = collaboration;
-        self
     }
 }
 

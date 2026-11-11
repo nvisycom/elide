@@ -5,6 +5,8 @@ use std::str::FromStr;
 
 use celes::Country;
 
+use crate::{Error, Result};
+
 /// [ISO 3166-1] country, identified by its code.
 ///
 /// Wraps [`celes::Country`], a static table entry carrying the numeric,
@@ -27,13 +29,29 @@ pub struct CountryCode(#[cfg_attr(feature = "schema", schemars(with = "String"))
 
 impl CountryCode {
     /// Look up a country by its ISO 3166-1 alpha-2 code (e.g. `"US"`).
-    pub fn from_alpha2(alpha2: impl AsRef<str>) -> Result<Self, &'static str> {
-        Country::from_alpha2(alpha2).map(Self)
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if
+    /// `alpha2` names no country.
+    pub fn from_alpha2(alpha2: impl AsRef<str>) -> Result<Self> {
+        let alpha2 = alpha2.as_ref();
+        Country::from_alpha2(alpha2)
+            .map(Self)
+            .map_err(|_| Error::malformed(format!("unknown alpha-2 country code: {alpha2}")))
     }
 
     /// Look up a country by its ISO 3166-1 alpha-3 code (e.g. `"USA"`).
-    pub fn from_alpha3(alpha3: impl AsRef<str>) -> Result<Self, &'static str> {
-        Country::from_alpha3(alpha3).map(Self)
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if
+    /// `alpha3` names no country.
+    pub fn from_alpha3(alpha3: impl AsRef<str>) -> Result<Self> {
+        let alpha3 = alpha3.as_ref();
+        Country::from_alpha3(alpha3)
+            .map(Self)
+            .map_err(|_| Error::malformed(format!("unknown alpha-3 country code: {alpha3}")))
     }
 
     /// Country's ISO 3166-1 alpha-2 code (e.g. `"US"`): its canonical
@@ -56,12 +74,14 @@ impl CountryCode {
 }
 
 impl FromStr for CountryCode {
-    type Err = &'static str;
+    type Err = Error;
 
     /// Accepts an alpha-2, alpha-3, numeric, or name form, per
     /// [`celes::Country`]'s [`FromStr`].
-    fn from_str(code: &str) -> Result<Self, Self::Err> {
-        Country::from_str(code).map(Self)
+    fn from_str(code: &str) -> Result<Self> {
+        Country::from_str(code)
+            .map(Self)
+            .map_err(|_| Error::malformed(format!("unknown country: {code}")))
     }
 }
 

@@ -3,7 +3,7 @@
 mod compiled;
 mod term;
 
-use derive_builder::Builder;
+use derive_builder::{Builder, UninitializedFieldError};
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, Result};
@@ -116,7 +116,7 @@ impl Default for Scoring {
     name = "DictionaryBuilder",
     pattern = "owned",
     setter(into, strip_option, prefix = "with"),
-    build_fn(error = "Error")
+    build_fn(private, name = "try_build", error = "UninitializedFieldError")
 )]
 pub struct Dictionary {
     /// Human-readable identifier surfaced in trail provenance
@@ -167,6 +167,18 @@ pub struct Dictionary {
 
 fn default_word_boundary() -> bool {
     true
+}
+
+impl DictionaryBuilder {
+    /// Build the dictionary.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Configuration`](elide_core::ErrorKind::Configuration) if
+    /// `name`, `labels`, or `terms` is unset.
+    pub fn build(self) -> Result<Dictionary> {
+        self.try_build().map_err(Error::configuration)
+    }
 }
 
 impl Dictionary {
