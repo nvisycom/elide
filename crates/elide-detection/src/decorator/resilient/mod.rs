@@ -96,9 +96,10 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
                 tracing::warn!(
                     recognizer = %self.inner.id(),
                     %error,
+                    subjects = subjects.len(),
                     "recognizer failed; continuing with no entities from it",
                 );
-                Ok(vec![Vec::new()])
+                Ok(subjects.iter().map(|_| Vec::new()).collect())
             }
         }
     }
@@ -218,5 +219,44 @@ mod tests {
             .expect("resilient swallows the error");
         let counts: Vec<usize> = out.iter().map(Vec::len).collect();
         assert_eq!(counts, [1, 0, 1]);
+    }
+
+    /// Rejects every batch, even an empty one.
+    struct RejectsEveryBatch;
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for RejectsEveryBatch {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("rejects-every-batch", "0")
+        }
+
+        async fn recognize(
+            &self,
+            _subject: &Subject<Text>,
+            _ctx: &Context<'_>,
+        ) -> Result<Vec<Entity<Text>>> {
+            Err(Error::recognition("rejected"))
+        }
+
+        async fn recognize_batch(
+            &self,
+            _subjects: &[&Subject<Text>],
+            _ctx: &Context<'_>,
+        ) -> Result<Vec<Vec<Entity<Text>>>> {
+            Err(Error::recognition("rejected"))
+        }
+    }
+
+    /// A failed empty batch still answers one list per subject: none.
+    #[tokio::test]
+    async fn a_failed_empty_batch_returns_no_lists() {
+        let recognizer = ResilientRecognizer::new(RejectsEveryBatch);
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let out = recognizer
+            .recognize_batch(&[], &ctx)
+            .await
+            .expect("resilient swallows the error");
+        assert!(out.is_empty());
     }
 }
