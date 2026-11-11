@@ -48,7 +48,7 @@ recognition:
     - **`Structural`** — geometry-aware cross-label handling: keep legitimate
       nestings, drop subsumed junk, and either auto-resolve a true conflict
       (`Structural::standard()`) or flag it for human review
-      (`Structural::reviewing()`).
+      (`Structural::standard().reviewing()`).
     - **`Exclusive`** — one finding per span; **`Permissive`** — keep every
       overlap (Presidio-style), deferring to the edit step.
 - **filter** — drop entities below a confidence threshold.

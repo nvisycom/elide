@@ -6,6 +6,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use futures::future;
 
 /// Wraps a [`Recognizer`] so that an error from it is logged and swallowed,
 /// yielding no entities for the affected subjects rather than aborting the run.
@@ -20,8 +21,9 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 ///
 /// On failure it emits a `warn` log naming the wrapped recognizer (via its
 /// [`id`](Recognizer::id)) and the error, so a dropped recognizer is never
-/// silent, then returns empty results. A batch failure yields one empty list per
-/// subject, preserving the one-list-per-subject contract the analyzer enforces.
+/// silent, then returns empty results. A failed batch is retried subject by
+/// subject, so one subject's failure costs only that subject its findings, and
+/// the result keeps the one-list-per-subject contract the analyzer enforces.
 /// It adds no entities and alters none, so it is transparent on the success path.
 ///
 /// Because it is itself a `Recognizer` over the same modality, it drops in
@@ -72,17 +74,31 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
     ) -> Result<Vec<Vec<Entity<M>>>> {
         match self.inner.recognize_batch(subjects, ctx).await {
             Ok(per_subject) => Ok(per_subject),
-            Err(error) => {
+            Err(error) if subjects.len() > 1 => {
                 tracing::warn!(
                     recognizer = %self.inner.id(),
                     %error,
                     subjects = subjects.len(),
-                    "recognizer batch failed; continuing with no entities from it",
+                    "recognizer batch failed; retrying each subject on its own",
                 );
-                // One empty list per subject: the analyzer requires each
-                // recognizer to return exactly one list per subject, and a whole
-                // batch failing means none of them got any entities.
-                Ok(subjects.iter().map(|_| Vec::new()).collect())
+                // One subject's failure must not cost the others their
+                // findings: recognize each on its own (concurrently), so only
+                // the subjects that still fail come back empty.
+                Ok(
+                    future::join_all(subjects.iter().map(|subject| self.recognize(subject, ctx)))
+                        .await
+                        .into_iter()
+                        .map(Result::unwrap_or_default)
+                        .collect(),
+                )
+            }
+            Err(error) => {
+                tracing::warn!(
+                    recognizer = %self.inner.id(),
+                    %error,
+                    "recognizer failed; continuing with no entities from it",
+                );
+                Ok(vec![Vec::new()])
             }
         }
     }
@@ -91,7 +107,10 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
 #[cfg(test)]
 mod tests {
     use elide_core::Error;
-    use elide_core::modality::text::{Text, TextData};
+    use elide_core::entity::LabelRef;
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::modality::text::{Text, TextData, TextLocation};
+    use elide_core::primitive::Confidence;
     use elide_core::recognition::{Scope, Subject};
 
     use super::*;
@@ -143,5 +162,61 @@ mod tests {
         // Exactly one (empty) list per subject — the analyzer's contract.
         assert_eq!(out.len(), subjects.len());
         assert!(out.iter().all(Vec::is_empty));
+    }
+
+    /// Fails on the subject `"bad"`, alone or inside a batch, and reports one
+    /// finding on any other subject.
+    struct FailsOnBad;
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for FailsOnBad {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("fails-on-bad", "0")
+        }
+
+        async fn recognize(
+            &self,
+            subject: &Subject<Text>,
+            _ctx: &Context<'_>,
+        ) -> Result<Vec<Entity<Text>>> {
+            if subject.data().as_str() == "bad" {
+                return Err(Error::recognition("bad subject"));
+            }
+            let location = TextLocation::inline(0..1);
+            let confidence = Confidence::new(0.9).unwrap();
+            let event =
+                AuditEvent::pattern("t", confidence, location.clone(), PatternRule::default());
+            Ok(vec![
+                Entity::new(LabelRef::new("THING"), location).with_event(event),
+            ])
+        }
+
+        async fn recognize_batch(
+            &self,
+            subjects: &[&Subject<Text>],
+            ctx: &Context<'_>,
+        ) -> Result<Vec<Vec<Entity<Text>>>> {
+            let mut found = Vec::with_capacity(subjects.len());
+            for subject in subjects {
+                found.push(self.recognize(subject, ctx).await?);
+            }
+            Ok(found)
+        }
+    }
+
+    /// One failing subject costs only itself: the batch is retried subject by
+    /// subject, and the others keep their findings.
+    #[tokio::test]
+    async fn a_failing_subject_keeps_the_others_findings() {
+        let recognizer = ResilientRecognizer::new(FailsOnBad);
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let subjects = [subject("good"), subject("bad"), subject("also good")];
+        let out = recognizer
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &ctx)
+            .await
+            .expect("resilient swallows the error");
+        let counts: Vec<usize> = out.iter().map(Vec::len).collect();
+        assert_eq!(counts, [1, 0, 1]);
     }
 }

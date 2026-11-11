@@ -87,13 +87,18 @@ where
 
 impl<G, S: Scoring> FuseLayer<G, S> {
     /// Fuse `members` into the highest-confidence one (ties to the earliest),
-    /// left in its slot; returns the others, emptied of their trails.
+    /// left in its slot; returns the members it absorbed, emptied of their
+    /// trails.
+    ///
+    /// A member whose location cannot be united with the fused one (a custom
+    /// grouping that clusters findings on different pages, say) is left in its
+    /// own slot, a separate entity: fusion merges only what it can locate as
+    /// one, and never drops a finding it cannot cover.
     fn fuse<M: Modality>(
         &self,
         slots: &mut [Option<Entity<M>>],
         members: &Cluster,
     ) -> Vec<Entity<M>> {
-        let mut others: Vec<Entity<M>> = Vec::with_capacity(members.len() - 1);
         let mut base_index = members[0];
         for &index in &members[1..] {
             let candidate = slots[index].as_ref().map(|e| e.confidence);
@@ -103,19 +108,36 @@ impl<G, S: Scoring> FuseLayer<G, S> {
             }
         }
         let mut base = slots[base_index].take().expect("each member is fused once");
+
+        let mut absorbed: Vec<Entity<M>> = Vec::with_capacity(members.len() - 1);
         for &index in members.iter().filter(|&&index| index != base_index) {
-            others.push(slots[index].take().expect("each member is fused once"));
+            let other = slots[index].take().expect("each member is fused once");
+            match base.location.union(&other.location) {
+                Some(union) => {
+                    base.location = union;
+                    absorbed.push(other);
+                }
+                None => slots[index] = Some(other),
+            }
+        }
+        if absorbed.is_empty() {
+            slots[base_index] = Some(base);
+            return absorbed;
         }
 
-        let confidence = others.iter().fold(base.confidence, |pooled, other| {
+        let confidence = absorbed.iter().fold(base.confidence, |pooled, other| {
             self.scoring.score(pooled, other.confidence)
         });
-        let mut heads = vec![base.audit.head_hash()];
-        for other in &mut others {
-            if let Some(union) = base.location.union(&other.location) {
-                base.location = union;
+        // The fusion event joins every member trail that has a head; a member
+        // with no events yet (built without provenance) contributes none.
+        let mut heads = Vec::with_capacity(absorbed.len() + 1);
+        if !base.audit.is_empty() {
+            heads.push(base.audit.head_hash());
+        }
+        for other in &mut absorbed {
+            if !other.audit.is_empty() {
+                heads.push(other.audit.head_hash());
             }
-            heads.push(other.audit.head_hash());
             base.audit.absorb(mem::take(&mut other.audit).into_events());
         }
         base.confidence = confidence;
@@ -124,7 +146,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
             heads,
         );
         slots[base_index] = Some(base);
-        others
+        absorbed
     }
 }
 
@@ -133,7 +155,7 @@ mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{Confidence, UnitBoundingBox};
 
     use super::*;
 
@@ -220,6 +242,53 @@ mod tests {
         assert_eq!(fusions.len(), 1);
         assert_eq!(fusions[0].parents().len(), 3);
         assert!(audit.verify().is_ok());
+    }
+
+    /// Members built without provenance (empty trails) fuse into a trail that
+    /// still verifies: the fusion event names no parent it does not have.
+    #[test]
+    fn fusing_entities_with_no_trail_verifies() {
+        let entities: Vec<Entity<Text>> = vec![
+            Entity::new(LabelRef::new("EMAIL"), TextLocation::inline(0..10)),
+            Entity::new(LabelRef::new("EMAIL"), TextLocation::inline(5..15)),
+        ];
+        let out = FuseLayer::max().apply(entities);
+        assert_eq!(out.kept.len(), 1);
+        assert!(out.kept[0].audit.verify().is_ok());
+    }
+
+    /// Groups every finding of a label, wherever it is.
+    struct AnyWhere;
+
+    impl GroupPredicate<Text> for AnyWhere {
+        type Bucket = LabelRef;
+
+        fn bucket(&self, entity: &Entity<Text>) -> LabelRef {
+            entity.label.clone()
+        }
+
+        fn is_grouped(&self, _a: &Entity<Text>, _b: &Entity<Text>) -> bool {
+            true
+        }
+    }
+
+    /// A grouping can cluster findings whose locations cannot be united (two
+    /// pages); fusion keeps each as its own entity rather than dropping one.
+    #[test]
+    fn a_member_that_cannot_be_united_stays_separate() {
+        let on_page = |page: u32| {
+            let location =
+                TextLocation::rendered(0..5, page, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]);
+            let confidence = Confidence::new(0.9).unwrap();
+            let event =
+                AuditEvent::pattern("t", confidence, location.clone(), PatternRule::default());
+            Entity::new(LabelRef::new("EMAIL"), location).with_event(event)
+        };
+        let out = FuseLayer::max()
+            .with_grouping(AnyWhere)
+            .apply(vec![on_page(1), on_page(2)]);
+        assert_eq!(out.kept.len(), 2, "both pages' findings survive");
+        assert!(out.dropped.is_empty());
     }
 
     /// Different labels never group under `SameLabel`, so fusion leaves a
