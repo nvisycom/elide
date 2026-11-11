@@ -72,7 +72,7 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 /// [`build_analyzer`] plus, when `llm` is on, the mock LLM recognizer. The LLM
 /// recognizer is bound to [`LlmModality`], which `Text` satisfies but `Tabular`
 /// does not (see `testdata/BUGS.md` B9), so only `Text` pipelines carry it today;
-/// a container's tabular body still drives its text sub-parts through this `Text`
+/// a container's tabular body still drives its text streams through this `Text`
 /// pipeline.
 ///
 /// Like the mock NER, the mock LLM finds nothing today; it makes the pipeline
@@ -219,7 +219,6 @@ impl TestOrchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         self.inner = self.inner.with_modality::<M>(analyzer, anonymizer);

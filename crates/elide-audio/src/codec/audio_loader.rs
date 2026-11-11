@@ -2,20 +2,17 @@
 //! tags stripped under the hidden-content policy.
 
 use elide_codec::content::ContentData;
-use elide_codec::{
-    Document, DocumentLoader, DocumentPart, ErasedStream, FormatId, LocalId, Stream,
-    StrippedContent,
-};
+use elide_codec::{Document, DocumentLoader, FormatId, StrippedContent};
 use elide_core::Result;
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
-use super::audio_recombine::AudioRecombine;
+use super::audio_document::AudioDocument;
 use super::audio_stream::AudioStream;
 use crate::AudioBuffer;
-use crate::modality::{Audio, AudioFormat};
+use crate::modality::AudioFormat;
 
-/// The id of a clip's one stream part.
-const BODY_PART_ID: &str = "body";
+/// The id of a clip's one stream.
+pub(super) const BODY_PART_ID: &str = "body";
 
 /// A loader that decodes a clip into a [`Document`] of one [`AudioStream`].
 ///
@@ -44,17 +41,13 @@ impl DocumentLoader for AudioDocumentLoader {
         let removed = clip.strip_metadata()?;
         stripped.record(HiddenContent::Properties, None, removed.tags);
         stripped.record(HiddenContent::PriorRevision, None, removed.padding);
-        let stream: Box<dyn Stream<Audio>> = Box::new(AudioStream {
-            clip,
-            format_id: self.format_id,
-        });
-        let part = DocumentPart::Stream {
-            id: LocalId::new(BODY_PART_ID),
-            handle: ErasedStream::new(stream),
-        };
-        let recombine = AudioRecombine {
+        let native = AudioDocument {
+            clip: AudioStream {
+                clip,
+                format_id: self.format_id,
+            },
             format: self.format,
         };
-        Ok(Document::new(self.format_id, vec![part], Box::new(recombine)).with_stripped(stripped))
+        Ok(Document::new(self.format_id, native, Vec::new()).with_stripped(stripped))
     }
 }

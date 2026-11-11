@@ -1,12 +1,12 @@
 //! [`LocalId`]: a [`Document`](super::Document)'s own, local id for one of its
-//! [`DocumentPart`](super::DocumentPart)s.
+//! streams or [`Blob`](super::Blob)s.
 
 use std::borrow::Cow;
 use std::fmt;
 use std::path::Path;
 
 /// A [`Document`](super::Document)'s own, local id for one of its
-/// [`DocumentPart`](super::DocumentPart)s.
+/// streams or [`Blob`](super::Blob)s.
 ///
 /// A zip entry name (`word/media/image1.png`) or a PDF object reference, unique
 /// only **within that one document**. The orchestrator composes these into a

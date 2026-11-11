@@ -1,4 +1,4 @@
-//! [`PartId`]: the container-local id of a blob part a PDF surfaces, and how it
+//! [`PartId`]: the container-local id of a blob a PDF surfaces, and how it
 //! reads back on encode.
 
 use std::fmt;
@@ -6,7 +6,7 @@ use std::fmt;
 use crate::document::attachment::AttachmentId;
 use crate::document::image::ImageId;
 
-/// What a blob part of a decoded PDF is: an embedded image (`img-N-G`), an
+/// What a blob of a decoded PDF is: an embedded image (`img-N-G`), an
 /// attachment (`att-N-G`), or a scanned page (`page-N`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PartId {
@@ -16,7 +16,7 @@ pub(super) enum PartId {
 }
 
 impl PartId {
-    /// The part `id` names, or `None` for an id that is no blob part (the body
+    /// The blob `id` names, or `None` for an id that is no blob (the body
     /// stream's).
     pub(super) fn parse(id: &str) -> Option<Self> {
         let object = |rest: &str| -> Option<(u32, u16)> {

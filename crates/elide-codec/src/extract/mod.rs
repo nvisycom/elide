@@ -7,22 +7,20 @@
 //!
 //! - [`ExtractedItem<A>`]: one addressable unit (its `value` plus an
 //!   address `A`), parser-agnostic.
-//! - [`ExtractStream`]: the [`Stream`] machinery over a shared item stream:
-//!   cumulative offsets, `chunks`, random read, batch redact, and `lift`. It
-//!   never inspects the address, only yields and edits `value`.
-//! - [`SharedSplice<A>`]: the decoded item stream, shared behind a
-//!   `Clone`-to-share handle between the [`ExtractStream`] (which
-//!   redacts it in place) and the format's [`Recombine`](crate::Recombine) (which
-//!   reads the redacted items via [`SharedSplice::with_items`] and re-serialises
-//!   the native container).
+//! - [`ExtractStream`]: the [`Stream`] machinery over the item stream it
+//!   owns: cumulative offsets, `chunks`, random read, batch redact, and `lift`.
+//!   It never inspects the address, only yields and edits `value`. The format's
+//!   [`Native`](crate::Native) document reads the redacted items through
+//!   [`ExtractStream::items`] and re-serialises the native container.
 //! - [`SourceAddresser<A>`]: the address-specific decoded↔raw mapping
 //!   ([`source_span`](SourceAddresser::source_span) /
 //!   [`locate_source`](SourceAddresser::locate_source)); the default addresses
 //!   nothing.
 //!
 //! A concrete format supplies a parser that produces the item stream, a
-//! `SourceAddresser` for its address type, and a `Recombine` that splices the
-//! (mutated) values back into its native bytes; everything between is shared.
+//! `SourceAddresser` for its address type, and a `Native` document that splices
+//! the (mutated) values back into its native bytes; everything between is
+//! shared.
 //! The item value is always [`Text`], so a recognizer or operator written for
 //! text serves every format built on this engine unchanged.
 //!
@@ -43,7 +41,6 @@ use elide_core::redaction::HiddenContentKind;
 
 pub use self::addresser::SourceAddresser;
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
-pub use self::state::SharedSplice;
 use self::state::SpliceState;
 pub use self::stream::ExtractStream;
 
@@ -51,7 +48,7 @@ pub use self::stream::ExtractStream;
 ///
 /// `value` is the text a recognizer scans and that redaction mutates in
 /// place; `address` is the "where": how the format's
-/// [`Recombine`](crate::Recombine) re-finds this unit to splice the mutated
+/// [`Native`](crate::Native) document re-finds this unit to splice the mutated
 /// value back in. The stream machinery never inspects `address`; it only
 /// streams and edits `value`, so each format chooses the addressing scheme its
 /// re-pack needs (source byte spans for in-place patching, `(part, span,

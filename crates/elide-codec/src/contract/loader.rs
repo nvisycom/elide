@@ -2,7 +2,7 @@
 //!
 //! - [`Loader`]: per-modality decoder a leaf format implementation writes.
 //!   Returns a concrete [`Stream`].
-//! - [`DocumentLoader`]: the parts-model decoder the `FormatRegistry` holds
+//! - [`DocumentLoader`]: the whole-document decoder the `FormatRegistry` holds
 //!   behind `Arc`; it produces the whole [`Document`]. `LeafLoader` adapts a
 //!   [`Loader`] into one for a leaf format.
 
@@ -10,7 +10,7 @@ use elide_core::Result;
 use elide_core::modality::Modality;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::{Document, Stream};
+use super::{Document, Encode, Stream};
 use crate::content::ContentData;
 
 /// Per-modality leaf-format loader.
@@ -24,8 +24,8 @@ use crate::content::ContentData;
 ///
 /// # Implementing a third-party leaf format
 ///
-/// 1. Implement [`Stream`](super::Stream) for the per-format type that owns the
-///    parsed in-memory representation.
+/// 1. Implement [`Stream`](super::Stream) and [`Encode`] for the per-format type
+///    that owns the parsed in-memory representation.
 /// 2. Implement `Loader` for a stateless type whose [`decode`] validates raw
 ///    [`ContentData`] and returns the stream.
 /// 3. Build a [`Format`] with [`Format::new`], chain extensions / content types
@@ -40,8 +40,9 @@ pub trait Loader: Send + Sync + 'static {
     /// The modality this loader decodes into.
     type Modality: Modality;
 
-    /// The stream type this loader produces.
-    type Stream: Stream<Self::Modality>;
+    /// The stream type this loader produces: the whole document, so it
+    /// [encodes](Encode) itself.
+    type Stream: Stream<Self::Modality> + Encode;
 
     /// Validate and parse the content, returning the loaded stream.
     ///
@@ -51,13 +52,12 @@ pub trait Loader: Send + Sync + 'static {
     async fn decode(&self, content: ContentData) -> Result<Self::Stream>;
 }
 
-/// Decode raw content into a [`Document`] — the parts model's loader.
+/// Decode raw content into a [`Document`].
 ///
 /// Where a [`Loader`] produces a single [`Stream`](super::Stream), a
-/// `DocumentLoader` produces
-/// the whole [`Document`]: its stream part(s), any blob sub-parts, and the
-/// format's recombiner. A leaf format returns a one-[`Stream`](super::Stream)
-/// document with a trivial recombiner.
+/// `DocumentLoader` produces the whole [`Document`]: the format's
+/// [`Native`](super::Native) document, which owns its streams, and the blobs
+/// embedded in it.
 ///
 /// Decoding is where a format applies the [`HiddenContentPolicy`]: hidden content
 /// the policy strips is gone before any part is built, so detection only sees
@@ -80,11 +80,11 @@ pub trait DocumentLoader: Send + Sync + 'static {
 
 /// A [`Loader`] wrapped so it produces a leaf [`Document`].
 ///
-/// Its one stream becomes the document's only part, with a trivial recombiner:
-/// the bridge for a
-/// leaf format that has only a [`Loader`] and no sub-parts. Such a format
-/// carries no hidden content, so the [`HiddenContentPolicy`] has nothing to act on; a
-/// format with hidden content implements [`DocumentLoader`] itself.
+/// Its one stream becomes a [`LeafDocument`](super::LeafDocument): the bridge
+/// for a leaf format that has only a [`Loader`] and no embedded files. Such a
+/// format carries no hidden content, so the [`HiddenContentPolicy`] has nothing
+/// to act on; a format with hidden content implements [`DocumentLoader`]
+/// itself.
 pub(crate) struct LeafLoader<L>(pub(crate) L);
 
 #[async_trait::async_trait]
@@ -92,7 +92,6 @@ impl<L: Loader> DocumentLoader for LeafLoader<L> {
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
         let stream = Loader::decode(&self.0, content).await?;
         let format_id = Stream::format(&stream);
-        let stream: Box<dyn Stream<L::Modality>> = Box::new(stream);
         Ok(Document::leaf(format_id, stream))
     }
 }

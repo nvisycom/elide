@@ -7,7 +7,7 @@
 //! UTF-8 value the recognizer sees (`value`). [`Stream::chunks`]
 //! yields leaves in document order; `write_at` splices each redaction into
 //! the leaf's `serialized` bytes at the mapped source span (keeping `value`
-//! in sync); [`Stream::encode`] concatenates every slot.
+//! in sync); [`Encode::encode`] concatenates every slot.
 //!
 //! Because a redaction is spliced rather than re-rendered from the decoded
 //! value, formatting (indentation, key order, whitespace) *and* every byte
@@ -19,7 +19,7 @@ use std::ops::Range;
 
 use elide_codec::content::ContentData;
 use elide_codec::string::RedactRange;
-use elide_codec::{Format, FormatId, Stream};
+use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
@@ -365,17 +365,6 @@ impl Stream<Text> for JsonHandler {
         FORMAT_ID
     }
 
-    fn encode(&self) -> Result<ContentData> {
-        let mut out = String::new();
-        for slot in &self.slots {
-            match slot {
-                Slot::Passthrough(text) => out.push_str(text),
-                Slot::Leaf(leaf) => out.push_str(&leaf.serialized),
-            }
-        }
-        Ok(ContentData::from_text(out))
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         // A chunk's location addresses the decoded stream, its span matches
         // `data` (the decoded value), so a recognizer's offsets into `data` map
@@ -421,6 +410,19 @@ impl Stream<Text> for JsonHandler {
             decoded_start..decoded_end,
             [SourceRef::new(source_start..source_end)],
         ))
+    }
+}
+
+impl Encode for JsonHandler {
+    fn encode(&self) -> Result<ContentData> {
+        let mut out = String::new();
+        for slot in &self.slots {
+            match slot {
+                Slot::Passthrough(text) => out.push_str(text),
+                Slot::Leaf(leaf) => out.push_str(&leaf.serialized),
+            }
+        }
+        Ok(ContentData::from_text(out))
     }
 }
 
@@ -480,7 +482,7 @@ impl JsonHandler {
     }
 
     /// The serialized byte offset where the slot at `idx` starts, what
-    /// [`encode`](Stream::encode) emits and what a raw [`SourceRef`] addresses.
+    /// [`encode`](Encode::encode) emits and what a raw [`SourceRef`] addresses.
     fn source_offset_of(&self, idx: usize) -> usize {
         self.slots[..idx].iter().map(Slot::source_len).sum()
     }

@@ -16,8 +16,8 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::handler::FORMAT_ID;
 use crate::engine::config::MarkupConfig;
+use crate::engine::document::markup_document;
 use crate::engine::parser::build_items;
-use crate::engine::recombine::markup_document;
 use crate::sanitize::{Dialect, MarkupSanitizer};
 
 /// HTML block-level elements: each ends a passage, and its text children form
@@ -93,7 +93,7 @@ impl DocumentLoader for HtmlLoader {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::{Document, DocumentPart};
+    use elide_codec::{Document, TypedStream};
     use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextReplacement};
     use elide_core::modality::{ChunkReader, DataReader, DataWriter};
@@ -101,14 +101,10 @@ mod tests {
 
     use super::*;
 
-    /// The body stream part of a decoded HTML document, downcast to `Text`.
-    fn body(doc: &mut Document) -> &mut elide_codec::TypedStream<Text> {
-        match &mut doc.parts_mut()[0] {
-            DocumentPart::Stream { handle, .. } => {
-                handle.downcast_mut::<Text>().expect("text body")
-            }
-            _ => panic!("part 0 is the body stream"),
-        }
+    /// The body stream of a decoded HTML document, as `Text`.
+    fn body(doc: &mut Document) -> TypedStream<'_, Text> {
+        let (_, stream) = doc.streams_mut().into_iter().next().expect("a body");
+        stream.downcast::<Text>().expect("text body")
     }
 
     async fn load_with(raw: &str, policy: HiddenContentPolicy) -> Document {

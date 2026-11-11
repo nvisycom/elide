@@ -1,10 +1,10 @@
 //! XML loader: sanitizes decoded content (its comments, under the policy) and
 //! wires the rest through the shared [`parser`] into a leaf [`Document`] whose
-//! body is an [`ExtractStream`] recombined by [`MarkupRecombine`].
+//! body is an [`ExtractStream`] re-serialised by [`MarkupDocument`].
 //!
 //! [`parser`]: crate::engine::parser
 //! [`ExtractStream`]: elide_codec::extract::ExtractStream
-//! [`MarkupRecombine`]: crate::engine::recombine::MarkupRecombine
+//! [`MarkupDocument`]: crate::engine::document::MarkupDocument
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document, DocumentLoader};
@@ -13,8 +13,8 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::handler::FORMAT_ID;
 use crate::engine::config::MarkupConfig;
+use crate::engine::document::markup_document;
 use crate::engine::parser::build_items;
-use crate::engine::recombine::markup_document;
 use crate::sanitize::{Dialect, MarkupSanitizer};
 
 /// Loader for XML files. Produces one leaf [`Document`] per input.

@@ -1,38 +1,47 @@
-//! The PDF [`Recombine`]: applies the recorded redactions from the shared
-//! [`PdfState`], folds in the redacted and removed image, scanned-page, and
+//! [`PdfDocument`]: a decoded PDF, re-serialised by applying the redactions its
+//! body stream recorded,
+//! folds in the redacted and removed image, scanned-page, and
 //! attachment blobs, and checks the output carries no hidden content.
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{EncodedPart, LocalId, Recombine};
+use elide_codec::{Blob, LocalId, Native, StreamMut};
 use elide_core::Result;
+use elide_core::modality::text::Text;
 
+use super::BODY_PART_ID;
 use super::part_id::PartId;
-use super::state::PdfState;
+use super::stream::PdfStream;
 use crate::document::attachment::AttachmentReplacement;
 use crate::document::image::ImageReplacement;
 use crate::document::{Pdf, Redaction};
 #[cfg(feature = "render")]
 use crate::render::PageReplacement;
 
-/// Re-serialises the PDF: applies the recorded redactions (from the shared
-/// [`PdfState`]) per its [`RedactMode`](super::RedactMode), folding in the
-/// embedded-image, scanned-page, and attachment
-/// [`Blob`](elide_codec::DocumentPart::Blob)s alongside.
-pub(super) struct PdfRecombine {
+/// A decoded PDF: its page-text body stream over the retained document,
+/// re-serialised by applying the redactions the stream recorded, per its
+/// [`RedactMode`](super::RedactMode), folding in the embedded-image,
+/// scanned-page, and attachment [`Blob`]s alongside.
+pub(super) struct PdfDocument {
+    /// The page-text body.
+    pub(super) body: PdfStream,
     /// The (sanitized) document bytes, retained so [`Pdf`] re-serialises from
     /// the decoded source.
     pub(super) document: Bytes,
-    /// The shared redaction state, read to apply the detections.
-    pub(super) state: PdfState,
 }
 
-impl Recombine for PdfRecombine {
-    fn assemble(&self, parts: &[EncodedPart], removed: &[LocalId]) -> Result<ContentData> {
+impl Native for PdfDocument {
+    fn streams(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
+        vec![(
+            LocalId::new(BODY_PART_ID),
+            StreamMut::new::<Text, _>(&mut self.body),
+        )]
+    }
+
+    fn encode(&self, blobs: &[Blob], removed: &[LocalId]) -> Result<ContentData> {
         let mut redaction = Redaction::default();
-        // Each blob part is an embedded image, a scanned page, or an attachment;
-        // the body stream part carries no bytes and parses as none.
-        for part in parts {
+        // Each blob is an embedded image, a scanned page, or an attachment.
+        for part in blobs {
             let bytes = part.bytes.to_vec();
             match PartId::parse(part.id.as_str()) {
                 Some(PartId::Image(id)) => {
@@ -66,7 +75,7 @@ impl Recombine for PdfRecombine {
             }
         }
 
-        let bytes = self.state.redact(&self.document, redaction)?;
+        let bytes = self.body.state.redact(&self.document, redaction)?;
         Ok(ContentData::new(bytes))
     }
 

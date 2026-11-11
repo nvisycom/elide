@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 
 use elide_codec::content::ContentData;
 use elide_codec::string::RedactRange;
-use elide_codec::{Format, FormatId, Stream};
+use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
@@ -212,10 +212,6 @@ impl Stream<Tabular> for CsvHandler {
         FORMAT_ID
     }
 
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(bytes::Bytes::from(self.serialize()?)))
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
         let mut chunks = Vec::new();
         for row in 0..self.total_rows() {
@@ -266,6 +262,12 @@ impl Stream<Tabular> for CsvHandler {
             location = location.with_sheet_name(sheet.clone());
         }
         Some(location)
+    }
+}
+
+impl Encode for CsvHandler {
+    fn encode(&self) -> Result<ContentData> {
+        Ok(ContentData::new(bytes::Bytes::from(self.serialize()?)))
     }
 }
 

@@ -2,7 +2,7 @@
 //! encode.
 
 use bytes::Bytes;
-use elide::codec::{Document, DocumentPart};
+use elide::codec::Document;
 use elide::redaction::{Disposition, HiddenContentPolicy};
 use elide_pdf::fixtures;
 
@@ -10,12 +10,10 @@ use super::decode;
 
 /// The attachment blob a document surfaces, as `(bytes, hint)`.
 fn attachment(doc: &Document) -> Option<(Bytes, String)> {
-    doc.parts().iter().find_map(|part| match part {
-        DocumentPart::Blob { id, bytes, hint } if id.as_str().starts_with("att-") => {
-            Some((bytes.clone(), hint.clone()))
-        }
-        _ => None,
-    })
+    doc.blobs()
+        .iter()
+        .find(|blob| blob.id.as_str().starts_with("att-"))
+        .map(|blob| (blob.bytes.clone(), blob.hint.clone()))
 }
 
 /// Whether `haystack` contains `needle`.
@@ -55,14 +53,12 @@ async fn a_removed_attachment_is_dropped_on_encode() {
     )
     .await;
     let id = doc
-        .parts()
+        .blobs()
         .iter()
-        .find_map(|part| match part {
-            DocumentPart::Blob { id, .. } if id.as_str().starts_with("att-") => Some(id.clone()),
-            _ => None,
-        })
+        .find(|blob| blob.id.as_str().starts_with("att-"))
+        .map(|blob| blob.id.clone())
         .expect("attachment blob");
-    doc.remove_part(&id).unwrap();
+    doc.remove_blob(&id).unwrap();
     let out = doc.encode().expect("encode");
     assert!(
         fixtures::attachments(out.as_bytes()).is_empty(),

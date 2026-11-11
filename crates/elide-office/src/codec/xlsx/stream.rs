@@ -1,7 +1,5 @@
 //! [`XlsxStream`]: the body [`Stream<Tabular>`] of a workbook's cells.
 
-use bytes::Bytes;
-use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Stream};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::TextData;
@@ -14,7 +12,7 @@ use super::state::XlsxState;
 
 /// The body [`Stream<Tabular>`] of an XLSX workbook: each cell is independently
 /// addressable via a [`TabularLocation`] scoped by sheet name. Redactions land on
-/// the shared [`XlsxState`]; the [`XlsxRecombine`](super::recombine::XlsxRecombine)
+/// its [`XlsxState`]; the [`XlsxDocument`](super::document::XlsxDocument)
 /// re-packs from it.
 pub(super) struct XlsxStream {
     pub(super) state: XlsxState,
@@ -25,15 +23,11 @@ impl Stream<Tabular> for XlsxStream {
         FORMAT_ID
     }
 
-    fn encode(&self) -> Result<ContentData> {
-        // The workbook re-pack lives in `XlsxRecombine`, which reads the shared
-        // cells; this part's own bytes are ignored by the recombiner.
-        Ok(ContentData::new(Bytes::new()))
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
-        Ok((0..self.state.cell_count())
-            .filter_map(|i| self.state.cell(i))
+        Ok(self
+            .state
+            .cells()
+            .iter()
             .map(|cell| {
                 let mut location =
                     TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
@@ -55,7 +49,7 @@ impl Stream<Tabular> for XlsxStream {
                 }
                 Chunk {
                     location,
-                    data: TextData::new(cell.text),
+                    data: TextData::new(cell.text.clone()),
                     hints,
                 }
             })

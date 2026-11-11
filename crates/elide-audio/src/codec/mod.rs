@@ -7,16 +7,16 @@
 //! Each format wraps this crate's [`AudioBuffer`] engine, which holds the
 //! encoded bytes and decodes to samples only when a redaction is applied on
 //! encode. The shared body is `AudioDocumentLoader` (`audio_loader`), the
-//! `AudioStream` part (`audio_stream`), and `AudioRecombine`
-//! (`audio_recombine`); the `impl_audio_handler!` macro stamps out each format's
+//! `AudioStream` (`audio_stream`), and `AudioDocument` (`audio_document`); the
+//! `impl_audio_handler!` macro stamps out each format's
 //! id and lookup keys.
 //!
 //! [`AudioBuffer`]: crate::AudioBuffer
 
 mod macros;
 
+mod audio_document;
 mod audio_loader;
-mod audio_recombine;
 mod audio_stream;
 
 #[cfg(feature = "mp3")]

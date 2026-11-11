@@ -1,48 +1,50 @@
-//! [`ExtractStream<A>`]: the [`Stream`] machinery over a shared
-//! extracted item stream.
+//! [`ExtractStream<A>`]: the [`Stream`] machinery over an extracted item
+//! stream.
 
 use std::ops::Range;
-use std::sync::Arc;
 
-use bytes::Bytes;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
-use super::{ItemEdit, Passage, SharedSplice, SourceAddresser, SpliceState};
-use crate::content::ContentData;
+use super::{ExtractedItem, ItemEdit, Passage, SourceAddresser, SpliceState};
 use crate::string::RedactRange;
 use crate::{FlaggedItem, FormatId, Stream};
 
-/// The [`Stream`] machinery over a shared extracted item stream.
+/// The [`Stream`] machinery over an extracted item stream.
 ///
 /// It yields each [`Passage`] of items as one [`Chunk`], so an entity a
 /// document stores across several items is read whole; reads and redacts by
 /// decoded offset, across items; and lifts a chunk-local finding to source
-/// coordinates via the [`SourceAddresser`]. The decoded items live in a [`SharedSplice`] the
-/// format's [`Recombine`](crate::Recombine) also holds, so a redaction here is
-/// visible when the document re-serialises.
+/// coordinates via the [`SourceAddresser`]. It owns the decoded items; the
+/// format's [`Native`](crate::Native) document reads the redacted ones through
+/// [`items`](Self::items) to write the document out.
 ///
 /// [`Chunk`]: elide_core::modality::Chunk
 pub struct ExtractStream<A> {
     format_id: FormatId,
-    state: SharedSplice<A>,
-    addresser: Arc<dyn SourceAddresser<A>>,
+    state: SpliceState<A>,
+    addresser: Box<dyn SourceAddresser<A>>,
 }
 
 impl<A: Send + Sync + 'static> ExtractStream<A> {
-    /// Build a stream over `state`, addressed by `addresser`.
+    /// Build a stream over the decoded `items`, addressed by `addresser`.
     pub fn new(
         format_id: FormatId,
-        state: SharedSplice<A>,
-        addresser: Arc<dyn SourceAddresser<A>>,
+        items: Vec<ExtractedItem<A>>,
+        addresser: impl SourceAddresser<A> + 'static,
     ) -> Self {
         Self {
             format_id,
-            state,
-            addresser,
+            state: SpliceState::new(items),
+            addresser: Box::new(addresser),
         }
+    }
+
+    /// The (possibly redacted) items, in document order.
+    pub fn items(&self) -> &[ExtractedItem<A>] {
+        &self.state.items
     }
 
     /// The location of the decoded range `range`, with the exact raw source
@@ -50,7 +52,7 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
     /// (markup, whose item value is a verbatim source slice; OOXML, via its
     /// per-block offset map). A separator has no source text of its own.
     fn source_location(&self, range: Range<usize>) -> TextLocation {
-        let state = self.state.lock();
+        let state = &self.state;
         let source: Vec<SourceRef> = state
             .covering(range.clone())
             .unwrap_or_default()
@@ -67,7 +69,7 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
     }
 
     fn redact_one(
-        &self,
+        addresser: &dyn SourceAddresser<A>,
         state: &mut SpliceState<A>,
         location: &TextLocation,
         replacement: &TextReplacement,
@@ -77,8 +79,7 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
         // selecting text in a container part, is reverse-resolved through the
         // addresser; otherwise the decoded `range` locates the item directly.
         // Either way the edit path below is the same.
-        let edits: Vec<ItemEdit> = self
-            .resolve(state, location)?
+        let edits: Vec<ItemEdit> = Self::resolve(addresser, state, location)?
             .into_iter()
             .filter(|edit| state.items[edit.item].passage != Passage::Separator)
             .collect();
@@ -113,10 +114,14 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
     /// audit stand over an unredacted document, so it is an `Err` instead. A
     /// missed decoded `range` resolves to nothing: the pipeline's own
     /// coordinate, tolerated as a no-op.
-    fn resolve(&self, state: &SpliceState<A>, location: &TextLocation) -> Result<Vec<ItemEdit>> {
+    fn resolve(
+        addresser: &dyn SourceAddresser<A>,
+        state: &SpliceState<A>,
+        location: &TextLocation,
+    ) -> Result<Vec<ItemEdit>> {
         let source = location.source_refs();
         if !source.is_empty() {
-            let edits = self.addresser.locate_source(&state.items, source);
+            let edits = addresser.locate_source(&state.items, source);
             if edits.is_empty() {
                 // A raw source reference that resolves to no redactable
                 // item (a bad part name, an offset past the part, a span
@@ -152,17 +157,8 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
         self.format_id
     }
 
-    fn encode(&self) -> Result<ContentData> {
-        // The re-pack is the format's `Recombine`, which holds the same shared
-        // items and re-serialises them into the native container (splicing
-        // markup, re-packing an OOXML zip). A spliced body has no standalone
-        // bytes, so this stream's own encode is an ignored marker: the
-        // recombiner discards this part's `EncodedPart` bytes.
-        Ok(ContentData::new(Bytes::new()))
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
-        let state = self.state.lock();
+        let state = &self.state;
         Ok(state
             .passages()
             .into_iter()
@@ -205,7 +201,7 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
 
     fn flagged(&self) -> Result<Vec<FlaggedItem<Text>>> {
         let flagged: Vec<_> = {
-            let state = self.state.lock();
+            let state = &self.state;
             state
                 .items
                 .iter()
@@ -235,7 +231,7 @@ impl<A: Send + Sync + 'static> DataReader<Text> for ExtractStream<A> {
         let Some(range) = location.range() else {
             return Ok(None);
         };
-        let state = self.state.lock();
+        let state = &self.state;
         let Some(edits) = state.covering(range.clone()) else {
             return Ok(None);
         };
@@ -253,9 +249,8 @@ impl<A: Send + Sync + 'static> DataWriter<Text> for ExtractStream<A> {
         // Apply right-to-left so each edit's length delta doesn't
         // invalidate earlier locations.
         redactions.sort_by_position();
-        let mut state = self.state.lock();
         for (location, replacement) in redactions.into_iter().rev() {
-            self.redact_one(&mut state, &location, &replacement)?;
+            Self::redact_one(&*self.addresser, &mut self.state, &location, &replacement)?;
         }
         Ok(())
     }
@@ -266,7 +261,6 @@ mod tests {
     use elide_core::modality::DataReader;
 
     use super::*;
-    use crate::extract::ExtractedItem;
 
     /// Addresses nothing: the items carry no source pre-image.
     struct Unaddressed;
@@ -285,27 +279,29 @@ mod tests {
 
     /// Two passages: a name and an email split across items around a line
     /// break, then a passage of its own.
-    fn stream() -> (ExtractStream<()>, SharedSplice<()>) {
-        let state = SharedSplice::new(vec![
+    fn stream() -> ExtractStream<()> {
+        let items = vec![
             item("Jane R", Passage::Start),
             item("oe", Passage::Continue),
             item("\n", Passage::Separator),
             item("jane.roe@", Passage::Continue),
             item("example.com", Passage::Continue),
             item("Next", Passage::Start),
-        ]);
-        let stream =
-            ExtractStream::new(FormatId::new("test"), state.clone(), Arc::new(Unaddressed));
-        (stream, state)
+        ];
+        ExtractStream::new(FormatId::new("test"), items, Unaddressed)
     }
 
-    fn values(state: &SharedSplice<()>) -> Vec<String> {
-        state.with_items(|items| items.iter().map(|item| item.value.clone()).collect())
+    fn values(stream: &ExtractStream<()>) -> Vec<String> {
+        stream
+            .items()
+            .iter()
+            .map(|item| item.value.clone())
+            .collect()
     }
 
     #[test]
     fn each_passage_is_one_chunk() {
-        let (stream, _) = stream();
+        let stream = stream();
         let chunks = stream.chunks().unwrap();
         let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.data.as_str()).collect();
         assert_eq!(texts, ["Jane Roe\njane.roe@example.com", "Next"]);
@@ -314,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_redaction_across_items_replaces_in_the_first_and_cuts_the_rest() {
-        let (mut stream, state) = stream();
+        let mut stream = stream();
         let mut redactions = Redactions::new();
         // "Jane Roe\njane.roe@example.com": the whole passage, across the break.
         redactions.push(
@@ -322,12 +318,12 @@ mod tests {
             TextReplacement::substituted("[X]"),
         );
         stream.write_at(redactions).await.unwrap();
-        assert_eq!(values(&state), ["[X]", "", "\n", "", "", "Next"]);
+        assert_eq!(values(&stream), ["[X]", "", "\n", "", "", "Next"]);
     }
 
     #[tokio::test]
     async fn a_redaction_within_a_passage_keeps_the_separator() {
-        let (mut stream, state) = stream();
+        let mut stream = stream();
         let mut redactions = Redactions::new();
         // "Roe": the tail of one item and the whole of the next.
         redactions.push(
@@ -340,14 +336,14 @@ mod tests {
         );
         stream.write_at(redactions).await.unwrap();
         assert_eq!(
-            values(&state),
+            values(&stream),
             ["Jane [NAME]", "", "\n", "[EMAIL]", "", "Next"]
         );
     }
 
     #[tokio::test]
     async fn a_read_spans_items() {
-        let (stream, _) = stream();
+        let stream = stream();
         let read = stream.read_at(&TextLocation::inline(5..18)).await.unwrap();
         assert_eq!(read.as_ref().map(TextData::as_str), Some("Roe\njane.roe@"));
     }

@@ -44,7 +44,6 @@ AES-256-GCM ciphertext. A `Deanonymizer` with the same key decrypts it in
 place:
 
 ```rust
-use elide::codec::DocumentPart;
 use elide::modality::text::TextLocation;
 use elide::prelude::operators::*;
 use elide::prelude::*;
@@ -54,24 +53,26 @@ use elide::prelude::*;
 # let mut document = FormatRegistry::with_builtin()
 #     .decode("mail a@b.com now", "txt", HiddenContentPolicy::default())
 #     .await?;
-# let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else { unreachable!() };
-# let stream = handle.downcast_mut::<Text>().unwrap();
+# let mut stream = document
+#     .stream_mut::<Text>("body")
+#     .unwrap();
 # let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
 # let mut entities = Analyzer::<Text>::new()
 #     .with_recognizer(elide::recognition::pattern::PatternRecognizer::builder().with_builtin_patterns().build()?)
-#     .analyze_stream(stream, &scope).await?.entities;
+#     .analyze_stream(&mut stream, &scope).await?.entities;
 # assert_eq!(entities.len(), 1);
 let key = vec![42u8; 32];
 
 Anonymizer::<Text>::new()
     .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), AesEncrypt::with_key(key.clone())))
-    .anonymize(stream, &mut entities, &scope)
+    .anonymize(&mut stream, &mut entities, &scope)
     .await?;
 # let redacted = String::from_utf8(document.encode()?.as_bytes().to_vec()).unwrap();
 # assert!(!redacted.contains("a@b.com"));
 # let ciphertext = "mail ".len()..redacted.len() - " now".len();
-# let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else { unreachable!() };
-# let stream = handle.downcast_mut::<Text>().unwrap();
+# let mut stream = document
+#     .stream_mut::<Text>("body")
+#     .unwrap();
 
 // Later, by whoever holds the key: an entity for each ciphertext in the
 // redacted document, under the label it was encrypted with.
@@ -79,7 +80,7 @@ let encrypted: Entity<Text> = Entity::new(builtins::EMAIL_ADDRESS.to_ref(), Text
 
 Deanonymizer::<Text>::new()
     .with_label(builtins::EMAIL_ADDRESS.to_ref(), AesEncrypt::with_key(key))
-    .deanonymize(stream, &[encrypted])
+    .deanonymize(&mut stream, &[encrypted])
     .await?;
 # assert_eq!(document.encode()?.as_bytes(), b"mail a@b.com now");
 # Ok(())

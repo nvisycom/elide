@@ -4,7 +4,6 @@
 
 #![cfg(feature = "txt")]
 
-use elide_codec::DocumentPart;
 use elide_codec::content::ContentData;
 use elide_core::modality::DataWriter;
 use elide_core::modality::text::{Text, TextLocation, TextReplacement};
@@ -14,16 +13,15 @@ use elide_format::FormatRegistry;
 #[tokio::test]
 async fn registry_decodes_txt_by_extension() {
     let reg = FormatRegistry::with_builtin();
-    let document = reg
+    let mut document = reg
         .decode("hello\nworld\n", "txt", HiddenContentPolicy::default())
         .await
         .expect("txt decoded");
     assert_eq!(document.format_id().as_str(), "elide.text.txt");
-    // A leaf txt document is one text stream part.
-    let DocumentPart::Stream { handle, .. } = &document.parts()[0] else {
-        panic!("txt is a leaf stream document")
-    };
-    assert!(handle.is::<Text>());
+    // A leaf txt document is one text stream.
+    let streams = document.streams_mut();
+    assert_eq!(streams.len(), 1);
+    assert!(streams[0].1.is::<Text>());
 }
 
 #[tokio::test]
@@ -67,10 +65,7 @@ async fn stream_part_recovers_its_modality() {
         .expect("decoded");
     assert_eq!(document.format_id().as_str(), "elide.text.txt");
     // The body stream recovers as Text; the TypeId downcast is exact.
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("txt is a leaf stream document")
-    };
-    assert!(handle.downcast_mut::<Text>().is_some());
+    assert!(document.stream_mut::<Text>("body").is_some());
 }
 
 #[tokio::test]
@@ -84,10 +79,7 @@ async fn decode_redact_reencode_round_trip() {
         )
         .await
         .expect("decoded");
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("txt is a leaf stream document")
-    };
-    let stream = handle.downcast_mut::<Text>().expect("text stream");
+    let mut stream = document.stream_mut::<Text>("body").expect("text stream");
 
     let mut batch = Redactions::new();
     // "contact " is 8 bytes; "alice@example.test" is 18 → 8..26.
@@ -127,10 +119,9 @@ async fn registry_decodes_and_redacts_csv() {
         .await
         .expect("csv decoded");
     assert_eq!(document.format_id().as_str(), "elide.tabular.csv");
-    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
-        panic!("csv is a leaf stream document")
-    };
-    let stream = handle.downcast_mut::<Tabular>().expect("tabular stream");
+    let mut stream = document
+        .stream_mut::<Tabular>("body")
+        .expect("tabular stream");
 
     // Find the email cell, then redact it.
     let email_chunk = stream

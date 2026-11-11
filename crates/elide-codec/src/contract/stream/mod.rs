@@ -1,16 +1,14 @@
-//! [`Stream<M>`]: a redactable modality stream — the content of one
-//! [`DocumentPart`](super::DocumentPart).
+//! [`Stream<M>`]: a redactable modality stream, one of a document's streams.
 //!
-//! A `Stream` is the read/redact/re-encode surface for one modality's content:
+//! A `Stream` is the read/redact surface for one modality's content:
 //! a text body, an image's pixels, an audio clip. It is a [`DataReader`] +
 //! [`DataWriter`] (random-access read / batch redact, shared with the rest of
-//! the workspace) plus the codec-specific stream surface — identify, serialise,
-//! chunk, and lift. A document's cross-modality sub-parts are NOT here; they are
-//! the [`Document`](super::Document)'s other
-//! [`DocumentPart`](super::DocumentPart)s.
+//! the workspace) plus the codec-specific stream surface — identify, chunk,
+//! and lift. A document's embedded files are not streams; they are the
+//! [`Document`](super::Document)'s [`Blob`](super::Blob)s.
 //!
-//! [`erased`] holds [`ErasedStream`] / [`TypedStream`], the modality-erasure that
-//! lets a `Document`'s stream parts of different modalities live in one `Vec`.
+//! [`erased`] holds [`StreamMut`] / [`TypedStream`], the modality erasure a
+//! document lends its streams of different modalities behind.
 //!
 //! [`DataReader`]: elide_core::modality::DataReader
 //! [`DataWriter`]: elide_core::modality::DataWriter
@@ -18,52 +16,43 @@
 mod erased;
 mod flagged;
 
+use std::any::Any;
+
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
-pub use self::erased::{ErasedStream, TypedStream};
+pub use self::erased::{StreamMut, TypedStream};
 pub use self::flagged::FlaggedItem;
 use super::FormatId;
-use crate::content::ContentData;
 
-/// A redactable modality stream: the content of one [`DocumentPart::Stream`].
+/// A redactable modality stream, owned by its format's [`Native`] document.
 ///
 /// A `Stream` *is* a [`DataReader`] + [`DataWriter`]: random-access read
 /// (`read_at`) and batch redaction (`write_at`) come from those shared traits,
 /// so a codec-backed stream plugs straight into anything that bounds on them
 /// (the toolkit's anonymizer). On top of that base it adds the codec surface:
-/// identify and serialise ([`format`], [`encode`]), hand back its decoded chunks
-/// ([`chunks`]) and the hidden content its format labels ([`flagged`]), and
-/// lift a chunk-local finding back to source coordinates ([`lift`]).
+/// identify itself ([`format`]), hand back its decoded chunks ([`chunks`]) and
+/// the hidden content its format labels ([`flagged`]), and lift a chunk-local
+/// finding back to source coordinates ([`lift`]).
+///
+/// A stream does not write bytes: the [`Native`] document that owns it reads it
+/// and writes the document out. It is lent to the engine as a
+/// [`StreamMut`], erased through the `Any` supertrait.
 ///
 /// A stream's chunks are materialized when it is decoded, so [`chunks`] is a
-/// plain `&self` read; only redaction ([`write_at`]) mutates. A stream stores
-/// behind `Box<dyn Stream<M>>`.
+/// plain `&self` read; only redaction ([`write_at`]) mutates.
 ///
 /// [`DataReader`]: elide_core::modality::DataReader
 /// [`DataWriter`]: elide_core::modality::DataWriter
 /// [`write_at`]: elide_core::modality::DataWriter::write_at
-/// [`DocumentPart::Stream`]: super::DocumentPart::Stream
+/// [`Native`]: super::Native
 /// [`format`]: Stream::format
-/// [`encode`]: Stream::encode
 /// [`chunks`]: Stream::chunks
 /// [`flagged`]: Stream::flagged
 /// [`lift`]: Stream::lift
-pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
+pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Any + Send + Sync {
     /// Stable id of the format this stream represents (e.g. `"elide.text.txt"`).
     fn format(&self) -> FormatId;
-
-    /// Serialize the stream's current content back to [`ContentData`] — this
-    /// stream's own bytes, not the whole document (the [`Document`]'s
-    /// [`Recombine`] assembles the parts).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the in-memory representation cannot be re-encoded.
-    ///
-    /// [`Document`]: super::Document
-    /// [`Recombine`]: super::Recombine
-    fn encode(&self) -> Result<ContentData>;
 
     /// Every decoded chunk this stream holds, front to back.
     ///

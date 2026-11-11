@@ -1,15 +1,12 @@
-//! The mutable decoded item stream (`SpliceState<A>`) and its `Clone`-to-share
-//! handle ([`SharedSplice<A>`]), with the lock hidden behind methods.
+//! The mutable decoded item stream (`SpliceState<A>`) an
+//! [`ExtractStream`](super::ExtractStream) owns, with its offset index.
 
-use std::fmt;
 use std::ops::Range;
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::{ExtractedItem, ItemEdit, Passage};
 
-/// The mutable decoded item stream of a structured document, shared between an
-/// [`ExtractStream`](super::ExtractStream) and the format's
-/// [`Recombine`](crate::Recombine).
+/// The mutable decoded item stream of a structured document, owned by its
+/// [`ExtractStream`](super::ExtractStream).
 ///
 /// `item_starts` is a cumulative-offset index over the items:
 /// `item_starts[i]` is the byte position of item `i` in the concatenated
@@ -27,7 +24,7 @@ pub(super) struct SpliceState<A> {
 
 impl<A> SpliceState<A> {
     /// Build the state (and its offset index) from a decoded item stream.
-    fn new(items: Vec<ExtractedItem<A>>) -> Self {
+    pub(super) fn new(items: Vec<ExtractedItem<A>>) -> Self {
         let item_starts = compute_item_starts(&items);
         Self { items, item_starts }
     }
@@ -93,47 +90,6 @@ impl<A> SpliceState<A> {
         for s in &mut self.item_starts[i + 1..] {
             *s = s.saturating_add_signed(delta);
         }
-    }
-}
-
-/// A `Clone`-to-share handle to a document's decoded item stream, so an
-/// [`ExtractStream`](super::ExtractStream) and a [`Recombine`](crate::Recombine)
-/// share (and both see) the redacted items.
-///
-/// The lock is held only inside these methods — a `Recombine` reads the redacted
-/// items through [`with_items`](Self::with_items) rather than locking directly.
-pub struct SharedSplice<A>(Arc<Mutex<SpliceState<A>>>);
-
-impl<A> Clone for SharedSplice<A> {
-    fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0))
-    }
-}
-
-impl<A: fmt::Debug> fmt::Debug for SharedSplice<A> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SharedSplice")
-            .field(&*self.0.lock().unwrap())
-            .finish()
-    }
-}
-
-impl<A> SharedSplice<A> {
-    /// Build a shared state from a decoded item stream.
-    pub fn new(items: Vec<ExtractedItem<A>>) -> Self {
-        Self(Arc::new(Mutex::new(SpliceState::new(items))))
-    }
-
-    /// Read the (possibly redacted) items under the lock — how a
-    /// [`Recombine`](crate::Recombine) re-serialises them into native bytes.
-    pub fn with_items<R>(&self, f: impl FnOnce(&[ExtractedItem<A>]) -> R) -> R {
-        f(&self.0.lock().unwrap().items)
-    }
-
-    /// The state under the lock, for the co-located
-    /// [`ExtractStream`](super::ExtractStream)'s read/redact paths.
-    pub(super) fn lock(&self) -> MutexGuard<'_, SpliceState<A>> {
-        self.0.lock().unwrap()
     }
 }
 

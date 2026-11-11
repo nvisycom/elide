@@ -1,17 +1,17 @@
-//! [`Document`]: a decoded document as an ordered set of typed [`DocumentPart`]s.
+//! [`Document`]: a decoded document, its format's [`Native`] document (which
+//! owns the streams) plus the [`Blob`]s embedded in it.
 //!
-//! A document is its parts. A leaf (a `.txt`) is a document with one
-//! [`DocumentPart::Stream`]; a container (a `.docx`) is a stream plus
-//! [`DocumentPart::Blob`] sub-files (images, document properties). A `Stream`
-//! part is redacted in place through its [`Stream<M>`] handle; a `Blob` part is
-//! re-decoded through the registry into its own child `Document`, redacted, and
-//! folded back. [`Document::encode`] assembles the (possibly redacted) parts
-//! into native bytes through the format's [`Recombine`], recursing into blob
-//! children first (post-order), which is how a nested container re-encodes
-//! before the level above needs its bytes.
+//! A leaf (a `.txt`) is one stream; a container (a `.docx`) is a body stream,
+//! perhaps others (document properties), and blobs (embedded images and files).
+//! A stream is redacted in place through the [`StreamMut`] its native document
+//! lends; a blob is re-decoded through the registry into its own child
+//! `Document`, redacted, and folded back. [`Document::encode`] writes the
+//! (possibly redacted) document into native bytes through its [`Native`]
+//! document; the engine re-encodes blob children first (post-order), so a nested
+//! container is written before the level above needs its bytes.
 
 mod local_id;
-mod recombine;
+mod native;
 mod stripped;
 
 use std::fmt;
@@ -22,91 +22,59 @@ use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
 pub use self::local_id::LocalId;
-pub use self::recombine::{LeafRecombine, Recombine};
+pub use self::native::{Encode, LeafDocument, Native};
 pub use self::stripped::{Stripped, StrippedContent};
-use super::{ErasedStream, FormatId, Stream};
+use super::{FormatId, Stream, StreamMut, TypedStream};
 use crate::content::ContentData;
 
-/// A decoded document: an ordered set of typed parts plus the format's
-/// recombiner.
+/// A decoded document: its format's [`Native`] document and the blobs embedded
+/// in it.
 pub struct Document {
     format_id: FormatId,
-    parts: Vec<DocumentPart>,
-    /// Blob parts dropped since decode, removed from the output on encode.
+    native: Box<dyn Native>,
+    blobs: Vec<Blob>,
+    /// Blobs dropped since decode, removed from the output on encode.
     removed: Vec<LocalId>,
     /// What decode stripped from the content.
     stripped: StrippedContent,
     /// The policy the document's hidden content was handled under.
     policy: HiddenContentPolicy,
-    recombine: Box<dyn Recombine>,
 }
 
-/// One part of a [`Document`]: a redactable stream, or a re-decodable sub-file.
-pub enum DocumentPart {
-    /// A redactable modality stream (a text body, image pixels, an audio clip),
-    /// redacted in place through its [`Stream<M>`] handle. Modality-erased so a
-    /// document's parts of different modalities live in one `Vec`.
-    Stream {
-        /// This part's document-local id.
-        id: LocalId,
-        /// The erased stream handle; recover the typed form with
-        /// [`ErasedStream::downcast_mut`].
-        handle: ErasedStream,
-    },
-    /// A self-contained sub-file, re-decoded through the registry into its own
-    /// [`Document`]. Its redacted bytes fold back through
-    /// [`Document::replace_part`].
-    Blob {
-        /// This part's document-local id.
-        id: LocalId,
-        /// The sub-file's raw, undecoded bytes.
-        bytes: Bytes,
-        /// A hint at the sub-file's modality/format (a filename extension or
-        /// content type); empty when the format can't say.
-        hint: String,
-    },
-}
-
-/// One assembled part, handed to [`Recombine::assemble`]: its id and its
-/// (possibly redacted) encoded bytes.
-pub struct EncodedPart {
-    /// The part's document-local id.
+/// A self-contained file embedded in a document (an image in a DOCX, a PDF
+/// attachment), re-decoded through the registry into its own [`Document`]. Its
+/// redacted bytes fold back through [`Document::replace_blob`].
+#[derive(Clone)]
+pub struct Blob {
+    /// The blob's document-local id.
     pub id: LocalId,
-    /// The part's encoded bytes — a redacted stream re-encoded, or a blob's
-    /// folded bytes.
+    /// The blob's current bytes: the original, or the redacted bytes
+    /// [`Document::replace_blob`] staged.
     pub bytes: Bytes,
+    /// A hint at the blob's format (a filename extension); empty when the
+    /// container can't say.
+    pub hint: String,
 }
 
 impl Document {
-    /// Build a leaf document: one [`Stream`] part named `body`, whose bytes are
-    /// the document's bytes (a [`LeafRecombine`]). For a single-modality format
-    /// with no sub-parts (TXT, JSON, a bare image or audio clip).
-    pub fn leaf<M: Modality>(format_id: FormatId, stream: Box<dyn Stream<M>>) -> Self {
-        let handle = ErasedStream::new(stream);
-        Self::new(
-            format_id,
-            vec![DocumentPart::Stream {
-                id: LocalId::new("body"),
-                handle,
-            }],
-            Box::new(LeafRecombine),
-        )
-    }
-
-    /// Build a document from its format id, parts, and recombiner.
-    pub fn new(
-        format_id: FormatId,
-        parts: Vec<DocumentPart>,
-        recombine: Box<dyn Recombine>,
-    ) -> Self {
+    /// Build a document from its format id, its `native` document, and the
+    /// `blobs` embedded in it.
+    pub fn new(format_id: FormatId, native: impl Native + 'static, blobs: Vec<Blob>) -> Self {
         Self {
             format_id,
-            parts,
+            native: Box::new(native),
+            blobs,
             removed: Vec::new(),
             stripped: StrippedContent::new(),
             policy: HiddenContentPolicy::default(),
-            recombine,
         }
+    }
+
+    /// Build a leaf document: one `stream` that [encodes](Encode) itself into
+    /// the document's bytes (a [`LeafDocument`]). For a single-modality format
+    /// with no embedded files (TXT, JSON, CSV).
+    pub fn leaf<M: Modality, S: Stream<M> + Encode>(format_id: FormatId, stream: S) -> Self {
+        Self::new(format_id, LeafDocument::<M, S>::new(stream), Vec::new())
     }
 
     /// This document with the record of what its decode stripped.
@@ -147,102 +115,88 @@ impl Document {
         self.format_id
     }
 
-    /// The document's parts.
-    pub fn parts(&self) -> &[DocumentPart] {
-        &self.parts
+    /// The document's streams, each with its document-local id, to read and
+    /// redact in place.
+    pub fn streams_mut(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
+        self.native.streams()
     }
 
-    /// The document's parts, mutably (to redact a stream part in place).
-    pub fn parts_mut(&mut self) -> &mut [DocumentPart] {
-        &mut self.parts
+    /// The stream `id` as a [`TypedStream<M>`], or `None` when the document has
+    /// no stream `id` of modality `M`. A leaf document's one stream is `body`.
+    pub fn stream_mut<M: Modality>(&mut self, id: &str) -> Option<TypedStream<'_, M>> {
+        let (_, stream) = self
+            .native
+            .streams()
+            .into_iter()
+            .find(|(part, _)| *part == id)?;
+        stream.downcast()
     }
 
-    /// Stage the redacted `bytes` for the blob part with document-local `id`, to
-    /// be folded in on [`encode`](Self::encode).
+    /// The blobs embedded in the document.
+    pub fn blobs(&self) -> &[Blob] {
+        &self.blobs
+    }
+
+    /// Stage the redacted `bytes` for the blob `id`, to be folded in on
+    /// [`encode`](Self::encode).
     ///
-    /// The orchestrator decodes a blob part into its own child document,
-    /// redacts it, re-encodes it, and hands the result back here. A stream part
-    /// is redacted in place through its handle, not through this.
+    /// The orchestrator decodes a blob into its own child document, redacts it,
+    /// re-encodes it, and hands the result back here.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::NotFound`](elide_core::ErrorKind::NotFound) for an unknown
-    /// id, or an id naming a stream part, so a caller can't silently lose a
-    /// redaction.
-    pub fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
-        for part in &mut self.parts {
-            if let DocumentPart::Blob {
-                id: blob_id,
-                bytes: blob_bytes,
-                ..
-            } = part
-                && blob_id == id
-            {
-                *blob_bytes = bytes;
-                return Ok(());
-            }
-        }
-        Err(Error::not_found(format!(
-            "replace_part: `{id}` is not a blob part of this document"
-        )))
+    /// [`ErrorKind::NotFound`](elide_core::ErrorKind::NotFound) for an id that
+    /// names no blob, so a caller can't silently lose a redaction.
+    pub fn replace_blob(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
+        let blob = self
+            .blobs
+            .iter_mut()
+            .find(|blob| blob.id == *id)
+            .ok_or_else(|| Error::not_found(format!("`{id}` is not a blob of this document")))?;
+        blob.bytes = bytes;
+        Ok(())
     }
 
-    /// Drop the blob part with document-local `id`, removing it from the output
-    /// on [`encode`](Self::encode).
+    /// Drop the blob `id`, removing it from the output on
+    /// [`encode`](Self::encode).
     ///
     /// The orchestrator drops a blob no codec can decode: content it cannot read
     /// it cannot redact, so the embedding is removed rather than shipped as-is.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::NotFound`](elide_core::ErrorKind::NotFound) for an unknown
-    /// id, or an id naming a stream part.
-    pub fn remove_part(&mut self, id: &LocalId) -> Result<()> {
+    /// [`ErrorKind::NotFound`](elide_core::ErrorKind::NotFound) for an id that
+    /// names no blob.
+    pub fn remove_blob(&mut self, id: &LocalId) -> Result<()> {
         let index = self
-            .parts
+            .blobs
             .iter()
-            .position(
-                |part| matches!(part, DocumentPart::Blob { id: blob_id, .. } if blob_id == id),
-            )
-            .ok_or_else(|| {
-                Error::not_found(format!(
-                    "remove_part: `{id}` is not a blob part of this document"
-                ))
-            })?;
-        self.parts.remove(index);
+            .position(|blob| blob.id == *id)
+            .ok_or_else(|| Error::not_found(format!("`{id}` is not a blob of this document")))?;
+        self.blobs.remove(index);
         self.removed.push(id.clone());
         Ok(())
     }
 
-    /// Assemble the document's (possibly redacted) parts into native bytes and
-    /// validate the result.
+    /// Write the (possibly redacted) document into native bytes and validate
+    /// the result.
     ///
-    /// Each stream part re-encodes its own current content; each blob part
-    /// contributes its current bytes (its staged redaction if
-    /// [`replace_part`](Self::replace_part) set one, else the original), and each
-    /// [removed](Self::remove_part) blob is dropped. The format's [`Recombine`]
-    /// joins them into the native container, then
-    /// [validates](Recombine::validate) it.
+    /// The [`Native`] document writes its streams' current content with each
+    /// blob's current bytes (its staged redaction if
+    /// [`replace_blob`](Self::replace_blob) set one, else the original); each
+    /// [removed](Self::remove_blob) blob is dropped. It then
+    /// [validates](Native::validate) the output.
     ///
-    /// A blob part's *own* redaction is folded in before this is called (the
+    /// A blob's *own* redaction is folded in before this is called (the
     /// orchestrator re-encodes each blob's child document first — post-order),
-    /// so `encode` never re-decodes: it only assembles.
+    /// so `encode` never re-decodes: it only writes.
     ///
     /// # Errors
     ///
-    /// Propagates a stream's re-encode error, the recombiner's assembly error,
-    /// or its validation error.
+    /// Propagates the native document's encode error or its validation error.
     pub fn encode(&self) -> Result<ContentData> {
-        let mut assembled = Vec::with_capacity(self.parts.len());
-        for part in &self.parts {
-            let (id, bytes) = match part {
-                DocumentPart::Stream { id, handle } => (id.clone(), handle.encode()?.into_bytes()),
-                DocumentPart::Blob { id, bytes, .. } => (id.clone(), bytes.clone()),
-            };
-            assembled.push(EncodedPart { id, bytes });
-        }
-        let output = self.recombine.assemble(&assembled, &self.removed)?;
-        self.recombine.validate(&output)?;
+        let output = self.native.encode(&self.blobs, &self.removed)?;
+        self.native.validate(&output)?;
         Ok(output)
     }
 }
@@ -251,105 +205,95 @@ impl fmt::Debug for Document {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Document")
             .field("format_id", &self.format_id)
-            .field("parts", &self.parts.len())
+            .field("blobs", &self.blobs)
             .finish_non_exhaustive()
     }
 }
 
-impl fmt::Debug for DocumentPart {
+impl fmt::Debug for Blob {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DocumentPart::Stream { id, handle } => f
-                .debug_struct("Stream")
-                .field("id", id)
-                .field("handle", handle)
-                .finish(),
-            DocumentPart::Blob { id, bytes, hint } => f
-                .debug_struct("Blob")
-                .field("id", id)
-                .field("bytes", &bytes.len())
-                .field("hint", hint)
-                .finish(),
-        }
+        f.debug_struct("Blob")
+            .field("id", &self.id)
+            .field("bytes", &self.bytes.len())
+            .field("hint", &self.hint)
+            .finish()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
+    use elide_core::modality::tabular::Tabular;
     use elide_core::modality::text::Text;
 
     use super::*;
-    use crate::contract::test_support::{JoinRecombine, StrStream};
+    use crate::contract::test_support::{JoinBlobs, StrStream};
+
+    fn blob(id: &'static str, bytes: &'static [u8]) -> Blob {
+        Blob {
+            id: LocalId::new(id),
+            bytes: Bytes::from_static(bytes),
+            hint: "bin".to_owned(),
+        }
+    }
 
     #[test]
     fn a_leaf_document_encodes_its_one_stream() {
-        let stream = ErasedStream::new(Box::new(StrStream("hello".to_owned())));
-        let doc = Document::new(
+        let doc = Document::leaf(
             FormatId::new("elide.test.str"),
-            vec![DocumentPart::Stream {
-                id: LocalId::new("body"),
-                handle: stream,
-            }],
-            Box::new(LeafRecombine),
+            StrStream("hello".to_owned()),
         );
         assert_eq!(doc.encode().unwrap().as_bytes(), b"hello");
     }
 
     #[test]
-    fn erased_stream_recovers_its_modality() {
-        let mut stream = ErasedStream::new(Box::new(StrStream("x".to_owned())));
-        assert!(stream.is::<Text>());
-        assert!(stream.downcast_mut::<Text>().is_some());
+    fn a_stream_is_found_by_id_and_modality() {
+        let mut doc = Document::leaf(FormatId::new("elide.test.str"), StrStream("x".to_owned()));
+        assert!(doc.stream_mut::<Text>("body").is_some());
+        assert!(doc.stream_mut::<Text>("other").is_none());
+        assert!(
+            doc.stream_mut::<Tabular>("body").is_none(),
+            "a text stream is not found as another modality"
+        );
     }
 
     #[test]
-    fn a_blob_part_folds_its_replaced_bytes() {
+    fn a_lent_stream_recovers_only_its_own_modality() {
+        let mut doc = Document::leaf(FormatId::new("elide.test.str"), StrStream("x".to_owned()));
+        let mut streams = doc.streams_mut();
+        let (id, stream) = &mut streams[0];
+        assert_eq!(*id, "body");
+        assert!(stream.is::<Text>());
+        assert!(stream.downcast_mut::<Text>().is_some());
+        assert!(!stream.is::<Tabular>());
+        assert!(stream.downcast_mut::<Tabular>().is_none());
+    }
+
+    #[test]
+    fn a_blob_folds_its_replaced_bytes() {
         let mut doc = Document::new(
             FormatId::new("elide.test.blobs"),
-            vec![
-                DocumentPart::Blob {
-                    id: LocalId::new("a"),
-                    bytes: Bytes::from_static(b"one"),
-                    hint: "bin".to_owned(),
-                },
-                DocumentPart::Blob {
-                    id: LocalId::new("b"),
-                    bytes: Bytes::from_static(b"two"),
-                    hint: "bin".to_owned(),
-                },
-            ],
-            Box::new(JoinRecombine),
+            JoinBlobs,
+            vec![blob("a", b"one"), blob("b", b"two")],
         );
-        doc.replace_part(&LocalId::new("a"), Bytes::from_static(b"[REDACTED]"))
+        doc.replace_blob(&LocalId::new("a"), Bytes::from_static(b"[REDACTED]"))
             .unwrap();
         assert_eq!(doc.encode().unwrap().as_bytes(), b"[REDACTED]two");
-        let missing = doc.replace_part(&LocalId::new("nope"), Bytes::new());
+        let missing = doc.replace_blob(&LocalId::new("nope"), Bytes::new());
         assert_eq!(missing.unwrap_err().kind(), ErrorKind::NotFound);
     }
 
     #[test]
-    fn a_removed_blob_part_is_dropped_on_encode() {
+    fn a_removed_blob_is_dropped_on_encode() {
         let mut doc = Document::new(
             FormatId::new("elide.test.blobs"),
-            vec![
-                DocumentPart::Blob {
-                    id: LocalId::new("a"),
-                    bytes: Bytes::from_static(b"one"),
-                    hint: "bin".to_owned(),
-                },
-                DocumentPart::Blob {
-                    id: LocalId::new("b"),
-                    bytes: Bytes::from_static(b"two"),
-                    hint: "bin".to_owned(),
-                },
-            ],
-            Box::new(JoinRecombine),
+            JoinBlobs,
+            vec![blob("a", b"one"), blob("b", b"two")],
         );
-        doc.remove_part(&LocalId::new("a")).unwrap();
-        assert_eq!(doc.parts().len(), 1);
+        doc.remove_blob(&LocalId::new("a")).unwrap();
+        assert_eq!(doc.blobs().len(), 1);
         assert_eq!(doc.encode().unwrap().as_bytes(), b"two");
-        let missing = doc.remove_part(&LocalId::new("a"));
+        let missing = doc.remove_blob(&LocalId::new("a"));
         assert_eq!(missing.unwrap_err().kind(), ErrorKind::NotFound);
     }
 }

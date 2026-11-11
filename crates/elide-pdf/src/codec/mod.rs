@@ -1,13 +1,12 @@
-//! Codec adapter: the PDF format on the parts model.
+//! Codec adapter: the PDF format.
 //!
 //! Binds this crate's PDF engine to the `elide-codec`
 //! [`DocumentLoader`](elide_codec::DocumentLoader)/[`Stream`](elide_codec::Stream)/
-//! [`Recombine`](elide_codec::Recombine) contracts: a document is a page-text
-//! body `Stream<Text>` (`PdfStream`) plus, on the glyph-deletion path, a
-//! [`Blob`](elide_codec::DocumentPart::Blob) per redactable embedded image
-//! XObject and per textless (scanned) page. A redaction on the body stream is
-//! recorded on the shared `PdfState` and applied by `PdfRecombine` per the
-//! document's `RedactMode`:
+//! [`Native`](elide_codec::Native) contracts: a document is a page-text body
+//! `Stream<Text>` (`PdfStream`) plus, on the glyph-deletion path, a
+//! [`Blob`](elide_codec::Blob) per redactable embedded image XObject and per
+//! textless (scanned) page. A redaction on the body stream is recorded on its
+//! `PdfState` and applied by `PdfDocument` per the document's `RedactMode`:
 //!
 //! - **Glyph deletion** (default, pure-Rust): the detected glyphs are deleted
 //!   from the content streams and annotations/metadata stripped, keeping a
@@ -23,9 +22,9 @@
 //! [`RasterMode`]: crate::primitive::RasterMode
 //! [`RasterMode::Always`]: crate::primitive::RasterMode::Always
 
+mod document;
 mod loader;
 mod part_id;
-mod recombine;
 mod state;
 mod stream;
 

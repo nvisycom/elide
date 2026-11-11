@@ -5,7 +5,7 @@
 //! a body [`ExtractStream`](elide_codec::extract::ExtractStream) over the
 //! element-text blocks [`OoxmlPackage::extract`](crate::ooxml::OoxmlPackage::extract)
 //! recovers plus its embedding / document-property blobs, re-packed via the
-//! shared `OoxmlRecombine`.
+//! shared `OoxmlDocument`.
 
 use elide_codec::{Format, FormatId};
 

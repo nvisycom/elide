@@ -13,7 +13,6 @@ impl_audio_handler! {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::DocumentPart;
     use elide_codec::content::ContentData;
     use elide_core::modality::ChunkReader as _;
     use elide_core::redaction::{Disposition, HiddenContentPolicy};
@@ -45,10 +44,12 @@ mod tests {
             )
             .await
             .expect("decode");
-        let DocumentPart::Stream { handle, .. } = &mut doc.parts_mut()[0] else {
-            panic!("a clip is one stream")
-        };
-        let chunks = handle.downcast_mut::<Audio>().unwrap().chunks().unwrap();
+        let (_, mut clip) = doc
+            .streams_mut()
+            .into_iter()
+            .next()
+            .expect("a clip is one stream");
+        let chunks = clip.downcast_mut::<Audio>().unwrap().chunks().unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].location.span.start_millis(), 0);
         assert!(

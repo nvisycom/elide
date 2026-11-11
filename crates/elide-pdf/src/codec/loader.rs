@@ -6,18 +6,15 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{
-    Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream, StrippedContent,
-};
+use elide_codec::{Blob, Document, DocumentLoader, LocalId, StrippedContent};
 use elide_core::Result;
-use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 
+use super::document::PdfDocument;
 use super::part_id::PartId;
-use super::recombine::PdfRecombine;
 use super::state::{PdfInner, PdfState};
 use super::stream::PdfStream;
-use super::{BODY_PART_ID, FORMAT_ID, PdfPage, RedactMode};
+use super::{FORMAT_ID, PdfPage, RedactMode};
 use crate::document::Pdf;
 use crate::document::extract::Block;
 #[cfg(feature = "render")]
@@ -28,7 +25,7 @@ use crate::text::PageGeometry;
 
 /// A [`DocumentLoader`] that decodes a PDF into a [`Document`]: the page-text
 /// body [`Stream`] plus, on the glyph-deletion path, a
-/// [`Blob`](DocumentPart::Blob) per redactable embedded image and (feature
+/// [`Blob`] per redactable embedded image and (feature
 /// `render`) per textless scanned page.
 #[derive(Debug, Default)]
 pub(crate) struct PdfDocumentLoader {
@@ -54,18 +51,13 @@ impl PdfDocumentLoader {
 
     /// Build a [`Document`] from the decoded `state`, the (sanitized)
     /// `document` bytes, and `blobs` (the surfaced embedded-image / scanned-page
-    /// parts).
-    pub(super) fn document(document: Bytes, state: PdfState, blobs: Vec<DocumentPart>) -> Document {
-        let mut parts = Vec::with_capacity(blobs.len() + 1);
-        let stream: Box<dyn Stream<Text>> = Box::new(PdfStream {
-            state: state.clone(),
-        });
-        parts.push(DocumentPart::Stream {
-            id: LocalId::new(BODY_PART_ID),
-            handle: ErasedStream::new(stream),
-        });
-        parts.extend(blobs);
-        Document::new(FORMAT_ID, parts, Box::new(PdfRecombine { document, state }))
+    /// / attachment files).
+    pub(super) fn document(document: Bytes, state: PdfState, blobs: Vec<Blob>) -> Document {
+        let native = PdfDocument {
+            body: PdfStream { state },
+            document,
+        };
+        Document::new(FORMAT_ID, native, blobs)
     }
 }
 
@@ -134,7 +126,7 @@ impl DocumentLoader for PdfDocumentLoader {
             else {
                 continue;
             };
-            blobs.push(DocumentPart::Blob {
+            blobs.push(Blob {
                 id: LocalId::new(PartId::Image(embedding.id).to_string()),
                 bytes,
                 hint: hint.to_owned(),
@@ -143,15 +135,11 @@ impl DocumentLoader for PdfDocumentLoader {
 
         // Each attached file is content of its own format, decoded and redacted
         // through the registry like any embedding.
-        blobs.extend(
-            pdf.attachments()?
-                .into_iter()
-                .map(|attachment| DocumentPart::Blob {
-                    id: LocalId::new(PartId::Attachment(attachment.id).to_string()),
-                    hint: attachment_hint(&attachment.name),
-                    bytes: attachment.bytes,
-                }),
-        );
+        blobs.extend(pdf.attachments()?.into_iter().map(|attachment| Blob {
+            id: LocalId::new(PartId::Attachment(attachment.id).to_string()),
+            hint: attachment_hint(&attachment.name),
+            bytes: attachment.bytes,
+        }));
 
         // `RasterMode::Auto` (feature `render` + an image codec): a textless
         // (scanned) page has no glyphs to delete, so render it and surface it as
@@ -161,7 +149,7 @@ impl DocumentLoader for PdfDocumentLoader {
         #[cfg(feature = "render")]
         if matches!(self.raster, RasterMode::Auto) {
             for (number, png) in scanned_pages(&pdf, &extraction.issues)? {
-                blobs.push(DocumentPart::Blob {
+                blobs.push(Blob {
                     id: LocalId::new(PartId::Page(number).to_string()),
                     bytes: png,
                     hint: "png".to_string(),
@@ -258,14 +246,14 @@ mod tests {
     /// Raster mode through the codec: every page flattened to a redacted image.
     mod raster {
         use bytes::Bytes;
-        use elide_codec::{DocumentPart, LocalId};
+        use elide_codec::LocalId;
 
         use super::super::PdfDocumentLoader;
         use crate::codec::RedactMode;
         use crate::codec::state::{PdfInner, PdfState};
 
-        /// A raster document flattens every page, so it surfaces no blob parts and
-        /// `replace_part` rejects any id (the raster path never accepts a per-image
+        /// A raster document flattens every page, so it surfaces no blobs and
+        /// `replace_blob` rejects any id (the raster path never accepts a per-image
         /// replacement). Built directly with empty observations, so it needs no
         /// PDFium (the observe step runs only in the loader's decode).
         #[test]
@@ -280,17 +268,12 @@ mod tests {
             });
             let mut doc = PdfDocumentLoader::document(Bytes::new(), state, Vec::new());
 
-            // No blob parts: only the body stream.
-            assert!(
-                doc.parts()
-                    .iter()
-                    .all(|p| matches!(p, DocumentPart::Stream { .. })),
-                "raster mode surfaced a blob part"
-            );
+            // No blobs: only the body stream.
+            assert!(doc.blobs().is_empty(), "raster mode surfaced a blob");
 
-            // `replace_part` rejects any id (no blob to replace).
+            // `replace_blob` rejects any id (no blob to replace).
             let err = doc
-                .replace_part(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
+                .replace_blob(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
                 .unwrap_err();
             assert_eq!(err.kind(), elide_core::ErrorKind::NotFound);
         }
@@ -304,7 +287,7 @@ mod tests {
         use std::io::Cursor;
 
         use bytes::Bytes;
-        use elide_codec::{DocumentPart, LocalId};
+        use elide_codec::{Blob, LocalId};
 
         use super::super::PdfDocumentLoader;
         use crate::codec::RedactMode;
@@ -356,7 +339,7 @@ mod tests {
             });
             let blobs = scanned
                 .iter()
-                .map(|(number, png)| DocumentPart::Blob {
+                .map(|(number, png)| Blob {
                     id: LocalId::new(format!("page-{number}")),
                     bytes: Bytes::from(png.clone()),
                     hint: "png".to_owned(),
@@ -370,12 +353,11 @@ mod tests {
             let mut doc = scanned_document(scanned_doc(), &[(1, png(100, 100, [200, 200, 200]))]);
 
             // The document surfaces the scanned page as a `page-1` image blob.
-            let page_blob = doc.parts().iter().find_map(|p| match p {
-                DocumentPart::Blob { id, hint, .. } if id.as_str() == "page-1" => {
-                    Some(hint.clone())
-                }
-                _ => None,
-            });
+            let page_blob = doc
+                .blobs()
+                .iter()
+                .find(|blob| blob.id == "page-1")
+                .map(|blob| blob.hint.clone());
             assert_eq!(
                 page_blob.as_deref(),
                 Some("png"),
@@ -384,7 +366,7 @@ mod tests {
 
             // Feed back a redacted (black) raster for that page.
             let redacted = Bytes::from(png(100, 100, [0, 0, 0]));
-            doc.replace_part(&LocalId::new("page-1"), redacted)
+            doc.replace_blob(&LocalId::new("page-1"), redacted)
                 .expect("page-1 accepted");
 
             // Encode reflattens the page: the original page content is gone.
@@ -405,7 +387,7 @@ mod tests {
             // No scanned pages were surfaced, so `page-1` is not accepted.
             let mut doc = scanned_document(scanned_doc(), &[]);
             let err = doc
-                .replace_part(&LocalId::new("page-1"), Bytes::from_static(b"x"))
+                .replace_blob(&LocalId::new("page-1"), Bytes::from_static(b"x"))
                 .unwrap_err();
             assert_eq!(err.kind(), elide_core::ErrorKind::NotFound);
         }

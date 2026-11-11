@@ -1,8 +1,8 @@
 //! The orchestrator's part-tree traversal: one recursive walk both analysis and
 //! redaction drive, and the two phase visitors that drive it.
 //!
-//! A document is a tree of [`DocumentPart`](elide_codec::DocumentPart)s: stream
-//! leaves and blob sub-parts that decode into their own child documents.
+//! A document is a tree: its streams are the leaves, and each of its
+//! [`Blob`](elide_codec::Blob)s decodes into a child document of its own.
 //! Analyzing and redacting walk that tree the same way — number each part, handle
 //! the stream leaves, recurse into each blob, enforce the depth limit — and differ
 //! only in *what* a stream leaf does and whether a blob child folds back.
@@ -13,7 +13,7 @@ mod phase;
 mod walk;
 
 use bytes::Bytes;
-use elide_codec::{Document as CodecDocument, ErasedStream, LocalId};
+use elide_codec::{Document as CodecDocument, LocalId, StreamMut};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
@@ -35,13 +35,13 @@ use crate::pipeline::BoxFuture;
 pub(crate) const MAX_CONTAINER_DEPTH: usize = 8;
 
 /// The per-phase behavior a [`Walk`] drives at each leaf: what a level's
-/// stream parts do, and whether a recursed blob child folds its re-encoded bytes
+/// streams do, and whether a recursed blob child folds its re-encoded bytes
 /// back into its parent.
 ///
 /// Analysis and redaction each implement this over their own mutable state
 /// (report / artifacts); the walk itself is phase-agnostic.
 pub(crate) trait PartVisitor: Send {
-    /// Handle a level's stream parts, each paired with its [`PartId`]. Analysis
+    /// Handle a level's streams, each paired with its [`PartId`]. Analysis
     /// batches them into one provider round-trip and scatters the results;
     /// redaction applies each stream's report entry in place. Returns whether any
     /// of them changed the document (redaction), so a parent knows to fold a child
@@ -49,11 +49,11 @@ pub(crate) trait PartVisitor: Send {
     fn visit_streams<'a>(
         &'a mut self,
         orchestrator: &'a Orchestrator,
-        streams: Vec<(PartId, &'a mut ErasedStream)>,
+        streams: Vec<(PartId, StreamMut<'a>)>,
         policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>>;
 
-    /// How a blob part's `child` folds back into its parent: kept as-is,
+    /// How a blob's `child` folds back into its parent: kept as-is,
     /// replaced by the child's re-encoded bytes, or removed. Analysis always
     /// keeps; redaction re-encodes a changed child, keeps an unchanged one, and
     /// removes one no codec can read.
@@ -67,7 +67,7 @@ pub(crate) trait PartVisitor: Send {
     fn stripped(&mut self) -> &mut StrippedRecord;
 }
 
-/// A blob part after the walk tried to decode it.
+/// A blob after the walk tried to decode it.
 pub(crate) enum Child<'a> {
     /// Decoded into its own document and walked. `changed` holds when anything
     /// in its subtree changed it: a redaction, or the decode-time sanitizing
@@ -84,7 +84,7 @@ pub(crate) enum Child<'a> {
     Unredactable,
 }
 
-/// How a blob part folds back into its parent document.
+/// How a blob folds back into its parent document.
 pub(crate) enum Fold {
     /// Leave the parent's blob bytes untouched.
     Keep,
@@ -95,7 +95,7 @@ pub(crate) enum Fold {
     Remove,
 }
 
-/// The [`PartId`] for a stream part: the first stream of a document is its body,
+/// The [`PartId`] for a stream: the first stream of a document is its body,
 /// keyed under the document's own prefix; each later stream keys under a child id.
 pub(crate) fn body_part_id(prefix: &PartId, id: &LocalId, body_seen: &mut bool) -> PartId {
     if *body_seen {

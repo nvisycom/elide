@@ -42,10 +42,10 @@ use elide::prelude::*;
 let registry = FormatRegistry::with_builtin();
 
 // By extension.
-let document = registry
+let mut document = registry
     .decode("Hello, world", "txt", HiddenContentPolicy::default())
     .await?;
-assert_eq!(document.parts().len(), 1);
+assert_eq!(document.streams_mut().len(), 1);
 # Ok(())
 # }
 ```
@@ -54,11 +54,12 @@ assert_eq!(document.parts().len(), 1);
 and with `codec-sniff`, it recognizes binary formats by their first bytes
 when there is neither.
 
-A document is a list of *parts*. A text or tabular format such as TXT or CSV
-has one, a stream in one modality. An image has its pixels, plus its EXIF
-metadata as a `Metadata` part when the hidden-content policy redacts metadata (see
-[Metadata](metadata.md)). A container such as DOCX or PDF has several, in
-different modalities; see [Containers](containers.md).
+A document is a set of *streams*, plus the files embedded in it. A text or
+tabular format such as TXT or CSV has one stream, in one modality. An image has
+its pixels, plus its EXIF metadata as a `Metadata` stream when the
+hidden-content policy redacts metadata (see [Metadata](metadata.md)). A
+container such as DOCX or PDF has several, in different modalities, and
+embedded files of its own; see [Containers](containers.md).
 
 ## Configuring a format
 

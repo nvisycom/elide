@@ -18,7 +18,7 @@ use std::ops::Range;
 
 use elide_codec::content::ContentData;
 use elide_codec::string::RedactRange;
-use elide_codec::{Format, FormatId, Stream};
+use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -52,10 +52,6 @@ impl Stream<Text> for TxtHandler {
         FORMAT_ID
     }
 
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::from_text(self.text.clone()))
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         Ok(self
             .blocks
@@ -81,6 +77,12 @@ impl Stream<Text> for TxtHandler {
             return None;
         }
         Some(TextLocation::inline(start..end))
+    }
+}
+
+impl Encode for TxtHandler {
+    fn encode(&self) -> Result<ContentData> {
+        Ok(ContentData::from_text(self.text.clone()))
     }
 }
 
@@ -184,7 +186,6 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::DocumentPart;
     use elide_core::redaction::HiddenContentPolicy;
 
     use super::*;
@@ -343,7 +344,7 @@ mod tests {
         Ok(())
     }
 
-    /// txt decodes into a leaf [`Document`] (one `Text` stream part), whose
+    /// txt decodes into a leaf [`Document`] (one `Text` stream), whose
     /// stream can be redacted in place and re-encoded.
     #[tokio::test]
     async fn leaf_document_decodes_redacts_and_encodes() -> Result<()> {
@@ -353,20 +354,17 @@ mod tests {
                 HiddenContentPolicy::default(),
             )
             .await?;
-        assert_eq!(doc.parts().len(), 1);
+        assert_eq!(doc.streams_mut().len(), 1);
 
-        // Redact the one stream part in place.
-        let DocumentPart::Stream { handle, .. } = &mut doc.parts_mut()[0] else {
-            panic!("txt is a stream part");
-        };
-        let stream = handle.downcast_mut::<Text>().expect("text stream");
+        // Redact the one stream in place.
+        let mut stream = doc.stream_mut::<Text>("body").expect("text stream");
         let mut batch = Redactions::new();
         // "contact " = 8 bytes; the email is 18 → 8..26.
         batch.push(
             TextLocation::inline(8..26),
             TextReplacement::substituted("[EMAIL]"),
         );
-        DataWriter::write_at(stream, batch).await?;
+        DataWriter::write_at(&mut stream, batch).await?;
 
         assert_eq!(doc.encode()?.as_bytes(), b"contact [EMAIL]");
         Ok(())

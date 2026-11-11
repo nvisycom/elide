@@ -15,7 +15,7 @@
 //! [`FormatRegistry`]: elide_format::FormatRegistry
 //! [`HiddenContentPolicy`]: crate::redaction::HiddenContentPolicy
 
-// The codec contract: the document/stream types and the loader/recombine
+// The codec contract: the document/stream types and the loader/native-document
 // traits a format implements, plus the `ContentData` its `decode`/`encode`
 // signatures speak in. The registry that assembles the formats comes from the
 // assembly crate. The crate's internal helpers
@@ -25,8 +25,8 @@
 pub use elide_codec::content::ContentData;
 #[doc(inline)]
 pub use elide_codec::{
-    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
-    LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent, TypedStream,
+    Blob, Document, DocumentLoader, Encode, Format, FormatId, LeafDocument, Loader, LocalId,
+    Native, Stream, StreamMut, Stripped, StrippedContent, TypedStream,
 };
 #[doc(inline)]
 pub use elide_format::FormatRegistry;
