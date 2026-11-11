@@ -88,7 +88,6 @@ impl DocumentLoader for ImageDocumentLoader {
 #[cfg(all(test, feature = "fixtures"))]
 mod tests {
     use bytes::Bytes;
-    use elide_codec::DocumentLoader as _;
     use elide_core::modality::metadata::{MetadataLocation, MetadataReplacement};
     use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{ChunkReader as _, DataReader as _, DataWriter as _};

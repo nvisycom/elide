@@ -271,9 +271,9 @@ fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
     }
     let mut out = Vec::with_capacity(hex.len() / 2);
     let bytes = hex.as_bytes();
-    for pair in bytes.chunks_exact(2) {
-        let hi = (pair[0] as char).to_digit(16)?;
-        let lo = (pair[1] as char).to_digit(16)?;
+    for &[hi, lo] in bytes.as_chunks::<2>().0 {
+        let hi = (hi as char).to_digit(16)?;
+        let lo = (lo as char).to_digit(16)?;
         out.push((hi * 16 + lo) as u8);
     }
     Some(out)

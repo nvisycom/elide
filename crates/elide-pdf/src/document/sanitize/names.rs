@@ -94,10 +94,10 @@ fn rebuild_tree(
                 .and_then(Object::as_array)
                 .ok()
         })
-        .flat_map(|array| array.chunks_exact(2))
-        .map(|pair| {
-            let current = decode_text_string(&pair[0]).unwrap_or_default();
-            let spec = match &pair[1] {
+        .flat_map(|array| array.as_chunks::<2>().0)
+        .map(|[name, value]| {
+            let current = decode_text_string(name).unwrap_or_default();
+            let spec = match value {
                 Object::Reference(id) => names.iter().find(|(spec, _)| spec == id),
                 _ => None,
             };
@@ -106,7 +106,7 @@ fn rebuild_tree(
                 any_renamed = true;
                 renamed += usize::from(spec.is_none_or(|(id, _)| !edited.contains(id)));
             }
-            (key, pair[1].clone())
+            (key, value.clone())
         })
         .collect();
     if !any_renamed {

@@ -65,19 +65,15 @@ fn user_comment(bytes: &[u8]) -> Option<String> {
 /// the order whose high bytes are mostly zero is taken, as text in any Latin
 /// script reads that way.
 fn utf16(body: &[u8]) -> String {
-    let pairs = body.chunks_exact(2);
-    let low_first = pairs.clone().filter(|pair| pair[1] == 0).count()
-        >= pairs.clone().filter(|pair| pair[0] == 0).count();
-    let units = pairs.map(|pair| {
-        if low_first {
-            u16::from_le_bytes([pair[0], pair[1]])
-        } else {
-            u16::from_be_bytes([pair[0], pair[1]])
-        }
-    });
-    char::decode_utf16(units)
-        .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
-        .collect()
+    let (pairs, _) = body.as_chunks::<2>();
+    let low_first = pairs.iter().filter(|[_, high]| *high == 0).count()
+        >= pairs.iter().filter(|[high, _]| *high == 0).count();
+    let body = &body[..pairs.len() * 2];
+    if low_first {
+        String::from_utf16le_lossy(body)
+    } else {
+        String::from_utf16be_lossy(body)
+    }
 }
 
 /// A GPS coordinate as decimal degrees with its hemisphere (`51.500700 N`),

@@ -1,6 +1,6 @@
 # Installation
 
-Elide needs Rust 1.95 or later. Add it with the features you need, and tokio
+Elide needs Rust 1.99 or later. Add it with the features you need, and tokio
 to run it:
 
 ```toml
