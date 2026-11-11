@@ -217,8 +217,7 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
     let out = document.document.encode()?;
     let out_bytes = out.as_bytes().to_vec();
     let read = |pkg: &[u8], part: &str| {
-        elide_office::fixtures::read_part(pkg, part)
-            .map(|b| String::from_utf8_lossy(&b).into_owned())
+        elide_office::fixtures::read_part(pkg, part).map(String::from_utf8_lossy_owned)
     };
     let outer_body = read(&out_bytes, "word/document.xml").expect("outer body");
     assert!(

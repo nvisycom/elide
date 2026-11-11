@@ -389,6 +389,8 @@ fn neutralize_kern_neighbors(arr: &mut [Object], k: usize) {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use lopdf::content::{Content, Operation};
 
     use super::*;
@@ -451,7 +453,7 @@ mod tests {
         // "ret" is now empty; both adjacent kerns (-40 before, -55 after) zeroed.
         assert_eq!(arr[0], Object::string_literal("Sec"));
         assert_eq!(arr[1], Object::Integer(0), "left kern not zeroed");
-        assert!(matches!(&arr[2], Object::String(b, _) if b.is_empty()));
+        assert_matches!(&arr[2], Object::String(b, _) if b.is_empty());
         assert_eq!(arr[3], Object::Integer(0), "right kern not zeroed");
         assert_eq!(arr[4], Object::string_literal(" Agent"));
     }

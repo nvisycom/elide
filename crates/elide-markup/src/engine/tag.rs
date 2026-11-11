@@ -83,10 +83,8 @@ impl HtmlTagExt for BytesEnd<'_> {
 
 /// Where the tag bytes `tag`, borrowed from `raw`, sit in it.
 fn place(raw: &str, tag: &str) -> Result<Range<usize>> {
-    (tag.as_ptr() as usize)
-        .checked_sub(raw.as_ptr() as usize)
-        .filter(|&at| at + tag.len() <= raw.len())
-        .map(|at| at..at + tag.len())
+    raw.substr_range(tag)
+        .map(Range::from)
         .ok_or_else(|| Error::malformed("an HTML tag was not read from its document"))
 }
 

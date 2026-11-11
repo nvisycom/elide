@@ -3,6 +3,8 @@
 //! modality-generic model and the audit DAG the way the toolkit
 //! fusion step would.
 
+use std::assert_matches;
+
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, ModelId, PatternRule};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
@@ -94,10 +96,9 @@ fn two_recognizers_fuse_into_one() {
     // Both recognitions survive, plus a deduplication event.
     assert_eq!(entity.audit.recognizers().count(), 2);
     assert_eq!(entity.audit.events().len(), 3);
-    assert!(matches!(
+    assert_matches!(
         entity.audit.events().last().unwrap().kind,
-        AuditKind::Deduplication(ref dedup) if dedup.strategy == "max"
-    ));
+        AuditKind::Deduplication(ref dedup) if dedup.strategy == "max");
     assert_eq!(
         entity.audit.final_confidence(),
         Some(Confidence::new(0.95).unwrap())
