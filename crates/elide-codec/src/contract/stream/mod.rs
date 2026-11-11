@@ -33,8 +33,8 @@ use crate::content::ContentData;
 /// so a codec-backed stream plugs straight into anything that bounds on them
 /// (the toolkit's anonymizer). On top of that base it adds the codec surface:
 /// identify and serialise ([`format`], [`encode`]), hand back its decoded chunks
-/// ([`chunks`]) and the hidden content its format labels ([`flagged`]), and lift a chunk-local finding back to source coordinates
-/// ([`lift`]).
+/// ([`chunks`]) and the hidden content its format labels ([`flagged`]), and
+/// lift a chunk-local finding back to source coordinates ([`lift`]).
 ///
 /// A stream's chunks are materialized when it is decoded, so [`chunks`] is a
 /// plain `&self` read; only redaction ([`write_at`]) mutates. A stream stores
@@ -51,7 +51,6 @@ use crate::content::ContentData;
 /// [`lift`]: Stream::lift
 pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this stream represents (e.g. `"elide.text.txt"`).
-    /// Cheap to clone.
     fn format(&self) -> FormatId;
 
     /// Serialize the stream's current content back to [`ContentData`] — this

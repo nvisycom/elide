@@ -82,7 +82,7 @@ impl Document {
     /// the document's bytes (a [`LeafRecombine`]). For a single-modality format
     /// with no sub-parts (TXT, JSON, a bare image or audio clip).
     pub fn leaf<M: Modality>(format_id: FormatId, stream: Box<dyn Stream<M>>) -> Self {
-        let handle = ErasedStream::new(format_id.clone(), stream);
+        let handle = ErasedStream::new(stream);
         Self::new(
             format_id,
             vec![DocumentPart::Stream {
@@ -143,8 +143,8 @@ impl Document {
     }
 
     /// The [`FormatId`] of the producing loader.
-    pub fn format_id(&self) -> &FormatId {
-        &self.format_id
+    pub fn format_id(&self) -> FormatId {
+        self.format_id
     }
 
     /// The document's parts.
@@ -166,8 +166,9 @@ impl Document {
     ///
     /// # Errors
     ///
-    /// An unknown id, or an id naming a stream part, is an error so a caller
-    /// can't silently lose a redaction.
+    /// [`ErrorKind::NotFound`](elide_core::ErrorKind::NotFound) for an unknown
+    /// id, or an id naming a stream part, so a caller can't silently lose a
+    /// redaction.
     pub fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         for part in &mut self.parts {
             if let DocumentPart::Blob {
@@ -181,7 +182,7 @@ impl Document {
                 return Ok(());
             }
         }
-        Err(Error::malformed(format!(
+        Err(Error::not_found(format!(
             "replace_part: `{id}` is not a blob part of this document"
         )))
     }
@@ -194,7 +195,8 @@ impl Document {
     ///
     /// # Errors
     ///
-    /// An unknown id, or an id naming a stream part.
+    /// [`ErrorKind::NotFound`](elide_core::ErrorKind::NotFound) for an unknown
+    /// id, or an id naming a stream part.
     pub fn remove_part(&mut self, id: &LocalId) -> Result<()> {
         let index = self
             .parts
@@ -203,7 +205,7 @@ impl Document {
                 |part| matches!(part, DocumentPart::Blob { id: blob_id, .. } if blob_id == id),
             )
             .ok_or_else(|| {
-                Error::malformed(format!(
+                Error::not_found(format!(
                     "remove_part: `{id}` is not a blob part of this document"
                 ))
             })?;
@@ -274,6 +276,7 @@ impl fmt::Debug for DocumentPart {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::modality::text::Text;
 
     use super::*;
@@ -281,10 +284,7 @@ mod tests {
 
     #[test]
     fn a_leaf_document_encodes_its_one_stream() {
-        let stream = ErasedStream::new(
-            FormatId::new("elide.test.str"),
-            Box::new(StrStream("hello".to_owned())),
-        );
+        let stream = ErasedStream::new(Box::new(StrStream("hello".to_owned())));
         let doc = Document::new(
             FormatId::new("elide.test.str"),
             vec![DocumentPart::Stream {
@@ -298,10 +298,7 @@ mod tests {
 
     #[test]
     fn erased_stream_recovers_its_modality() {
-        let mut stream = ErasedStream::new(
-            FormatId::new("elide.test.str"),
-            Box::new(StrStream("x".to_owned())),
-        );
+        let mut stream = ErasedStream::new(Box::new(StrStream("x".to_owned())));
         assert!(stream.is::<Text>());
         assert!(stream.downcast_mut::<Text>().is_some());
     }
@@ -327,10 +324,8 @@ mod tests {
         doc.replace_part(&LocalId::new("a"), Bytes::from_static(b"[REDACTED]"))
             .unwrap();
         assert_eq!(doc.encode().unwrap().as_bytes(), b"[REDACTED]two");
-        assert!(
-            doc.replace_part(&LocalId::new("nope"), Bytes::new())
-                .is_err()
-        );
+        let missing = doc.replace_part(&LocalId::new("nope"), Bytes::new());
+        assert_eq!(missing.unwrap_err().kind(), ErrorKind::NotFound);
     }
 
     #[test]
@@ -354,6 +349,7 @@ mod tests {
         doc.remove_part(&LocalId::new("a")).unwrap();
         assert_eq!(doc.parts().len(), 1);
         assert_eq!(doc.encode().unwrap().as_bytes(), b"two");
-        assert!(doc.remove_part(&LocalId::new("a")).is_err());
+        let missing = doc.remove_part(&LocalId::new("a"));
+        assert_eq!(missing.unwrap_err().kind(), ErrorKind::NotFound);
     }
 }

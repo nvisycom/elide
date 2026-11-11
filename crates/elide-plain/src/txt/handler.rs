@@ -31,7 +31,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new(FORMAT_ID.clone(), TxtLoader)
+    Format::new(FORMAT_ID, TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }
@@ -49,7 +49,7 @@ pub(crate) struct TxtHandler {
 
 impl Stream<Text> for TxtHandler {
     fn format(&self) -> FormatId {
-        FORMAT_ID.clone()
+        FORMAT_ID
     }
 
     fn encode(&self) -> Result<ContentData> {
@@ -184,6 +184,9 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
 
 #[cfg(test)]
 mod tests {
+    use elide_codec::DocumentPart;
+    use elide_core::redaction::HiddenContentPolicy;
+
     use super::*;
 
     fn handler(text: &str) -> TxtHandler {
@@ -340,22 +343,17 @@ mod tests {
         Ok(())
     }
 
-    /// Stage-1 parts model: txt decodes into a leaf [`Document`] (one `Text`
-    /// stream part), whose stream can be redacted in place and re-encoded.
+    /// txt decodes into a leaf [`Document`] (one `Text` stream part), whose
+    /// stream can be redacted in place and re-encoded.
     #[tokio::test]
     async fn leaf_document_decodes_redacts_and_encodes() -> Result<()> {
-        use elide_codec::content::ContentData;
-        use elide_codec::{Document, DocumentLoader, DocumentPart, LeafLoader};
-        use elide_core::redaction::HiddenContentPolicy;
-
-        let doc: Document = LeafLoader(TxtLoader)
+        let mut doc = format()
             .decode(
                 ContentData::from_text("contact alice@example.test"),
                 HiddenContentPolicy::default(),
             )
             .await?;
         assert_eq!(doc.parts().len(), 1);
-        let mut doc = doc;
 
         // Redact the one stream part in place.
         let DocumentPart::Stream { handle, .. } = &mut doc.parts_mut()[0] else {

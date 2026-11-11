@@ -20,7 +20,7 @@
 
 mod document;
 mod format;
-pub(crate) mod loader;
+mod loader;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -30,5 +30,6 @@ pub use self::document::{
     StrippedContent,
 };
 pub use self::format::{Format, FormatId};
-pub use self::loader::{DocumentLoader, LeafLoader, Loader};
+pub(crate) use self::loader::LeafLoader;
+pub use self::loader::{DocumentLoader, Loader};
 pub use self::stream::{ErasedStream, FlaggedItem, Stream, TypedStream};

@@ -10,8 +10,8 @@
 //! - [`ExtractStream`]: the [`Stream`] machinery over a shared item stream:
 //!   cumulative offsets, `chunks`, random read, batch redact, and `lift`. It
 //!   never inspects the address, only yields and edits `value`.
-//! - [`SpliceState<A>`] / [`SharedSplice<A>`]: the decoded item stream, shared
-//!   behind a `Clone`-to-share handle between the [`ExtractStream`] (which
+//! - [`SharedSplice<A>`]: the decoded item stream, shared behind a
+//!   `Clone`-to-share handle between the [`ExtractStream`] (which
 //!   redacts it in place) and the format's [`Recombine`](crate::Recombine) (which
 //!   reads the redacted items via [`SharedSplice::with_items`] and re-serialises
 //!   the native container).
@@ -43,7 +43,8 @@ use elide_core::redaction::HiddenContentKind;
 
 pub use self::addresser::SourceAddresser;
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
-pub use self::state::{SharedSplice, SpliceState};
+pub use self::state::SharedSplice;
+use self::state::SpliceState;
 pub use self::stream::ExtractStream;
 
 /// One redactable unit in a structured document.

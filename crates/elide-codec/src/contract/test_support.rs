@@ -53,7 +53,7 @@ impl Recombine for JoinRecombine {
         for part in parts {
             out.extend_from_slice(&part.bytes);
         }
-        Ok(ContentData::new(bytes::Bytes::from(out)))
+        Ok(ContentData::from(out))
     }
 
     fn validate(&self, _output: &ContentData) -> Result<()> {

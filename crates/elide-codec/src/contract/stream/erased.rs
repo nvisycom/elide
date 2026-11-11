@@ -21,7 +21,6 @@ use crate::contract::FormatId;
 ///
 /// [`TypeId`]: std::any::TypeId
 pub struct ErasedStream {
-    format_id: FormatId,
     stream: Box<dyn ErasedStreamObj>,
 }
 
@@ -93,16 +92,10 @@ impl<M: Modality> ChunkReader<M> for TypedStream<M> {
 
 impl ErasedStream {
     /// Erase a typed [`Stream<M>`] into the modality-independent form.
-    pub fn new<M: Modality>(format_id: FormatId, stream: Box<dyn Stream<M>>) -> Self {
+    pub fn new<M: Modality>(stream: Box<dyn Stream<M>>) -> Self {
         Self {
-            format_id,
             stream: Box::new(TypedStream { stream }),
         }
-    }
-
-    /// The [`FormatId`] of the loader that produced this stream.
-    pub fn format_id(&self) -> &FormatId {
-        &self.format_id
     }
 
     /// Whether this stream carries modality `M`.
@@ -130,8 +123,6 @@ impl ErasedStream {
 
 impl fmt::Debug for ErasedStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ErasedStream")
-            .field("format_id", &self.format_id)
-            .finish_non_exhaustive()
+        f.debug_struct("ErasedStream").finish_non_exhaustive()
     }
 }

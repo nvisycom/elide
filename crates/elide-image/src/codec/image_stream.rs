@@ -21,7 +21,7 @@ pub(super) struct PixelStream {
 
 impl Stream<Image> for PixelStream {
     fn format(&self) -> FormatId {
-        self.format_id.clone()
+        self.format_id
     }
 
     fn encode(&self) -> Result<ContentData> {

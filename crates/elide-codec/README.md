@@ -8,21 +8,22 @@ The codec contracts for reading and redacting documents across file formats.
 
 Detection works on text, but real documents arrive as files: plain text, JSON,
 HTML, XML, images, audio, PDFs, and Office documents. This crate defines the
-contracts that bridge the two. The `Handler` and `Loader` traits describe how a
-format decodes its bytes, exposes its content so recognizers can scan it, applies
-redactions back to the right places, and re-encodes; the `Format` descriptor and
-the `Container`/`Part` surface for documents that nest sub-parts of other
-modalities round out the vocabulary.
+contracts that bridge the two. A format's `DocumentLoader` decodes its bytes
+into a `Document`: an ordered set of parts, each either a `Stream` of one
+modality (a text body, an image's pixels, an audio clip) that detection reads
+and redaction edits in place, or a blob, an embedded file decoded as a document
+of its own. The format's `Recombine` assembles the redacted parts back into
+native bytes and checks the result. A `Format` names the format and the
+extensions and content types it is found by.
 
-It ships no format handlers of its own. Each format is implemented against these
-traits in the crate that owns its engine — the plain-text formats in
+It ships no formats of its own. Each format is implemented against these
+contracts in the crate that owns its engine: the plain-text formats in
 `elide-plain`, HTML and XML in `elide-markup`, and images, audio, PDF, and
 Office documents in `elide-image`, `elide-audio`, `elide-pdf`, and
-`elide-office` — and `elide-format` assembles
-them into a registry. Alongside the traits, this crate carries the shared
-text-extraction machinery those handlers build on: the extract-and-splice engine
-that maps a decoded value back to its raw source offsets, and the byte-level
-redaction helper.
+`elide-office`; `elide-format` assembles them into a registry. Alongside the
+contracts, this crate carries the shared text-extraction machinery those formats
+build on: the extract-and-splice engine that maps a decoded value back to its
+raw source offsets, and the byte-level redaction helper.
 
 The guiding principle is faithful round-tripping. When a document is re-encoded,
 only the redacted parts change; structure, formatting, and everything left

@@ -40,7 +40,7 @@ impl ExifStream {
 
 impl Stream<Metadata> for ExifStream {
     fn format(&self) -> FormatId {
-        self.format_id.clone()
+        self.format_id
     }
 
     fn encode(&self) -> Result<ContentData> {

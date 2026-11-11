@@ -2,6 +2,9 @@
 //!
 //! The words a recognizer's context boost matches on.
 
+use std::iter::Peekable;
+use std::str::CharIndices;
+
 /// Turn a structural *name* — an XML element or attribute name, a JSON object
 /// key — into context words for the value it labels.
 ///
@@ -49,7 +52,7 @@ impl ContextWords for str {
 /// it; separators (`_`, `-`) are consumed and never part of a word.
 struct ContextWordsIter<'a> {
     name: &'a str,
-    chars: std::iter::Peekable<std::str::CharIndices<'a>>,
+    chars: Peekable<CharIndices<'a>>,
     /// Byte offset the current word started at, once one is open.
     start: Option<usize>,
 }

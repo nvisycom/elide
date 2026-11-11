@@ -87,7 +87,7 @@ impl DocumentLoader for HtmlLoader {
             .with_passage_bounds(PASSAGE_BOUNDS);
         // `build_items` already reports a `MalformedInput` parse error.
         let items = build_items(&text, config)?;
-        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer).with_stripped(stripped))
+        Ok(markup_document(FORMAT_ID, text, items, sanitizer).with_stripped(stripped))
     }
 }
 

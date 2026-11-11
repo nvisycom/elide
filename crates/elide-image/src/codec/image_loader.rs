@@ -58,18 +58,18 @@ impl DocumentLoader for ImageDocumentLoader {
 
         let pixels: Box<dyn Stream<Image>> = Box::new(PixelStream {
             state: state.clone(),
-            format_id: self.format_id.clone(),
+            format_id: self.format_id,
         });
         let mut parts = vec![DocumentPart::Stream {
             id: LocalId::new(PIXEL_PART_ID),
-            handle: ErasedStream::new(self.format_id.clone(), pixels),
+            handle: ErasedStream::new(pixels),
         }];
         if policy.metadata.treats_as_content() {
             let exif: Box<dyn Stream<Metadata>> =
-                Box::new(ExifStream::new(state.clone(), self.format_id.clone())?);
+                Box::new(ExifStream::new(state.clone(), self.format_id)?);
             parts.push(DocumentPart::Stream {
                 id: LocalId::new(EXIF_PART_ID),
-                handle: ErasedStream::new(self.format_id.clone(), exif),
+                handle: ErasedStream::new(exif),
             });
         }
 
@@ -78,10 +78,7 @@ impl DocumentLoader for ImageDocumentLoader {
             format: self.format,
             metadata: policy.metadata,
         };
-        Ok(
-            Document::new(self.format_id.clone(), parts, Box::new(recombine))
-                .with_stripped(stripped),
-        )
+        Ok(Document::new(self.format_id, parts, Box::new(recombine)).with_stripped(stripped))
     }
 }
 

@@ -1155,7 +1155,6 @@ dependencies = [
  "elide-core",
  "hex",
  "serde_json",
- "sha2 0.11.1",
  "tokio",
 ]
 

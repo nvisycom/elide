@@ -163,7 +163,7 @@ impl FormatRegistry {
     pub fn add_format(&mut self, format: Format) -> &mut Self {
         let inner = Arc::make_mut(&mut self.0);
         assert!(
-            !inner.by_id.contains_key(format.id()),
+            !inner.by_id.contains_key(&format.id()),
             "format id already registered: {} (use replace_format to override)",
             format.id()
         );
@@ -279,12 +279,12 @@ impl FormatRegistry {
         let by_ext = content
             .extension()
             .and_then(|ext| self.by_extension(&ext))
-            .map(|f| f.id().clone());
+            .map(|f| f.id());
         let format_id = by_ext.or_else(|| {
             content
                 .content_type()
                 .and_then(|ct| self.by_content_type(ct))
-                .map(|f| f.id().clone())
+                .map(|f| f.id())
         });
         // Sniff the bytes only when the caller asserted nothing at all. An
         // extension or content type that is present but unregistered is still a
@@ -292,7 +292,7 @@ impl FormatRegistry {
         // than second-guessing it — the sniff is for the "no hints" case.
         let format_id = format_id.or_else(|| {
             (content.extension().is_none() && content.content_type().is_none())
-                .then(|| self.sniff(content.as_bytes()).map(|f| f.id().clone()))
+                .then(|| self.sniff(content.as_bytes()).map(|f| f.id()))
                 .flatten()
         });
         let Some(format_id) = format_id else {
@@ -331,7 +331,7 @@ impl FormatRegistryInner {
     /// first dropped, so a key the replacement no longer declares stops
     /// resolving to this slot rather than lingering as a stale mapping.
     fn insert_format(&mut self, format: Format) {
-        let id = format.id().clone();
+        let id = format.id();
         let index = match self.by_id.get(&id) {
             Some(&existing) => {
                 // Drop the outgoing format's keys that point here; the
@@ -373,7 +373,7 @@ mod tests {
     /// stand in for a customized built-in. The registry bookkeeping under test
     /// never decodes through it, so any loader with the right id serves.
     fn txt_variant() -> Format {
-        Format::with_document_loader(txt_format().id().clone(), MockLoader)
+        Format::with_document_loader(txt_format().id(), MockLoader)
             .with_extensions(["variant"])
             .with_content_types(["text/variant"])
     }
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn replace_format_swaps_in_place() {
-        let id = txt_format().id().clone();
+        let id = txt_format().id();
         let mut reg = FormatRegistry::new();
         reg.add_format(txt_format());
         let before = reg.iter().count();
@@ -398,13 +398,10 @@ mod tests {
         // Same slot reused: no duplicate format.
         assert_eq!(reg.iter().count(), before);
         // The replacement's lookups now resolve to the (single) txt id.
+        assert_eq!(reg.by_extension("variant").map(|f| f.id()), Some(id));
         assert_eq!(
-            reg.by_extension("variant").map(|f| f.id().clone()),
-            Some(id.clone())
-        );
-        assert_eq!(
-            reg.by_content_type("text/variant").map(|f| f.id().clone()),
-            Some(id.clone())
+            reg.by_content_type("text/variant").map(|f| f.id()),
+            Some(id)
         );
         // The original still resolves by id to the same single entry.
         assert!(reg.by_id(&id).is_some());

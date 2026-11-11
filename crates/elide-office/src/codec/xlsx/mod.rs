@@ -37,7 +37,7 @@ const TEXT_PART_ID: &str = "text";
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), XlsxDocumentLoader)
+    Format::with_document_loader(FORMAT_ID, XlsxDocumentLoader)
         .with_extensions(["xlsx"])
         .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
 }

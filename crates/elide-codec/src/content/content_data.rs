@@ -2,43 +2,35 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::ops::Range;
 use std::path::Path;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use sha2::{Digest, Sha256};
-
-use super::TextEncoding;
 
 /// Raw content bytes with optional descriptive metadata.
 ///
-/// The data the codec moves around: the bytes, the [`encoding`] used to
-/// read them as text, plus the caller-supplied hints a registry can use
-/// to resolve a format: an original [`filename`] and a declared
-/// [`content_type`]. The metadata fields are optional; the caller
-/// supplies whatever it knows. Helpers cover the things a handler needs:
-/// byte access, slicing, text [`decode`], a content hash.
+/// The data the codec moves around: the bytes, plus the caller-supplied
+/// hints a registry can use to resolve a format: an original [`filename`]
+/// and a declared [`content_type`]. The metadata fields are optional; the
+/// caller supplies whatever it knows. Helpers cover byte access and UTF-8
+/// [`decode`].
 ///
-/// [`encoding`]: ContentData::encoding
 /// [`filename`]: ContentData::filename
 /// [`content_type`]: ContentData::content_type
 /// [`decode`]: ContentData::decode
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentData {
     data: Bytes,
-    encoding: TextEncoding,
     filename: Option<Cow<'static, str>>,
     content_type: Option<Cow<'static, str>>,
 }
 
 impl ContentData {
-    /// Wrap raw bytes, with UTF-8 encoding and no metadata.
+    /// Wrap raw bytes, with no metadata.
     #[must_use]
     pub fn new(data: Bytes) -> Self {
         Self {
             data,
-            encoding: TextEncoding::default(),
             filename: None,
             content_type: None,
         }
@@ -69,36 +61,15 @@ impl ContentData {
         self
     }
 
-    /// Set the text encoding used by [`decode`] (default
-    /// [`TextEncoding::Utf8`]).
-    ///
-    /// [`decode`]: Self::decode
-    #[must_use]
-    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        self.encoding = encoding;
-        self
-    }
-
-    /// The text encoding these bytes are read with.
-    #[must_use]
-    pub fn encoding(&self) -> TextEncoding {
-        self.encoding
-    }
-
-    /// Decode the bytes to a [`String`] using the content's [`encoding`].
-    ///
-    /// Text loaders call this instead of carrying their own encoding;
-    /// the charset is a property of the content, so it travels with the
-    /// bytes.
+    /// Decode the bytes as UTF-8 text.
     ///
     /// # Errors
     ///
-    /// Returns a malformed-input error when the bytes are not valid for the
-    /// encoding.
-    ///
-    /// [`encoding`]: Self::encoding
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// when the bytes are not valid UTF-8.
     pub fn decode(&self) -> Result<String> {
-        self.encoding.decode_bytes(&self.data)
+        String::from_utf8(self.data.to_vec())
+            .map_err(|e| Error::malformed(format!("invalid UTF-8: {e}")))
     }
 
     /// The original filename, if one was attached.
@@ -130,12 +101,6 @@ impl ContentData {
         })
     }
 
-    /// The size of the content in bytes.
-    #[must_use]
-    pub fn size(&self) -> usize {
-        self.data.len()
-    }
-
     /// Whether the content is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -158,42 +123,6 @@ impl ContentData {
     #[must_use]
     pub fn into_bytes(self) -> Bytes {
         self.data
-    }
-
-    /// The SHA-256 hash of the content.
-    #[must_use]
-    pub fn sha256(&self) -> Bytes {
-        let mut hasher = Sha256::new();
-        hasher.update(&self.data);
-        Bytes::from(hasher.finalize().to_vec())
-    }
-
-    /// The SHA-256 hash as a lowercase hex string.
-    #[must_use]
-    pub fn sha256_hex(&self) -> String {
-        hex::encode(self.sha256())
-    }
-
-    /// A slice of the content over `range`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a malformed-input error when the range end is past the content
-    /// length or its start exceeds its end.
-    pub fn slice(&self, range: Range<usize>) -> Result<Bytes> {
-        let Range { start, end } = range;
-        if end > self.data.len() {
-            return Err(Error::malformed(format!(
-                "slice end {end} exceeds content length {}",
-                self.data.len()
-            )));
-        }
-        if start > end {
-            return Err(Error::malformed(format!(
-                "slice start {start} is greater than end {end}"
-            )));
-        }
-        Ok(Bytes::copy_from_slice(&self.data[start..end]))
     }
 }
 
@@ -243,7 +172,6 @@ mod tests {
         assert_eq!(c.filename(), None);
         assert_eq!(c.content_type(), None);
         assert_eq!(c.extension(), None);
-        assert_eq!(c.encoding(), TextEncoding::Utf8);
     }
 
     #[test]

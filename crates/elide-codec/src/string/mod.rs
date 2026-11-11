@@ -1,4 +1,4 @@
-//! String extension traits the text-shaped handlers build on.
+//! String extension traits the text-shaped streams build on.
 //!
 //! Derive context words from a structural name ([`ContextWords`]), and splice a
 //! redaction into a byte range ([`RedactRange`]).

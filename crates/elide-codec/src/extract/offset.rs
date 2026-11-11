@@ -97,36 +97,7 @@ impl OffsetMap {
     /// embedded entity gives one uninterrupted raw range. Returns empty for an
     /// empty range or one outside the mapped text.
     pub fn raw_ranges(&self, decoded: Range<usize>) -> Vec<Range<usize>> {
-        if decoded.start >= decoded.end {
-            return Vec::new();
-        }
-        let mut ranges: Vec<Range<usize>> = Vec::new();
-        for run in &self.runs {
-            let start = decoded.start.max(run.decoded.start);
-            let end = decoded.end.min(run.decoded.end);
-            if start >= end {
-                continue;
-            }
-            let raw = match run.kind {
-                // Offsets within an identity run advance one-for-one, so the raw
-                // slice is the run's raw start shifted by the overlap.
-                RunKind::Identity => {
-                    let shift = start - run.decoded.start;
-                    let raw_start = run.raw.start + shift;
-                    raw_start..raw_start + (end - start)
-                }
-                // An entity is indivisible: any overlap yields its whole raw
-                // reference.
-                RunKind::Entity => run.raw.clone(),
-            };
-            match ranges.last_mut() {
-                // Coalesce a raw range contiguous with the previous one so a
-                // continuous redaction reads back as one uninterrupted range.
-                Some(prev) if prev.end == raw.start => prev.end = raw.end,
-                _ => ranges.push(raw),
-            }
-        }
-        ranges
+        self.translate(decoded, |run| &run.decoded, |run| &run.raw)
     }
 
     /// Translate a source-absolute `raw` byte range into the decoded byte
@@ -141,31 +112,44 @@ impl OffsetMap {
     /// several ranges; contiguous decoded ranges coalesce. Returns empty for an
     /// empty range or one outside the mapped raw text.
     pub fn decoded_ranges(&self, raw: Range<usize>) -> Vec<Range<usize>> {
-        if raw.start >= raw.end {
+        self.translate(raw, |run| &run.raw, |run| &run.decoded)
+    }
+
+    /// Translate `range`, expressed in the dimension `from` reads off a run,
+    /// into the dimension `to` reads, coalescing contiguous results.
+    fn translate(
+        &self,
+        range: Range<usize>,
+        from: impl Fn(&OffsetRun) -> &Range<usize>,
+        to: impl Fn(&OffsetRun) -> &Range<usize>,
+    ) -> Vec<Range<usize>> {
+        if range.start >= range.end {
             return Vec::new();
         }
         let mut ranges: Vec<Range<usize>> = Vec::new();
         for run in &self.runs {
-            let start = raw.start.max(run.raw.start);
-            let end = raw.end.min(run.raw.end);
+            let (source, target) = (from(run), to(run));
+            let start = range.start.max(source.start);
+            let end = range.end.min(source.end);
             if start >= end {
                 continue;
             }
-            let decoded = match run.kind {
+            let mapped = match run.kind {
                 // Offsets within an identity run advance one-for-one, so the
-                // decoded slice is the run's decoded start shifted by the overlap.
+                // target slice is the run's target start shifted by the overlap.
                 RunKind::Identity => {
-                    let shift = start - run.raw.start;
-                    let decoded_start = run.decoded.start + shift;
-                    decoded_start..decoded_start + (end - start)
+                    let target_start = target.start + (start - source.start);
+                    target_start..target_start + (end - start)
                 }
-                // An entity is indivisible: any raw overlap yields its whole
-                // decoded character.
-                RunKind::Entity => run.decoded.clone(),
+                // An entity is indivisible in both directions: any overlap
+                // yields its whole range on the other side.
+                RunKind::Entity => target.clone(),
             };
             match ranges.last_mut() {
-                Some(prev) if prev.end == decoded.start => prev.end = decoded.end,
-                _ => ranges.push(decoded),
+                // Coalesce a range contiguous with the previous one so a
+                // continuous span reads back as one uninterrupted range.
+                Some(prev) if prev.end == mapped.start => prev.end = mapped.end,
+                _ => ranges.push(mapped),
             }
         }
         ranges

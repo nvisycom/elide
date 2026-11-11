@@ -53,7 +53,7 @@ impl Document {
     }
 
     /// This document's format id.
-    pub fn format_id(&self) -> &FormatId {
+    pub fn format_id(&self) -> FormatId {
         self.document.format_id()
     }
 }

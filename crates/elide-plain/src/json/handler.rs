@@ -34,7 +34,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new(FORMAT_ID.clone(), JsonLoader)
+    Format::new(FORMAT_ID, JsonLoader)
         .with_extensions(["json"])
         .with_content_types(["application/json"])
 }
@@ -362,7 +362,7 @@ pub(crate) struct JsonHandler {
 
 impl Stream<Text> for JsonHandler {
     fn format(&self) -> FormatId {
-        FORMAT_ID.clone()
+        FORMAT_ID
     }
 
     fn encode(&self) -> Result<ContentData> {

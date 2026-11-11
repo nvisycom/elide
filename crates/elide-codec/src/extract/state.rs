@@ -1,8 +1,9 @@
-//! The mutable decoded item stream ([`SpliceState<A>`]) and its `Clone`-to-share
+//! The mutable decoded item stream (`SpliceState<A>`) and its `Clone`-to-share
 //! handle ([`SharedSplice<A>`]), with the lock hidden behind methods.
 
+use std::fmt;
 use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::{ExtractedItem, ItemEdit, Passage};
 
@@ -17,16 +18,16 @@ use super::{ExtractedItem, ItemEdit, Passage};
 /// `O(log N)`. Offsets are over the redactable-item sequence in document
 /// order, not raw source bytes.
 #[derive(Debug)]
-pub struct SpliceState<A> {
+pub(super) struct SpliceState<A> {
     /// The redactable item stream, in document order.
-    pub items: Vec<ExtractedItem<A>>,
+    pub(super) items: Vec<ExtractedItem<A>>,
     /// The cumulative byte-offset index over `items`.
-    pub item_starts: Vec<usize>,
+    pub(super) item_starts: Vec<usize>,
 }
 
 impl<A> SpliceState<A> {
     /// Build the state (and its offset index) from a decoded item stream.
-    pub fn new(items: Vec<ExtractedItem<A>>) -> Self {
+    fn new(items: Vec<ExtractedItem<A>>) -> Self {
         let item_starts = compute_item_starts(&items);
         Self { items, item_starts }
     }
@@ -95,7 +96,7 @@ impl<A> SpliceState<A> {
     }
 }
 
-/// A `Clone`-to-share handle to a [`SpliceState`], so an
+/// A `Clone`-to-share handle to a document's decoded item stream, so an
 /// [`ExtractStream`](super::ExtractStream) and a [`Recombine`](crate::Recombine)
 /// share (and both see) the redacted items.
 ///
@@ -109,8 +110,8 @@ impl<A> Clone for SharedSplice<A> {
     }
 }
 
-impl<A: std::fmt::Debug> std::fmt::Debug for SharedSplice<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<A: fmt::Debug> fmt::Debug for SharedSplice<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("SharedSplice")
             .field(&*self.0.lock().unwrap())
             .finish()
@@ -131,7 +132,7 @@ impl<A> SharedSplice<A> {
 
     /// The state under the lock, for the co-located
     /// [`ExtractStream`](super::ExtractStream)'s read/redact paths.
-    pub(super) fn lock(&self) -> std::sync::MutexGuard<'_, SpliceState<A>> {
+    pub(super) fn lock(&self) -> MutexGuard<'_, SpliceState<A>> {
         self.0.lock().unwrap()
     }
 }
