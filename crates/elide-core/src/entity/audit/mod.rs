@@ -326,3 +326,139 @@ impl<M: Modality> Default for AuditLog<M> {
         Self { events: Vec::new() }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use jiff::Timestamp;
+
+    use super::*;
+    use crate::entity::LabelRef;
+    use crate::modality::Hint;
+    use crate::modality::text::{Text, TextLocation};
+    use crate::primitive::ComponentId;
+    use crate::redaction::{HiddenContentKind, LeakProfile};
+
+    /// `event` stamped at the Unix epoch, so its hash is reproducible.
+    fn fixed(mut event: AuditEvent<Text>) -> AuditEvent<Text> {
+        event.timestamp = Timestamp::UNIX_EPOCH;
+        event
+    }
+
+    /// One event of every kind, each with every optional field set, chained in
+    /// a single trail.
+    fn every_kind() -> AuditLog<Text> {
+        let at = TextLocation::inline(3..9);
+        let conf = Confidence::new(0.5).unwrap();
+        let operator = ComponentId::new("mask", "1");
+        let why = Attribution::cited("GDPR", "Art. 17").with_rationale("erasure");
+        let events = [
+            AuditEvent::pattern(
+                "pattern",
+                conf,
+                at.clone(),
+                PatternEvent {
+                    name: "ssn".into(),
+                    regex: Some(r"\d{3}".into()),
+                    validator: Some("luhn".into()),
+                },
+            ),
+            AuditEvent::model(
+                "model",
+                conf,
+                at.clone(),
+                ModelEvent {
+                    name: "ner".into(),
+                    version: Some("2".into()),
+                },
+            ),
+            AuditEvent::flagged(
+                "codec",
+                conf,
+                at.clone(),
+                FlaggedEvent {
+                    content: HiddenContentKind::Collaboration,
+                },
+            ),
+            AuditEvent::deduplication("union", conf),
+            AuditEvent::conflict(Conflict::new(LabelRef::new("iban"), conf, "longest"), conf),
+            AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
+            AuditEvent::calibration(conf, 0.5),
+            AuditEvent::refinement(
+                "context",
+                conf,
+                Refinement::new("ssn")
+                    .with_hint(Hint::new(TextLocation::inline(0..2)))
+                    .with_location(TextLocation::inline(0..2)),
+            ),
+            AuditEvent::selection(
+                Selection::new(operator.clone(), RuleMatch::Tag("pii".into()))
+                    .with_attribution(why.clone()),
+                conf,
+            ),
+            AuditEvent::redaction(
+                Redaction::new(operator, RuleMatch::Label(LabelRef::new("ssn")))
+                    .with_leak_profile(LeakProfile::Partial)
+                    .with_attribution(why.clone()),
+                conf,
+            ),
+            AuditEvent::manual(
+                "reviewer",
+                conf,
+                Manual::new(ManualIntent::Suppress, at).with_attribution(why),
+            ),
+        ];
+        let mut log = AuditLog::default();
+        for event in events {
+            log.record(fixed(event));
+        }
+        log
+    }
+
+    /// Pins every kind's hash layout: a change to what an event folds into its
+    /// hash, or to a discriminant it folds in, changes these digests and must be
+    /// a deliberate format change.
+    #[test]
+    fn every_kind_hashes_to_its_pinned_digest() {
+        let log = every_kind();
+        assert!(log.verify().is_ok());
+        let digests: Vec<String> = log.events().iter().map(|e| e.hash().to_string()).collect();
+        assert_eq!(digests, PINNED);
+    }
+
+    /// The digests of [`every_kind`]'s events, in order.
+    const PINNED: [&str; 11] = [
+        // pattern
+        "efd6aa450cea4b05d8b578402db5265e36b8d8ceba1e92dd68970b94fc6e2ff9",
+        // model
+        "be2a8bc8d489f497b7e7e57aad9d95576ba406a6306d7606bc91aacba48266e3",
+        // flagged
+        "05d48e609b150c7180fad9163c4e96bd160e540df3f2c5f7eb9c5a57b74937f3",
+        // deduplication
+        "d1b7c5290a168246ebb9cb2c5f4f3c16ede35f42637c7bb58dba1329d434d88c",
+        // conflict
+        "d7481599219daeab60f7ba1e35723a622a86fed5160a607228841fe3408b6575",
+        // contested
+        "aefaa238ba40ee2e07dda0ede908400dc9831e6b504c1af9f02e02175dbb7734",
+        // calibration
+        "19339f127087e661d20b90dc538aabc28f52dbed5b0ccb5bddafa470adae91c2",
+        // refinement
+        "e2e2678477a3aec58d3ff282764714ae7ec1ed06f3db3c79122e85e5d5881dab",
+        // selection
+        "93422dd7c33f8d227b53e930e4302ae2c4bba532bf6c3c58b59b0ef02da68687",
+        // redaction
+        "977d1745249d663991a333f0a5dd16108796639ceba4070c29544eca9674ef4a",
+        // manual
+        "215d199b8bb6aadc4d747bea55d392aba27b623d6b0b4454b135d4e06ccc0cc9",
+    ];
+
+    /// Editing any recorded payload field breaks verification.
+    #[test]
+    fn editing_a_payload_field_breaks_verification() {
+        let mut log = every_kind();
+        let AuditKind::Redaction(redaction) = &mut log.events[9].kind else {
+            panic!("the tenth event is the redaction");
+        };
+        redaction.leak_profile = Some(LeakProfile::Irrecoverable);
+        assert!(log.verify().is_err());
+    }
+}
