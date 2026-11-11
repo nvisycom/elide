@@ -1,4 +1,4 @@
-//! [`ComponentId`]: the name + version of an analysis component.
+//! [`ComponentId`]: the name + version of a pipeline component.
 
 use std::fmt;
 
@@ -6,8 +6,8 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Identifies an analysis component — a recognizer or an enricher — by name and
-/// version.
+/// Identifies a pipeline component (a recognizer, an enricher, or a redaction
+/// operator) by name and version.
 ///
 /// Pairs a stable name with a free-form version string so the audit trail and
 /// usage report record not just *which* component ran but *which build* of it:

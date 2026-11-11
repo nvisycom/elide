@@ -8,8 +8,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::primitive::{LanguageTag, LocalizedText};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::{ComponentId, LanguageTag, LocalizedText};
+use elide_core::redaction::{LeakProfile, Operator};
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -133,8 +133,8 @@ pub struct Clamp {
 
 impl Clamp {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("clamp", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("clamp", "1.0.0")
     }
 
     /// A clamp with no bounds, every value passes through until a
@@ -242,7 +242,7 @@ impl Clamp {
 
 #[async_trait::async_trait]
 impl Operator<Text> for Clamp {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Clamp::id()
     }
 
@@ -277,7 +277,7 @@ impl TryOperator<Text> for Clamp {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Clamp {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Clamp::id()
     }
 
@@ -314,7 +314,7 @@ impl TryOperator<Tabular> for Clamp {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Clamp {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Clamp::id()
     }
 
@@ -343,7 +343,7 @@ impl TryOperator<Metadata> for Clamp {
         data: &MetadataData,
     ) -> Result<Option<MetadataReplacement>> {
         Ok(self
-            .render(data.value(), entity.language.as_ref())
+            .render(data.as_str(), entity.language.as_ref())
             .map(|text| TextReplacement::substituted(text).into()))
     }
 }

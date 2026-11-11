@@ -2,7 +2,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -40,8 +41,8 @@ impl Default for Blur {
 
 #[async_trait::async_trait]
 impl Operator<Image> for Blur {
-    fn id(&self) -> OperatorId {
-        OperatorId::new("blur", "1.0.0")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("blur", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {

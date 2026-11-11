@@ -55,7 +55,7 @@ impl MetadataFields {
         match &location.span {
             Some(span) => Some(MetadataData::new(
                 field.key.clone(),
-                field.value().get(span.clone())?.to_owned(),
+                field.as_str().get(span.clone())?.to_owned(),
                 field.label.clone(),
             )),
             None => Some(field.clone()),
@@ -89,7 +89,7 @@ impl MetadataFields {
             else {
                 continue;
             };
-            let mut value = field.value().to_owned();
+            let mut value = field.as_str().to_owned();
             let span = location.span.unwrap_or(0..value.len());
             value.redact_range(replacement.value().unwrap_or_default(), span)?;
             field.value = value.into();
@@ -103,11 +103,12 @@ impl MetadataFields {
         let edits = edited
             .into_iter()
             .filter_map(|key| {
-                let value = self.field(&key)?.value().trim().to_owned();
+                let value = self.field(&key)?.as_str().trim().to_owned();
                 Some((key, value))
             })
             .collect();
-        self.fields.retain(|field| !field.value().trim().is_empty());
+        self.fields
+            .retain(|field| !field.as_str().trim().is_empty());
         Ok(edits)
     }
 
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn a_span_reads_its_part_of_the_value() {
         let read = fields().read_at(&part(9, 17)).unwrap();
-        assert_eq!(read.value(), "Jane Roe");
+        assert_eq!(read.value, "Jane Roe");
         assert!(fields().read_at(&part(0, 99)).is_none());
         assert!(
             fields()
@@ -176,7 +177,7 @@ mod tests {
             fields
                 .read_at(&MetadataLocation::new("description"))
                 .unwrap()
-                .value(),
+                .value,
             "Photo of [NAME] in "
         );
     }

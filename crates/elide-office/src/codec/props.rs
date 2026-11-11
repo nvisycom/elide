@@ -133,8 +133,8 @@ mod tests {
                 .chunks()
                 .unwrap()
                 .into_iter()
-                .find(|chunk| chunk.data.key() == key)
-                .map(|chunk| chunk.data.label().clone())
+                .find(|chunk| chunk.data.key == key)
+                .map(|chunk| chunk.data.label.clone())
         };
         assert_eq!(
             label("creator"),

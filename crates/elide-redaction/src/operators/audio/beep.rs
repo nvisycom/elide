@@ -3,7 +3,8 @@
 use elide_audio::modality::{Audio, AudioData, AudioReplacement, Waveform};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -68,8 +69,8 @@ impl Default for Beep {
 
 #[async_trait::async_trait]
 impl Operator<Audio> for Beep {
-    fn id(&self) -> OperatorId {
-        OperatorId::new("beep", "1.0.0")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("beep", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {

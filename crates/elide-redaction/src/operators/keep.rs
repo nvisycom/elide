@@ -9,7 +9,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "image")]
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
@@ -40,14 +41,14 @@ const KEEP_LEAK: LeakProfile = LeakProfile::Recoverable;
 
 impl Keep {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("keep", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("keep", "1.0.0")
     }
 }
 
 #[async_trait::async_trait]
 impl Operator<Text> for Keep {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Keep::id()
     }
 
@@ -63,7 +64,7 @@ impl Operator<Text> for Keep {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Keep {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Keep::id()
     }
 
@@ -83,7 +84,7 @@ impl Operator<Tabular> for Keep {
 #[cfg(feature = "image")]
 #[async_trait::async_trait]
 impl Operator<Image> for Keep {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Keep::id()
     }
 
@@ -103,7 +104,7 @@ impl Operator<Image> for Keep {
 #[cfg(feature = "audio")]
 #[async_trait::async_trait]
 impl Operator<Audio> for Keep {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Keep::id()
     }
 
@@ -123,7 +124,7 @@ impl Operator<Audio> for Keep {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Keep {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Keep::id()
     }
 

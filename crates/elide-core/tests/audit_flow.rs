@@ -53,7 +53,6 @@ fn two_recognizers_fuse_into_one() {
                 name: "phone".into(),
                 regex: Some("\\d{3}-\\d{3}-\\d{4}".into()),
                 validator: Some("luhn".into()),
-                contextual: false,
             },
         ),
     );
@@ -70,7 +69,6 @@ fn two_recognizers_fuse_into_one() {
             ModelEvent {
                 name: "ner-model".into(),
                 version: Some("2024.1".into()),
-                contextual: false,
             },
         ),
     );
@@ -252,7 +250,7 @@ fn a_detected_language_never_filters() {
     // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
     assert!(!ctx.languages(&subject).apply_to(&de_scope));
 
-    // `asserted_languages` excludes the detected one, the caller asserted
+    // `asserted` excludes the detected one, the caller asserted
     // nothing, so per-language context selection stays permissive rather than
     // keying on the (unreliable) detected `es`.
     assert!(ctx.languages(&subject).asserted().is_empty());
@@ -265,7 +263,8 @@ fn a_detected_language_never_filters() {
 
 #[test]
 fn operator_trait_shape() {
-    use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+    use elide_core::primitive::ComponentId;
+    use elide_core::redaction::{LeakProfile, Operator};
 
     /// A trivial `[LABEL]`-style replace operator, to exercise the
     /// trait shape and the pure `Replacement` model.
@@ -273,8 +272,8 @@ fn operator_trait_shape() {
 
     #[async_trait::async_trait]
     impl Operator<Text> for Replace {
-        fn id(&self) -> OperatorId {
-            OperatorId::new("replace", "1.0.0")
+        fn id(&self) -> ComponentId {
+            ComponentId::new("replace", "1.0.0")
         }
 
         fn leak_profile(&self) -> LeakProfile {
@@ -295,7 +294,7 @@ fn operator_trait_shape() {
     }
 
     let op = Replace;
-    assert_eq!(op.id(), OperatorId::new("replace", "1.0.0"));
+    assert_eq!(op.id(), ComponentId::new("replace", "1.0.0"));
     assert_eq!(op.leak_profile(), LeakProfile::Partial);
     assert!(LeakProfile::Recoverable < LeakProfile::Irrecoverable);
 

@@ -5,14 +5,14 @@
 //! own bytes so two kinds can never hash alike, see the [payloads
 //! overview](super).
 
-use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
-use super::super::{Attribution, AuditHash, RuleMatch};
+use super::super::{Attribution, RuleMatch};
 use crate::modality::{Modality, ModalityLocation};
-use crate::redaction::{LeakProfile, OperatorId};
+use crate::primitive::ComponentId;
+use crate::redaction::LeakProfile;
 
 /// An operator hid the entity.
 #[derive(Debug, Clone)]
@@ -20,7 +20,7 @@ use crate::redaction::{LeakProfile, OperatorId};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Redaction {
     /// Which operator (name + version) ran.
-    pub operator: OperatorId,
+    pub operator: ComponentId,
     /// How much the output leaks about the original, when the operator claimed a
     /// profile; `None` when it made no claim.
     #[cfg_attr(
@@ -28,13 +28,6 @@ pub struct Redaction {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub leak_profile: Option<LeakProfile>,
-    /// Identifier of the key needed to reverse it, if reversible.
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub key_id: Option<HipStr<'static>>,
     /// Which selection rule chose this operator: the automatic "why" (matched a
     /// label, a tag, a predicate, or the fallback).
     pub matched_by: RuleMatch,
@@ -45,21 +38,6 @@ pub struct Redaction {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub attribution: Option<Attribution>,
-    /// BLAKE3 digest of the original text the operator hid, when the redaction
-    /// layer recorded it. Proves *what* was redacted without storing the
-    /// plaintext; `None` when the operator did not capture it.
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub span_hash: Option<AuditHash>,
-    /// Byte length of the original text the operator hid, paired with
-    /// [`span_hash`](Self::span_hash). `None` when not captured.
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub span_length: Option<u32>,
 }
 
 impl Redaction {
@@ -67,17 +45,13 @@ impl Redaction {
     pub(crate) const TAG: u8 = 7;
 
     /// A redaction by `operator`, chosen by the rule `matched_by`. The leak
-    /// profile, reversal key, policy attribution, and captured span are attached
-    /// with the `with_*` builders.
-    pub fn new(operator: OperatorId, matched_by: RuleMatch) -> Self {
+    /// profile and policy attribution are attached with the `with_*` builders.
+    pub fn new(operator: ComponentId, matched_by: RuleMatch) -> Self {
         Self {
             operator,
             leak_profile: None,
-            key_id: None,
             matched_by,
             attribution: None,
-            span_hash: None,
-            span_length: None,
         }
     }
 
@@ -88,27 +62,10 @@ impl Redaction {
         self
     }
 
-    /// Attach the identifier of the key needed to reverse a reversible operator.
-    #[must_use]
-    pub fn with_key_id(mut self, key_id: impl Into<HipStr<'static>>) -> Self {
-        self.key_id = Some(key_id.into());
-        self
-    }
-
     /// Attach the author-supplied policy [`Attribution`] the operator carried.
     #[must_use]
     pub fn with_attribution(mut self, attribution: impl Into<Attribution>) -> Self {
         self.attribution = Some(attribution.into());
-        self
-    }
-
-    /// Record what was hidden without the plaintext: the BLAKE3 `hash` of the
-    /// original span and its byte `length`. The two are set together, they are
-    /// meaningless apart.
-    #[must_use]
-    pub fn with_span(mut self, hash: AuditHash, length: u32) -> Self {
-        self.span_hash = Some(hash);
-        self.span_length = Some(length);
         self
     }
 
@@ -124,19 +81,8 @@ impl Redaction {
                 out.byte(0);
             }
         }
-        out.opt(self.key_id.as_ref().map(|s| s.as_bytes()));
         self.matched_by.hash_into(out);
         hash_opt_attribution(out, self.attribution.as_ref());
-        out.opt(self.span_hash.as_ref().map(|h| h.as_bytes().as_slice()));
-        match self.span_length {
-            Some(length) => {
-                out.byte(1);
-                out.raw(&length.to_le_bytes());
-            }
-            None => {
-                out.byte(0);
-            }
-        }
     }
 }
 
@@ -151,7 +97,7 @@ pub struct Selection {
     /// Identity (name + version) of the operator picked. Its *config* is not
     /// recorded; it lives in the policy that will run it, so apply re-resolves
     /// the configured operator rather than reading it here.
-    pub operator: OperatorId,
+    pub operator: ComponentId,
     /// Which selection rule chose this operator: the automatic "why" (matched a
     /// label, a tag, a predicate, or the fallback).
     pub matched_by: RuleMatch,
@@ -170,7 +116,7 @@ impl Selection {
 
     /// A pick of `operator`, chosen by the rule `matched_by`, with no policy
     /// attribution. Attach one with [`with_attribution`](Self::with_attribution).
-    pub fn new(operator: OperatorId, matched_by: RuleMatch) -> Self {
+    pub fn new(operator: ComponentId, matched_by: RuleMatch) -> Self {
         Self {
             operator,
             matched_by,
@@ -200,7 +146,7 @@ impl Selection {
 /// [`source`], not a payload field.
 ///
 /// [`source`]: super::AuditEvent::source
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -232,18 +178,6 @@ pub struct Manual<M: Modality> {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub attribution: Option<Attribution>,
-}
-
-// Manual `Clone`: `derive` would add a spurious `M: Clone` bound, but `M` is
-// a zero-size marker. The location clones via its own bound.
-impl<M: Modality> Clone for Manual<M> {
-    fn clone(&self) -> Self {
-        Self {
-            intent: self.intent,
-            location: self.location.clone(),
-            attribution: self.attribution.clone(),
-        }
-    }
 }
 
 impl<M: Modality> Manual<M> {
@@ -303,7 +237,7 @@ pub enum ManualIntent {
 }
 
 /// Fold an optional [`Attribution`] into `out`: a presence byte, then the
-/// attribution's own bytes if present. Shared by [`Redaction`] and [`Selection`].
+/// attribution's own bytes if present. Shared by every payload that carries one.
 fn hash_opt_attribution(out: &mut AuditHasher, attribution: Option<&Attribution>) {
     match attribution {
         Some(attribution) => {

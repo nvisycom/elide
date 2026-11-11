@@ -100,7 +100,12 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         // document, so detection still runs, but restricted to the asserted set,
         // so each entity is attributed to the asserted language its own text is
         // in rather than to whichever was asserted first.
-        let asserted = ctx.asserted_languages();
+        let asserted: Vec<LanguageTag> = ctx
+            .scope()
+            .languages()
+            .iter()
+            .map(|claim| claim.language.clone())
+            .collect();
         if asserted.len() == 1 {
             return Ok(());
         }

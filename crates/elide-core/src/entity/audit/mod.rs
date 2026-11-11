@@ -79,8 +79,14 @@ pub struct AuditLog<M: Modality> {
     events: Vec<AuditEvent<M>>,
 }
 
-/// Accessors and trail assembly that do not depend on hashing.
 impl<M: Modality> AuditLog<M> {
+    /// An audit log seeded with a single birth `event` (no parents).
+    pub fn new(event: AuditEvent<M>) -> Self {
+        let mut log = Self { events: Vec::new() };
+        log.record(event);
+        log
+    }
+
     /// The recorded events, in order.
     pub fn events(&self) -> &[AuditEvent<M>] {
         &self.events
@@ -129,10 +135,9 @@ impl<M: Modality> AuditLog<M> {
 
     /// The entity's operator *pick*, if one was recorded: the [`Selection`]
     /// payload from its most recent selection event. `None` when no operator was
-    /// picked (e.g. a suppressed entity, or before [`pick`] ran).
+    /// picked (e.g. a suppressed entity, or before the anonymizer's pick ran).
     ///
     /// [`Selection`]: crate::entity::audit::Selection
-    /// [`pick`]: crate::entity::audit::AuditKind::Selection
     pub fn selection(&self) -> Option<&Selection> {
         self.events.iter().rev().find_map(|e| match &e.kind {
             AuditKind::Selection(s) => Some(s),
@@ -196,7 +201,7 @@ impl<M: Modality> AuditLog<M> {
 
     /// The index of the first event whose [`kind`] satisfies `predicate`, or
     /// `None` if none do, the audit-trail counterpart to
-    /// [`slice::position`](https://doc.rust-lang.org/std/primitive.slice.html).
+    /// [`Iterator::position`].
     ///
     /// Events are in the order they were recorded, so comparing two positions
     /// tells you which happened first (e.g. that a [`Selection`] pick was
@@ -209,30 +214,10 @@ impl<M: Modality> AuditLog<M> {
         self.events.iter().position(|e| predicate(&e.kind))
     }
 
-    /// Confidence at the very first event, before any adjustment.
-    pub fn original_confidence(&self) -> Option<Confidence> {
-        self.events.first().map(|e| e.confidence)
-    }
-
     /// Confidence after the most recent event: the entity's effective
     /// confidence.
     pub fn final_confidence(&self) -> Option<Confidence> {
         self.events.last().map(|e| e.confidence)
-    }
-}
-
-/// Hashing and verification. Bound-free: an event's hash folds its payload and
-/// its [`kind`](AuditEvent::kind) detail through [`ModalityLocation::hash`], so
-/// the tamper-evident chain works with or without the `serde` feature. serde is
-/// only for persisting the trail, never for building or verifying it.
-///
-/// [`ModalityLocation::hash`]: crate::modality::ModalityLocation::hash
-impl<M: Modality> AuditLog<M> {
-    /// An audit log seeded with a single birth `event` (no parents).
-    pub fn new(event: AuditEvent<M>) -> Self {
-        let mut log = Self { events: Vec::new() };
-        log.record(event);
-        log
     }
 
     /// Record `event` as following the current head: it links to the last

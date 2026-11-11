@@ -3,7 +3,8 @@
 use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -22,8 +23,8 @@ pub struct Silence;
 
 #[async_trait::async_trait]
 impl Operator<Audio> for Silence {
-    fn id(&self) -> OperatorId {
-        OperatorId::new("silence", "1.0.0")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("silence", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {

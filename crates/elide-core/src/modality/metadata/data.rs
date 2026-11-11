@@ -44,22 +44,13 @@ impl MetadataData {
         }
     }
 
-    /// The field key.
+    /// The field's value as a string slice, what an operator reads, as
+    /// [`TextData::as_str`] does for text.
+    ///
+    /// [`TextData::as_str`]: crate::modality::text::TextData::as_str
     #[must_use]
-    pub fn key(&self) -> &str {
-        self.key.as_str()
-    }
-
-    /// The field value.
-    #[must_use]
-    pub fn value(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         self.value.as_str()
-    }
-
-    /// What the field is by its format's schema.
-    #[must_use]
-    pub fn label(&self) -> &LabelRef {
-        &self.label
     }
 }
 

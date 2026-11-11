@@ -222,31 +222,35 @@ impl HiddenContent {
 /// [`Metadata`](Self::Metadata) and [`Collaboration`](Self::Collaboration) are
 /// what a [`HiddenContentPolicy`] chooses for; every other kind is always
 /// stripped.
+// Explicit discriminants: `Flagged::hash_into` folds `kind as u8` into the
+// tamper-evident hash, so these values are part of the hash. Append new
+// variants with the next value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum HiddenContentKind {
     /// Descriptive data about the document.
-    Metadata,
+    Metadata = 0,
     /// Comments, tracked changes, and annotations.
-    Collaboration,
+    Collaboration = 1,
     /// Rendered previews.
-    Preview,
+    Preview = 2,
     /// References to resources outside the document.
-    ExternalReference,
+    ExternalReference = 3,
     /// Content that runs: scripts, macros, actions, controls, add-ins.
-    ActiveContent,
+    ActiveContent = 4,
     /// Traces that identify the author, their machine, or the file's history.
-    Fingerprint,
+    Fingerprint = 5,
     /// Content the file carries that is not part of what a reader sees:
     /// leftovers of earlier revisions, content never displayed.
-    Remnant,
+    Remnant = 6,
     /// Content a reader can reach that no extraction reads, so detection
     /// cannot redact it.
-    Unextracted,
+    Unextracted = 7,
     /// Embedded content that cannot be redacted because no codec reads it.
-    EmbeddedObject,
+    EmbeddedObject = 8,
 }
 
 #[cfg(test)]

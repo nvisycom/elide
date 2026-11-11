@@ -9,19 +9,6 @@ use uuid::Uuid;
 use crate::entity::LabelCatalog;
 use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 
-/// Caller-asserted scope shared across every payload of one analysis.
-///
-/// Built once with the `with_*` chain and passed by reference to the
-/// analyzer, which borrows it into a fresh [`Context`] per
-/// payload. It holds only what the *caller* asserts about the analysis as a
-/// whole, languages, jurisdictions, document labels, the target catalog, a
-/// correlation id, none of which depends on the medium, so one [`Scope`]
-/// drives a text, image, or audio analysis alike.
-///
-/// The per-payload working state (NLP artifacts, detected languages) lives on
-/// the context, not here.
-///
-/// [`Context`]: super::Context
 /// Free-form, caller-asserted request context: the *document* it is about and
 /// the *request* driving it.
 ///
@@ -90,21 +77,32 @@ impl ScopeMetadata {
 ///
 /// Carries the [`catalog`] of entity types to find (empty means detect
 /// nothing), the asserted [`languages`] and [`countries`] that gate
-/// locale-specific rules, and free-form [`metadata`]. Passed to every
-/// recognizer so each can narrow itself to what the caller asked for.
+/// locale-specific rules, and free-form [`metadata`]. None of it depends on the
+/// medium, so one `Scope` drives a text, image, or audio analysis alike.
+///
+/// Built once with the `with_*` chain; the analyzer borrows it into a
+/// [`Context`] that every enricher and recognizer reads, so each can narrow
+/// itself to what the caller asked for. The per-chunk working state
+/// (enrichment, detected languages, hints) lives on the [`Subject`], not here.
 ///
 /// [`catalog`]: Self::catalog
 /// [`languages`]: Self::languages
 /// [`countries`]: Self::countries
 /// [`metadata`]: Self::metadata
+/// [`Context`]: super::Context
+/// [`Subject`]: super::Subject
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Scope {
-    /// Caller-asserted languages for the analysis. Empty means the caller
-    /// asserted none, leaving detection (if an enricher runs) to fill in.
-    pub languages: Vec<LanguageClaim>,
+    /// Caller-asserted languages for the analysis, read through
+    /// [`languages`](Self::languages). Every claim is asserted: the builders
+    /// record each tag with [`LanguageClaim::asserted`], and serde carries the
+    /// bare tags, so a deserialized scope cannot smuggle in a detected claim.
+    #[cfg_attr(feature = "serde", serde(with = "asserted_tags"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
+    languages: Vec<LanguageClaim>,
     /// Caller-asserted jurisdictions. When non-empty, recognizers that
     /// carry per-rule country scopes skip rules that match none of them.
     /// An empty list means "any": rules that declare countries still run
@@ -133,13 +131,7 @@ impl Scope {
     /// so a bare `Scope::new()` **detects nothing**, set a catalog (e.g.
     /// `.with_catalog(`[`LabelCatalog::with_builtins`]`())`) to detect.
     pub fn new() -> Self {
-        Self {
-            languages: Vec::new(),
-            countries: Vec::new(),
-            metadata: ScopeMetadata::default(),
-            catalog: LabelCatalog::new(),
-            correlation_id: None,
-        }
+        Self::default()
     }
 
     /// Assert a `language` for the analysis, returning `self` for chaining.
@@ -155,6 +147,22 @@ impl Scope {
         self
     }
 
+    /// Replace the asserted languages with `languages`, each recorded as a
+    /// caller [`asserted`](LanguageClaim::asserted) claim like
+    /// [`with_language`](Self::with_language).
+    #[must_use]
+    pub fn with_languages(mut self, languages: impl IntoIterator<Item = LanguageTag>) -> Self {
+        self.languages = languages.into_iter().map(LanguageClaim::asserted).collect();
+        self
+    }
+
+    /// The caller-asserted language claims, in the order given. Empty means the
+    /// caller asserted none, leaving detection (if an enricher runs) to fill in.
+    #[must_use]
+    pub fn languages(&self) -> &[LanguageClaim] {
+        &self.languages
+    }
+
     /// Assert a jurisdiction. May be called more than once to assert
     /// several; a rule runs when any one matches.
     #[must_use]
@@ -165,8 +173,8 @@ impl Scope {
 
     /// Replace the asserted jurisdictions with `countries`.
     #[must_use]
-    pub fn with_countries(mut self, countries: Vec<CountryCode>) -> Self {
-        self.countries = countries;
+    pub fn with_countries(mut self, countries: impl IntoIterator<Item = CountryCode>) -> Self {
+        self.countries = countries.into_iter().collect();
         self
     }
 
@@ -229,6 +237,29 @@ impl Scope {
     }
 }
 
+/// (De)serializes the scope's asserted languages as bare tags, re-asserting
+/// each on the way in.
+#[cfg(feature = "serde")]
+mod asserted_tags {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::primitive::{LanguageClaim, LanguageTag};
+
+    pub(super) fn serialize<S: Serializer>(
+        claims: &[LanguageClaim],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(claims.iter().map(|claim| &claim.language))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<LanguageClaim>, D::Error> {
+        let tags = Vec::<LanguageTag>::deserialize(deserializer)?;
+        Ok(tags.into_iter().map(LanguageClaim::asserted).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +271,17 @@ mod tests {
         assert!(!Scope::new().with_tags(["medical"]).metadata.is_empty());
         assert!(!Scope::new().with_purpose("fraud").metadata.is_empty());
         assert!(!Scope::new().with_audience(["auditor"]).metadata.is_empty());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn languages_round_trip_as_asserted_tags() {
+        let en = LanguageTag::parse("en").unwrap();
+        let scope = Scope::new().with_language(en.clone());
+        let json = serde_json::to_value(&scope).unwrap();
+        assert_eq!(json["languages"], serde_json::json!(["en"]));
+
+        let back: Scope = serde_json::from_value(json).unwrap();
+        assert_eq!(back.languages(), [LanguageClaim::asserted(en)]);
     }
 }

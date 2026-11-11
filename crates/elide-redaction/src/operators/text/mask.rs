@@ -8,7 +8,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -34,8 +35,8 @@ pub struct Mask {
 
 impl Mask {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("mask", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("mask", "1.0.0")
     }
 
     /// A mask using `mask_char`, with no preserved prefix or suffix.
@@ -93,7 +94,7 @@ impl Mask {
 
 #[async_trait::async_trait]
 impl Operator<Text> for Mask {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Mask::id()
     }
 
@@ -110,7 +111,7 @@ impl Operator<Text> for Mask {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Mask {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Mask::id()
     }
 
@@ -130,7 +131,7 @@ impl Operator<Tabular> for Mask {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Mask {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Mask::id()
     }
 
@@ -143,6 +144,6 @@ impl Operator<Metadata> for Mask {
         _entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.value())).into())
+        Ok(TextReplacement::substituted(self.render(data.as_str())).into())
     }
 }

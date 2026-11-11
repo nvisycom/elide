@@ -2,8 +2,8 @@
 //!
 //! A model-backed component — LLM/VLM extraction, NER, speech-to-text, OCR —
 //! is a [`Backend`]: it takes a [`BackendRequest`], calls a model, and returns
-//! a [`BackendResponse`] that reports the [`TokenCounts`] it spent and how much
-//! it produced. One contract, so the `Metered` wrapper in the `elide-backend`
+//! a [`BackendResponse`] that reports the billing [`Units`] it spent and how
+//! much it produced. One contract, so the `Metered` wrapper in the `elide-backend`
 //! crate can meter any of them without per-backend code.
 //!
 //! Request and response are associated types: [`Request`](Backend::Request) is
@@ -11,10 +11,11 @@
 //! the trait models the call exactly. The trait is therefore not object-safe: a
 //! consumer is generic over `B: Backend` rather than holding a `dyn Backend`.
 //!
-//! Only [`TokenCounts`] lives here — the one usage type the contract returns. The
-//! `Metered` wrapper, the `Usage` record, the collector and the sinks live in
-//! `elide-backend`, pulled in only when a caller wants usage accounting; the
-//! recognizers, enrichers, and reports that consume a backend never carry usage.
+//! Only the usage types the contract returns live here ([`Units`], [`Meter`],
+//! [`TokenCounts`]). The `Metered` wrapper, the `Usage` record, the collector
+//! and the sinks live in `elide-backend`, pulled in only when a caller wants
+//! usage accounting; the recognizers, enrichers, and reports that consume a
+//! backend never carry usage.
 
 mod usage;
 
@@ -85,7 +86,7 @@ pub trait Backend: Send + Sync {
     /// The request this backend accepts. A GAT, so the request may borrow its
     /// payload for the duration of the call.
     type Request<'a>: BackendRequest;
-    /// The response this backend returns, reporting its tokens.
+    /// The response this backend returns, reporting the units it spent.
     type Response: BackendResponse;
 
     /// The model this backend calls, for entity-trail provenance and the usage

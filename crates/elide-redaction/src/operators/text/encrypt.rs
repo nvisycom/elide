@@ -13,7 +13,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId, ReversibleOperator};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator, ReversibleOperator};
 use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -75,8 +76,8 @@ impl AesEncrypt {
     }
 
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("encrypt", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("encrypt", "1.0.0")
     }
 
     /// The cipher for `label`'s key, or a [`Redaction`](elide_core::ErrorKind::Redaction)
@@ -154,7 +155,7 @@ impl fmt::Debug for AesEncrypt {
 
 #[async_trait::async_trait]
 impl Operator<Text> for AesEncrypt {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::id()
     }
 
@@ -184,7 +185,7 @@ impl ReversibleOperator<Text> for AesEncrypt {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for AesEncrypt {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::id()
     }
 
@@ -220,7 +221,7 @@ impl ReversibleOperator<Tabular> for AesEncrypt {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for AesEncrypt {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Self::id()
     }
 
@@ -233,7 +234,7 @@ impl Operator<Metadata> for AesEncrypt {
         entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.encrypt_str(&entity.label, data.value())?).into())
+        Ok(TextReplacement::substituted(self.encrypt_str(&entity.label, data.as_str())?).into())
     }
 }
 

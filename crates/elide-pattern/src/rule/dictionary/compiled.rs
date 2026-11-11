@@ -59,7 +59,6 @@ impl CompiledDictionary {
             context: self.context,
             pattern: PatternEvent {
                 name: self.name.clone().into(),
-                contextual: false,
                 ..PatternEvent::default()
             },
         }

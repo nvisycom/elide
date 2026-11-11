@@ -31,9 +31,9 @@ use crate::modality::Modality;
 /// # }
 /// ```
 ///
-/// `#[non_exhaustive]`: new event kinds (verification, annotation, …) can be
-/// added compatibly. The recognition kinds ([`Pattern`], [`Model`]) carry the
-/// matched [`Location`]; the rest carry their own data.
+/// `#[non_exhaustive]`: new event kinds can be added compatibly. The
+/// recognition kinds ([`Pattern`], [`Model`]) carry the matched [`Location`];
+/// the rest carry their own data.
 ///
 /// [`AuditEvent`]: super::AuditEvent
 /// [`Pattern`]: AuditKind::Pattern

@@ -10,7 +10,8 @@ use elide::primitive::Confidence;
 /// linked events.
 fn redacted_entity(label: &str) -> Entity<Text> {
     use elide::entity::audit::{Redaction, RuleMatch};
-    use elide::redaction::{LeakProfile, OperatorId};
+    use elide::primitive::ComponentId;
+    use elide::redaction::LeakProfile;
 
     let location = TextLocation::inline(0..5);
     let conf = Confidence::new(0.9).unwrap();
@@ -22,7 +23,7 @@ fn redacted_entity(label: &str) -> Entity<Text> {
             PatternEvent::default(),
         ))
         .with_event(AuditEvent::redaction(
-            Redaction::new(OperatorId::new("erase", "1.0.0"), RuleMatch::Fallback)
+            Redaction::new(ComponentId::new("erase", "1.0.0"), RuleMatch::Fallback)
                 .with_leak_profile(LeakProfile::Irrecoverable),
             conf,
         ))

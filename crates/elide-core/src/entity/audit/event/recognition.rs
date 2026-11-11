@@ -34,7 +34,7 @@ use crate::redaction::HiddenContentKind;
 pub struct Pattern<M: Modality> {
     /// Where the recognizer matched.
     pub location: M::Location,
-    /// Pattern metadata (name, regex, validator, contextual flag).
+    /// Pattern metadata (name, regex, validator).
     pub pattern: PatternEvent,
 }
 
@@ -48,7 +48,6 @@ impl<M: Modality> Pattern<M> {
         out.bytes(self.pattern.name.as_bytes());
         out.opt(self.pattern.regex.as_ref().map(|s| s.as_bytes()));
         out.opt(self.pattern.validator.as_ref().map(|s| s.as_bytes()));
-        out.byte(self.pattern.contextual.into());
     }
 }
 
@@ -71,7 +70,7 @@ impl<M: Modality> Pattern<M> {
 pub struct Model<M: Modality> {
     /// Where the recognizer matched.
     pub location: M::Location,
-    /// Model metadata (name, version, contextual flag).
+    /// Model metadata (name, version).
     pub model: ModelEvent,
 }
 
@@ -83,7 +82,6 @@ impl<M: Modality> Model<M> {
         out.bytes(&self.location.hash());
         out.bytes(self.model.name.as_bytes());
         out.opt(self.model.version.as_ref().map(|s| s.as_bytes()));
-        out.byte(self.model.contextual.into());
     }
 }
 
@@ -150,9 +148,6 @@ pub struct PatternEvent {
     /// Name of the validator that confirmed the match (e.g. `"luhn"`).
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub validator: Option<HipStr<'static>>,
-    /// Whether contextual analysis (keyword co-occurrence) adjusted the score
-    /// for this match.
-    pub contextual: bool,
 }
 
 /// Metadata of a model/NER recognition, carried by [`Model`].
@@ -166,6 +161,4 @@ pub struct ModelEvent {
     /// Model version string, when known.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub version: Option<HipStr<'static>>,
-    /// Whether contextual analysis adjusted the score for this match.
-    pub contextual: bool,
 }

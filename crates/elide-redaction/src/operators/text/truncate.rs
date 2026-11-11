@@ -9,7 +9,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -39,8 +40,8 @@ pub struct Truncate {
 
 impl Truncate {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("truncate", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("truncate", "1.0.0")
     }
 
     /// Keep the first `keep_prefix` and last `keep_suffix` characters,
@@ -83,7 +84,7 @@ impl Truncate {
 
 #[async_trait::async_trait]
 impl Operator<Text> for Truncate {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Truncate::id()
     }
 
@@ -101,7 +102,7 @@ impl Operator<Text> for Truncate {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Truncate {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Truncate::id()
     }
 
@@ -121,7 +122,7 @@ impl Operator<Tabular> for Truncate {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Truncate {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Truncate::id()
     }
 
@@ -134,7 +135,7 @@ impl Operator<Metadata> for Truncate {
         _entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.value())?).into())
+        Ok(TextReplacement::substituted(self.render(data.as_str())?).into())
     }
 }
 

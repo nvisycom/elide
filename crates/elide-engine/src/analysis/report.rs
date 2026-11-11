@@ -386,7 +386,7 @@ mod tests {
         let missing = report.part::<Text>(&PartId::new("missing")).unwrap_err();
         assert_eq!(missing.kind(), ErrorKind::NotFound);
 
-        #[derive(Debug)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         struct Other;
         impl Modality for Other {
             type Artifact = elide_core::modality::NoArtifact;

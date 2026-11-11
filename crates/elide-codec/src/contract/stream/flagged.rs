@@ -39,7 +39,7 @@ impl FlaggedItem<Metadata> {
     pub fn field(field: &MetadataData) -> Self {
         Self::new(
             MetadataLocation::new(field.key.clone()),
-            field.label().clone(),
+            field.label.clone(),
             HiddenContentKind::Metadata,
         )
     }

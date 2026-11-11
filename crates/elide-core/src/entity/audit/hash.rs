@@ -4,7 +4,9 @@ use std::fmt;
 use std::hash::Hash;
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A 32-byte BLAKE3 digest.
 ///
@@ -116,15 +118,14 @@ struct HexBytes([u8; 32]);
 
 #[cfg(feature = "serde")]
 impl Serialize for HexBytes {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&hex::encode(self.0))
     }
 }
 
 #[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for HexBytes {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let hex = String::deserialize(deserializer)?;
         let bytes = hex::decode(&hex).map_err(D::Error::custom)?;
         let bytes: [u8; 32] = bytes

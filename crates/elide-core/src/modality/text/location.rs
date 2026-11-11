@@ -6,7 +6,9 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::SourceRef;
 use crate::modality::{ModalityLocation, Overlap};
@@ -51,9 +53,7 @@ pub enum TextLocation {
 /// a deserialized location hashes and compares like a constructed one.
 #[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for TextLocation {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Repr {

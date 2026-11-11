@@ -336,7 +336,6 @@ impl Fixture {
     ) -> Result<PipelineOutcome<M>>
     where
         M: TextRecognizable,
-        Entity<M>: Clone,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
@@ -366,7 +365,6 @@ impl Fixture {
     ) -> Result<PipelineOutcome<M>>
     where
         M: TextRecognizable,
-        Entity<M>: Clone,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,

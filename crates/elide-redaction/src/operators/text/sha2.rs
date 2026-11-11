@@ -9,7 +9,8 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
@@ -32,8 +33,8 @@ pub struct Sha2Hash {
 
 impl Sha2Hash {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
-        OperatorId::new("hash", "1.0.0")
+    fn id() -> ComponentId {
+        ComponentId::new("hash", "1.0.0")
     }
 
     /// A hash operator using `algorithm`, with no salt.
@@ -82,7 +83,7 @@ impl Sha2Hash {
 
 #[async_trait::async_trait]
 impl Operator<Text> for Sha2Hash {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Sha2Hash::id()
     }
 
@@ -100,7 +101,7 @@ impl Operator<Text> for Sha2Hash {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Sha2Hash {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Sha2Hash::id()
     }
 
@@ -120,7 +121,7 @@ impl Operator<Tabular> for Sha2Hash {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Sha2Hash {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         Sha2Hash::id()
     }
 
@@ -133,6 +134,6 @@ impl Operator<Metadata> for Sha2Hash {
         _entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.digest(data.value())).into())
+        Ok(TextReplacement::substituted(self.digest(data.as_str())).into())
     }
 }

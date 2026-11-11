@@ -5,7 +5,7 @@ use std::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::Confidence;
+use super::{Confidence, is_unit_interval};
 
 /// Minimum-confidence cutoff in the closed range `0.0..=1.0`.
 ///
@@ -36,7 +36,7 @@ impl ConfidenceThreshold {
     /// Construct a threshold, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.
     pub fn new(threshold: f32) -> Option<Self> {
-        if super::is_unit_interval(threshold) {
+        if is_unit_interval(threshold) {
             Some(Self(threshold))
         } else {
             None
@@ -45,7 +45,8 @@ impl ConfidenceThreshold {
 
     /// Construct a threshold, clamping out-of-range values into `[0, 1]`.
     ///
-    /// A non-finite input clamps to [`ConfidenceThreshold::MIN`]. Mirrors
+    /// NaN clamps to [`ConfidenceThreshold::MIN`]; an infinity clamps to the
+    /// bound on its side. Mirrors
     /// [`Confidence::clamped`], for the common case of a literal cutoff
     /// known to be in range.
     ///

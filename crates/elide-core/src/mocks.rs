@@ -9,7 +9,7 @@ use crate::modality::Modality;
 use crate::modality::text::{Text, TextData, TextReplacement};
 use crate::primitive::ComponentId;
 use crate::recognition::{Context, Recognizer, Subject};
-use crate::redaction::{LeakProfile, Operator, OperatorId};
+use crate::redaction::{LeakProfile, Operator};
 use crate::{Error, Result};
 
 /// A recognizer that replays a fixed list of entities, ignoring the subject.
@@ -43,10 +43,7 @@ impl<M: Modality> MockRecognizer<M> {
 }
 
 #[async_trait::async_trait]
-impl<M: Modality> Recognizer<M> for MockRecognizer<M>
-where
-    Entity<M>: Clone,
-{
+impl<M: Modality> Recognizer<M> for MockRecognizer<M> {
     fn id(&self) -> ComponentId {
         self.id.clone()
     }
@@ -63,7 +60,7 @@ where
 /// override it for a test that asserts on leak reporting.
 #[derive(Debug, Clone)]
 pub struct MockOperator {
-    id: OperatorId,
+    id: ComponentId,
     replacement: String,
     leak: LeakProfile,
 }
@@ -73,7 +70,7 @@ impl MockOperator {
     #[must_use]
     pub fn new(replacement: impl Into<String>) -> Self {
         Self {
-            id: OperatorId::new("mock-operator", "1"),
+            id: ComponentId::new("mock-operator", "1"),
             replacement: replacement.into(),
             leak: LeakProfile::Irrecoverable,
         }
@@ -89,7 +86,7 @@ impl MockOperator {
 
 #[async_trait::async_trait]
 impl Operator<Text> for MockOperator {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         self.id.clone()
     }
 

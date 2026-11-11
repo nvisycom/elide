@@ -24,7 +24,7 @@ use crate::entity::Entity;
 
 /// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Text;
 

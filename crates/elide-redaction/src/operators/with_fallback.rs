@@ -26,7 +26,8 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::ComponentId;
+use elide_core::redaction::{LeakProfile, Operator};
 
 /// An [`Operator`] that may decline to apply to a given value.
 ///
@@ -96,7 +97,7 @@ where
     P: TryOperator<M>,
     F: Operator<M>,
 {
-    fn id(&self) -> OperatorId {
+    fn id(&self) -> ComponentId {
         // One composite identity naming both paths a value might take, e.g.
         // `generalize_date@1.0.0-or-else-erase@1.0.0`. The audit records this
         // whichever branch fired, so it never falsely claims a value was
@@ -125,8 +126,8 @@ where
 /// `generalize_date@1.0.0-or-else-erase@1.0.0`). Folding in each operand's
 /// version keeps the audit trail exact: it records which build of *both*
 /// paths a value could have taken, not just their names.
-fn composite_id(primary: &OperatorId, fallback: &OperatorId) -> OperatorId {
-    OperatorId::new(format!("{primary}-or-else-{fallback}"), "1.0.0")
+fn composite_id(primary: &ComponentId, fallback: &ComponentId) -> ComponentId {
+    ComponentId::new(format!("{primary}-or-else-{fallback}"), "1.0.0")
 }
 
 #[cfg(test)]

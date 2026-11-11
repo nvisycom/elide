@@ -18,7 +18,7 @@ pub use self::replacement::ImageReplacement;
 
 /// Image modality: data is [`ImageData`], locations are
 /// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Image;
 
