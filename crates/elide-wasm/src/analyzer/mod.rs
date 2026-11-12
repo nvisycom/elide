@@ -15,7 +15,7 @@
 
 use elide::detection::Analyzer as RustAnalyzer;
 use elide::detection::filter::ThresholdLayer;
-use elide::detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
+use elide::detection::reconcile::{FuseLayer, ReconcileLayer};
 use elide::modality::Modality;
 use elide::modality::audio::Audio;
 use elide::modality::image::Image;
@@ -190,7 +190,7 @@ fn with_layers<M: Modality>(mut analyzer: RustAnalyzer<M>, layers: Vec<Layer>) -
     if layers.is_empty() {
         return analyzer
             .with_layer(FuseLayer::max())
-            .with_layer(ReconcileLayer::cross_label(Structural::default()))
+            .with_layer(ReconcileLayer::structural())
             .with_layer(ThresholdLayer::default());
     }
     for layer in layers {

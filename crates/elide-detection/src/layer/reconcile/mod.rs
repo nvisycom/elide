@@ -89,30 +89,57 @@ where
 /// It clusters overlapping entities, then disposes of each pair with a
 /// [`Reconciler`] (keep both, contest, or resolve to a winner).
 ///
-/// Generic over the grouping `G` and the reconciler `R`, each chosen at
-/// construction; see the [module docs].
+/// Generic over the grouping `G` (by default [`CrossLabel`]: different
+/// labels, overlapping) and the reconciler `R`; see the [module docs].
 ///
 /// [module docs]: self
-#[derive(Debug, Clone)]
-pub struct ReconcileLayer<G, R> {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReconcileLayer<G = CrossLabel, R = Structural> {
     group: G,
     reconciler: R,
 }
 
-impl<G, R> ReconcileLayer<G, R> {
-    /// A reconcile layer clustering by `group` and disposing with
-    /// `reconciler`.
-    pub fn new(group: G, reconciler: R) -> Self {
-        Self { group, reconciler }
+impl<R> ReconcileLayer<CrossLabel, R> {
+    /// A reconcile layer over cross-label overlaps, disposing of each pair
+    /// with `reconciler` (typically a [`Structural`]).
+    pub fn new(reconciler: R) -> Self {
+        Self {
+            group: CrossLabel,
+            reconciler,
+        }
     }
 }
 
-impl<R> ReconcileLayer<CrossLabel, R> {
-    /// A reconcile layer over *cross-label* overlaps, the conflict pass.
-    /// Clusters overlapping findings of different labels and disposes of each
-    /// pair with `reconciler` (typically a [`Structural`]).
-    pub fn cross_label(reconciler: R) -> Self {
-        Self::new(CrossLabel, reconciler)
+impl ReconcileLayer<CrossLabel, Structural> {
+    /// Arbitrate cross-label overlaps by how their spans relate (the default):
+    /// keep nestings, resolve conflicts to the more confident finding.
+    pub fn structural() -> Self {
+        Self::new(Structural::standard())
+    }
+}
+
+impl ReconcileLayer<CrossLabel, Exclusive> {
+    /// Keep one finding per cross-label overlap, the more confident one.
+    pub fn exclusive() -> Self {
+        Self::new(Exclusive::highest_confidence())
+    }
+}
+
+impl ReconcileLayer<CrossLabel, Permissive> {
+    /// Keep every cross-label overlap untouched.
+    pub fn permissive() -> Self {
+        Self::new(Permissive::new())
+    }
+}
+
+impl<G, R> ReconcileLayer<G, R> {
+    /// Cluster by `group` instead: which findings are arbitrated as a pair.
+    #[must_use]
+    pub fn with_grouping<G2>(self, group: G2) -> ReconcileLayer<G2, R> {
+        ReconcileLayer {
+            group,
+            reconciler: self.reconciler,
+        }
     }
 }
 
@@ -150,7 +177,7 @@ mod tests {
     }
 
     fn structural() -> ReconcileLayer<CrossLabel, Structural> {
-        ReconcileLayer::cross_label(Structural::default())
+        ReconcileLayer::structural()
     }
 
     /// A nesting of different labels is a hierarchy, keep both.
@@ -218,7 +245,7 @@ mod tests {
             entity("PERSON_NAME", 0, 12, 0.9),
             entity("ORGANIZATION", 2, 14, 0.7),
         ];
-        let layer = ReconcileLayer::cross_label(Structural::standard().reviewing());
+        let layer = ReconcileLayer::new(Structural::standard().reviewing());
         let out = layer.apply(entities);
         assert_eq!(out.kept.len(), 2, "contest keeps both");
         assert!(out.dropped.is_empty());
@@ -234,7 +261,7 @@ mod tests {
             entity("PERSON_NAME", 0, 12, 0.9),
             entity("ORGANIZATION", 2, 14, 0.7),
         ];
-        let out = ReconcileLayer::cross_label(Permissive::new()).apply(entities);
+        let out = ReconcileLayer::permissive().apply(entities);
         assert_eq!(out.kept.len(), 2);
         assert!(out.dropped.is_empty());
     }

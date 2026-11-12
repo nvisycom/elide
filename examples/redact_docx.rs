@@ -138,7 +138,7 @@ fn build_text_analyzer() -> Result<Analyzer<Text>> {
         .with_recognizer(ner)
         .with_recognizer(llm)
         .with_layer(FuseLayer::max())
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
+        .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default()))
 }
 

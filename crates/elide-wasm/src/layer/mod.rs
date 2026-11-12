@@ -179,22 +179,22 @@ impl Layer {
                 analyzer.with_layer(FuseLayer::noisy_or())
             }
             LayerKind::CrossLabel(CrossLabelKind::Structural { iou }) => match iou {
-                Some(iou) => analyzer.with_layer(ReconcileLayer::cross_label(
+                Some(iou) => analyzer.with_layer(ReconcileLayer::new(
                     Structural::standard().with_threshold(iou),
                 )),
-                None => analyzer.with_layer(ReconcileLayer::cross_label(Structural::default())),
+                None => analyzer.with_layer(ReconcileLayer::structural()),
             },
             LayerKind::CrossLabel(CrossLabelKind::Exclusive(
                 ExclusiveTiebreaker::HighestConfidence,
-            )) => analyzer.with_layer(ReconcileLayer::cross_label(Exclusive::highest_confidence())),
+            )) => analyzer.with_layer(ReconcileLayer::exclusive()),
             LayerKind::CrossLabel(CrossLabelKind::Exclusive(ExclusiveTiebreaker::LongestSpan)) => {
-                analyzer.with_layer(ReconcileLayer::cross_label(Exclusive::longest_span()))
+                analyzer.with_layer(ReconcileLayer::new(Exclusive::longest_span()))
             }
             LayerKind::CrossLabel(CrossLabelKind::Permissive { contesting: false }) => {
-                analyzer.with_layer(ReconcileLayer::cross_label(Permissive::new()))
+                analyzer.with_layer(ReconcileLayer::permissive())
             }
             LayerKind::CrossLabel(CrossLabelKind::Permissive { contesting: true }) => {
-                analyzer.with_layer(ReconcileLayer::cross_label(Permissive::contesting()))
+                analyzer.with_layer(ReconcileLayer::new(Permissive::contesting()))
             }
         }
     }

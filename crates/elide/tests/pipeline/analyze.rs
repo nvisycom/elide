@@ -7,7 +7,7 @@ use std::assert_matches;
 use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::ThresholdLayer;
-use elide::detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
+use elide::detection::reconcile::{FuseLayer, ReconcileLayer};
 use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
@@ -71,7 +71,7 @@ async fn analyze_fuses_resolves_filters() {
         .with_recognizer(b)
         .with_layer(CalibrateLayer::new(CalibrationMap::new())) // identity (empty)
         .with_layer(FuseLayer::max())
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
+        .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default());
 
     let mut entities = analyzer
@@ -221,7 +221,7 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(recognizer)
         .with_layer(FuseLayer::max())
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
+        .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default());
 
     let scope = Scope::new().with_catalog(catalog);
