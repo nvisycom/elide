@@ -3,15 +3,13 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::operators::TextValued;
 
 /// Replaces an entity's text with a template string, like `[EMAIL]`.
 ///
@@ -30,6 +28,10 @@ use serde::{Deserialize, Serialize};
 /// the entity, so no cross-call state is needed and the output is
 /// independent of the order entities are processed.
 ///
+/// A template with `{value}` writes the original back, so it reports
+/// [`LeakProfile::Recoverable`]; without it the profile is
+/// [`LeakProfile::Partial`].
+///
 /// The default template is `[{label}]`.
 ///
 /// [`EntityCoRef`]: elide_core::entity::EntityCoRef
@@ -41,11 +43,6 @@ pub struct Replace {
 }
 
 impl Replace {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("replace", "1.0.0")
-    }
-
     /// A [`Replace`] with the given template (see the type docs for
     /// placeholder syntax).
     pub fn new(template: impl Into<String>) -> Self {
@@ -62,72 +59,108 @@ impl Default for Replace {
     }
 }
 
+/// The placeholder for the entity's label name.
+const LABEL: &str = "{label}";
+/// The placeholder for the original matched value.
+const VALUE: &str = "{value}";
+/// The placeholder for the entity's coreference id.
+const COREF: &str = "{coref}";
+
 impl Replace {
-    /// Expand the template for an entity, substituting the placeholders.
+    /// Expand the template for an entity in one pass, so text a placeholder
+    /// expands to is never expanded again.
     fn render<M: Modality>(&self, entity: &Entity<M>, value: &str) -> TextReplacement {
         let coref = entity.coref.as_ref().map_or("", |coref| coref.as_str());
-        let rendered = self
-            .template
-            .replace("{label}", entity.label.as_str())
-            .replace("{value}", value)
-            .replace("{coref}", coref);
+        let placeholders = [
+            (LABEL, entity.label.as_str()),
+            (VALUE, value),
+            (COREF, coref),
+        ];
+        let mut rendered = String::with_capacity(self.template.len());
+        let mut rest = self.template.as_str();
+        while let Some(open) = rest.find('{') {
+            rendered.push_str(&rest[..open]);
+            rest = &rest[open..];
+            match placeholders
+                .iter()
+                .find(|(placeholder, _)| rest.starts_with(placeholder))
+            {
+                Some((placeholder, expansion)) => {
+                    rendered.push_str(expansion);
+                    rest = &rest[placeholder.len()..];
+                }
+                None => {
+                    rendered.push('{');
+                    rest = &rest[1..];
+                }
+            }
+        }
+        rendered.push_str(rest);
         TextReplacement::substituted(rendered)
     }
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for Replace {
+impl<M: TextValued> Operator<M> for Replace {
     fn id(&self) -> ComponentId {
-        Replace::id()
+        ComponentId::new("replace", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
-        // Position and length of the rewritten span stay observable even
-        // though the original value is gone.
-        LeakProfile::Partial
+        if self.template.contains(VALUE) {
+            // The template writes the original value back.
+            LeakProfile::Recoverable
+        } else {
+            // Position and length of the rewritten span stay observable even
+            // though the original value is gone.
+            LeakProfile::Partial
+        }
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(self.render(entity, data.as_str()))
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        Ok(M::replacement(self.render(entity, M::value(data))))
     }
 }
 
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for Replace {
-    fn id(&self) -> ComponentId {
-        Replace::id()
+#[cfg(test)]
+mod tests {
+    use elide_core::entity::EntityCoRef;
+    use elide_core::modality::text::Text;
+
+    use super::*;
+
+    fn render(template: &str, value: &str) -> TextReplacement {
+        let entity = Entity::<Text>::fixture("EMAIL", (0, value.len()))
+            .with_coref(EntityCoRef::new("c1".to_owned()));
+        Replace::new(template).render(&entity, value)
     }
 
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
+    #[test]
+    fn expands_every_placeholder() {
+        assert_eq!(
+            render("[{label}:{coref}] was {value}", "a@b.c"),
+            TextReplacement::substituted("[EMAIL:c1] was a@b.c"),
+        );
     }
 
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(self.render(entity, data.as_str()).into())
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Replace {
-    fn id(&self) -> ComponentId {
-        Replace::id()
+    /// Text a placeholder expands to is not expanded again.
+    #[test]
+    fn expands_in_one_pass() {
+        assert_eq!(
+            render("{value}", "x{coref}{label}"),
+            TextReplacement::substituted("x{coref}{label}"),
+        );
+        assert_eq!(
+            render("{unknown}", "v"),
+            TextReplacement::substituted("{unknown}")
+        );
     }
 
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(self.render(entity, data.as_str()).into())
+    /// A template that writes the original back leaks it.
+    #[test]
+    fn a_value_template_is_recoverable() {
+        let profile = |template: &str| Operator::<Text>::leak_profile(&Replace::new(template));
+        assert_eq!(profile("[{label}]"), LeakProfile::Partial);
+        assert_eq!(profile("<{value}>"), LeakProfile::Recoverable);
     }
 }

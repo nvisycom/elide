@@ -3,17 +3,15 @@
 //!
 //! [`Mask`]: crate::operators::Mask
 
+use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
-use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::operators::{TextValued, TryOperator};
 
 /// Physically truncate the value, keeping a leading and/or trailing run.
 ///
@@ -24,10 +22,14 @@ use serde::{Deserialize, Serialize};
 /// truncation, `"411111"` (BIN only), not `"4111********1234"`.
 ///
 /// Counts are character-based, so multi-byte codepoints stay intact.
-/// A configuration whose kept regions already cover (or overlap) the
-/// whole value is rejected at apply time: truncating there would either
-/// be a no-op or reveal the entire value, so an explicit error beats a
-/// silent pass-through.
+///
+/// A value the kept regions already cover (or overlap) cannot be truncated
+/// without revealing all of it, so [`Truncate`] is a [`TryOperator`] and
+/// *declines* it. Used directly as an [`Operator`] it erases a declined
+/// value (the safe default); wrap it in [`WithFallback`] to choose a
+/// different treatment.
+///
+/// [`WithFallback`]: crate::operators::WithFallback
 ///
 /// [`Mask`]: crate::operators::Mask
 #[derive(Debug, Clone, Copy, Default)]
@@ -39,11 +41,6 @@ pub struct Truncate {
 }
 
 impl Truncate {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("truncate", "1.0.0")
-    }
-
     /// Keep the first `keep_prefix` and last `keep_suffix` characters,
     /// dropping the middle.
     pub fn new(keep_prefix: usize, keep_suffix: usize) -> Self {
@@ -63,29 +60,27 @@ impl Truncate {
         Self::new(0, n)
     }
 
-    /// Truncate `value`: the first `keep_prefix` characters concatenated
-    /// with the last `keep_suffix`. Errors when the kept regions cover the
-    /// whole value (the truncation would be a no-op or reveal everything).
-    fn render(&self, value: &str) -> Result<String> {
+    /// Truncate `value`: the first `keep_prefix` characters followed by the
+    /// last `keep_suffix`, or `None` when the kept regions cover the whole
+    /// value (the operator declines it).
+    pub fn render(&self, value: &str) -> Option<String> {
         let chars: Vec<char> = value.chars().collect();
         let total = chars.len();
         if self.keep_prefix.saturating_add(self.keep_suffix) >= total {
-            return Err(Error::redaction(
-                "truncate keeps at least the whole value; nothing would be dropped",
-            ));
+            return None;
         }
         let suffix_start = total - self.keep_suffix;
         let mut out = String::with_capacity(self.keep_prefix + self.keep_suffix);
         out.extend(chars[..self.keep_prefix].iter());
         out.extend(chars[suffix_start..].iter());
-        Ok(out)
+        Some(out)
     }
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for Truncate {
+impl<M: TextValued> Operator<M> for Truncate {
     fn id(&self) -> ComponentId {
-        Truncate::id()
+        ComponentId::new("truncate", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -94,48 +89,25 @@ impl Operator<Text> for Truncate {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.as_str())?))
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        // Used on its own, a declined value erases, the safe default.
+        Ok(self
+            .try_anonymize(entity, data)
+            .await?
+            .unwrap_or_else(|| M::replacement(TextReplacement::Removed)))
     }
 }
 
-#[cfg(feature = "tabular")]
 #[async_trait::async_trait]
-impl Operator<Tabular> for Truncate {
-    fn id(&self) -> ComponentId {
-        Truncate::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
+impl<M: TextValued> TryOperator<M> for Truncate {
+    async fn try_anonymize(
         &self,
-        _entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.as_str())?).into())
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Truncate {
-    fn id(&self) -> ComponentId {
-        Truncate::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.as_str())?).into())
+        _entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
+        Ok(self
+            .render(M::value(data))
+            .map(|text| M::replacement(TextReplacement::substituted(text))))
     }
 }
 
@@ -165,12 +137,34 @@ mod tests {
         );
     }
 
+    /// Used on its own, a declined value is erased; under `WithFallback` the
+    /// fallback decides.
+    #[tokio::test]
+    async fn a_declined_value_erases_or_falls_back() {
+        use elide_core::modality::text::{Text, TextData};
+
+        use crate::operators::{Mask, WithFallback};
+
+        let entity = Entity::<Text>::fixture("PAN", (0, 4));
+        let data = TextData::new("1234");
+        let alone = Operator::<Text>::anonymize(&Truncate::suffix(4), &entity, &data)
+            .await
+            .unwrap();
+        assert_eq!(alone, TextReplacement::Removed);
+
+        let masked = WithFallback::new(Truncate::suffix(4), Mask::stars());
+        let out = Operator::<Text>::anonymize(&masked, &entity, &data)
+            .await
+            .unwrap();
+        assert_eq!(out, TextReplacement::substituted("****"));
+    }
+
     #[test]
-    fn errors_when_config_would_be_a_no_op() {
+    fn declines_a_value_the_kept_regions_cover() {
         // keep_prefix + keep_suffix == len: nothing dropped.
-        assert!(Truncate::new(4, 4).render("12345678").is_err());
+        assert!(Truncate::new(4, 4).render("12345678").is_none());
         // keep_prefix + keep_suffix > len: would reveal everything.
-        assert!(Truncate::new(6, 6).render("1234567").is_err());
+        assert!(Truncate::new(6, 6).render("1234567").is_none());
     }
 
     #[test]

@@ -3,15 +3,13 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::operators::TextValued;
 
 /// Masks an entity's text by replacing its characters, like `****1234`.
 ///
@@ -20,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// and a `keep_suffix` of trailing ones. Counts are character-based, so
 /// multi-byte codepoints stay intact, and the output length equals the
 /// input length. When `keep_prefix + keep_suffix` covers the whole
-/// value, it passes through unmasked.
+/// value, every character is masked: keeping them would reveal it all.
 ///
 /// Common patterns: mask everything ([`Mask::stars`]); show the last 4
 /// of a card (`Mask::stars().with_keep_suffix(4)`).
@@ -34,11 +32,6 @@ pub struct Mask {
 }
 
 impl Mask {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("mask", "1.0.0")
-    }
-
     /// A mask using `mask_char`, with no preserved prefix or suffix.
     pub fn new(mask_char: char) -> Self {
         Self {
@@ -69,13 +62,14 @@ impl Mask {
 
     /// Render `value`: keep `keep_prefix` leading and `keep_suffix`
     /// trailing characters verbatim, replace the rest with `mask_char`.
-    /// Character-based; when the kept regions cover the whole value it
-    /// is returned unchanged.
+    ///
+    /// Character-based. When the kept regions cover the whole value, every
+    /// character is masked instead.
     pub fn render(&self, value: &str) -> String {
         let chars: Vec<char> = value.chars().collect();
         let total = chars.len();
         if self.keep_prefix.saturating_add(self.keep_suffix) >= total {
-            return value.to_owned();
+            return std::iter::repeat_n(self.mask_char, total).collect();
         }
         let suffix_start = total - self.keep_suffix;
         chars
@@ -93,9 +87,9 @@ impl Mask {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for Mask {
+impl<M: TextValued> Operator<M> for Mask {
     fn id(&self) -> ComponentId {
-        Mask::id()
+        ComponentId::new("mask", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -103,47 +97,28 @@ impl Operator<Text> for Mask {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.as_str())))
+    async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        let masked = self.render(M::value(data));
+        Ok(M::replacement(TextReplacement::substituted(masked)))
     }
 }
 
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for Mask {
-    fn id(&self) -> ComponentId {
-        Mask::id()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_the_configured_ends() {
+        let mask = Mask::stars().with_keep_suffix(4);
+        assert_eq!(mask.render("4111111111111234"), "************1234");
     }
 
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.as_str())).into())
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Mask {
-    fn id(&self) -> ComponentId {
-        Mask::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.render(data.as_str())).into())
+    /// Kept ends that cover the whole value would reveal it, so every
+    /// character is masked instead.
+    #[test]
+    fn masks_everything_when_the_kept_ends_cover_the_value() {
+        let mask = Mask::stars().with_keep_suffix(4);
+        assert_eq!(mask.render("1234"), "****");
+        assert_eq!(mask.render("12"), "**");
     }
 }

@@ -30,16 +30,29 @@ predicate over a `MatchContext`, or a catch-all fallback) and two paths:
 `Deanonymizer` reverses a reversible operator given the key, recovering the
 original value.
 
-```rust,ignore
+```rust
+use elide_core::entity::{Entity, LabelCatalog, LabelRef};
+use elide_core::modality::text::{Text, TextDoc};
+use elide_core::recognition::Scope;
 use elide_redaction::operators::{Erase, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
 
-Anonymizer::new()
-    .with(Rule::label(EMAIL_ADDRESS, Replace::default()))
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> elide_core::Result<()> {
+let mut document = TextDoc::new("write to alice@example.com");
+let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (9, 26))];
+
+Anonymizer::<Text>::new()
+    .with_catalog(LabelCatalog::with_builtins())
+    .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()))
     .with(Rule::tag("financial", Mask::stars()))
     .with(Rule::fallback(Erase))
-    .anonymize(&mut document, &mut entities, &scope)
+    .anonymize(&mut document, &mut entities, &Scope::default())
     .await?;
+
+assert_eq!(document.text(), "write to [EMAIL_ADDRESS]");
+# Ok(())
+# }
 ```
 
 ## What's here

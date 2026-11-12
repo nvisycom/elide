@@ -11,8 +11,8 @@
 //!
 //! Value reduction: [`Clamp`] collapses out-of-range numbers into a
 //! (localized) bucket label; [`GeneralizeDate`] (feature `datetime`) reduces
-//! a date/timestamp to a coarser ISO-8601 granularity. Both only apply to
-//! values of their shape, so both are a [`TryOperator`], a value they
+//! a date/timestamp to a coarser granularity (its year, say). Both only apply
+//! to values of their shape, so both are a [`TryOperator`], a value they
 //! can't parse is *declined* rather than erased by fiat. [`WithFallback`]
 //! wraps such an operator with any other [`Operator`] to run when it
 //! declines, so a caller composes their own treatment for the leftover
@@ -60,6 +60,7 @@ mod keep;
 mod key_provider;
 #[cfg(any(feature = "sha2", feature = "hmac"))]
 mod sha2_algorithm;
+mod text_valued;
 mod with_fallback;
 
 /// Replace an entity with a plausible, locale-aware fake value.
@@ -97,8 +98,11 @@ pub use self::text::HmacHash;
 #[cfg_attr(docsrs, doc(cfg(feature = "sha2")))]
 pub use self::text::Sha2Hash;
 // Text (and tabular-cell) operators.
-pub use self::text::{Clamp, Mask, Pseudonymize, PseudonymizeKey, Replace, Truncate};
+pub use self::text::{
+    Clamp, Mask, Pseudonymize, PseudonymizeKey, PseudonymizeSeed, Replace, Truncate,
+};
 #[cfg(feature = "datetime")]
 #[cfg_attr(docsrs, doc(cfg(feature = "datetime")))]
 pub use self::text::{DateGranularity, DateStyle, GeneralizeDate};
+pub use self::text_valued::TextValued;
 pub use self::with_fallback::{TryOperator, WithFallback};

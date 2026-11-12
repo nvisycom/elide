@@ -425,7 +425,7 @@ impl PatternRecognizerBuilder {
                 // Per-term `score` wins when set; otherwise ask
                 // the dictionary's `Scoring` to resolve against
                 // the term's source column. `None` means the
-                // column didn't map to a declared score ,
+                // column didn't map to a declared score,
                 // surfaced as a hard build error so silent
                 // misconfiguration can't happen.
                 let score = entry

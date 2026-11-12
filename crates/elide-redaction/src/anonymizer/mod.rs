@@ -31,7 +31,8 @@ pub use self::rule::{MatchContext, Rule};
 /// An operator stored in a [`Rule`], type-erased and shared.
 pub(crate) type SharedOperator<M> = Arc<dyn Operator<M>>;
 
-/// Boxed predicate over a [`MatchContext`], used by `Matcher::Predicate`.
+/// Boxed predicate over a [`MatchContext`], the matcher of a
+/// [predicate rule](Rule::predicate).
 ///
 /// The context bundles the entity under test, the [`LabelCatalog`] (empty when
 /// none was set), and the run [`Scope`], so a predicate can branch on the
@@ -52,17 +53,35 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send +
 /// and optionally carries a policy [`Attribution`]. [`anonymize`] resolves
 /// and runs the operators, applying the replacements back into the target.
 ///
-/// ```ignore
-/// Anonymizer::new()
+/// ```
+/// # use elide_core::entity::{Entity, LabelCatalog, LabelRef};
+/// # use elide_core::modality::text::{Text, TextDoc};
+/// # use elide_core::primitive::ConfidenceThreshold;
+/// # use elide_core::recognition::Scope;
+/// # use elide_redaction::operators::{Erase, Keep, Mask, Replace};
+/// # use elide_redaction::{Anonymizer, Rule};
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() -> elide_core::Result<()> {
+/// let mut document = TextDoc::new("write to alice@example.com");
+/// let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (9, 26))];
+///
+/// Anonymizer::<Text>::new()
 ///     .with_catalog(LabelCatalog::with_builtins())
 ///     // Order matters: a weak detection is kept as-is before any
 ///     // label or tag rule can fire.
-///     .with(Rule::predicate(|cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence), Keep))
+///     .with(Rule::predicate(
+///         |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
+///         Keep,
+///     ))
 ///     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()))
 ///     .with(Rule::tag("financial", Mask::stars()))
 ///     .with(Rule::fallback(Erase))
-///     .anonymize(&mut document, &entities)
+///     .anonymize(&mut document, &mut entities, &Scope::default())
 ///     .await?;
+///
+/// assert_eq!(document.text(), "write to [EMAIL_ADDRESS]");
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// [`with_multiple`]: Anonymizer::with_multiple
@@ -97,9 +116,15 @@ impl<M: Modality> Anonymizer<M> {
     /// one of the [`Rule`] constructors and optionally attribute it with
     /// [`Rule::because`]:
     ///
-    /// ```ignore
-    /// Anonymizer::new()
-    ///     .with(Rule::label(EMAIL, Replace::default()).because(Attribution::freeform("gdpr-art-17")))
+    /// ```
+    /// # use elide_core::entity::LabelRef;
+    /// # use elide_core::entity::audit::Attribution;
+    /// # use elide_core::modality::text::Text;
+    /// # use elide_redaction::operators::{Erase, Mask, Replace};
+    /// # use elide_redaction::{Anonymizer, Rule};
+    /// let gdpr = Attribution::freeform("gdpr-art-17");
+    /// let anonymizer = Anonymizer::<Text>::new()
+    ///     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()).because(gdpr))
     ///     .with(Rule::tag("financial", Mask::stars()))
     ///     .with(Rule::fallback(Erase));
     /// ```
@@ -119,12 +144,18 @@ impl<M: Modality> Anonymizer<M> {
     /// records that rule's attribution, so the shared attribution is what a
     /// reviewer traces back to "which rule fired".
     ///
-    /// ```ignore
+    /// ```
+    /// # use elide_core::entity::LabelRef;
+    /// # use elide_core::entity::audit::Attribution;
+    /// # use elide_core::modality::text::Text;
+    /// # use elide_redaction::operators::{Clamp, Erase, Mask};
+    /// # use elide_redaction::{Anonymizer, Rule};
     /// let attr: Attribution = Attribution::freeform("hipaa-safe-harbor").into();
-    /// Anonymizer::new().with_multiple([
-    ///     Rule::label(DATE_OF_BIRTH, GeneralizeDate::new(Year)).because(attr.clone()),
-    ///     Rule::label(AGE, Clamp::new().with_ceiling(90.0, "90 or older")).because(attr.clone()),
-    ///     Rule::label(PERSON_NAME, Erase).because(attr),
+    /// let anonymizer = Anonymizer::<Text>::new().with_multiple([
+    ///     Rule::label(LabelRef::new("date_of_birth"), Mask::stars()).because(attr.clone()),
+    ///     Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older"))
+    ///         .because(attr.clone()),
+    ///     Rule::label(LabelRef::new("person_name"), Erase).because(attr),
     /// ]);
     /// ```
     ///
@@ -145,8 +176,7 @@ impl<M: Modality> Anonymizer<M> {
     /// rule below) and records a [`Selection`] event, naming the operator, its
     /// leak profile, the rule that matched, and any policy attribution, on
     /// **every** entity the cluster covers, so a merged non-winner still shows
-    /// why it will be hidden.
-    /// No document data is touched. Entities whose label has no operator and no
+    /// why it will be hidden. No document data is touched. Entities whose label has no operator and no
     /// fallback get no pick; a reviewer-suppressed entity is skipped entirely.
     ///
     /// Idempotent: re-running `pick`, or calling [`anonymize`] after it, does
@@ -156,9 +186,6 @@ impl<M: Modality> Anonymizer<M> {
     /// `scope` is the caller-asserted request [`Scope`], passed to
     /// [predicate rules](Rule::predicate) via [`MatchContext::scope`] so the pick
     /// can branch on request context.
-    ///
-    /// [`Scope`]: elide_core::recognition::Scope
-    /// [`Selection`]: elide_core::entity::audit::AuditKind::Selection
     ///
     /// **Overlapping entities are merged.** Where a set of entities overlap in
     /// the medium (a left-over nesting, or one a user re-introduced by editing
@@ -174,6 +201,8 @@ impl<M: Modality> Anonymizer<M> {
     ///
     /// [`anonymize`]: Self::anonymize
     /// [`LeakProfile`]: elide_core::redaction::LeakProfile
+    /// [`Scope`]: elide_core::recognition::Scope
+    /// [`Selection`]: elide_core::entity::audit::AuditKind::Selection
     pub fn pick(&self, entities: &mut [Entity<M>], scope: &Scope) {
         for cluster in self.resolve_clusters(entities, scope) {
             cluster.record_selection(entities);
@@ -189,7 +218,7 @@ impl<M: Modality> Anonymizer<M> {
     fn resolve_clusters(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<ResolvedCluster<M>> {
         // A reviewer-suppressed entity is left alone: it contributes no operator
         // and does not extend the redacted span. (Where it overlaps a live
-        // entity, the shared bytes still fall inside the live member's own span ,
+        // entity, the shared bytes still fall inside the live member's own span;
         // span-level redaction cannot spare those.) Exclude suppressed entities
         // from clustering entirely, so a suppressed span can never bridge two
         // live ones into a cluster that fails to coalesce once it is dropped.
@@ -697,7 +726,7 @@ mod tests {
     /// A suppressed entity overlapping a live one contributes no operator and
     /// does not extend the redacted span, but it cannot spare the shared bytes:
     /// those fall inside the live member's own span and are still rewritten. This
-    /// pins the behavior the `resolve_clusters` comment now claims.
+    /// pins the behavior the `resolve_clusters` comment describes.
     #[tokio::test]
     async fn a_suppressed_overlapping_entity_contributes_nothing_but_shares_bytes() {
         let mut target = TextDoc::new("alice@example.com");

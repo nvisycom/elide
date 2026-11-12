@@ -37,11 +37,9 @@ use elide_core::redaction::{LeakProfile, Operator};
 /// (names, addresses, organisations) emit a fresh locale-aware
 /// fake whose length doesn't need to match.
 ///
-/// Generic over the fallback operator type because
-/// [`elide_core::redaction::Operator`] is not dyn-compatible (its
-/// `anonymize` method returns `impl Future`), so a stored
-/// `Arc<dyn Operator<…>>` is not available. Each `Fake` instance
-/// binds one concrete fallback type at construction.
+/// Generic over the fallback operator type, so each `Fake` binds one
+/// concrete fallback at construction; pass an `Arc<dyn Operator<…>>` to
+/// choose it at runtime.
 #[derive(Clone, Debug)]
 pub struct Fake<F> {
     fallback: F,

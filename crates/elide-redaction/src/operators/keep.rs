@@ -4,17 +4,14 @@
 use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "image")]
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::operators::TextValued;
 
 /// Passes an entity through unchanged, to exempt it from redaction.
 ///
@@ -23,9 +20,9 @@ use serde::{Deserialize, Serialize};
 /// retain. The replacement records "leave this as-is" so the entity still
 /// shows up in the audit trail.
 ///
-/// Works across modalities, a text/tabular span stays verbatim, an image
-/// region or audio range is left untouched, a metadata field keeps its value. Like the other operators, [`Keep`]
-/// is implemented per modality, so the one type serves every modality.
+/// Works across modalities: a text or tabular span stays verbatim, an image
+/// region or audio range is left untouched, and a metadata field keeps its
+/// value.
 ///
 /// A field that stands for a group with others (an EXIF device or GPS field)
 /// goes with the group when another of its fields is redacted: removal wins,
@@ -47,7 +44,7 @@ impl Keep {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for Keep {
+impl<M: TextValued> Operator<M> for Keep {
     fn id(&self) -> ComponentId {
         Keep::id()
     }
@@ -56,28 +53,8 @@ impl Operator<Text> for Keep {
         KEEP_LEAK
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(data.as_str()))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for Keep {
-    fn id(&self) -> ComponentId {
-        Keep::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(data.as_str()).into())
+    async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        Ok(M::unchanged(data))
     }
 }
 
@@ -118,26 +95,6 @@ impl Operator<Audio> for Keep {
         _data: &AudioData,
     ) -> Result<AudioReplacement> {
         Ok(AudioReplacement::Unchanged)
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Keep {
-    fn id(&self) -> ComponentId {
-        Keep::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        _data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(MetadataReplacement::Unchanged)
     }
 }
 

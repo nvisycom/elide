@@ -1,17 +1,14 @@
 //! [`Pseudonymize`]: replace an entity with a consistent synthetic value,
 //! backed by a vault so every mention of one entity reads the same.
 
-#[cfg(feature = "tabular")]
-use elide_core::Error;
-use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::Modality;
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{Generator, LeakProfile, Operator};
+use elide_core::{Error, Result};
 
+use crate::operators::TextValued;
 use crate::vault::Vault;
 
 /// Replace an entity with a consistent generated surrogate.
@@ -71,11 +68,6 @@ impl<V, G> Pseudonymize<V, G> {
     pub fn new(vault: V, generator: G) -> Self {
         Self { vault, generator }
     }
-
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("pseudonymize", "1.0.0")
-    }
 }
 
 /// The vault key a [`Pseudonymize`] operator looks surrogates up under.
@@ -93,28 +85,43 @@ impl<V, G> Pseudonymize<V, G> {
 pub struct PseudonymizeKey {
     /// The entity's label, the class the surrogate belongs to.
     pub label: LabelRef,
-    /// The cluster seed: the coreference id when present, else the original
-    /// value. Equal seeds under the same label share one surrogate.
-    pub seed: String,
+    /// The cluster seed. Equal seeds under the same label share one surrogate.
+    pub seed: PseudonymizeSeed,
 }
 
-/// The cluster seed for an entity: its coreference id when present, else its
-/// original value.
-fn seed<M: Modality>(entity: &Entity<M>, data: &TextData) -> String {
-    entity.coref.as_ref().map_or_else(
-        || data.as_str().to_owned(),
-        |coref| coref.as_str().to_owned(),
-    )
+/// What a [`PseudonymizeKey`] groups mentions by: a coreference cluster, or
+/// the value itself when the entity has none.
+///
+/// The two never collide: a cluster named `alice` and a value `alice` are
+/// different seeds, so an unrelated mention of the text cannot take a
+/// cluster's surrogate.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PseudonymizeSeed {
+    /// The entity's coreference cluster id.
+    CoRef(String),
+    /// The entity's original value, for an entity with no cluster.
+    Value(String),
+}
+
+impl PseudonymizeSeed {
+    /// The seed of `entity`, whose original value is `value`.
+    fn of<M: Modality>(entity: &Entity<M>, value: &str) -> Self {
+        match &entity.coref {
+            Some(coref) => Self::CoRef(coref.as_str().to_owned()),
+            None => Self::Value(value.to_owned()),
+        }
+    }
 }
 
 #[async_trait::async_trait]
-impl<V, G> Operator<Text> for Pseudonymize<V, G>
+impl<M, V, G> Operator<M> for Pseudonymize<V, G>
 where
+    M: TextValued,
     V: Vault<PseudonymizeKey, TextReplacement>,
-    G: Generator<Text>,
+    G: Generator<M>,
 {
     fn id(&self) -> ComponentId {
-        Self::id()
+        ComponentId::new("pseudonymize", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -123,57 +130,24 @@ where
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        let seed = seed(entity, data);
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
         let key = PseudonymizeKey {
             label: entity.label.clone(),
-            seed: seed.clone(),
+            seed: PseudonymizeSeed::of(entity, M::value(data)),
         };
-
-        self.vault
-            .get_or_try_insert_with(key, || Ok(self.generator.generate(entity, data)))
-            .await
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl<V, G> Operator<Tabular> for Pseudonymize<V, G>
-where
-    V: Vault<PseudonymizeKey, TextReplacement>,
-    G: Generator<Tabular>,
-{
-    fn id(&self) -> ComponentId {
-        Self::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        let seed = seed(entity, data);
-        let key = PseudonymizeKey {
-            label: entity.label.clone(),
-            seed: seed.clone(),
-        };
-
-        // The vault stores the text surrogate; unwrap the generator's cell
-        // treatment to get it (a surrogate generator never drops structure).
-        let cell = self
+        // The vault stores the text surrogate, so one vault serves every
+        // modality; a generator must produce a text treatment.
+        let surrogate = self
             .vault
-            .get_or_try_insert_with(key, || match self.generator.generate(entity, data) {
-                TabularReplacement::Cell(replacement) => Ok(replacement),
-                _ => Err(Error::redaction(
-                    "pseudonymize generator must produce a cell surrogate",
-                )),
+            .get_or_try_insert_with(key, || {
+                M::text_of(&self.generator.generate(entity, data))
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::redaction("pseudonymize generator must produce a text surrogate")
+                    })
             })
             .await?;
-        Ok(TabularReplacement::Cell(cell))
+        Ok(M::replacement(surrogate))
     }
 }
 
@@ -181,7 +155,7 @@ where
 mod tests {
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{EntityCoRef, LabelRef};
-    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
 
     use super::*;
@@ -214,6 +188,25 @@ mod tests {
         let b = op.anonymize(&she, &TextData::new("she")).await.unwrap();
 
         assert_eq!(a, b); // same cluster -> same surrogate
+    }
+
+    /// A cluster id and a raw value that read the same are different seeds.
+    #[tokio::test]
+    async fn a_cluster_id_and_an_equal_value_do_not_collide() {
+        let op = Pseudonymize::new(InMemoryVault::new(), RandomToken);
+        let clustered = entity("PERSON", Some("alice"));
+        let unclustered = entity("PERSON", None);
+
+        let a = op
+            .anonymize(&clustered, &TextData::new("Alice"))
+            .await
+            .unwrap();
+        let b = op
+            .anonymize(&unclustered, &TextData::new("alice"))
+            .await
+            .unwrap();
+
+        assert_ne!(a, b);
     }
 
     #[tokio::test]

@@ -47,12 +47,15 @@ such as `GeneralizeDate` on text that is not a date, the second runs.
 Every operator declares a `LeakProfile`, how much of the original its output
 still exposes:
 
-- **Irrecoverable**: nothing survives. `Erase`, `Replace`, `Blackbox`.
-- **Partial**: some survives by design. `Mask` with a kept suffix,
-  `Truncate`, `GeneralizeDate`.
+- **Irrecoverable**: nothing survives. `Erase`, `DropRow`, `DropColumn`.
+- **Partial**: some survives by design, at least the value's position and
+  extent. `Mask`, `Replace`, `Truncate`, `Clamp`, `GeneralizeDate`, and the
+  image and audio treatments.
 - **Recoverable**: the output stays linked to the original. `AesEncrypt`
   decrypts with its key; `Pseudonymize`'s vault keeps the mapping from each
-  original (or coreference cluster) to its surrogate.
+  original (or coreference cluster) to its surrogate; a hash can be
+  brute-forced over a small input space; `Keep`, and a `Replace` template
+  with `{value}`, write the original back.
 
 Check profiles before you ship a policy: for example, reject a recoverable
 operator on a label your policy says must be destroyed.

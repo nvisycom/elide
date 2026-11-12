@@ -98,10 +98,18 @@ impl<M: Modality> Matcher<M> {
 /// Rules are tried in the order they are added; the first whose matcher
 /// accepts an entity wins.
 ///
-/// ```ignore
-/// Rule::label(EMAIL_ADDRESS, Replace::default()).because(Attribution::freeform("gdpr-art-17"))
-/// Rule::tag("financial", Mask::stars())
-/// Rule::fallback(Erase)
+/// ```
+/// # use elide_core::entity::LabelRef;
+/// # use elide_core::entity::audit::Attribution;
+/// # use elide_core::modality::text::Text;
+/// # use elide_redaction::Rule;
+/// # use elide_redaction::operators::{Erase, Mask, Replace};
+/// let rules: [Rule<Text>; 3] = [
+///     Rule::label(LabelRef::new("email_address"), Replace::default())
+///         .because(Attribution::freeform("gdpr-art-17")),
+///     Rule::tag("financial", Mask::stars()),
+///     Rule::fallback(Erase),
+/// ];
 /// ```
 ///
 /// [`Anonymizer::with`]: super::Anonymizer::with
@@ -150,12 +158,15 @@ impl<M: Modality> Rule<M> {
     /// `countries`) and the caller runs selection once per [`Scope`], so the
     /// same analyzed entities produce a different plan for each audience.
     ///
-    /// ```ignore
+    /// ```
+    /// # use elide_core::modality::text::Text;
+    /// # use elide_redaction::Rule;
+    /// # use elide_redaction::operators::Mask;
     /// // Auditors see more of a card than support agents do.
-    /// Rule::predicate(
+    /// let rule: Rule<Text> = Rule::predicate(
     ///     |cx| cx.scope.metadata.audience.iter().any(|a| a == "auditor"),
     ///     Mask::stars().with_keep_prefix(6).with_keep_suffix(4),
-    /// )
+    /// );
     /// ```
     ///
     /// [`Scope`]: elide_core::recognition::Scope

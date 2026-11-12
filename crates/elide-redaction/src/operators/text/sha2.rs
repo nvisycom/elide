@@ -4,18 +4,14 @@
 use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
 
-use crate::operators::Sha2Algorithm;
+use crate::operators::{Sha2Algorithm, TextValued};
 
 /// Replaces an entity's text with its one-way SHA-2 hash, in hex.
 ///
@@ -32,11 +28,6 @@ pub struct Sha2Hash {
 }
 
 impl Sha2Hash {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("hash", "1.0.0")
-    }
-
     /// A hash operator using `algorithm`, with no salt.
     pub fn new(algorithm: Sha2Algorithm) -> Self {
         Self {
@@ -82,9 +73,9 @@ impl Sha2Hash {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for Sha2Hash {
+impl<M: TextValued> Operator<M> for Sha2Hash {
     fn id(&self) -> ComponentId {
-        Sha2Hash::id()
+        ComponentId::new("hash", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -93,47 +84,8 @@ impl Operator<Text> for Sha2Hash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(self.digest(data.as_str())))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for Sha2Hash {
-    fn id(&self) -> ComponentId {
-        Sha2Hash::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(self.digest(data.as_str())).into())
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Sha2Hash {
-    fn id(&self) -> ComponentId {
-        Sha2Hash::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.digest(data.as_str())).into())
+    async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        let digest = self.digest(M::value(data));
+        Ok(M::replacement(TextReplacement::substituted(digest)))
     }
 }

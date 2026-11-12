@@ -18,10 +18,11 @@ mod registry;
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::modality::{DataReader, DataWriter, Modality, TextRecognizable};
+use elide_core::modality::{DataReader, DataWriter, Modality};
 use elide_core::redaction::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
+use crate::operators::TextValued;
 
 /// The recovery engine: restores entities' originals through reversible
 /// operators.
@@ -72,17 +73,13 @@ impl<M: Modality> Deanonymizer<M> {
     }
 }
 
-/// Recovery for a text-backed modality: the stored replacement is text, so
-/// it lifts to a [`TextReplacement`] (and into `M::Replacement`) the operator
-/// can reverse. Implemented for [`Text`] and [`Tabular`].
+/// Recovery for a modality whose value is plain text ([`Text`] and
+/// [`Tabular`]): the stored replacement is text, so it lifts back to the
+/// modality's replacement for the operator to reverse.
 ///
 /// [`Text`]: elide_core::modality::text::Text
 /// [`Tabular`]: elide_core::modality::tabular::Tabular
-impl<M> Deanonymizer<M>
-where
-    M: TextRecognizable<Data = TextData>,
-    M::Replacement: From<TextReplacement>,
-{
+impl<M: TextValued<Data = TextData>> Deanonymizer<M> {
     /// Plan the recovery of every entity, reading values from `reader`,
     /// applying none.
     ///
@@ -108,7 +105,7 @@ where
             };
             // The document holds the replacement text as data; lift it back
             // to the modality's replacement so the operator can reverse it.
-            let current = M::Replacement::from(TextReplacement::substituted(data.as_str()));
+            let current = M::replacement(TextReplacement::substituted(data.as_str()));
             let Some(original) = operator.deanonymize(entity, &current).await? else {
                 tracing::debug!(
                     modality = M::NAME,
@@ -119,7 +116,7 @@ where
             };
             redactions.push(
                 entity.location.clone(),
-                M::Replacement::from(TextReplacement::substituted(original.as_str())),
+                M::replacement(TextReplacement::substituted(original.as_str())),
             );
         }
         Ok(redactions)

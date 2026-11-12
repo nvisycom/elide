@@ -206,7 +206,7 @@ mod tests {
         assert!(PartPath::from("_rels/.rels").is_relationships());
         assert!(PartPath::from("word/_rels/document.xml.rels").is_relationships());
         assert!(PartPath::from("xl/worksheets/_rels/sheet1.xml.rels").is_relationships());
-        // A file merely ending in `.rels` but not in a `_rels/` dir is not one ,
+        // A file merely ending in `.rels` but not in a `_rels/` dir is not one,
         // the loose `ends_with(".rels")` check would wrongly accept this.
         assert!(!PartPath::from("data/foo.rels").is_relationships());
         assert!(!PartPath::from("word/document.xml").is_relationships());

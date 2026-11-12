@@ -336,7 +336,7 @@ impl<'a> MarkupParser<'a> {
             // No matching open element: a stray end tag. Ignore it.
             return;
         };
-        // Unwind every frame from the top down to (and including) the match ,
+        // Unwind every frame from the top down to (and including) the match,
         // an intervening unclosed inline element is closed implicitly here.
         while self.stack.len() > depth {
             let frame = self.stack.pop().expect("frame above the matched depth");

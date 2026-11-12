@@ -1,11 +1,11 @@
 //! [`RandomToken`]: the default [`Generator`], a random token per entity.
 
 use elide_core::entity::Entity;
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
 use elide_core::redaction::Generator;
 use uuid::Uuid;
+
+use crate::operators::TextValued;
 
 /// Default text [`Generator`]: a fresh random token per distinct entity.
 ///
@@ -18,23 +18,16 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RandomToken;
 
-impl Generator<Text> for RandomToken {
-    fn generate(&self, _entity: &Entity<Text>, _data: &TextData) -> TextReplacement {
-        TextReplacement::substituted(Uuid::new_v4().to_string())
-    }
-}
-
-#[cfg(feature = "tabular")]
-impl Generator<Tabular> for RandomToken {
-    fn generate(&self, _entity: &Entity<Tabular>, _data: &TextData) -> TabularReplacement {
-        TabularReplacement::Cell(TextReplacement::substituted(Uuid::new_v4().to_string()))
+impl<M: TextValued> Generator<M> for RandomToken {
+    fn generate(&self, _entity: &Entity<M>, _data: &M::Data) -> M::Replacement {
+        M::replacement(TextReplacement::substituted(Uuid::new_v4().to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::modality::text::{Text, TextData, TextLocation};
 
     use super::*;
 

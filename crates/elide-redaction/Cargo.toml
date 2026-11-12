@@ -107,6 +107,9 @@ elide-image = { workspace = true, features = ["fixtures"] }
 # fixture encoder `fixtures::blank_audio_data` uses).
 elide-audio = { workspace = true, features = ["fixtures", "wav"] }
 
+# (De)serialization
+serde_json = { workspace = true, features = [] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt", "macros"] }
 
