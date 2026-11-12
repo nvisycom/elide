@@ -9,10 +9,11 @@ mod image;
 mod localize;
 mod text;
 
-use elide_core::entity::Entity;
+use elide_core::entity::{Entity, EntityCoRef};
 use elide_core::modality::Modality;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::candidates::Candidates;
 
@@ -34,3 +35,24 @@ pub trait LlmModality: Modality + Sized {
 /// Default confidence assigned to a candidate when the model didn't score
 /// it.
 pub(crate) const DEFAULT_CONFIDENCE: f64 = 0.5;
+
+/// The namespace of one recognizer call's coreference handles.
+///
+/// A model names its clusters with handles of its own (`c1`, `person_1`, a
+/// name), which repeat across calls. Prefixing each with a fresh id per call
+/// keeps the mentions of one call's cluster together while two calls'
+/// clusters never share an [`EntityCoRef`], so a surrogate keyed on it never
+/// links unrelated entities.
+pub(crate) struct CorefScope(Uuid);
+
+impl CorefScope {
+    /// A fresh namespace for one call.
+    pub(crate) fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+
+    /// The coreference id of the model's `handle` within this call.
+    pub(crate) fn coref(&self, handle: &str) -> EntityCoRef {
+        EntityCoRef::new(format!("{}/{handle}", self.0))
+    }
+}

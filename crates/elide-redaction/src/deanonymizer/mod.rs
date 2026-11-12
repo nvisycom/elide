@@ -18,7 +18,7 @@ mod registry;
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::modality::{DataReader, DataWriter, Modality, TextRedactable};
+use elide_core::modality::{DataReader, DataWriter, Modality};
 use elide_core::redaction::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
@@ -78,7 +78,11 @@ impl<M: Modality> Deanonymizer<M> {
 ///
 /// [`Text`]: elide_core::modality::text::Text
 /// [`Tabular`]: elide_core::modality::tabular::Tabular
-impl<M: TextRedactable<Data = TextData>> Deanonymizer<M> {
+impl<M> Deanonymizer<M>
+where
+    M: Modality<Data = TextData>,
+    M::Replacement: From<TextReplacement>,
+{
     /// Plan the recovery of every entity, reading values from `reader`,
     /// applying none.
     ///

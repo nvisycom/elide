@@ -70,6 +70,7 @@ thiserror = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v7"] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }

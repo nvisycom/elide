@@ -15,9 +15,11 @@ use serde::{Deserialize, Serialize};
 /// same `EntityCoRef` are coreferent: they refer to the same underlying
 /// entity even though each is a distinct mention with its own span.
 ///
-/// The identifier is opaque and only meaningful *within* a single
-/// detection call: it is the recognizer's local handle for a cluster of
-/// mentions, not a global key.
+/// The identifier is opaque and names one cluster only: a recognizer must
+/// keep two calls' clusters apart (scoping a model's own handles, which
+/// repeat across calls, to the call), because operators key a consistent
+/// surrogate on it. It may still embed the model's handle, which can echo a
+/// mention, so it is not safe to write into a redacted document as is.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

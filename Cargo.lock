@@ -1310,6 +1310,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "unicode-normalization",
+ "uuid",
 ]
 
 [[package]]

@@ -2,12 +2,12 @@
 //! pixel space and build the entity.
 
 use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, EntityCoRef, LabelRef};
+use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, UnitBoundingBox};
 use elide_image::modality::{Image, ImageData, ImageLocation};
 use elide_image::primitive::UnitBoundingBoxExt;
 
-use super::{DEFAULT_CONFIDENCE, LlmModality};
+use super::{CorefScope, DEFAULT_CONFIDENCE, LlmModality};
 use crate::candidates::{Candidates, ImageCandidate};
 
 impl LlmModality for Image {
@@ -19,6 +19,7 @@ impl LlmModality for Image {
         // decoded payload (no re-probe, no drift).
         let dims = data.dimensions();
 
+        let scope = CorefScope::new();
         let mut out = Vec::with_capacity(batch.entities.len());
         for d in batch.entities {
             let label = LabelRef::new(d.label.clone());
@@ -39,9 +40,10 @@ impl LlmModality for Image {
             );
             let mut entity = Entity::new(label, location).with_event(event);
             // The model groups mentions of the same real-world entity under
-            // a shared id; carry it onto the entity as a coreference cluster.
-            if let Some(id) = d.coreference.clone() {
-                entity = entity.with_coref(EntityCoRef::new(id));
+            // a shared handle; scoped to this call, it is the entity's
+            // coreference cluster.
+            if let Some(handle) = &d.coreference {
+                entity = entity.with_coref(scope.coref(handle));
             }
             out.push(entity);
         }

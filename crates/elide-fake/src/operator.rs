@@ -95,10 +95,10 @@ where
     }
 
     fn leak_profile(&self) -> LeakProfile {
-        // The original value is gone; only the entity's position
-        // and approximate shape (length differs from the original)
-        // leak.
-        LeakProfile::Partial
+        // A faked value leaves only the entity's position and approximate
+        // shape; a label it cannot fake takes the fallback, so the pair is
+        // only as safe as the leakier of the two.
+        LeakProfile::Partial.min(self.fallback.leak_profile())
     }
 
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
@@ -156,6 +156,22 @@ mod tests {
         let entity = entity_over(diagnosis(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
         assert_eq!(out, TextReplacement::substituted("[redacted]"));
+    }
+
+    /// A label `Fake` cannot fake takes the fallback, so a leakier fallback
+    /// sets the profile.
+    #[test]
+    fn the_leak_profile_includes_the_fallback() {
+        use elide::redaction::operators::Keep;
+
+        assert_eq!(
+            Operator::<Text>::leak_profile(&Fake::new(Mask::stars())),
+            LeakProfile::Partial
+        );
+        assert_eq!(
+            Operator::<Text>::leak_profile(&Fake::new(Keep)),
+            LeakProfile::Recoverable
+        );
     }
 
     #[tokio::test]

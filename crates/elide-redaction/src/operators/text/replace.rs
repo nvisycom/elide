@@ -21,14 +21,15 @@ use serde::{Deserialize, Serialize};
 /// The `{coref}` placeholder threads coreference through redaction: every
 /// mention sharing an [`EntityCoRef`] expands to the same token, so a
 /// template like `[{label}:{coref}]` renders `Alice`, `she`, and
-/// `Ms. Smith` all as `[PERSON:alice]` while a distinct cluster stays
-/// distinct. The substitution is pure: the identifier comes straight off
-/// the entity, so no cross-call state is needed and the output is
-/// independent of the order entities are processed.
+/// `Ms. Smith` as one token while a distinct cluster stays distinct. The
+/// substitution is pure: the identifier comes straight off the entity, so no
+/// cross-call state is needed and the output is independent of the order
+/// entities are processed.
 ///
-/// A template with `{value}` writes the original back, so it reports
-/// [`LeakProfile::Recoverable`]; without it the profile is
-/// [`LeakProfile::Partial`].
+/// A template with `{value}` writes the original back, and a coreference id
+/// can embed the recognizer's handle for the cluster, which may echo a
+/// mention, so a template with either reports [`LeakProfile::Recoverable`];
+/// without them the profile is [`LeakProfile::Partial`].
 ///
 /// The default template is `[{label}]`.
 ///
@@ -105,8 +106,9 @@ impl<M: TextRedactable> Operator<M> for Replace {
     }
 
     fn leak_profile(&self) -> LeakProfile {
-        if self.template.contains(VALUE) {
-            // The template writes the original value back.
+        if self.template.contains(VALUE) || self.template.contains(COREF) {
+            // `{value}` writes the original back, and a coreference id can
+            // embed the recognizer's handle, which may echo the mention.
             LeakProfile::Recoverable
         } else {
             // Position and length of the rewritten span stay observable even
@@ -154,11 +156,12 @@ mod tests {
         );
     }
 
-    /// A template that writes the original back leaks it.
+    /// A template that can write the original back leaks it.
     #[test]
-    fn a_value_template_is_recoverable() {
+    fn a_value_or_coref_template_is_recoverable() {
         let profile = |template: &str| Operator::<Text>::leak_profile(&Replace::new(template));
         assert_eq!(profile("[{label}]"), LeakProfile::Partial);
         assert_eq!(profile("<{value}>"), LeakProfile::Recoverable);
+        assert_eq!(profile("[{label}:{coref}]"), LeakProfile::Recoverable);
     }
 }
