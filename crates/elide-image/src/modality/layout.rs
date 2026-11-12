@@ -28,7 +28,7 @@ use super::ImageLocation;
 /// adjacent regions don't run their text together.
 const REGION_SEPARATOR: &str = " ";
 
-/// An image's recognized text, laid out in space.
+/// An image's recognized text, laid out in space as located regions.
 ///
 /// A flat, ordered list of [`LayoutRegion`]s (the recognized text runs in
 /// reading order). The flat [`text`], the regions joined by a space, is what a
@@ -133,8 +133,10 @@ impl Layout {
         })
     }
 
-    /// Resolve a byte `range` of [`text`] to the [`ImageLocation`] it covers:
-    /// the union of the boxes of every region the range overlaps.
+    /// Resolve a byte `range` of [`text`] to the [`ImageLocation`] it covers.
+    ///
+    /// The location is the union of the boxes of every region the range
+    /// overlaps.
     ///
     /// A single covered region keeps its polygon; a union of several drops it,
     /// as the enclosing box is axis-aligned. `None` when the range overlaps no

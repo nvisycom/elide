@@ -13,7 +13,7 @@ use crate::engine::tags::strip_wav;
 use crate::modality::{Audio, AudioFormat, AudioLocation, AudioReplacement};
 use crate::primitive::TimeSpan;
 
-/// An audio clip, the single entry point into the crate.
+/// An audio clip to decode, strip, and redact: the crate's single entry point.
 ///
 /// Unlike a decoded raster image, an `AudioBuffer` retains the **encoded**
 /// bytes and its format, and decodes to samples only on [`encode`](Self::encode).
@@ -32,8 +32,11 @@ pub struct AudioBuffer {
 }
 
 impl AudioBuffer {
-    /// Open `bytes` as the caller-resolved `format`, validating they decode as
-    /// it and retaining the encoded clip.
+    /// Open `bytes` as the caller-resolved `format`, validating that they
+    /// decode.
+    ///
+    /// The encoded clip is retained, so it re-encodes without a round trip
+    /// through samples.
     ///
     /// The format is not detected here — the ingestion registry already resolved
     /// it (from the extension, content type, or a magic-byte sniff) and routes
@@ -145,9 +148,10 @@ impl AudioBuffer {
         }
     }
 
-    /// Remove every tag block the clip carries beside its samples (ID3, APE,
-    /// and Lyrics3 tags of an MP3; every chunk of a WAV but its format and
-    /// sample data), in place. Returns what was removed.
+    /// Remove every tag block the clip carries beside its samples, in place.
+    ///
+    /// That is the ID3, APE, and Lyrics3 tags of an MP3, and every chunk of a
+    /// WAV but its format and sample data. Returns what was removed.
     ///
     /// # Errors
     ///
@@ -219,8 +223,8 @@ impl AudioBuffer {
         self.redactions.push(AudioLocation::new(span), *replacement);
     }
 
-    /// Re-encode the clip with the staged redactions applied, returning the
-    /// container bytes.
+    /// Re-encode the clip with its staged redactions applied, into container
+    /// bytes.
     ///
     /// With no staged redaction the source bytes are returned untouched (a
     /// cheap clone); otherwise the clip is decoded, every redaction applied,
@@ -269,8 +273,9 @@ pub(crate) struct Untagged {
     pub(crate) padding: usize,
 }
 
-/// What a tag strip removed from a clip: how many tag blocks, and how many
-/// padding chunks (space a writer reserved, which can keep stale bytes).
+/// What a tag strip removed from a clip: its tag blocks and padding chunks.
+///
+/// Padding is space a writer reserved, which can keep stale bytes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StrippedTags {
     /// Tag blocks: ID3, APE, and Lyrics3 tags, and WAV metadata chunks.

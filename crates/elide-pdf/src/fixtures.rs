@@ -13,16 +13,18 @@ use bytes::Bytes;
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
-/// A one-page PDF drawing one 8x8 JPEG image (`DCTDecode`), the kind whose
-/// stream is a file the image pipeline reads as it is.
+/// A one-page PDF drawing one 8x8 JPEG image (`DCTDecode`).
+///
+/// The kind whose stream is a file the image pipeline reads as it is.
 #[must_use]
 pub fn jpeg_image() -> Bytes {
     let image = Stream::new(image_dict(8, 8, Some("DCTDecode")), jpeg());
     drawing(vec![image], Vec::new())
 }
 
-/// A one-page PDF drawing one 2x2 image stored as raw RGB samples
-/// (`FlateDecode`), the way every lossless image is.
+/// A one-page PDF drawing one 2x2 image of raw RGB samples (`FlateDecode`).
+///
+/// The way every lossless image is stored.
 #[must_use]
 pub fn raw_image() -> Bytes {
     let mut image = Stream::new(image_dict(2, 2, None), vec![200; 12]);
@@ -30,9 +32,10 @@ pub fn raw_image() -> Bytes {
     drawing(vec![image], Vec::new())
 }
 
-/// A one-page PDF drawing a fax-coded image (`CCITTFaxDecode`), a JPEG image,
-/// and an inline image: two images the image pipeline cannot read, beside one
-/// it can.
+/// A one-page PDF drawing three images, two the image pipeline cannot read.
+///
+/// A fax-coded image (`CCITTFaxDecode`), a JPEG image, and an inline image; the
+/// JPEG is the one it can read.
 #[must_use]
 pub fn unsurfaceable_images() -> Bytes {
     let fax = Stream::new(image_dict(8, 8, Some("CCITTFaxDecode")), vec![0; 4]);
@@ -47,8 +50,10 @@ pub fn unsurfaceable_images() -> Bytes {
     drawing(vec![fax, jpeg], vec![inline])
 }
 
-/// A one-page PDF whose `/Info` names its author, `Jane Roe`, and which
-/// attaches one file, `notes.txt`, holding `Jane Roe`.
+/// A one-page PDF with an author in `/Info` and one attached file.
+///
+/// Its `/Info` names its author, `Jane Roe`, and it attaches one file,
+/// `notes.txt`, holding `Jane Roe`.
 #[must_use]
 pub fn metadata_and_attachment() -> Bytes {
     let mut doc = Document::with_version("1.7");
@@ -84,7 +89,7 @@ pub fn metadata_and_attachment() -> Bytes {
     save(&mut doc)
 }
 
-/// The stream bytes of every image XObject in `pdf`.
+/// The stream bytes of every image XObject in `pdf`, to assert on them.
 ///
 /// # Panics
 ///
@@ -94,7 +99,7 @@ pub fn images(pdf: &[u8]) -> Vec<Bytes> {
     streams(pdf, |dict| dict_name(dict, b"Subtype") == Some(b"Image"))
 }
 
-/// The stream bytes of every embedded file in `pdf`.
+/// The stream bytes of every embedded file in `pdf`, to assert on them.
 ///
 /// # Panics
 ///
@@ -106,8 +111,9 @@ pub fn attachments(pdf: &[u8]) -> Vec<Bytes> {
     })
 }
 
-/// Whether any page of `pdf` still draws an image: an XObject (`Do`) or an
-/// inline image (`BI`).
+/// Whether any page of `pdf` still draws an image, as XObject or inline.
+///
+/// An XObject (`Do`) or an inline image (`BI`).
 ///
 /// # Panics
 ///

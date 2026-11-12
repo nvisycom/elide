@@ -3,7 +3,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Color as 8-bit RGB.
+/// A color as 8-bit RGB, like the fill of a block redaction.
 ///
 /// Used by visual redaction (a solid-fill block over an image region) and
 /// any other rendering instruction that needs a color.

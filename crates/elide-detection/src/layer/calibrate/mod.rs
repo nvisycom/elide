@@ -1,5 +1,6 @@
-//! Calibration: scale entity confidences by per-recognizer multipliers
-//! before fusion.
+//! Calibration: scale entity confidences by per-recognizer multipliers.
+//!
+//! It runs before fusion, so fused scores combine calibrated inputs.
 
 mod map;
 

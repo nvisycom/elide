@@ -9,24 +9,26 @@ use bytes::Bytes;
 
 use crate::modality::{AudioData, AudioFormat};
 
-/// Wrap fixture `bytes` of the given `format` into an [`AudioData`], for a test
-/// that needs the audio modality's payload — the way ingestion does, with the
-/// format already resolved.
+/// Wrap fixture `bytes` of a known `format` into an [`AudioData`] payload.
+///
+/// For a test that needs the audio modality's payload the way ingestion builds
+/// it, with the format already resolved.
 #[must_use]
 pub fn audio_data(bytes: impl Into<Bytes>, format: AudioFormat) -> AudioData {
     AudioData::new(bytes, format)
 }
 
-/// A tiny WAV [`AudioData`], for a test that needs *some* valid audio payload
-/// but does not care about its samples (it exercises the transcript artifact or
-/// an empty-recognition path, not the audio itself).
+/// A tiny valid WAV [`AudioData`], for a test that needs audio but not samples.
+///
+/// It exercises the transcript artifact or an empty-recognition path, not the
+/// audio itself.
 #[cfg(feature = "wav")]
 #[must_use]
 pub fn blank_audio_data() -> AudioData {
     audio_data(wav_ramp(1), AudioFormat::Wav)
 }
 
-/// A `secs`-long 8 kHz mono 16-bit WAV ramp.
+/// A `secs`-long 8 kHz mono 16-bit WAV ramp, a valid clip for tests.
 ///
 /// The smallest fixture a WAV handler can open, decode, and re-encode: a real
 /// RIFF container whose samples ascend so a redacted span is visibly zeroed
@@ -57,7 +59,7 @@ pub fn wav_ramp(secs: u32) -> Bytes {
     Bytes::from(buf.into_inner())
 }
 
-/// A `secs`-long 16 kHz mono MP3 tone at 64 kbps.
+/// A `secs`-long 16 kHz mono 64 kbps MP3 tone, a valid clip for tests.
 ///
 /// A real MP3 a handler can open and re-encode, built with the same LAME path
 /// the redaction round-trip uses, so the fixture and the engine agree on

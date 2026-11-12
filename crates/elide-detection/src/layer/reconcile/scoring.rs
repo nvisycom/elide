@@ -21,7 +21,7 @@ pub trait Scoring: Send + Sync {
     fn score(&self, a: Confidence, b: Confidence) -> Confidence;
 }
 
-/// `max(a, b)`, the more confident finding wins.
+/// `max(a, b)`: a fused finding is as confident as its most confident member.
 ///
 /// The conservative default: corroboration never *lowers* the score, and a
 /// single strong witness carries the cluster. The merged confidence is one
@@ -40,7 +40,7 @@ impl Scoring for MaxConfidence {
     }
 }
 
-/// Noisy-OR of two scores: `1 − (1 − a)(1 − b)`.
+/// Noisy-OR of two scores, `1 − (1 − a)(1 − b)`: agreement raises confidence.
 ///
 /// Treats recognizers as independent witnesses, each adds evidence, so the
 /// fused score is monotonic in the number of agreeing detectors and can exceed

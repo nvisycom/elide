@@ -1,4 +1,4 @@
-//! The [`Tiebreaker`] trait and the shipped tiebreakers.
+//! The [`Tiebreaker`] trait, which picks a conflict's winner, and shipped ones.
 
 use std::cmp::Ordering;
 
@@ -29,8 +29,9 @@ impl<M: Modality> Tiebreaker<M> for HighestConfidence {
     }
 }
 
-/// Keep the entity covering the larger span, the more specific match (ties
-/// keep the first).
+/// Keeps the entity covering the larger span, the more specific match.
+///
+/// Ties keep the first.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LongestSpan;
 

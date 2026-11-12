@@ -15,7 +15,7 @@ use std::fmt;
 /// when attached to an [`Error`] as its underlying source.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// Error type returned across the core domain operations.
+/// The error every core operation returns: an [`ErrorKind`] and optional cause.
 ///
 /// Opaque by design: construct one with [`Error::new`] (kind + cause), a
 /// constructor named for its kind ([`Error::malformed`], …), or
@@ -195,7 +195,7 @@ impl std::error::Error for Error {
     }
 }
 
-/// Coarse category of [`Error`], suitable for matching.
+/// The coarse category of an [`Error`], for matching on what went wrong.
 ///
 /// Deliberately small and `#[non_exhaustive]`: it names the *kind* of
 /// failure a caller can branch on (is the input corrupt, the config wrong,
@@ -315,8 +315,7 @@ impl ErrorKind {
         }
     }
 
-    /// Whether an operation that failed with this kind could plausibly
-    /// succeed if retried unchanged.
+    /// Whether a failure of this kind could succeed if retried unchanged.
     ///
     /// Only [`Transport`](Self::Transport) is retryable: a network failure or
     /// timeout may be transient. Every other kind is deterministic: the same
@@ -348,7 +347,7 @@ impl fmt::Display for ErrorKind {
     }
 }
 
-/// Convenience alias for results in this crate.
+/// The result of a core operation, failing with this crate's [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]

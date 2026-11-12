@@ -5,14 +5,16 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// NRIC / FIN, Singapore National Registration Identity
-    /// Card / Foreign Identification Number with weighted Mod-11
-    /// checksum.
+    /// NRIC / FIN, the Singapore identity card and foreigner numbers.
+    ///
+    /// The National Registration Identity Card / Foreign Identification Number,
+    /// with a weighted Mod-11 checksum.
     fn nric from "../../../assets/patterns/sg/identity/nric.toml"
 );
 shipped_pattern!(
-    /// UEN, Unique Entity Number issued by ACRA (formats A, B,
-    /// and C, each with its own checksum).
+    /// UEN, the Singapore Unique Entity Number issued by ACRA.
+    ///
+    /// Formats A, B, and C, each with its own checksum.
     fn uen from "../../../assets/patterns/sg/finance/uen.toml"
 );
 shipped_pattern!(

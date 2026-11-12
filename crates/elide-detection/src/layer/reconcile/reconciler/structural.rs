@@ -20,7 +20,7 @@ pub enum OnConflict {
     Contest,
 }
 
-/// The default, structure-aware reconciler.
+/// The default, structure-aware reconciler: nesting, subsumption, conflict.
 ///
 /// Reads the geometric relationship between the two locations rather than
 /// treating every overlap as a contest:

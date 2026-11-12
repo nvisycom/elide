@@ -11,7 +11,7 @@ use super::{Category, Label, LabelRef};
 use crate::entity::Entity;
 use crate::modality::Modality;
 
-/// Registry of [`Label`]s, keyed by id.
+/// A registry of [`Label`]s keyed by id: the entity types a call detects.
 ///
 /// Holds the authoritative definitions (localized names + descriptions)
 /// for a run.

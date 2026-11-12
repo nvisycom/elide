@@ -9,9 +9,11 @@
 
 use std::ops::Range;
 
-/// A window over the source text: the byte range (a real slice of the original,
-/// so offsets inside it are the full text's offsets, not a rejoined copy's) and
-/// its start offset — the delta a finding inside the window is rebased by.
+/// A window over the source text: its byte range and its start offset.
+///
+/// The range is a real slice of the original, so offsets inside it are the full
+/// text's offsets, not a rejoined copy's. The start offset is the delta a
+/// finding inside the window is rebased by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Window {
     /// Byte offset of the window's start in the full text.
@@ -28,8 +30,10 @@ impl Window {
     }
 }
 
-/// A strategy for splitting text into overlapping windows small enough for a
-/// length-limited recognizer.
+/// A strategy for splitting text into overlapping windows a recognizer can
+/// take.
+///
+/// Each window is small enough for a length-limited recognizer.
 ///
 /// Returns the windows in order; each is a byte range into the text passed in.
 /// Consecutive windows overlap so an entity on a boundary still appears whole in
@@ -40,9 +44,10 @@ pub trait Chunking: Send + Sync {
     fn windows(&self, text: &str) -> Vec<Window>;
 }
 
-/// Window by **word count**: at most `size` whitespace-separated words per
-/// window, each starting `size - overlap` words after the previous, so
-/// consecutive windows share `overlap` words.
+/// Windows by **word count**: at most `size` whitespace-separated words each.
+///
+/// Each window starts `size - overlap` words after the previous, so consecutive
+/// windows share `overlap` words.
 ///
 /// This is the GLiNER long-document strategy; [`default`](Self::default) is its
 /// 384-word / 64-word-overlap setting. Word count is a proxy for a model's token
@@ -93,8 +98,9 @@ impl Chunking for WordWindows {
     }
 }
 
-/// Window by **character count**: at most `size` Unicode scalar values per
-/// window, each starting `size - overlap` characters after the previous.
+/// Windows by **character count**: at most `size` Unicode scalar values each.
+///
+/// Each window starts `size - overlap` characters after the previous.
 ///
 /// A character bound is a far tighter proxy for a model's token limit than a
 /// word bound — measured chars-per-token stays in a narrow band across scripts
@@ -131,8 +137,9 @@ impl CharWindows {
         Self { size, overlap }
     }
 
-    /// A conservative setting for a 512-token model such as GLiNER: 500-character
-    /// windows overlapping by 84 (about one sixth).
+    /// A conservative setting for a 512-token model such as GLiNER.
+    ///
+    /// 500-character windows overlapping by 84 (about one sixth).
     ///
     /// The budget assumes nearly one character per token — the floor observed on
     /// emoji- and punctuation-dense text, where a larger char budget (or any word

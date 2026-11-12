@@ -29,8 +29,10 @@ impl MockBackend {
         Self::default()
     }
 
-    /// Make `call_batch` return `n` fewer responses than requests, violating the
-    /// one-response-per-request contract, to exercise a consumer's count guard.
+    /// Make `call_batch` return `n` fewer responses than it got requests.
+    ///
+    /// It violates the one-response-per-request contract, to exercise a
+    /// consumer's count guard.
     #[must_use]
     pub fn with_dropped_responses(mut self, n: usize) -> Self {
         self.dropped = n;

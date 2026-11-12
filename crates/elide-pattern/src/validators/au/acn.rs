@@ -6,9 +6,10 @@
 
 const WEIGHTS: [u32; 8] = [8, 7, 6, 5, 4, 3, 2, 1];
 
-/// Return `true` when `value` is a valid 9-digit ACN. Whitespace
-/// and dash separators in the canonical `NNN NNN NNN` rendering
-/// are stripped before validation.
+/// Return `true` when `value` is a valid 9-digit Australian ACN.
+///
+/// Whitespace and dash separators in the canonical `NNN NNN NNN` rendering are
+/// stripped before validation.
 pub fn acn(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

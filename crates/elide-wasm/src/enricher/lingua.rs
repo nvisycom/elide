@@ -12,8 +12,9 @@ use tsify::{Ts, Tsify};
 
 use crate::error::{ElideError, ElideErrorKind};
 
-/// The languages a language-detection enricher considers: a named preset or an
-/// explicit list of BCP-47 tags.
+/// The languages a detection enricher considers: a preset or BCP-47 tags.
+///
+/// A named preset or an explicit list of BCP-47 tags.
 ///
 /// `Tsify` generates `type LanguageSet = LanguagePreset | string[]`, so JS passes
 /// either a preset string (`"common"`) or an array (`["en", "tr", "el"]`).
@@ -28,7 +29,7 @@ pub enum LanguageSet {
     Tags(Vec<String>),
 }
 
-/// A named language preset, from narrowest to widest.
+/// A named set of languages to detect, from narrowest to widest.
 #[derive(Deserialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub enum LanguagePreset {

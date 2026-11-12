@@ -25,9 +25,10 @@ use super::MockBackend;
 use super::{SttRequest, SttResponse};
 use crate::modality::{Audio, Transcription};
 
-/// An [`Enricher<Audio>`] that transcribes the clip, generic over its STT
-/// backend `B` — any [`Backend`] whose request is [`SttRequest`] and whose
-/// response is [`SttResponse`].
+/// An [`Enricher<Audio>`] that transcribes each clip through an STT backend.
+///
+/// Generic over its backend `B`: any [`Backend`] whose request is
+/// [`SttRequest`] and whose response is [`SttResponse`].
 ///
 /// Stamps the resulting [`Transcription`] onto the call's artifact. Registered on
 /// an `Analyzer<Audio>` ahead of its recognizers, the same way a language

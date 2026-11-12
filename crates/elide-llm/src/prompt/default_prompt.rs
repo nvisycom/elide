@@ -18,7 +18,7 @@ use super::Prompt;
 use super::image_prompt::ImagePromptBuilder;
 use super::text_prompt::TextPromptBuilder;
 
-/// Shipped [`Prompt`] impl covering both [`Text`] and [`Image`].
+/// The shipped [`Prompt`], with wording for both [`Text`] and [`Image`].
 ///
 /// Stateless zero-sized type. Customise wording by writing your own
 /// [`Prompt<M>`] impl rather than tweaking this one.

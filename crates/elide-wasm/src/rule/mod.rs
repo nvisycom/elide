@@ -19,7 +19,7 @@ pub(crate) enum RuleKind {
     Fallback { operator: OperatorKind },
 }
 
-/// A redaction rule, ready to fold into an anonymizer.
+/// A redaction rule that binds an operator to entities, for an anonymizer.
 ///
 /// Built with [`Rule::label`] or [`Rule::fallback`] and consumed by
 /// [`Anonymizer::rule`](crate::anonymizer::Anonymizer::rule).
@@ -28,8 +28,10 @@ pub struct Rule(pub(crate) RuleKind);
 
 #[wasm_bindgen]
 impl Rule {
-    /// A rule that applies `operator` to every entity of `label` (a label id such
-    /// as `"email_address"`). Consumes the operator.
+    /// A rule applying `operator` to every entity of `label`, like
+    /// `"email_address"`.
+    ///
+    /// `label` is a label id. Consumes the operator.
     #[wasm_bindgen(js_name = label)]
     pub fn label(label: String, operator: Operator) -> Rule {
         Self(RuleKind::Label {
@@ -38,8 +40,9 @@ impl Rule {
         })
     }
 
-    /// A catch-all rule that applies `operator` to every entity not matched by an
-    /// earlier rule. Consumes the operator.
+    /// A catch-all rule applying `operator` to every entity not yet matched.
+    ///
+    /// Consumes the operator.
     #[wasm_bindgen(js_name = fallback)]
     pub fn fallback(operator: Operator) -> Rule {
         Self(RuleKind::Fallback {

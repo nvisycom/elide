@@ -87,7 +87,8 @@ impl RasterImage {
         Ok(Bytes::from(buf.into_inner()))
     }
 
-    /// Crop the in-bounds intersection of `region` out as its own image, or
+    /// Crop the in-bounds part of `region` out as its own image.
+    ///
     /// `None` when the region does not overlap the image (out of bounds or
     /// zero-area). The crop carries no metadata.
     #[must_use]
@@ -102,10 +103,12 @@ impl RasterImage {
         })
     }
 
-    /// Paint `replacement` over `region` in place (blur, pixelate, block, or
-    /// remove), returning whether any pixel changed. A region that does not
-    /// overlap the image is a silent no-op that reports `false`; redaction acts
-    /// on the in-bounds intersection.
+    /// Paint `replacement` over `region` in place, returning if any pixel
+    /// changed.
+    ///
+    /// The replacement blurs, pixelates, blocks, or removes. A region that does
+    /// not overlap the image is a silent no-op that reports `false`; redaction
+    /// acts on the in-bounds intersection.
     pub fn redact(&mut self, region: BoundingBox<u32>, replacement: &ImageReplacement) -> bool {
         let Some(region) = self.clamp(region) else {
             return false;

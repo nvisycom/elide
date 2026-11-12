@@ -13,7 +13,7 @@ pub(crate) use self::compiled::CompiledDictionary;
 pub use self::term::Term;
 use crate::context::RuleContext;
 
-/// Confidence policy for a [`Dictionary`]'s matches.
+/// The confidence a [`Dictionary`]'s matches get: uniform, or per column.
 ///
 /// Either every term gets the same score ([`Uniform`]), or scores
 /// vary by CSV source column ([`PerColumn`]). The untagged serde
@@ -86,7 +86,7 @@ impl Default for Scoring {
     }
 }
 
-/// Literal-term detection rule.
+/// A detection rule that matches a list of literal terms, like nationalities.
 ///
 /// Scans for a fixed list of literals using a shared Aho-Corasick
 /// automaton. Unlike [`Pattern`], a dictionary has no regex engine,
@@ -126,8 +126,9 @@ pub struct Dictionary {
     /// first candidate the request catalog declares; a single-candidate
     /// dictionary carries a one-element list.
     pub labels: Vec<LabelRef>,
-    /// Literal terms to scan for. Compiled into the shared
-    /// Aho-Corasick automaton at recognizer-build time.
+    /// The literal terms to scan for, as one shared Aho-Corasick automaton.
+    ///
+    /// Compiled into the automaton at recognizer-build time.
     pub terms: Vec<Term>,
     /// Confidence policy resolved against each term at
     /// recognizer-build time. Defaults to [`Scoring::Uniform`]

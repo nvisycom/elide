@@ -32,7 +32,7 @@ use super::parser::parse_slots;
 /// Stable [`FormatId`] for the JSON codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The JSON [`Format`], resolved by `.json` and `application/json`.
 pub fn format() -> Format {
     Format::new(FORMAT_ID, JsonLoader)
         .with_extensions(["json"])

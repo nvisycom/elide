@@ -6,8 +6,9 @@
 //! to 10. Positions 8–9 carry the physician's Fachgruppe and are
 //! not part of the checksum.
 
-/// Return `true` when `value` is a 9-digit LANR with a valid
-/// position-7 check digit per KBV.
+/// Return `true` when `value` is a 9-digit LANR with a valid KBV check digit.
+///
+/// The check digit is in position 7.
 pub fn lanr(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

@@ -26,10 +26,11 @@ macro_rules! impl_image_handler {
         /// [`FormatId`]: elide_codec::FormatId
         pub const FORMAT_ID: ::elide_codec::FormatId = ::elide_codec::FormatId::new($format_id);
 
-        /// [`Format`] descriptor registered into `FormatRegistry`. Decodes into a
-        /// [`Document`](elide_codec::Document) of the pixel stream, plus the
-        /// `#exif` metadata stream when the hidden-content policy treats metadata
-        /// as content.
+        /// This container's [`Format`], decoding an image's pixels and metadata.
+        ///
+        /// Decodes into a [`Document`](elide_codec::Document) of the pixel stream,
+        /// plus the `#exif` metadata stream when the hidden-content policy treats
+        /// metadata as content.
         ///
         /// [`Format`]: elide_codec::Format
         pub fn format() -> ::elide_codec::Format {

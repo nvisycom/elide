@@ -99,8 +99,10 @@ impl Outcome {
     }
 }
 
-/// One backend call's resource usage: whether it succeeded, how long it took, the
-/// model it called and the units it spent, and how much it produced.
+/// One backend call's resource usage, from its outcome to the units it spent.
+///
+/// Whether it succeeded, how long it took, the model it called and the units it
+/// spent, and how much it produced.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -149,7 +151,8 @@ impl Usage {
     }
 }
 
-/// Where a [`Metered`](crate::metrics::Metered) backend reports each call's [`Usage`].
+/// Where a [`Metered`](crate::metrics::Metered) backend sends each [`Usage`]
+/// record.
 ///
 /// The seam: a caller supplies one and hands it to the wrappers at construction.
 /// [`UsageCollector`] is the batteries-included in-memory implementation; a caller
@@ -169,8 +172,9 @@ impl UsageSink for Arc<dyn UsageSink> {
     }
 }
 
-/// The in-memory [`UsageSink`]: collects every recorded [`Usage`] into a shared
-/// `Vec` a caller reads back after a run.
+/// An in-memory [`UsageSink`] a caller reads the recorded usage back from.
+///
+/// It collects every recorded [`Usage`] into a shared `Vec`, read after a run.
 ///
 /// Cheap to [`Clone`] (it shares one buffer): build one, clone it into each
 /// [`Metered`](crate::metrics::Metered) wrapper, run the pipeline, then read the entries.
@@ -238,8 +242,9 @@ impl UsageCollector {
         total.into_units()
     }
 
-    /// Every entry whose model name matches `model`, in record order, for
-    /// attributing usage to one model when several ran.
+    /// Every recorded entry whose model name matches `model`, in record order.
+    ///
+    /// For attributing usage to one model when several ran.
     #[must_use]
     pub fn by_model(&self, model: &str) -> Vec<Usage> {
         self.entries()

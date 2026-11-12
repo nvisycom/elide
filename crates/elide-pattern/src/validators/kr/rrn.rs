@@ -9,8 +9,9 @@
 
 pub(super) const WEIGHTS: [u32; 12] = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5];
 
-/// Return `true` when `value` is a valid RRN. Hyphen separators
-/// are stripped before validation.
+/// Return `true` when `value` is a valid Korean RRN.
+///
+/// Hyphen separators are stripped before validation.
 pub fn rrn(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

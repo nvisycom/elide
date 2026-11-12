@@ -1,4 +1,5 @@
-//! Modalities: the media entities live in.
+//! Modalities: the media entities live in, from text and tables to images,
+//! audio.
 //!
 //! Re-exports the core modality vocabulary (the [`Modality`] trait, its
 //! [`Text`]/`Tabular`/`Metadata` markers, [`Chunk`], the reader/writer traits,

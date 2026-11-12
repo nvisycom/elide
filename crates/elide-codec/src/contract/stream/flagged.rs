@@ -6,8 +6,9 @@ use elide_core::modality::Modality;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::redaction::HiddenContentKind;
 
-/// An item of hidden content a stream keeps and its format labels by what it
-/// is: a metadata field, a comment, its author, a tracked deletion.
+/// An item of hidden content a stream keeps, labelled by what it is.
+///
+/// A metadata field, a comment, its author, a tracked deletion.
 ///
 /// The label is the item's detection: the engine makes the item an entity when
 /// the document's [`Disposition`](elide_core::redaction::Disposition) for its

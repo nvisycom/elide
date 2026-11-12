@@ -5,7 +5,7 @@ use rig_reqwest::ReqwestMiddlewareClient;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Provider that does not require an API key (Ollama).
+/// A provider that needs no API key, such as a local Ollama server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UnauthenticatedProvider {
     /// Model name (e.g. `llama3.1:8b`).

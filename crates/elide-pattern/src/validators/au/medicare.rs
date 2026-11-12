@@ -10,10 +10,11 @@
 
 const WEIGHTS: [u32; 8] = [1, 3, 7, 9, 1, 3, 7, 9];
 
-/// Return `true` when the first 9 digits of `value` form a
-/// Medicare number whose checksum matches. Whitespace and dash
-/// separators are stripped before validation. Trailing digits
-/// (individual reference + issue) are accepted but ignored.
+/// Return `true` when the first 9 digits of `value` form a valid Medicare
+/// number.
+///
+/// Whitespace and dash separators are stripped before validation. Trailing
+/// digits (individual reference + issue) are accepted but ignored.
 pub fn medicare(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

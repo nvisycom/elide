@@ -5,8 +5,9 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// SIN, 9-digit Social Insurance Number with Luhn checksum
-    /// (first digit in `[1-7, 9]`).
+    /// SIN, the 9-digit Canadian Social Insurance Number, with a Luhn checksum.
+    ///
+    /// Its first digit is in `[1-7, 9]`.
     fn sin from "../../../assets/patterns/ca/identity/sin.toml"
 );
 shipped_pattern!(

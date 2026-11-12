@@ -11,8 +11,7 @@
 //! so `"DE 123 456 789"`, `"DE-123-456-789"`, and `"DE.123.456.789"`
 //! all normalize to `"DE123456789"`.
 
-/// Return `true` when `value` is a valid German USt-IdNr per the
-/// ISO 7064 Mod 11,10 heuristic.
+/// Return `true` when `value` is a valid German USt-IdNr (ISO 7064 Mod 11,10).
 pub fn vat_id(value: &str) -> bool {
     let normalized: String = value
         .chars()

@@ -20,7 +20,7 @@ use elide_core::backend::BackendResponse;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
 
-/// One per-call NER response from a NER backend.
+/// The spans a NER backend predicted for one request.
 ///
 /// Wraps the spans the backend produced. Each span already carries a
 /// canonical [`LabelRef`]; the recognizer applies its ignore-set before
@@ -48,7 +48,7 @@ impl BackendResponse for NerResponse {
     }
 }
 
-/// One entity span predicted by a NER model.
+/// One entity span a NER model predicted: its range, label, and score.
 ///
 /// The label is a canonical [`LabelRef`], not a raw model string: the
 /// backend is responsible for any raw-to-canonical translation (see the

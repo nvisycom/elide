@@ -25,8 +25,7 @@ use crate::backend::{NerRequest, NerResponse};
 /// configured labels.
 const DEFAULT_MULTIPLIER: f32 = 1.2;
 
-/// A NER backend that scales the confidence of spans whose label is in
-/// a configured set.
+/// A NER backend that scales the confidence of spans with configured labels.
 ///
 /// Delegates recognition to the wrapped backend, then multiplies the
 /// confidence of each matching span by the [`multiplier`], saturating
@@ -52,9 +51,11 @@ impl<B> ScoreScaled<B> {
         }
     }
 
-    /// Set the multiplier applied to the configured labels' scores, in place
-    /// of the default 1.2. Below `1.0` demotes, above `1.0` boosts; the
-    /// result is clamped to `[0, 1]`.
+    /// Set the multiplier applied to the configured labels' scores (default
+    /// 1.2).
+    ///
+    /// Below `1.0` demotes, above `1.0` boosts; the result is clamped to `[0,
+    /// 1]`.
     #[must_use]
     pub fn with_multiplier(mut self, multiplier: f32) -> Self {
         self.multiplier = multiplier;

@@ -11,9 +11,10 @@ const REGION_CODES: &[&str] = &[
     "28",
 ];
 
-/// Return `true` when `value` is a 12-digit Korean driver
-/// license number with a valid region code. Hyphen and space
-/// separators are stripped before validation.
+/// Return `true` when `value` is a Korean driver license with a valid region.
+///
+/// A 12-digit number with a valid region code. Hyphen and space separators are
+/// stripped before validation.
 pub fn driver_license(value: &str) -> bool {
     let digits: String = value.chars().filter(|c| c.is_ascii_digit()).collect();
     let extras = value

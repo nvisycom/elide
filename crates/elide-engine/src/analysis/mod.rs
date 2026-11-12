@@ -72,8 +72,7 @@ pub use self::registry::ReportDeserializer;
 pub(crate) use self::report::{PartReport, StrippedRecord};
 pub use self::report::{Report, StrippedItem};
 
-/// The result of analyzing a document: its findings and the enrichment that
-/// produced them.
+/// The result of an analysis: its findings and the enrichment behind them.
 ///
 /// [`report`](Self::report) holds the detected entities (references into the
 /// document). [`artifacts`](Self::artifacts) holds the enrichment content (OCR

@@ -4,9 +4,11 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Axis-aligned bounding box in normalized `0.0..=1.0` coordinates, top-left
-/// origin: `(0, 0)` is the top-left corner of the medium and `(1, 1)` the
-/// bottom-right, with `y` increasing downward.
+/// An axis-aligned box in normalized `0.0..=1.0` coordinates, from the
+/// top-left.
+///
+/// `(0, 0)` is the top-left corner of the medium and `(1, 1)` the bottom-right,
+/// with `y` increasing downward.
 ///
 /// It names a position *within* a rendered medium without knowing its pixel
 /// size, so one value serves a viewer at any zoom: a highlight over a PDF page,

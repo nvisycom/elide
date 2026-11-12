@@ -9,9 +9,9 @@
 //! value mod 97 to equal 1.
 
 /// Return `true` when `value` is a valid 26-digit Polish NRB.
-/// Space and hyphen separators in the conventional
-/// `CC BBBB BBBB AAAA AAAA AAAA AAAA` grouping are stripped before
-/// validation.
+///
+/// Space and hyphen separators in the conventional `CC BBBB BBBB AAAA AAAA AAAA
+/// AAAA` grouping are stripped before validation.
 pub fn nrb(value: &str) -> bool {
     // Strip Unicode whitespace, not just ASCII: the pattern's `\s` matches
     // `White_Space`, so a PDF-extracted NRB can carry a U+00A0 non-breaking

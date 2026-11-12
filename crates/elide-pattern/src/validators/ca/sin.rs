@@ -4,8 +4,9 @@
 //! beginning with `0` or `8` are reserved by Employment and
 //! Social Development Canada (ESDC) and never assigned.
 
-/// Return `true` when `value` is a valid Canadian SIN. Whitespace
-/// and dash separators in the canonical `NNN NNN NNN` /
+/// Return `true` when `value` is a valid Canadian SIN.
+///
+/// Whitespace and dash separators in the canonical `NNN NNN NNN` /
 /// `NNN-NNN-NNN` renderings are stripped before validation.
 pub fn sin(value: &str) -> bool {
     let digits: Vec<u32> = value

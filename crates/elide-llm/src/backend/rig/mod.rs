@@ -30,7 +30,7 @@ use crate::provider::Provider;
 
 const TARGET: &str = "elide_llm::backend::rig";
 
-/// Rig-backed LLM backend.
+/// An [`LlmBackend`](crate::backend::LlmBackend) that calls a provider through the `rig` crate.
 ///
 /// Construct with [`new`] (default config) or [`new_with_config`]. Owns the
 /// provider's completion model (type-erased to [`DynModel`] at construction, so

@@ -13,7 +13,7 @@ use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Character-replacement masking operator.
+/// Masks an entity's text by replacing its characters, like `****1234`.
 ///
 /// Configurable along three axes: the `mask_char` substituted in
 /// (default `'*'`), a `keep_prefix` of leading characters left visible,

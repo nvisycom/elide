@@ -8,7 +8,7 @@ use serde::de::Error as _;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A 32-byte BLAKE3 digest.
+/// A 32-byte BLAKE3 digest that links and verifies an audit trail's events.
 ///
 /// The tamper-evident link in an [`AuditLog`] DAG: each [`AuditEvent`] hashes
 /// its payload together with its parents' hashes, so altering any event breaks

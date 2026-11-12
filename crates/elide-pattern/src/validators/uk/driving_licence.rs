@@ -7,8 +7,10 @@
 //! `9ABCD…`, `A9BCD…`), violates the padding rule and is
 //! structurally invalid.
 
-/// Return `true` when the leading 5-char surname slot of a
-/// 16-char DVLA driving licence number is structurally valid.
+/// Return `true` when a UK driving licence's surname slot is well-formed.
+///
+/// Checks the leading 5-character surname slot of a 16-character DVLA driving
+/// licence number.
 ///
 /// Rejects an all-`9` surname and any `9` that appears before a
 /// letter within the slot. Does not re-validate the rest of the

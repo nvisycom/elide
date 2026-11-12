@@ -1,5 +1,7 @@
-//! [`ChunkedRecognizer`]: a [`Recognizer`] decorator that windows an over-long
-//! text so a length-limited recognizer sees all of it.
+//! A [`Recognizer`] decorator that windows text too long for its recognizer.
+//!
+//! [`ChunkedRecognizer`] splits an over-long text so a length-limited
+//! recognizer sees all of it.
 
 mod chunking;
 
@@ -16,10 +18,11 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
 use crate::batch::expect_one_per_input;
 
-/// Wraps a text [`Recognizer`] whose backend caps input length: a [`Chunking`]
-/// strategy splits an over-long subject into overlapping windows, each is
-/// recognized on the inner recognizer, and the findings are rebased onto the
-/// full text and merged.
+/// Wraps a text [`Recognizer`] whose backend caps input length, windowing text.
+///
+/// A [`Chunking`] strategy splits an over-long subject into overlapping
+/// windows, each is recognized on the inner recognizer, and the findings are
+/// rebased onto the full text and merged.
 ///
 /// A hosted span recognizer (GLiNER and the like) accepts only so many tokens
 /// per call, so a long chunk silently loses everything past the limit. This

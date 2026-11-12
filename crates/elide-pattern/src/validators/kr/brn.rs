@@ -7,8 +7,9 @@
 
 const MAGIC: [u32; 9] = [1, 3, 7, 1, 3, 7, 1, 3, 5];
 
-/// Return `true` when `value` is a valid 10-digit BRN. Hyphen
-/// separators are stripped before validation.
+/// Return `true` when `value` is a valid 10-digit Korean BRN.
+///
+/// Hyphen separators are stripped before validation.
 pub fn brn(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

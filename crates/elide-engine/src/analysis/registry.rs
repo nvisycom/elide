@@ -130,8 +130,10 @@ impl ModalityRegistry {
     }
 }
 
-/// Rebuilds a serialized [`Report`], without the analyzers, anonymizers, or
-/// codec registry needed to *run* one.
+/// Rebuilds a serialized [`Report`] without the machinery that runs one.
+///
+/// It needs none of the analyzers, anonymizers, or codec registry needed to
+/// *run* one.
 ///
 /// A report's wire form tags each group with its modality name but not the
 /// concrete type, and deserialization is not object-safe, so a bare
@@ -167,8 +169,10 @@ impl ReportDeserializer {
         Self::default()
     }
 
-    /// Register modality `M` so a group tagged with its name reconstructs as
-    /// `Vec<Entity<M>>`. Returns `self` for chaining.
+    /// Register modality `M`, so a group tagged with its name deserializes as
+    /// it.
+    ///
+    /// The group reconstructs as `Vec<Entity<M>>`. Returns `self` for chaining.
     #[must_use]
     pub fn with_modality<M>(mut self) -> Self
     where
@@ -180,8 +184,7 @@ impl ReportDeserializer {
         self
     }
 
-    /// Reconstruct a [`Report`] from `deserializer`, routing each group to a
-    /// registered modality.
+    /// Reconstruct a [`Report`], routing each group to its registered modality.
     ///
     /// # Errors
     ///

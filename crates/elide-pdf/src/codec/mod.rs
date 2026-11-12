@@ -1,4 +1,4 @@
-//! Codec adapter: the PDF format.
+//! The codec adapter for PDF: the format, decoded for glyph-level redaction.
 //!
 //! Binds this crate's PDF engine to the `elide-codec`
 //! [`DocumentLoader`](elide_codec::DocumentLoader)/[`Stream`](elide_codec::Stream)/
@@ -41,15 +41,15 @@ use crate::render::PageObservation;
 use crate::text::Detection;
 use crate::text::PageGeometry;
 
-/// Stable [`FormatId`] for the PDF codec.
+/// The stable [`FormatId`] of the PDF format, `elide.document.pdf`.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 
 /// The body stream's part id; excluded from the blob-part fold on assemble.
 const BODY_PART_ID: &str = "body";
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The PDF [`Format`], decoding pages for glyph-deletion redaction.
 ///
-/// Decodes on the glyph-deletion redaction path. To flatten pages to images
+/// To flatten pages to images
 /// instead, build the format with [`pdf_format_with`] and `RasterMode::Always`.
 pub fn pdf_format() -> Format {
     Format::with_document_loader(FORMAT_ID, PdfDocumentLoader::new())
@@ -57,7 +57,7 @@ pub fn pdf_format() -> Format {
         .with_content_types(["application/pdf"])
 }
 
-/// [`Format`] descriptor with an explicit [`RasterMode`].
+/// The PDF [`Format`] with an explicit [`RasterMode`], to flatten pages.
 ///
 /// Under [`RasterMode::Always`] redaction flattens every page to an image
 /// (a fresh image-only PDF); [`Auto`](RasterMode::Auto) and

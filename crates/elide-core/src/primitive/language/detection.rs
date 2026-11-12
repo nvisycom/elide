@@ -45,7 +45,8 @@ impl LanguageSource {
     }
 }
 
-/// A single claim that a span of text is in a [`language`](Self::language).
+/// A claim that some text, or a span of it, is in a
+/// [`language`](Self::language).
 ///
 /// Its [`source`](Self::source) records whether the caller asserted it or a
 /// detector found it (with a score), and [`span`](Self::span) the byte range it

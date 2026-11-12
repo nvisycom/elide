@@ -4,7 +4,7 @@ use elide_core::backend::{BackendResponse, Units};
 
 use crate::modality::TranscriptSegment;
 
-/// One per-call STT response from an STT backend.
+/// The transcript an STT backend returns for one clip: its segments.
 ///
 /// Wraps the [`TranscriptSegment`]s the backend produced in backend order
 /// (typically source order). These are the core transcription type, so an

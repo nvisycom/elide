@@ -6,8 +6,10 @@ use elide_core::redaction::HiddenContent;
 
 use super::LocalId;
 
-/// One entry of a [`StrippedContent`] record: which item of hidden content was
-/// stripped, where, and how many times.
+/// One entry of a [`StrippedContent`] record: what was stripped, and where.
+///
+/// It names the item of hidden content, the part it was stripped from or with,
+/// and how many times.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stripped {
     /// The item stripped.

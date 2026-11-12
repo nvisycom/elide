@@ -8,7 +8,7 @@ use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Mosaic-pixelate the matched image region.
+/// Hides an image region under a coarse mosaic of pixel blocks.
 ///
 /// The "pixelated face" look: the region is reduced to coarse blocks. A
 /// common compliance default, more obviously redacted than [`Blur`] while

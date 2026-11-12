@@ -81,8 +81,10 @@ impl<M: Modality> Anonymizer<M> {
         }
     }
 
-    /// Set the [`LabelCatalog`] that [tag rules](Rule::tag) resolve label
-    /// names against. Without it, tag rules never match.
+    /// Set the [`LabelCatalog`] that [tag rules](Rule::tag) resolve label names
+    /// in.
+    ///
+    /// Without it, tag rules never match.
     #[must_use]
     pub fn with_catalog(mut self, catalog: LabelCatalog) -> Self {
         self.operators.set_catalog(catalog);
@@ -133,10 +135,11 @@ impl<M: Modality> Anonymizer<M> {
         self
     }
 
-    /// Record the operator *pick* for every entity onto its audit trail,
-    /// without reading any data, the *decision* half of redaction, split out
-    /// so the picks can be inspected (and the entities edited) before anything
-    /// is applied.
+    /// Record each entity's operator *pick* on its audit trail, reading no
+    /// data.
+    ///
+    /// The *decision* half of redaction, split out so the picks can be
+    /// inspected (and the entities edited) before anything is applied.
     ///
     /// For each overlap cluster it resolves the winning operator (see the merge
     /// rule below) and records a [`Selection`] event, naming the operator, its
@@ -230,11 +233,14 @@ impl<M: Modality> Anonymizer<M> {
         resolved
     }
 
-    /// Hide every entity: for each overlap cluster, resolve its winning
-    /// operator from the rules, record that decision as a [`Selection`] when it
-    /// differs from the entity's latest one, read the union span from `target`,
-    /// run the operator, and hand the batch to [`DataWriter::write_at`], then
-    /// record a [`Redaction`] on every covered entity.
+    /// Hide every entity, writing each overlap cluster's replacement into
+    /// `target`.
+    ///
+    /// For each overlap cluster: resolve its winning operator from the rules,
+    /// record that decision as a [`Selection`] when it differs from the
+    /// entity's latest one, read the union span from `target`, run the
+    /// operator, and hand the batch to [`DataWriter::write_at`], then record a
+    /// [`Redaction`] on every covered entity.
     ///
     /// `target` is both the reader and the writer, typically a decoded codec
     /// document, and owns the *how* and *ordering* of applying the batch.

@@ -1,5 +1,4 @@
-//! The detection building blocks: a recognizer, ready to fold into a modality's
-//! analyzer.
+//! The detection building blocks: recognizers to fold into an analyzer.
 //!
 //! A recognizer is compiled once ([`Recognizer::pattern`]) or wired to a JS
 //! callback ([`Recognizer::ner`]) and handed to

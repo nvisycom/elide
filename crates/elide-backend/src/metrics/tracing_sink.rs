@@ -2,9 +2,11 @@
 
 use crate::metrics::{Usage, UsageSink};
 
-/// Emits each backend call's [`Usage`] as a `tracing` event on the
-/// `elide::usage` target, so it lands in whatever subscriber the process runs
-/// alongside the backends' own instrumentation spans.
+/// Reports each backend call's [`Usage`] as a `tracing` event.
+///
+/// The event goes to the `elide::usage` target, so it lands in whatever
+/// subscriber the process runs, alongside the backends' own instrumentation
+/// spans.
 ///
 /// The event carries the model name and version, the call duration in
 /// milliseconds, and each billing meter the call reported (tokens, audio seconds,

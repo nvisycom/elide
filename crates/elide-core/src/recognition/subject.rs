@@ -5,8 +5,8 @@
 use crate::modality::{Modality, ResolvedHint};
 use crate::primitive::LanguageClaim;
 
-/// The thing under recognition: one chunk of a source together with everything
-/// known about it.
+/// The thing under recognition: one chunk of a source and what is known about
+/// it.
 ///
 /// The analyzer builds a `Subject` per chunk from the codec's payload, then hands
 /// it to the enrichers and recognizers. It carries the raw payload plus the
@@ -79,24 +79,29 @@ impl<M: Modality> Subject<M> {
         &self.data
     }
 
-    /// The medium's enrichment, or [`None`] when no enricher has run for this
-    /// chunk. `Some(empty)` (enriched to nothing) is distinct from `None`, so a
-    /// caller that only needs the content can `unwrap_or_default` while an
-    /// enricher tells the two apart via [`is_enriched`](Self::is_enriched).
+    /// The medium's enrichment, or [`None`] when no enricher has run on the
+    /// chunk.
+    ///
+    /// `Some(empty)` (enriched to nothing) is distinct from `None`, so a caller
+    /// that only needs the content can `unwrap_or_default` while an enricher
+    /// tells the two apart via [`is_enriched`](Self::is_enriched).
     #[must_use]
     pub fn artifact(&self) -> Option<&M::Artifact> {
         self.artifact.as_ref()
     }
 
-    /// Record `artifact` as this chunk's enrichment, what an enricher calls once
-    /// it has run. Marks the subject [enriched](Self::is_enriched) even when
-    /// `artifact` is empty, so a later enricher pass skips.
+    /// Record `artifact` as this chunk's enrichment, once an enricher has run.
+    ///
+    /// Marks the subject [enriched](Self::is_enriched) even when `artifact` is
+    /// empty, so a later enricher pass skips.
     pub fn set_artifact(&mut self, artifact: M::Artifact) {
         self.artifact = Some(artifact);
     }
 
-    /// Whether an enricher has run (or a saved artifact was restored) for this
-    /// chunk, `true` even when the enrichment is empty.
+    /// Whether an enricher has run for this chunk, or its artifact was
+    /// restored.
+    ///
+    /// `true` even when the enrichment is empty.
     #[must_use]
     pub fn is_enriched(&self) -> bool {
         self.artifact.is_some()

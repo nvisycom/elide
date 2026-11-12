@@ -13,8 +13,7 @@ use crate::modality::Modality;
 use crate::primitive::CountryCode;
 use crate::recognition::{Languages, Scope, Subject};
 
-/// The analysis-wide inputs handed to an enricher or recognizer alongside the
-/// [`Subject`].
+/// The analysis-wide inputs an enricher or recognizer gets with a [`Subject`].
 ///
 /// Borrows the caller-asserted [`Scope`], shared across every chunk of the
 /// analysis and every modality. Where the [`Subject`] carries the per-chunk
@@ -61,7 +60,8 @@ impl<'a> Context<'a> {
         &self.scope.metadata.tags
     }
 
-    /// The [`LabelCatalog`] of entity types to detect, the caller's request.
+    /// The [`LabelCatalog`] of entity types to detect, as the caller requested.
+    ///
     /// A zero-shot NER model requests exactly these labels; an LLM prompt lists
     /// them as the types to find. On the `Analyzer::analyze*` path this is
     /// non-empty: those entries gate an empty catalog (detect nothing) before
@@ -72,9 +72,9 @@ impl<'a> Context<'a> {
         &self.scope.catalog
     }
 
-    /// The entity types to emit, as [`LabelRef`]s, the catalog's labels.
-    /// Convenience over [`catalog`] for recognizers that
-    /// only need the ids.
+    /// The entity types to emit, as the catalog's [`LabelRef`]s.
+    ///
+    /// Convenience over [`catalog`] for recognizers that only need the ids.
     ///
     /// [`catalog`]: Self::catalog
     #[must_use]
@@ -97,10 +97,11 @@ impl<'a> Context<'a> {
         self.scope.correlation_id
     }
 
-    /// The call's languages — the caller-asserted ones (scope) and the ones a
-    /// detector found (on `subject`) — as a [`Languages`] view to query
-    /// together: which is primary, whether a language-scoped rule applies, and
-    /// span-based entity attribution.
+    /// The call's languages, asserted and detected, as a [`Languages`] view.
+    ///
+    /// The caller-asserted ones (scope) and the ones a detector found (on
+    /// `subject`), to query together: which is primary, whether a
+    /// language-scoped rule applies, and span-based entity attribution.
     #[must_use]
     pub fn languages<'s, M: Modality>(&'s self, subject: &'s Subject<M>) -> Languages<'s> {
         Languages::new(self.scope.languages(), subject.detected_languages())

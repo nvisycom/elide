@@ -23,8 +23,10 @@ use elide_core::redaction::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
 
-/// The recover engine: picks a reversible operator per entity and restores
-/// the original value.
+/// The recovery engine: restores entities' originals through reversible
+/// operators.
+///
+/// It picks a reversible operator per entity.
 ///
 /// Selection is an ordered list of rules tried top to bottom, first match
 /// winning: bind an operator to a label with [`with_label`], or as a
@@ -61,8 +63,8 @@ impl<M: Modality> Deanonymizer<M> {
         self
     }
 
-    /// Append a catch-all rule: `operator` runs for every entity not
-    /// matched by an earlier rule.
+    /// Append a catch-all rule: `operator` runs for every entity not yet
+    /// matched.
     #[must_use]
     pub fn with_fallback<O: ReversibleOperator<M> + 'static>(mut self, operator: O) -> Self {
         self.operators.push_fallback(operator);
@@ -81,8 +83,10 @@ where
     M: TextRecognizable<Data = TextData>,
     M::Replacement: From<TextReplacement>,
 {
-    /// Plan the recovery for every entity, reading each one's current value
-    /// from `reader`, without applying anything.
+    /// Plan the recovery of every entity, reading values from `reader`,
+    /// applying none.
+    ///
+    /// Each entity's current value is read from `reader`; nothing is written.
     ///
     /// For each entity: resolve its reversible operator, read the current
     /// (replaced) value, lift it back to the modality's replacement, and
@@ -121,8 +125,9 @@ where
         Ok(redactions)
     }
 
-    /// Recover every entity by writing its operator's recovered original
-    /// back into `target`.
+    /// Recover every entity, writing its original value back into `target`.
+    ///
+    /// The value is the one its operator recovers.
     ///
     /// The complete recovery step: [`plan`]s each entity's original (reading
     /// its current value from `target`), then hands the batch to

@@ -23,16 +23,15 @@ use super::loader::CsvLoader;
 /// Stable [`FormatId`] for the CSV codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.csv");
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The CSV [`Format`] with a header row and an auto-detected delimiter.
 ///
-/// Treats the first row as a header and auto-detects the field delimiter. Use
-/// [`format_with`] to override either for a headerless file or a non-comma
-/// delimiter (TSV, semicolon).
+/// Use [`format_with`] to override either for a headerless file or a
+/// non-comma delimiter (TSV, semicolon).
 pub fn format() -> Format {
     format_from(CsvLoader::default())
 }
 
-/// [`Format`] descriptor with explicit CSV parsing options.
+/// The CSV [`Format`] with explicit parsing options: header and delimiter.
 ///
 /// `has_headers` chooses whether the first row is the header (its default,
 /// `true`). A header row still enters the detection stream, but it gains

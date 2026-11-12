@@ -27,7 +27,7 @@ use self::engine::Engine;
 pub use self::engine::OCRS_MODELS_DIR_ENV;
 use super::{OcrRequest, OcrResponse};
 
-/// An OCR backend backed by the pure-Rust `ocrs` engine.
+/// An OCR backend on the pure-Rust `ocrs` engine, with its models from disk.
 ///
 /// Construct it once (loading the models is not cheap) and share it: it is
 /// [`Clone`] over a shared `Arc<Engine>`, so clones are cheap, and it is
@@ -68,8 +68,8 @@ impl OcrsBackend {
         Ok(Self::wrap(Engine::from_models_dir(dir)?))
     }
 
-    /// Load the models from the directory named by the [`OCRS_MODELS_DIR_ENV`]
-    /// environment variable.
+    /// Load the models from the directory the [`OCRS_MODELS_DIR_ENV`] variable
+    /// names.
     ///
     /// # Errors
     ///

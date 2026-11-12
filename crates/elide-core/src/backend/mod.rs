@@ -1,4 +1,4 @@
-//! The unified model-[`Backend`] contract.
+//! The unified model-[`Backend`] contract and the usage a call reports.
 //!
 //! A model-backed component — LLM/VLM extraction, NER, speech-to-text, OCR —
 //! is a [`Backend`]: it takes a [`BackendRequest`], calls a model, and returns
@@ -24,7 +24,7 @@ use crate::Result;
 use crate::entity::audit::ModelId;
 use crate::primitive::LanguageTag;
 
-/// A request handed to a [`Backend`].
+/// A request handed to a [`Backend`], exposing what decorators read off it.
 ///
 /// Names the input half of a backend's call contract, so the associated type is
 /// self-documenting and a backend cannot be built over an unrelated type, and

@@ -1,6 +1,7 @@
-//! The composed pipeline: a fluent [`Orchestrator`] that folds per-modality
-//! detect-and-redact stages, and drives them over a blob with
-//! [`redact`](Orchestrator::redact).
+//! The composed pipeline: an [`Orchestrator`] of detect-and-redact stages.
+//!
+//! The fluent [`Orchestrator`] folds per-modality stages and drives them over a
+//! blob with [`redact`](Orchestrator::redact).
 
 mod report;
 
@@ -14,9 +15,11 @@ use crate::analyzer::{Analyzer, StageModality};
 use crate::anonymizer::Anonymizer;
 use crate::error::{ElideError, ElideErrorKind};
 
-/// The detect-and-redact pipeline, mirroring the toolkit's own
-/// [`Orchestrator`](elide::Orchestrator): its configured modality stages plus the
-/// built-in codec registry and label catalog.
+/// The detect-and-redact pipeline: modality stages, codecs, and labels.
+///
+/// It mirrors the toolkit's own [`Orchestrator`](elide::Orchestrator): its
+/// configured modality stages plus the built-in codec registry and label
+/// catalog.
 ///
 /// Add a modality's stage with [`with`](Self::with) — an [`Analyzer`] paired with
 /// the modality's redaction policy — then run it over a blob with
@@ -45,9 +48,11 @@ impl Orchestrator {
         Self::default()
     }
 
-    /// Add a modality's stage: an [`Analyzer`] paired with an optional
-    /// [`Anonymizer`] redaction policy (a default policy applies when omitted).
-    /// The analyzer's modality selects the codec path. Consumes both handles.
+    /// Add a modality's stage: an [`Analyzer`] and an optional [`Anonymizer`].
+    ///
+    /// The [`Anonymizer`] is the redaction policy; a default one applies when
+    /// omitted. The analyzer's modality selects the codec path. Consumes both
+    /// handles.
     ///
     /// Text, tabular, and audio each detect-and-redact their own decoded content;
     /// image always scrubs the picture's EXIF metadata and, with an OCR-enriched
@@ -111,9 +116,11 @@ impl Orchestrator {
         Ok(self)
     }
 
-    /// Detect and redact the personal data in `bytes`, whose format the `hint`
-    /// names (a file extension like `txt`, `csv`, `png`), returning the redacted
-    /// bytes and every finding.
+    /// Detect and redact the personal data in `bytes`, of the format `hint`
+    /// names.
+    ///
+    /// The hint is a file extension like `txt`, `csv`, `png`. Returns the
+    /// redacted bytes and every finding.
     ///
     /// # Errors
     ///

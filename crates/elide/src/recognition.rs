@@ -18,8 +18,7 @@
 #[doc(inline)]
 pub use elide_core::recognition::{Context, LabelMap, Recognizer, Scope, ScopeMetadata, Subject};
 
-/// Recognizer decorators: wrap a [`Recognizer`] to change *how* it runs without
-/// changing *what* it detects.
+/// Recognizer decorators: change *how* a recognizer runs, not *what* it finds.
 ///
 /// Each is itself a [`Recognizer`], so they drop in anywhere one goes and
 /// compose with each other:
@@ -55,8 +54,7 @@ pub mod decorator {
     pub use elide_detection::decorator::*;
 }
 
-/// LLM-mediated recognition: prompt a language or vision model over
-/// text and images.
+/// LLM recognition: prompt a language or vision model over text and images.
 #[cfg(feature = "llm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
 pub mod llm {
@@ -71,8 +69,7 @@ pub mod ner {
     #[doc(inline)]
     pub use elide_ner::*;
 }
-/// Dictionary- and pattern-based recognition: match entities by regex
-/// and term lists.
+/// Pattern-based recognition: match entities by regex and by term lists.
 #[cfg(feature = "pattern")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
 pub mod pattern {

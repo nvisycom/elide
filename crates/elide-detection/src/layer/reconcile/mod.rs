@@ -84,8 +84,10 @@ where
     buckets.into_values().flatten().collect()
 }
 
-/// The arbitration stage: cluster overlapping entities, then dispose of each
-/// pair with a [`Reconciler`] (keep both, contest, or resolve to a winner).
+/// The arbitration stage: settles each pair of overlapping, differing findings.
+///
+/// It clusters overlapping entities, then disposes of each pair with a
+/// [`Reconciler`] (keep both, contest, or resolve to a winner).
 ///
 /// Generic over the grouping `G` and the reconciler `R`, each chosen at
 /// construction; see the [module docs].

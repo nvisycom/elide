@@ -242,8 +242,8 @@ impl ValidatorRegistry {
             .with_simple("th.national_id", th::national_id)
     }
 
-    /// Register a context-aware `validator` under `name`,
-    /// overwriting any previous entry with the same key.
+    /// Register a context-aware `validator` under `name`, replacing any before
+    /// it.
     ///
     /// Override a built-in by registering under the same name
     /// (e.g. `"phone"`).

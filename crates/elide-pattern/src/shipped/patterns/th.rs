@@ -6,13 +6,15 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// National ID (เลขประจำตัวประชาชน), 13-digit ID with
-    /// weighted Mod-11 check digit; first digit 1-8.
+    /// Thai national ID (เลขประจำตัวประชาชน), 13 digits with a check digit.
+    ///
+    /// A weighted Mod-11 check digit; the first digit is 1-8.
     fn national_id from "../../../assets/patterns/th/identity/national_id.toml"
 );
 shipped_pattern!(
-    /// Thai postal code (รหัสไปรษณีย์), 5-digit Thailand Post
-    /// code with province prefix 10-96.
+    /// Thai postal codes (รหัสไปรษณีย์), 5 digits with a province prefix.
+    ///
+    /// The Thailand Post province prefix is 10-96.
     fn postal_code from "../../../assets/patterns/th/contact/postal_code.toml"
 );
 

@@ -9,9 +9,9 @@
 const WEIGHTS_9: [u32; 8] = [8, 9, 2, 3, 4, 5, 6, 7];
 const WEIGHTS_14: [u32; 13] = [2, 4, 8, 5, 0, 9, 7, 3, 6, 1, 2, 4, 8];
 
-/// Return `true` when `value` is a valid REGON in either the
-/// 9-digit or 14-digit form. Hyphen and space separators are
-/// stripped before validation.
+/// Return `true` when `value` is a valid 9- or 14-digit Polish REGON.
+///
+/// Hyphen and space separators are stripped before validation.
 pub fn regon(value: &str) -> bool {
     let chars: Vec<char> = value
         .chars()

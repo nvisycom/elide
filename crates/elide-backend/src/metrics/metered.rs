@@ -9,8 +9,9 @@ use elide_core::{Error, Result};
 
 use super::usage::{ModelUsage, Usage, UsageSink};
 
-/// Wraps a [`Backend`] and reports each call's [`Usage`] to a [`UsageSink`],
-/// leaving the response untouched.
+/// Wraps a [`Backend`] and reports each call's [`Usage`] to a [`UsageSink`].
+///
+/// The response passes through untouched.
 ///
 /// Because it is itself a `Backend` (same request/response, same provenance), it
 /// drops in anywhere the inner backend goes; the recognizer or enricher holding

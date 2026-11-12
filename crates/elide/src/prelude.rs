@@ -1,4 +1,4 @@
-//! The common imports for assembling a pipeline.
+//! The common imports for assembling a detection and redaction pipeline.
 //!
 //! A `use elide::prelude::*;` brings the engines ([`Analyzer`],
 //! [`Anonymizer`], [`Deanonymizer`], and, with `codec`, `Orchestrator`

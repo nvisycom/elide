@@ -25,10 +25,11 @@ const IMAGES: &str = "elide.backend.images";
 /// Characters processed.
 const CHARACTERS: &str = "elide.backend.characters";
 
-/// Records each backend call's [`Usage`] through the `metrics` facade: a call
-/// duration histogram and one counter per billing meter the call reported
-/// (tokens, audio seconds, pages, …), each labelled by the `model` and `version`
-/// that ran.
+/// Records each backend call's [`Usage`] through the `metrics` facade.
+///
+/// A call-duration histogram and one counter per billing meter the call
+/// reported (tokens, audio seconds, pages, …), each labelled by the `model` and
+/// `version` that ran.
 ///
 /// For a process-wide aggregate view — total tokens, latency percentiles — via a
 /// recorder the process installs (Prometheus, StatsD, …). This is *global* by

@@ -78,8 +78,9 @@ impl<V, G> Pseudonymize<V, G> {
     }
 }
 
-/// The vault key a [`Pseudonymize`] operator looks surrogates up under: an
-/// entity's label paired with its cluster seed (coreference id when present,
+/// The vault key a [`Pseudonymize`] operator looks surrogates up under.
+///
+/// An entity's label paired with its cluster seed (coreference id when present,
 /// else the original value).
 ///
 /// Folding the label into the key lets one vault back several `Pseudonymize`

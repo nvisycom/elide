@@ -1,4 +1,4 @@
-//! Operator contracts: how a detected entity is hidden.
+//! Operator contracts: how a detected entity is replaced, masked, or removed.
 //!
 //! An operator reads an [`Entity`] and the [`Data`] under it and
 //! *computes* a [`Replacement`] (mask, replace, hash, encrypt, blur, …)
@@ -35,8 +35,7 @@ use crate::error::Result;
 use crate::modality::Modality;
 use crate::primitive::ComponentId;
 
-/// Redaction operator: computes what should replace an entity to remove
-/// or obscure it.
+/// A redaction operator: computes what replaces an entity to hide it.
 ///
 /// Modelled on Presidio's anonymizer operators (replace, redact, mask,
 /// hash, encrypt, keep, custom), generalised to be multimodal. Every

@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::entity::{LabelCatalog, LabelRef};
 
-/// Translation table from a model's raw label strings to the toolkit's
-/// canonical entity labels.
+/// Maps a model's raw label strings to the toolkit's canonical entity labels.
 ///
 /// A model may emit labels in its own vocabulary (`"PER"`, `"LOC"`,
 /// `"B-ORG"`) rather than the canonical taxonomy the rest of the toolkit

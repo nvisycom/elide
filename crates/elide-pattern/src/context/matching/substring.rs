@@ -9,7 +9,8 @@ use hipstr::HipStr;
 
 use super::KeywordMatcher;
 
-/// ASCII case-insensitive substring matcher.
+/// A [`KeywordMatcher`] that finds keywords as ASCII case-insensitive
+/// substrings.
 ///
 /// The default matcher. It runs whenever no token artifact was
 /// stamped on `Context.artifacts`, or whenever the caller

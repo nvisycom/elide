@@ -5,8 +5,9 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// PESEL, 11-digit personal ID with date + sex + serial +
-    /// weighted-mod-10 check digit.
+    /// PESEL, the 11-digit Polish personal ID with an encoded date of birth.
+    ///
+    /// Date + sex + serial + weighted-mod-10 check digit.
     fn pesel from "../../../assets/patterns/pl/identity/pesel.toml"
 );
 shipped_pattern!(
@@ -25,8 +26,10 @@ shipped_pattern!(
     fn kod_pocztowy from "../../../assets/patterns/pl/contact/kod_pocztowy.toml"
 );
 shipped_pattern!(
-    /// NRB, 26-digit domestic bank account number (a Polish IBAN
-    /// without the `PL` prefix), ISO 13616 mod-97 checksum.
+    /// NRB, the 26-digit Polish domestic bank account number.
+    ///
+    /// A Polish IBAN without the `PL` prefix, with an ISO 13616 mod-97
+    /// checksum.
     fn nrb from "../../../assets/patterns/pl/finance/nrb.toml"
 );
 

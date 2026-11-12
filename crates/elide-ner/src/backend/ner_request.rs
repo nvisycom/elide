@@ -5,7 +5,7 @@ use elide_core::entity::Label;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
-/// One per-call NER request handed to a NER backend.
+/// One text handed to a NER backend, optionally with the labels to look for.
 #[derive(Debug, Clone)]
 pub struct NerRequest<'a> {
     /// Source text to scan. Byte offsets in returned spans refer

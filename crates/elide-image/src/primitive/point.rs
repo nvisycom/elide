@@ -5,7 +5,7 @@ use core::ops::Sub;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// A scalar a [`Point`] coordinate can hold.
+/// A scalar a [`Point`] coordinate can hold: an integer or a float.
 ///
 /// A sealed, closed set (the numeric primitives this crate's geometry uses),
 /// so a `Point` cannot be built over an arbitrary type. Modelled on the way
@@ -64,7 +64,7 @@ macro_rules! impl_coordinate {
 impl_coordinate!(int: u32 => "U32", i32 => "I32");
 impl_coordinate!(float: f32 => "F32", f64 => "F64");
 
-/// A point in a 2-D coordinate space.
+/// A point in a 2-D coordinate space, generic over its [`Coordinate`].
 ///
 /// The coordinate basis is left to the consumer: pixel coordinates for a raster
 /// image, normalized `0.0..=1.0` coordinates for a resolution-independent

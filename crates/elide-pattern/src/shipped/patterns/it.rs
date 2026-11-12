@@ -5,8 +5,9 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// Codice Fiscale, 16-character personal tax/health ID with
-    /// odd/even-mapping checksum, omocodia-aware.
+    /// Codice Fiscale, the 16-character Italian personal tax and health ID.
+    ///
+    /// An odd/even-mapping checksum, omocodia-aware.
     fn fiscal_code from "../../../assets/patterns/it/identity/fiscal_code.toml"
 );
 shipped_pattern!(

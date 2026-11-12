@@ -30,7 +30,7 @@ pub mod reconcile;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
-/// The result of running one [`Layer`].
+/// The result of running one [`Layer`]: the entities kept and those dropped.
 ///
 /// Names the two outcomes explicitly so call sites don't juggle a positional
 /// tuple. The pipeline threads [`kept`] into the next layer and accumulates
@@ -47,8 +47,7 @@ pub struct LayerOutput<M: Modality> {
 }
 
 impl<M: Modality> LayerOutput<M> {
-    /// All entities kept, none dropped, for layers that only reshape rather
-    /// than remove.
+    /// All entities kept, none dropped, for a layer that only reshapes them.
     pub fn kept(entities: Vec<Entity<M>>) -> Self {
         Self {
             kept: entities,
@@ -62,7 +61,7 @@ impl<M: Modality> LayerOutput<M> {
     }
 }
 
-/// One stage of the layer pipeline.
+/// One stage of the layer pipeline: takes entities, keeps or drops them.
 ///
 /// A layer takes the working set of entities and returns the reshaped set plus
 /// anything it removed. Stages are **pure and synchronous**, they operate over

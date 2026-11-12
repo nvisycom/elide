@@ -22,8 +22,10 @@ use super::Modality;
 use super::text_recognizable::TextRecognizable;
 use crate::entity::Entity;
 
-/// Text modality: data is [`TextData`], locations are
-/// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
+/// The text modality: located by byte range, redacted by replacement text.
+///
+/// Data is [`TextData`], locations are [`TextLocation`] byte ranges, and
+/// replacements are [`TextReplacement`]s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Text;

@@ -6,8 +6,7 @@
 
 use jiff::civil::Date;
 
-/// Return `true` if `value` is a real calendar date in one of the
-/// supported written formats.
+/// Return `true` if `value` is a real calendar date in a supported format.
 ///
 /// Supported formats are `MM/DD/YYYY`, `DD/MM/YYYY`, `YYYY-MM-DD`,
 /// and `YYYY/MM/DD`, with `/` or `-` as separators. Leap years and

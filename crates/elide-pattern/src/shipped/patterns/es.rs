@@ -17,8 +17,10 @@ shipped_pattern!(
     fn passport from "../../../assets/patterns/es/identity/passport.toml"
 );
 shipped_pattern!(
-    /// CIF, company tax ID with entity-class letter + 7 digits +
-    /// control char (digit or letter per class).
+    /// CIF, the Spanish company tax ID, with an entity-class letter.
+    ///
+    /// The entity-class letter + 7 digits + a control character (digit or
+    /// letter per class).
     fn cif from "../../../assets/patterns/es/finance/cif.toml"
 );
 shipped_pattern!(

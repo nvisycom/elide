@@ -10,8 +10,9 @@ shipped_pattern!(
     fn tckn from "../../../assets/patterns/tr/identity/tckn.toml"
 );
 shipped_pattern!(
-    /// Turkish license plate (plaka), space- and
-    /// hyphen-separated renderings, province codes 01-81.
+    /// Turkish license plates (plaka), with province codes 01-81.
+    ///
+    /// Space- and hyphen-separated renderings.
     fn license_plate from "../../../assets/patterns/tr/vehicle/license_plate.toml"
 );
 shipped_pattern!(

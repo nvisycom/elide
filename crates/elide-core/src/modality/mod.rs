@@ -45,14 +45,14 @@ pub use self::data_writer::DataWriter;
 pub use self::hint::{Hint, ResolvedHint};
 pub use self::text_recognizable::TextRecognizable;
 
-/// Payload a recognizer inspects for a modality.
+/// The payload a recognizer inspects in a modality, like text or an image.
 ///
 /// The content a [`Modality`] presents to its recognizers: text bytes,
 /// a decoded image, an audio buffer. A near-empty marker: it only fixes
 /// the bounds a payload must satisfy to flow through the model.
 pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
 
-/// The spatial relationship between two locations.
+/// How two locations relate in space: disjoint, nested, or partly overlapping.
 ///
 /// The single answer a [`ModalityLocation`] computes about how it sits
 /// against another, every yes/no the deduplication pipeline branches on
@@ -171,7 +171,7 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
     fn hash(&self) -> Vec<u8>;
 }
 
-/// Instruction a codec applies to hide an entity.
+/// The instruction a codec applies to hide an entity in its modality.
 ///
 /// What an [`Operator`] produces for a modality. Hiding is
 /// modality-specific even though detection is not: text yields
@@ -202,9 +202,10 @@ pub trait ModalityArtifact:
 {
 }
 
-/// The artifact of a medium with no enrichment (plain text, tabular): a
-/// zero-sized stand-in that carries nothing and is omitted from a serialized
-/// report.
+/// The artifact of a medium that is never enriched, such as plain text.
+///
+/// A zero-sized stand-in (plain text, tabular) that carries nothing and is
+/// omitted from a serialized report.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -212,7 +213,7 @@ pub struct NoArtifact;
 
 impl ModalityArtifact for NoArtifact {}
 
-/// Medium that entities can be located within.
+/// A medium entities can be located in, typing its data, locations, and edits.
 ///
 /// Implemented by a modality crate's marker type, binding the medium's
 /// [`Data`], [`Location`], [`Replacement`], and [`Artifact`] types together at

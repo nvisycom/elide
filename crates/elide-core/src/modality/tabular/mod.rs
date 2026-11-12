@@ -18,9 +18,10 @@ use super::Modality;
 use super::text::{TextData, Token, Tokens};
 use super::text_recognizable::TextRecognizable;
 
-/// Tabular modality: cells hold text, so data is [`TextData`] and
-/// replacements are [`TabularReplacement`]; only [`TabularLocation`] is
-/// tabular-specific.
+/// The tabular modality: text in cells, located by row and column.
+///
+/// Cells hold text, so data is [`TextData`] and replacements are
+/// [`TabularReplacement`]; only [`TabularLocation`] is tabular-specific.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Tabular;

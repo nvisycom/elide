@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{Coordinate, Point};
 
-/// Closed polygon, given by its ordered vertices, generic over the coordinate
-/// scalar (a [`Coordinate`]).
+/// A closed polygon, given by its ordered vertices.
+///
+/// Generic over the coordinate scalar (a [`Coordinate`]).
 ///
 /// A richer location than a [`BoundingBox`] for detections whose extent
 /// is not rectangular: rotated text, a region traced by a vision model, a

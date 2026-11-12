@@ -13,7 +13,7 @@ use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Substitute the matched span with a template string.
+/// Replaces an entity's text with a template string, like `[EMAIL]`.
 ///
 /// Templates support three placeholders, expanded at apply time:
 ///

@@ -8,7 +8,7 @@ use elide_core::Result;
 
 use super::Vault;
 
-/// Process-local [`Vault`] backed by a locked [`HashMap`].
+/// A process-local [`Vault`] backed by a locked [`HashMap`], for one run.
 ///
 /// The default vault: holds everything in memory behind a [`Mutex`], so
 /// it is shareable and concurrency-safe but not durable, the contents

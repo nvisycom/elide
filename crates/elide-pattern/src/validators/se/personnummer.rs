@@ -7,9 +7,10 @@
 
 use super::luhn::luhn10;
 
-/// Return `true` when `value` is a valid personnummer. Hyphen
-/// `-` and plus `+` separators (the latter marks a 100-year-old
-/// cohort) are accepted; whitespace is ignored.
+/// Return `true` when `value` is a valid Swedish personnummer.
+///
+/// Hyphen `-` and plus `+` separators (the latter marks a 100-year-old cohort)
+/// are accepted; whitespace is ignored.
 pub fn personnummer(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

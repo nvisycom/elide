@@ -21,9 +21,10 @@ use phonenumber::parse;
 
 use super::ValidationContext;
 
-/// Return `true` when `value` parses as a valid phone number
-/// for the caller's jurisdiction (or as E.164 with an explicit
-/// `+CC` prefix).
+/// Return `true` when `value` parses as a valid phone number.
+///
+/// Valid for the caller's jurisdiction, or as E.164 with an explicit `+CC`
+/// prefix.
 pub fn phone(value: &str, ctx: &ValidationContext) -> bool {
     let trimmed = value.trim();
 

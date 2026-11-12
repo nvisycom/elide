@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::modality::ModalityReplacement;
 use crate::modality::text::TextReplacement;
 
-/// What a metadata operator produces.
+/// What a metadata operator produces: a text treatment, or the field as it is.
 ///
 /// A field's value is text, so most treatments are a [`TextReplacement`]
 /// applied to the field, or to the part of its value the location narrows to,

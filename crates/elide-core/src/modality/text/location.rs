@@ -14,7 +14,7 @@ use super::SourceRef;
 use crate::modality::{ModalityLocation, Overlap};
 use crate::primitive::UnitBoundingBox;
 
-/// Where an entity sits in text.
+/// Where an entity sits in text: a byte span and how it maps to the source.
 ///
 /// Two independent facts, one per level:
 ///
@@ -86,8 +86,9 @@ impl<'de> Deserialize<'de> for TextLocation {
     }
 }
 
-/// A location the pipeline detected over decoded text: always a byte span, plus
-/// where that text physically lives.
+/// A location detected over decoded text: a byte span and where it lives.
+///
+/// The span is always set; the variant says where that text physically lives.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
@@ -124,9 +125,10 @@ pub enum Detected {
     },
 }
 
-/// A reviewer's mark with no decoded span: the physical anchor is the whole
-/// location. (A mark on plain text gives a byte range, so it is a
-/// [`Detected::Inline`], not a `Marked` — hence no inline variant here.)
+/// A reviewer's mark with no decoded span, anchored to the whole location.
+///
+/// A mark on plain text gives a byte range, so it is a [`Detected::Inline`],
+/// not a `Marked`; hence no inline variant here.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
@@ -149,8 +151,9 @@ pub enum Marked {
 }
 
 impl TextLocation {
-    /// A location over the decoded `span` whose text is its own source (plain
-    /// text, CSV): no separate anchor.
+    /// A location over the decoded `span` of text that is its own source.
+    ///
+    /// For plain text or CSV: no separate anchor.
     pub fn inline(span: Range<usize>) -> Self {
         TextLocation::Detected(Detected::Inline { span })
     }
@@ -189,10 +192,11 @@ impl TextLocation {
         TextLocation::Marked(Marked::Source { refs: vec![source] })
     }
 
-    /// A reviewer's mark anchored at several raw source references (normalized),
-    /// for an entity aggregating non-adjacent raw runs. Returns `None` when `refs`
-    /// is empty — a mark must name a location, so the caller handles the empty
-    /// case rather than producing one that redacts nothing.
+    /// A reviewer's mark anchored at several raw source references, normalized.
+    ///
+    /// For an entity aggregating non-adjacent raw runs. Returns `None` when
+    /// `refs` is empty: a mark must name a location, so the caller handles the
+    /// empty case rather than producing one that redacts nothing.
     pub fn marked_sources(refs: impl IntoIterator<Item = SourceRef>) -> Option<Self> {
         normalize_refs(refs).map(|refs| TextLocation::Marked(Marked::Source { refs }))
     }
@@ -264,8 +268,7 @@ impl TextLocation {
         }
     }
 
-    /// The 1-based page the span is rendered on, or `None` when it has no rendered
-    /// anchor.
+    /// The 1-based page the span is rendered on, if it has a rendered anchor.
     #[must_use]
     pub fn page(&self) -> Option<u32> {
         match self {

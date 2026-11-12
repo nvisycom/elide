@@ -12,8 +12,9 @@ use super::icao::mrz_check_digit;
 
 const FORBIDDEN_LETTERS: &str = "ABDEIOQSU";
 
-/// Return `true` when `value` is a 9-character German passport
-/// serial whose final digit matches the ICAO Doc 9303 check.
+/// Return `true` when `value` is a German passport serial with a valid check.
+///
+/// A 9-character serial whose final digit matches the ICAO Doc 9303 check.
 pub fn passport(value: &str) -> bool {
     let trimmed = value.trim().to_ascii_uppercase();
     if trimmed.len() != 9 {

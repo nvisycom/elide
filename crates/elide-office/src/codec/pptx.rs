@@ -26,7 +26,7 @@ impl OoxmlCodec for PptxCodec {
 /// Stable [`FormatId`] for the PPTX codec.
 pub const FORMAT_ID: FormatId = PptxCodec::FORMAT_ID;
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The PPTX [`Format`]: PowerPoint presentations, resolved by `.pptx`.
 pub fn format() -> Format {
     Format::with_document_loader(FORMAT_ID, OoxmlLoader::<PptxCodec>::new())
         .with_extensions(["pptx"])

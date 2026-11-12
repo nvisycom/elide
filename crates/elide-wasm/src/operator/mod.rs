@@ -22,7 +22,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::error::{ElideError, ElideErrorKind};
 
-/// The tuning for a [`Operator::mask`] masking operator.
+/// The tuning of an [`Operator::mask`] operator: what it keeps and masks with.
 ///
 /// `Tsify` generates the matching TypeScript `interface` (camelCase). All fields
 /// are optional: an unset field takes its default — mask character `*`, and no

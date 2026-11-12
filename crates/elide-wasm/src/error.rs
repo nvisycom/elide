@@ -1,4 +1,4 @@
-//! [`ElideError`]: the error every fallible export throws, as a real JS class.
+//! The [`ElideError`] every fallible export throws, as a real JS class.
 //!
 //! A `wasm_bindgen` class rather than a bare `Error`, so a caller can tell an
 //! elide pipeline failure from any other with `e instanceof ElideError` and
@@ -61,7 +61,7 @@ impl From<elide::ErrorKind> for ElideErrorKind {
     }
 }
 
-/// The error every fallible export throws.
+/// The error every fallible export throws, a JavaScript class with a kind.
 ///
 /// A JavaScript `catch` receives an `ElideError` instance: `e instanceof
 /// ElideError` distinguishes it from any other thrown value, and its

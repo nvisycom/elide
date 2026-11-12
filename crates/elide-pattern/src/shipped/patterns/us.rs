@@ -35,8 +35,9 @@ shipped_pattern!(
     fn mbi from "../../../assets/patterns/us/health/mbi.toml"
 );
 shipped_pattern!(
-    /// US generic bank account number (8-17 digits, no checksum).
-    /// Very weak score; relies on the context-keyword boost.
+    /// US bank account numbers, 8-17 digits, confirmed by context.
+    ///
+    /// No checksum. A very weak score; it relies on the context-keyword boost.
     fn bank_account from "../../../assets/patterns/us/finance/bank_account.toml"
 );
 shipped_pattern!(

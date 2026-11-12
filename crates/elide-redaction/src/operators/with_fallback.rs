@@ -59,8 +59,7 @@ pub trait TryOperator<M: Modality>: Operator<M> {
     ) -> Result<Option<M::Replacement>>;
 }
 
-/// Run a [`TryOperator`], falling back to another [`Operator`] when it
-/// declines the value.
+/// Runs a [`TryOperator`], falling back to another [`Operator`] if it declines.
 ///
 /// Runs `primary` first. When it produces a replacement, that is the
 /// result. When it *declines* (`try_anonymize` returns `Ok(None)`, the

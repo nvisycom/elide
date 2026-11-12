@@ -5,8 +5,10 @@ use elide_core::entity::LabelRef;
 
 use crate::backend::{LabelExcluded, LabelScoped, NerRequest, NerResponse, ScoreScaled};
 
-/// Wraps a NER backend in this crate's decorators by method, in the order they
-/// apply, like `BackendExt` in `elide-backend` does for the general ones:
+/// Wraps a NER backend in this crate's decorators, by method.
+///
+/// The methods apply in order, as `BackendExt` in `elide-backend` does for the
+/// general ones:
 ///
 /// ```ignore
 /// let backend = gliner

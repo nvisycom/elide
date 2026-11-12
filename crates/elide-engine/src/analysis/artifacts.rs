@@ -38,9 +38,10 @@ pub(crate) struct ArtifactEntry {
     pub(crate) artifact: Box<dyn ArtifactGroup>,
 }
 
-/// The enrichment a document set's analysis produced: every part's artifact
-/// keyed by [`PartId`], exactly as the [`Report`] keys its parts, a named
-/// document's own artifact is its depth-1 part.
+/// The enrichment an analysis produced: every part's artifact, by [`PartId`].
+///
+/// It is keyed exactly as the [`Report`] keys its parts: a named document's own
+/// artifact is its depth-1 part.
 ///
 /// Produced beside a [`Report`] by [`analyze`](crate::Orchestrator::analyze)
 /// (see [`AnalyzedDocument`](crate::AnalyzedDocument)) and consumed by
@@ -77,9 +78,10 @@ impl ArtifactSet {
         entry.artifact.as_any().downcast_ref::<M::Artifact>()
     }
 
-    /// The enrichment [`artifact`](Modality::Artifact) of the part `id`, as
-    /// modality `P`, read-only. `None` for an unknown part or a modality
-    /// mismatch.
+    /// The enrichment [`artifact`](Modality::Artifact) of part `id`, as
+    /// modality `P`.
+    ///
+    /// Read-only. `None` for an unknown part or a modality mismatch.
     pub fn part<P: Modality>(&self, id: &PartId) -> Option<&P::Artifact> {
         let entry = self.parts.get(id)?;
         if entry.modality != TypeId::of::<P>() {

@@ -10,8 +10,10 @@ shipped_pattern!(
     fn nin from "../../../assets/patterns/ng/identity/nin.toml"
 );
 shipped_pattern!(
-    /// Vehicle registration, 3-letter LGA + 3 digits + 2-letter
-    /// year/batch (current 2011+ format).
+    /// Nigerian vehicle registration: LGA letters, digits, and a year/batch
+    /// code.
+    ///
+    /// 3-letter LGA + 3 digits + 2-letter year/batch (current 2011+ format).
     fn vehicle_registration from "../../../assets/patterns/ng/vehicle/registration.toml"
 );
 

@@ -30,8 +30,9 @@ impl MockBackend {
         Self::default()
     }
 
-    /// A mock backend that returns `segments` on every call, so the enricher
-    /// stamps the same [`Transcription`] onto each request.
+    /// A mock backend that transcribes every clip as the same `segments`.
+    ///
+    /// The enricher stamps the same [`Transcription`] onto each request.
     ///
     /// [`Transcription`]: crate::modality::Transcription
     #[must_use]

@@ -7,8 +7,10 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// A reference back to the original source: a byte range, and, for a container
-/// whose body spans several files, which part that range indexes.
+/// A reference back to the original source: a byte range, and which part.
+///
+/// The part is named for a container whose body spans several files, saying
+/// which one that range indexes.
 ///
 /// [`TextLocation`]'s `span` indexes the *decoded* text stream a codec hands
 /// the pipeline (entities resolved, container parts concatenated). A `SourceRef`

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modality::ModalityArtifact;
 
-/// One token produced by an upstream tokenizer.
+/// One token an upstream tokenizer produced: its text, lemma, span, and flags.
 ///
 /// `lemma` falls back to `text` when the producer has no lemmatizer, so callers
 /// that want lemma-aware matching can read `token.lemma` uniformly without
@@ -84,8 +84,9 @@ impl Token {
     }
 }
 
-/// Owning token sequence: the [`Text`](super::Text) modality's enrichment
-/// artifact, produced by a tokenizing enricher and read by a context enhancer.
+/// An owned token sequence, the [`Text`](super::Text) modality's artifact.
+///
+/// A tokenizing enricher produces it, and a context enhancer reads it.
 ///
 /// Tokens are sorted by `offset.start` (producers should emit them in order;
 /// consumer-side code assumes this). A context enhancer borrows the underlying

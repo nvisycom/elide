@@ -8,8 +8,9 @@
 //! product ≥ 10, and asserts the total mod 10 equals the check
 //! digit.
 
-/// Return `true` when `value` is a valid 10-character KVNR
-/// (letter + 9 digits) per GKV §290 SGB V.
+/// Return `true` when `value` is a valid German KVNR, a letter and 9 digits.
+///
+/// Per GKV §290 SGB V.
 pub fn health_insurance(value: &str) -> bool {
     let trimmed = value.trim().to_ascii_uppercase();
     let chars: Vec<char> = trimmed.chars().collect();

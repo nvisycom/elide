@@ -1,4 +1,4 @@
-//! Concrete redaction operators.
+//! The shipped redaction operators: text, tabular, image, and audio.
 //!
 //! Each shipped [`Operator`] reads the entity's value (the slice a
 //! [`DataReader`] produced) and returns a modality [`Replacement`].

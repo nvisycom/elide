@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modality::ModalityData;
 
-/// Run of text.
+/// A run of text a recognizer reads, the text modality's data.
 ///
 /// Either the payload a text recognizer inspects, or the value sliced out
 /// at an entity's location for an operator.

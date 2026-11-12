@@ -16,8 +16,10 @@ pub use self::location::AudioLocation;
 pub use self::replacement::{AudioReplacement, Waveform};
 pub use self::transcription::{TranscriptSegment, TranscriptWord, Transcription};
 
-/// Audio modality: data is [`AudioData`], locations are
-/// [`AudioLocation`] time ranges, replacements are [`AudioReplacement`].
+/// The audio modality: clips located by time span, redacted acoustically.
+///
+/// Data is [`AudioData`], locations are [`AudioLocation`] time ranges, and
+/// replacements are [`AudioReplacement`]s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Audio;

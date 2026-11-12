@@ -44,7 +44,7 @@ pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 use self::state::SpliceState;
 pub use self::stream::ExtractStream;
 
-/// One redactable unit in a structured document.
+/// One redactable unit of a structured document: its text and its address.
 ///
 /// `value` is the text a recognizer scans and that redaction mutates in
 /// place; `address` is the "where": how the format's
@@ -71,9 +71,9 @@ pub struct ExtractedItem<A> {
     pub flag: Option<ItemFlag>,
 }
 
-/// What an [`ExtractedItem`] of hidden content is: its label and the kind of
-/// hidden content it belongs to. The stream reports it as a
-/// [`FlaggedItem`](crate::FlaggedItem).
+/// What a hidden-content [`ExtractedItem`] is: its label and its kind.
+///
+/// The stream reports it as a [`FlaggedItem`](crate::FlaggedItem).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemFlag {
     /// What the item is.
@@ -89,8 +89,10 @@ impl ItemFlag {
     }
 }
 
-/// How an [`ExtractedItem`] joins the items before it into a passage: the text
-/// a reader takes in as one, which detection scans as one chunk.
+/// How an [`ExtractedItem`] joins the items before it into a passage.
+///
+/// A passage is the text a reader takes in as one, which detection scans as one
+/// chunk.
 ///
 /// A document often stores one passage across several items (a Word paragraph
 /// in runs split by formatting or editing sessions, an HTML paragraph across
@@ -109,10 +111,12 @@ pub enum Passage {
     Separator,
 }
 
-/// A resolved redaction target: which item to edit, and the byte range within
-/// that item's decoded value to replace. The common currency of the stream's
-/// own resolution step and [`SourceAddresser::locate_source`], which both answer
-/// "which item, and where in its value".
+/// A resolved redaction target: which item to edit, and which of its bytes.
+///
+/// The byte range is within that item's decoded value. It is the common
+/// currency of the stream's own resolution step and
+/// [`SourceAddresser::locate_source`], which both answer "which item, and where
+/// in its value".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemEdit {
     /// Index of the target item in the stream's item sequence.

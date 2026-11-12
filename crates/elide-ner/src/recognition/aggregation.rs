@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How adjacent token predictions merge into one span.
+/// How adjacent token predictions of a NER model merge into one span.
 ///
 /// Names follow HuggingFace
 /// `transformers.pipeline(aggregation_strategy=...)`.

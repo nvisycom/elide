@@ -11,7 +11,7 @@ use super::scoring::{MaxConfidence, NoisyOrConfidence, Scoring};
 use super::{Cluster, cluster};
 use crate::layer::{Layer, LayerOutput};
 
-/// The fusion stage: every cluster becomes one entity.
+/// The fusion stage: each cluster of the same finding becomes one entity.
 ///
 /// A [`GroupPredicate`] (by default [`SameLabel`]: same label, overlapping)
 /// decides which findings are the same finding; each cluster of them fuses into
@@ -77,8 +77,14 @@ where
         let mut slots: Vec<Option<Entity<M>>> = entities.into_iter().map(Some).collect();
         let mut dropped = Vec::new();
         for members in clusters {
-            if members.len() > 1 {
-                dropped.extend(self.fuse(&mut slots, &members));
+            // Fuse in rounds: each round fuses the members that can be located
+            // as one with its strongest member, and the rest fuse among
+            // themselves in the next. Each round settles at least its base.
+            let mut remaining = members;
+            while remaining.len() > 1 {
+                let (absorbed, rest) = self.fuse(&mut slots, &remaining);
+                dropped.extend(absorbed);
+                remaining = rest;
             }
         }
         LayerOutput::split(slots.into_iter().flatten().collect(), dropped)
@@ -88,17 +94,17 @@ where
 impl<G, S: Scoring> FuseLayer<G, S> {
     /// Fuse `members` into the highest-confidence one (ties to the earliest),
     /// left in its slot; returns the members it absorbed, emptied of their
-    /// trails.
+    /// trails, and the indices of the ones it could not unite.
     ///
     /// A member whose location cannot be united with the fused one (a custom
     /// grouping that clusters findings on different pages, say) is left in its
-    /// own slot, a separate entity: fusion merges only what it can locate as
+    /// own slot for the next round: fusion merges only what it can locate as
     /// one, and never drops a finding it cannot cover.
     fn fuse<M: Modality>(
         &self,
         slots: &mut [Option<Entity<M>>],
         members: &Cluster,
-    ) -> Vec<Entity<M>> {
+    ) -> (Vec<Entity<M>>, Cluster) {
         let mut base_index = members[0];
         for &index in &members[1..] {
             let candidate = slots[index].as_ref().map(|e| e.confidence);
@@ -110,6 +116,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
         let mut base = slots[base_index].take().expect("each member is fused once");
 
         let mut absorbed: Vec<Entity<M>> = Vec::with_capacity(members.len() - 1);
+        let mut rest = Cluster::new();
         for &index in members.iter().filter(|&&index| index != base_index) {
             let other = slots[index].take().expect("each member is fused once");
             match base.location.union(&other.location) {
@@ -117,12 +124,15 @@ impl<G, S: Scoring> FuseLayer<G, S> {
                     base.location = union;
                     absorbed.push(other);
                 }
-                None => slots[index] = Some(other),
+                None => {
+                    slots[index] = Some(other);
+                    rest.push(index);
+                }
             }
         }
         if absorbed.is_empty() {
             slots[base_index] = Some(base);
-            return absorbed;
+            return (absorbed, rest);
         }
 
         let confidence = absorbed.iter().fold(base.confidence, |pooled, other| {
@@ -146,7 +156,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
             heads,
         );
         slots[base_index] = Some(base);
-        absorbed
+        (absorbed, rest)
     }
 }
 
@@ -273,22 +283,31 @@ mod tests {
     }
 
     /// A grouping can cluster findings whose locations cannot be united (two
-    /// pages); fusion keeps each as its own entity rather than dropping one.
+    /// pages); fusion keeps each page's findings apart rather than dropping
+    /// one, and still fuses the findings that share a page.
     #[test]
-    fn a_member_that_cannot_be_united_stays_separate() {
-        let on_page = |page: u32| {
+    fn members_that_cannot_be_united_fuse_by_location() {
+        let on_page = |page: u32, conf: f32| {
             let location =
                 TextLocation::rendered(0..5, page, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]);
-            let confidence = Confidence::new(0.9).unwrap();
+            let confidence = Confidence::new(conf).unwrap();
             let event =
                 AuditEvent::pattern("t", confidence, location.clone(), PatternRule::default());
             Entity::new(LabelRef::new("EMAIL"), location).with_event(event)
         };
-        let out = FuseLayer::max()
-            .with_grouping(AnyWhere)
-            .apply(vec![on_page(1), on_page(2)]);
-        assert_eq!(out.kept.len(), 2, "both pages' findings survive");
-        assert!(out.dropped.is_empty());
+        let out = FuseLayer::noisy_or().with_grouping(AnyWhere).apply(vec![
+            on_page(1, 0.9),
+            on_page(2, 0.6),
+            on_page(2, 0.6),
+        ]);
+        assert_eq!(out.kept.len(), 2, "one entity per page");
+        assert_eq!(out.dropped.len(), 1, "the page-2 pair fused");
+        let page_two = out
+            .kept
+            .iter()
+            .find(|entity| entity.location.page() == Some(2))
+            .expect("page 2 survives");
+        assert!((page_two.confidence.get() - 0.84).abs() < 1e-5);
     }
 
     /// Different labels never group under `SameLabel`, so fusion leaves a

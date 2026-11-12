@@ -161,8 +161,8 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Set the [`RegexBudget`] for the shared [`RegexSet`] union (every
-    /// registered variant compiled together).
+    /// Set the [`RegexBudget`] for the shared [`RegexSet`] union of every
+    /// variant.
     ///
     /// Many individually-small regexes still union into one large `RegexSet`
     /// whose compiled size can only be bounded here; the shipped builtins

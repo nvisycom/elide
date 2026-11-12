@@ -1,4 +1,4 @@
-//! OCR: recognize the text laid out in an image.
+//! OCR: recognize the text laid out in an image, so text recognizers read it.
 //!
 //! Enriches the call with a [`Layout`](crate::modality::Layout).
 //!

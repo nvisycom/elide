@@ -35,7 +35,7 @@ const BODY_PART_ID: &str = "body";
 /// replacements.
 const TEXT_PART_ID: &str = "text";
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The XLSX [`Format`]: Excel workbooks, resolved by `.xlsx`.
 pub fn format() -> Format {
     Format::with_document_loader(FORMAT_ID, XlsxDocumentLoader)
         .with_extensions(["xlsx"])

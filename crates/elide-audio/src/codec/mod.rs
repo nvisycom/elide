@@ -1,4 +1,4 @@
-//! Codec adapters: the audio format handlers (WAV, MP3).
+//! Codec adapters for audio: the WAV and MP3 formats on the codec contract.
 //!
 //! Each format decodes into a one-stream [`Document`](elide_codec::Document):
 //! the clip, streamed as one chunk and redacted by editing decoded samples, with

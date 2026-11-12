@@ -12,7 +12,8 @@ use hipstr::HipStr;
 
 use super::{Predicate, SharedOperator};
 
-/// The context a [predicate rule](Rule::predicate) matches against.
+/// What a [predicate rule](Rule::predicate) matches: the entity and its
+/// context.
 ///
 /// A read-only bundle of everything a matcher can branch on: the
 /// [`entity`](Self::entity) under test, the [`catalog`](Self::catalog) that
@@ -128,6 +129,7 @@ impl<M: Modality> Rule<M> {
     }
 
     /// A rule binding `operator` to every entity whose label carries `tag`.
+    ///
     /// Requires a catalog on the anonymizer ([`Anonymizer::with_catalog`]).
     ///
     /// [`Anonymizer::with_catalog`]: super::Anonymizer::with_catalog
@@ -171,8 +173,9 @@ impl<M: Modality> Rule<M> {
         Self::new(Matcher::Always, operator)
     }
 
-    /// Attribute this rule to a policy: the [`Attribution`] is recorded on the
-    /// redaction provenance of every entity this rule redacts, the *why*
+    /// Attribute this rule to a policy, recorded on every entity it redacts.
+    ///
+    /// The [`Attribution`] is recorded on the redaction provenance, the *why*
     /// alongside the matched rule. Accepts anything that converts into an
     /// `Attribution`, so a builder chain flows in directly:
     /// `.because(Attribution::freeform("gdpr-art-17").with_description("…"))`.

@@ -4,7 +4,7 @@ use super::Modality;
 use crate::error::Result;
 use crate::redaction::Redactions;
 
-/// Applies a [`Redactions`] batch back into some target.
+/// Writes a [`Redactions`] batch back into the content it was read from.
 ///
 /// The write counterpart to [`DataReader`]: implemented by a modality's
 /// mutable content holder (a text buffer being rewritten, an image being

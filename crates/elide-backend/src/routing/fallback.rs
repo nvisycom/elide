@@ -11,8 +11,7 @@ use elide_core::{Error, ErrorKind, Result};
 /// Which errors fail a call over to the fallback.
 type Condition = Arc<dyn Fn(&Error) -> bool + Send + Sync>;
 
-/// Calls a primary backend, and on failure routes the same request to a
-/// fallback: failover.
+/// Calls a primary backend and, when the call fails, retries on a fallback.
 ///
 /// A hosted model has outages, quotas, and timeouts. Without failover, a failed
 /// call either fails the whole analysis or, behind a `ResilientRecognizer`,
@@ -55,8 +54,8 @@ impl<P, F> FallbackRouted<P, F> {
         }
     }
 
-    /// Fail over on the errors for which `condition` returns true, instead of
-    /// the default kinds.
+    /// Fail over on the errors `condition` accepts, instead of the default
+    /// kinds.
     #[must_use]
     pub fn when(mut self, condition: impl Fn(&Error) -> bool + Send + Sync + 'static) -> Self {
         self.condition = Arc::new(condition);

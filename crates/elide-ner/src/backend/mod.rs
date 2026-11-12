@@ -1,6 +1,7 @@
-//! NER backend types: the [`NerRequest`]/[`NerResponse`] a NER backend speaks,
-//! the decorators that shape a model's labels and scores, and the shipped
-//! impls.
+//! NER backends: the request and response types, decorators, and shipped impls.
+//!
+//! The [`NerRequest`]/[`NerResponse`] a NER backend speaks, the decorators that
+//! shape a model's labels and scores, and the shipped impls.
 //!
 //! A NER backend is a [`Backend`](elide_core::backend::Backend) whose request
 //! carries `(text, labels)` and whose response carries canonical [`NerSpan`]s. It

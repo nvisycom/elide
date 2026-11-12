@@ -6,7 +6,7 @@ use elide_core::primitive::Confidence;
 use elide_core::{Error, Result};
 use serde::Deserialize;
 
-/// One literal scanned for by a [`Dictionary`].
+/// One literal term a [`Dictionary`] scans for, optionally tied to a column.
 ///
 /// The `column` field is `Some(i)` for CSV-loaded terms and `None`
 /// for plain-text or programmatic sources. The `score` field

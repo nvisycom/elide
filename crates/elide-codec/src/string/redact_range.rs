@@ -4,8 +4,7 @@ use std::ops::Range;
 
 use elide_core::{Error, Result};
 
-/// Apply a redaction to a string in place: replace a byte range with a
-/// replacement value.
+/// Splice a redaction into a string: replace a byte range with a value.
 ///
 /// The text-shaped streams use it to splice a redacted span back into a decoded
 /// value.

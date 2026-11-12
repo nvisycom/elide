@@ -30,8 +30,9 @@ impl MockBackend {
         Self::default()
     }
 
-    /// A mock backend that returns `regions` on every call, so the enricher
-    /// stamps the same [`Layout`] onto each request.
+    /// A mock backend that recognizes every image as the same `regions`.
+    ///
+    /// The enricher stamps the same [`Layout`] onto each request.
     ///
     /// [`Layout`]: crate::modality::Layout
     #[must_use]

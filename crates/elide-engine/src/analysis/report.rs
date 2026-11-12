@@ -108,9 +108,10 @@ impl StrippedRecord {
     }
 }
 
-/// One item of hidden content stripped from a document, as a [`Report`]
-/// records it: where, what, and how many. Never the stripped value itself, so
-/// the report can be shared without shipping what was removed.
+/// One item of hidden content stripped from a document: where, what, how many.
+///
+/// As a [`Report`] records it. Never the stripped value itself, so the report
+/// can be shared without shipping what was removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrippedItem {
     /// The part it was stripped from: a document's own path, or a part within
@@ -124,8 +125,9 @@ pub struct StrippedItem {
 }
 
 impl Report {
-    /// An empty report, no parts. Fill it with [`insert_part`], or let
-    /// [`analyze`] produce one.
+    /// An empty report with no parts, to fill in by hand or by analysis.
+    ///
+    /// Fill it with [`insert_part`], or let [`analyze`] produce one.
     ///
     /// [`insert_part`]: Self::insert_part
     /// [`analyze`]: crate::Orchestrator::analyze
@@ -136,10 +138,12 @@ impl Report {
         }
     }
 
-    /// A [`ReportDeserializer`] for reconstructing a serialized report, without
-    /// the analyzers, anonymizers, or codec registry an [`Orchestrator`] needs
-    /// to *run* one. Register the modalities the report may contain, then
-    /// [`deserialize`] it:
+    /// A [`ReportDeserializer`] that rebuilds a report without an
+    /// [`Orchestrator`].
+    ///
+    /// It needs none of the analyzers, anonymizers, or codec registry an
+    /// [`Orchestrator`] needs to *run* one. Register the modalities the report
+    /// may contain, then [`deserialize`] it:
     ///
     /// ```ignore
     /// let report = Report::deserializer()
@@ -187,8 +191,8 @@ impl Report {
         self.stripped = record;
     }
 
-    /// Set the entities of the container part `id`, as modality `P`,
-    /// replacing any already set for that part.
+    /// Set the entities of the container part `id` as modality `P`, replacing
+    /// any.
     ///
     /// For rebuilding a report from out-of-band entities. [`anonymize_with`]
     /// re-decodes the part `id` from the container and applies these through
@@ -260,9 +264,10 @@ impl Report {
         self.part_mut::<M>(&id)
     }
 
-    /// Find an entity of modality `M` by its [`id`] across **every** part,
-    /// read-only, for a caller that holds an entity's id but not the part it
-    /// lives in. Parts of another modality are skipped.
+    /// Find an entity of modality `M` by its [`id`] in any part, read-only.
+    ///
+    /// For a caller that holds an entity's id but not the part it lives in.
+    /// Parts of another modality are skipped.
     ///
     /// [`id`]: elide_core::entity::Entity::id
     pub fn entity_anywhere<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
@@ -272,9 +277,10 @@ impl Report {
             .find_map(|entities| entities.iter().find(|entity| entity.id == id))
     }
 
-    /// Find an entity of modality `M` by its [`id`] across **every** part, for
-    /// editing, the `&mut` counterpart to [`entity_anywhere`]. Parts of another
-    /// modality are skipped.
+    /// Find an entity of modality `M` by its [`id`] in any part, for editing.
+    ///
+    /// The `&mut` counterpart to [`entity_anywhere`]. Parts of another modality
+    /// are skipped.
     ///
     /// [`id`]: elide_core::entity::Entity::id
     /// [`entity_anywhere`]: Self::entity_anywhere

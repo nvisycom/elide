@@ -116,8 +116,9 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
     }
 }
 
-/// Decode raw bytes straight into a named [`Document`], an extension trait on
-/// [`FormatRegistry`].
+/// Decodes raw bytes straight into a named [`Document`] through a registry.
+///
+/// An extension trait on [`FormatRegistry`].
 ///
 /// The codec stays byte-and-format only (a document carries no filename) while
 /// the engine attaches the name it owns. The [`HiddenContentPolicy`] given here

@@ -1,4 +1,4 @@
-//! Built-in [`Label`] constants.
+//! The built-in [`Label`] constants: names, identifiers, contacts, and more.
 //!
 //! Each constant carries a [`Category`](super::Category) (`identity`,
 //! `financial`, `health`, …), the coarse group it belongs to for organizing

@@ -6,9 +6,9 @@
 
 use super::super::verhoeff::verhoeff;
 
-/// Return `true` when `value` is a valid 12-digit Aadhaar.
-/// Whitespace and `-`/`:` separators are stripped before
-/// validation.
+/// Return `true` when `value` is a valid 12-digit Indian Aadhaar number.
+///
+/// Whitespace and `-`/`:` separators are stripped before validation.
 pub fn aadhaar(value: &str) -> bool {
     let digits: String = value.chars().filter(|c| c.is_ascii_digit()).collect();
     let extras = value

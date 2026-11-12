@@ -1,4 +1,4 @@
-//! Codec adapters: the raster formats (PNG, JPEG, TIFF).
+//! Codec adapters for images: the PNG, JPEG, and TIFF formats.
 //!
 //! Each raster format decodes into a [`Document`](elide_codec::Document): the
 //! pixel [`Stream`](elide_codec::Stream) (the decoded image, redacted in place

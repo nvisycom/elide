@@ -12,8 +12,10 @@
 
 use elide_core::primitive::CountryCode;
 
-/// Return `true` when `value` is BIC-shaped *and* its country segment
-/// (characters 5-6) is a valid ISO 3166-1 alpha-2 country code.
+/// Return `true` when `value` is BIC-shaped with a valid country segment.
+///
+/// The country segment (characters 5-6) must be a valid ISO 3166-1 alpha-2
+/// country code.
 pub fn swift(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 8 && bytes.len() != 11 {

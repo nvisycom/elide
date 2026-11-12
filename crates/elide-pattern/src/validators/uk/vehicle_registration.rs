@@ -12,8 +12,9 @@
 //! (cheap to express); this validator narrows it to the issued
 //! windows that the DVLA actually allocates.
 
-/// Return `true` when the 2-digit age identifier embedded in a
-/// 7-char current-format UK plate falls inside an issued range.
+/// Return `true` when a UK plate's age identifier falls in an issued range.
+///
+/// Checks the 2-digit age identifier of a 7-character current-format plate.
 ///
 /// Strips whitespace and `-`, then reads characters at positions
 /// 2 and 3 of the canonicalized string.

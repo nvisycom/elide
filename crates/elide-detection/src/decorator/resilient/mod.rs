@@ -1,5 +1,7 @@
-//! [`ResilientRecognizer`]: a [`Recognizer`] decorator that turns its inner's errors into
-//! empty results instead of failing the whole analysis.
+//! A [`Recognizer`] decorator that turns its errors into empty results.
+//!
+//! [`ResilientRecognizer`] keeps one failing recognizer from failing the whole
+//! analysis.
 
 use elide_core::Result;
 use elide_core::entity::Entity;
@@ -8,8 +10,9 @@ use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use futures::future;
 
-/// Wraps a [`Recognizer`] so that an error from it is logged and swallowed,
-/// yielding no entities for the affected subjects rather than aborting the run.
+/// Wraps a [`Recognizer`] so that its errors are logged, not propagated.
+///
+/// A failing subject yields no entities rather than aborting the run.
 ///
 /// The analyzer joins its recognizers and fails the whole analysis on the first
 /// error, which is the safe default: for a redaction tool, a recognizer that
@@ -96,9 +99,10 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
                 tracing::warn!(
                     recognizer = %self.inner.id(),
                     %error,
+                    subjects = subjects.len(),
                     "recognizer failed; continuing with no entities from it",
                 );
-                Ok(vec![Vec::new()])
+                Ok(subjects.iter().map(|_| Vec::new()).collect())
             }
         }
     }
@@ -218,5 +222,44 @@ mod tests {
             .expect("resilient swallows the error");
         let counts: Vec<usize> = out.iter().map(Vec::len).collect();
         assert_eq!(counts, [1, 0, 1]);
+    }
+
+    /// Rejects every batch, even an empty one.
+    struct RejectsEveryBatch;
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for RejectsEveryBatch {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("rejects-every-batch", "0")
+        }
+
+        async fn recognize(
+            &self,
+            _subject: &Subject<Text>,
+            _ctx: &Context<'_>,
+        ) -> Result<Vec<Entity<Text>>> {
+            Err(Error::recognition("rejected"))
+        }
+
+        async fn recognize_batch(
+            &self,
+            _subjects: &[&Subject<Text>],
+            _ctx: &Context<'_>,
+        ) -> Result<Vec<Vec<Entity<Text>>>> {
+            Err(Error::recognition("rejected"))
+        }
+    }
+
+    /// A failed empty batch still answers one list per subject: none.
+    #[tokio::test]
+    async fn a_failed_empty_batch_returns_no_lists() {
+        let recognizer = ResilientRecognizer::new(RejectsEveryBatch);
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let out = recognizer
+            .recognize_batch(&[], &ctx)
+            .await
+            .expect("resilient swallows the error");
+        assert!(out.is_empty());
     }
 }

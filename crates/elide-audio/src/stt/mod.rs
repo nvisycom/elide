@@ -1,4 +1,4 @@
-//! Speech-to-text: transcribe an audio clip.
+//! Speech-to-text: transcribe an audio clip so text recognizers can read it.
 //!
 //! Enriches the call with a
 //! [`Transcription`](crate::modality::Transcription).

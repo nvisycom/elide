@@ -1,5 +1,4 @@
-//! Recognizer decorators: wrap a [`Recognizer`] to change *how* it runs without
-//! changing *what* it detects.
+//! Recognizer decorators: change *how* a recognizer runs, not *what* it finds.
 //!
 //! Each is itself a [`Recognizer`], so they drop in anywhere one goes and
 //! compose with each other:
