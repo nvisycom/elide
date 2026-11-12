@@ -18,7 +18,7 @@ reduce (the layers) — and returns the reconciled entities.
 
 ```rust,ignore
 use elide_detection::Analyzer;
-use elide_detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
+use elide_detection::overlap::{FuseLayer, ReconcileLayer, Structural};
 
 let analysis = Analyzer::new()
     .with_recognizer(us_phone)
@@ -38,7 +38,7 @@ recognition:
 - **calibrate** — scale each entity's confidence by a per-recognizer multiplier,
   so detectors with different score distributions are comparable before
   reconciliation.
-- **reconcile** — decide what happens to overlapping entities. A
+- **overlap** — decide what happens to overlapping entities. A
   `GroupPredicate` chooses *which* entities cluster (`SameLabel` same-label,
   `CrossLabel` cross-label); two layers act on the clusters:
   - **`FuseLayer`** — fuse each cluster of the same finding into one entity

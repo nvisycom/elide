@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
 pub use self::kind::AuditKind;
 pub use self::recognition::{Flagged, Model, ModelId, Pattern, PatternRule};
-pub use self::reconcile::{Calibration, Conflict, Contested, Deduplication, Refinement};
+pub use self::reconcile::{Calibration, Conflict, Contested, Fusion, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
 use crate::modality::Modality;
@@ -38,8 +38,8 @@ use crate::redaction::HiddenContentKind;
 /// It records the effect on confidence and its tamper-evident links.
 ///
 /// Events are recorded on an entity's [`AuditLog`], forming the full audit
-/// trail of its life: each recognizer that found it, the deduplication that
-/// fused them, any score calibration, and the redaction that hid it. The
+/// trail of its life: each recognizer that found it, the fusion that
+/// joined them, any score calibration, and the redaction that hid it. The
 /// uniform spine (who, resulting score, when) is the same for every event; the
 /// [`kind`] carries the event-specific detail *and* the explanation of why the
 /// event happened.
@@ -77,7 +77,7 @@ use crate::redaction::HiddenContentKind;
     )
 )]
 pub struct AuditEvent<M: Modality> {
-    /// Who produced this event: a recognizer name, a deduplication strategy,
+    /// Who produced this event: a recognizer name, a fusion strategy,
     /// an operator, or whatever acted.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub source: HipStr<'static>,
@@ -208,12 +208,12 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, Flagged { location, content })
     }
 
-    /// Deduplication (fusion) event combining several detections. Its
+    /// A fusion event combining several detections of one finding. Its
     /// `confidence` is the pooled score of the fused entities; the `source` is
     /// the fusion strategy's name.
-    pub fn deduplication(strategy: impl Into<HipStr<'static>>, confidence: Confidence) -> Self {
+    pub fn fusion(strategy: impl Into<HipStr<'static>>, confidence: Confidence) -> Self {
         let strategy = strategy.into();
-        Self::new(strategy.clone(), confidence, Deduplication { strategy })
+        Self::new(strategy.clone(), confidence, Fusion { strategy })
     }
 
     /// Conflict-resolution event: a competing detection was arbitrated against

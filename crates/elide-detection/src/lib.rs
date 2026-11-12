@@ -9,4 +9,4 @@ mod layer;
 pub mod decorator;
 
 pub use self::analyzer::{Analysis, Analyzer};
-pub use self::layer::{Layer, LayerOutput, calibrate, filter, reconcile};
+pub use self::layer::{Layer, LayerOutput, calibrate, filter, overlap};

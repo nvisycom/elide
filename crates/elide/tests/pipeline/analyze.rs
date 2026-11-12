@@ -7,7 +7,7 @@ use std::assert_matches;
 use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::ThresholdLayer;
-use elide::detection::reconcile::{FuseLayer, ReconcileLayer};
+use elide::detection::overlap::{FuseLayer, ReconcileLayer};
 use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
@@ -86,16 +86,16 @@ async fn analyze_fuses_resolves_filters() {
     let phone = entities.pop().unwrap();
     assert_eq!(phone.label, LabelRef::new("PHONE_NUMBER"));
     // Fusion kept the higher-confidence, larger span and recorded both
-    // recognitions plus a deduplication event.
+    // recognitions plus a fusion event.
     assert_eq!(phone.confidence, Confidence::new(0.95).unwrap());
     assert_eq!(phone.location, TextLocation::inline(10..23));
     assert_eq!(phone.audit.recognizers().count(), 2);
-    // The trail: 2 recognition events + 1 deduplication event.
+    // The trail: 2 recognition events + 1 fusion event.
     assert_eq!(phone.audit.events().len(), 3);
     let last = phone.audit.events().last().unwrap();
     assert_matches!(
         last.kind,
-        AuditKind::Deduplication(ref d) if d.strategy == "max");
+        AuditKind::Fusion(ref d) if d.strategy == "max");
     assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
 }
 

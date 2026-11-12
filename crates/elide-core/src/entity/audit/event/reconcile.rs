@@ -1,5 +1,5 @@
 //! Reconciliation payloads: what happened to an entity as detections were
-//! combined and scored, fusion ([`Deduplication`]), cross-label arbitration
+//! combined and scored, fusion ([`Fusion`]), cross-label arbitration
 //! ([`Conflict`] / [`Contested`]), confidence rescaling ([`Calibration`]), and
 //! context-keyword boosting ([`Refinement`]).
 //!
@@ -20,13 +20,13 @@ use crate::primitive::Confidence;
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Deduplication {
+pub struct Fusion {
     /// Name of the fusion strategy that combined them.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub strategy: HipStr<'static>,
 }
 
-impl Deduplication {
+impl Fusion {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 2;
 

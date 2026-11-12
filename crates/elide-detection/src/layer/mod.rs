@@ -8,7 +8,7 @@
 //! 1. [`calibrate`], scale each entity's confidence by a per-recognizer
 //!    multiplier, so detectors with different score distributions are
 //!    comparable before reconciliation.
-//! 2. [`reconcile`], decide what happens to overlapping entities: cluster them
+//! 2. [`overlap`], decide what happens to overlapping entities: cluster them
 //!    ([`GroupPredicate`]), fuse each cluster of the same finding
 //!    ([`FuseLayer`]), and arbitrate cross-label pairs ([`Reconciler`]):
 //!    keep, contest, or resolve.
@@ -16,16 +16,16 @@
 //!
 //! Each stage implements [`Layer`], returning a [`LayerOutput`]. Stages are
 //! pure and synchronous, reached through their submodules (e.g.
-//! [`reconcile::ReconcileLayer`]).
+//! [`overlap::ReconcileLayer`]).
 //!
 //! [`Analyzer`]: crate::Analyzer
-//! [`GroupPredicate`]: reconcile::group::GroupPredicate
-//! [`FuseLayer`]: reconcile::FuseLayer
-//! [`Reconciler`]: reconcile::Reconciler
+//! [`GroupPredicate`]: overlap::group::GroupPredicate
+//! [`FuseLayer`]: overlap::FuseLayer
+//! [`Reconciler`]: overlap::Reconciler
 
 pub mod calibrate;
 pub mod filter;
-pub mod reconcile;
+pub mod overlap;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
@@ -71,8 +71,8 @@ impl<M: Modality> LayerOutput<M> {
 /// pair), [`ThresholdLayer`] (drop by confidence), [`CalibrateLayer`] (rescale
 /// confidence).
 ///
-/// [`FuseLayer`]: reconcile::FuseLayer
-/// [`ReconcileLayer`]: reconcile::ReconcileLayer
+/// [`FuseLayer`]: overlap::FuseLayer
+/// [`ReconcileLayer`]: overlap::ReconcileLayer
 /// [`ThresholdLayer`]: filter::ThresholdLayer
 /// [`CalibrateLayer`]: calibrate::CalibrateLayer
 pub trait Layer<M: Modality>: Send + Sync {

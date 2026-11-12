@@ -11,7 +11,7 @@
 use elide::codec::{FormatRegistry, TypedStream};
 use elide::detection::Analyzer;
 use elide::detection::filter::ThresholdLayer;
-use elide::detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
+use elide::detection::overlap::{FuseLayer, ReconcileLayer, Structural};
 use elide::entity::{Entity, LabelCatalog, builtins};
 #[cfg(feature = "image")]
 use elide::modality::image::Image;

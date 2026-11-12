@@ -1,4 +1,4 @@
-//! Reconciliation: deciding what happens to overlapping entities.
+//! Overlapping findings: deciding what happens to entities that overlap.
 //!
 //! A [`GroupPredicate`] decides *which* entities cluster; two layers then act
 //! on the clusters:

@@ -151,10 +151,8 @@ impl<G, S: Scoring> FuseLayer<G, S> {
             base.audit.absorb(mem::take(&mut other.audit).into_events());
         }
         base.confidence = confidence;
-        base.audit.record_fusion(
-            AuditEvent::deduplication(self.scoring.name(), confidence),
-            heads,
-        );
+        base.audit
+            .record_fusion(AuditEvent::fusion(self.scoring.name(), confidence), heads);
         slots[base_index] = Some(base);
         (absorbed, rest)
     }
@@ -247,7 +245,7 @@ mod tests {
         let fusions: Vec<_> = audit
             .events()
             .iter()
-            .filter(|event| matches!(event.kind, AuditKind::Deduplication(_)))
+            .filter(|event| matches!(event.kind, AuditKind::Fusion(_)))
             .collect();
         assert_eq!(fusions.len(), 1);
         assert_eq!(fusions[0].parents().len(), 3);

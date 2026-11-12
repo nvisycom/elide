@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// score-distribution differences between detectors, a regex that
 /// always returns `1.0` and an NER model that returns `0.3–0.9` can be
 /// brought into the same range (e.g. a `0.8` multiplier on the regex)
-/// before deduplication compares them. Recognizers absent from the map
+/// before fusion and reconciliation compare them. Recognizers absent from the map
 /// are left unchanged (implicit multiplier `1.0`).
 ///
 /// A multiplier is finite and non-negative, however the map is built (insert,

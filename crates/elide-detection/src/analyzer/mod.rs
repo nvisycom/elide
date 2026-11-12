@@ -1,6 +1,6 @@
 //! The [`Analyzer`]: the "find" engine.
 //!
-//! Wraps enrichers, recognizers, and a deduplication pipeline into one
+//! Wraps enrichers, recognizers, and a layer pipeline into one
 //! Presidio-style entry point. Enrichers, recognizers, and [`Layer`]s are added
 //! with the `with_*` builders; the `analyze*` entries run three phases in order:
 //! enrich (sequential), recognize (concurrent), reduce (the layers), returning a
@@ -36,9 +36,9 @@ pub use self::analysis::Analysis;
 use crate::batch::expect_one_per_input;
 use crate::layer::Layer;
 
-/// The find engine: enrichers, recognizers, and deduplication, in one call.
+/// The find engine: enrichers, recognizers, and layers, in one call.
 ///
-/// Generic over the [`Modality`] `M`. Enrichers, recognizers, and deduplication
+/// Generic over the [`Modality`] `M`. Enrichers, recognizers, and
 /// layers are added with [`with_enricher`], [`with_recognizer`], and
 /// [`with_layer`], each in the order it should run. [`analyze`] runs the three
 /// phases and returns an [`Analysis`] carrying the reconciled entities.
@@ -94,7 +94,7 @@ impl<M: Modality> Analyzer<M> {
         self
     }
 
-    /// Append a deduplication layer. Layers run in the order added, after
+    /// Append a layer. Layers run in the order added, after
     /// detection.
     #[must_use]
     pub fn with_layer<L: Layer<M> + 'static>(mut self, layer: L) -> Self {
@@ -306,7 +306,7 @@ impl<M: Modality> Analyzer<M> {
         Analysis::new(entities).with_artifact(subject.artifact().cloned())
     }
 
-    /// Run every deduplication layer in order over `entities`, threading each
+    /// Run every layer in order over `entities`, threading each
     /// layer's kept output into the next and returning the survivors.
     fn reduce(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
         let before = entities.len();
@@ -321,7 +321,7 @@ impl<M: Modality> Analyzer<M> {
             before,
             after = entities.len(),
             dropped,
-            "deduplication complete"
+            "layers complete"
         );
         entities
     }

@@ -15,7 +15,7 @@
 
 use elide::detection::Analyzer as RustAnalyzer;
 use elide::detection::filter::ThresholdLayer;
-use elide::detection::reconcile::{FuseLayer, ReconcileLayer};
+use elide::detection::overlap::{FuseLayer, ReconcileLayer};
 use elide::modality::Modality;
 use elide::modality::audio::Audio;
 use elide::modality::image::Image;

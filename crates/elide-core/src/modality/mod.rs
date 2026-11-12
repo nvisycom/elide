@@ -57,7 +57,7 @@ pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
 /// How two locations relate in space: disjoint, nested, or partly overlapping.
 ///
 /// The single answer a [`ModalityLocation`] computes about how it sits
-/// against another, every yes/no the deduplication pipeline branches on
+/// against another, every yes/no the detection layers branch on
 /// is read off this one value, so the intersection geometry is computed
 /// once rather than re-derived per question.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,7 +91,7 @@ pub enum Overlap {
 /// questions: how it [*overlaps*] another (to group co-located findings,
 /// detect cross-label conflicts, and tell nesting from coincidence), how
 /// its extent [`compares`] to another's (to prefer the larger, more
-/// specific span when the deduplication pipeline resolves conflicts), and
+/// specific span when the detection layers resolve conflicts), and
 /// where it sits [*positionally*] (so a codec applies redactions in a
 /// stable document order). All are intrinsic to what a location *is*, so
 /// they live here rather than in a separate trait.
