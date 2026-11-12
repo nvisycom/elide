@@ -3,6 +3,7 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::{ComponentId, LanguageTag, LocalizedText};
 use elide_core::redaction::{LeakProfile, Operator};
@@ -10,7 +11,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::operators::{TextValued, TryOperator};
+use crate::operators::TryOperator;
 
 /// The text a clamped value collapses to.
 ///
@@ -241,7 +242,7 @@ impl Clamp {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Clamp {
+impl<M: TextRedactable> Operator<M> for Clamp {
     fn id(&self) -> ComponentId {
         ComponentId::new("clamp", "1.0.0")
     }
@@ -257,20 +258,20 @@ impl<M: TextValued> Operator<M> for Clamp {
         Ok(self
             .try_anonymize(entity, data)
             .await?
-            .unwrap_or_else(|| M::replacement(TextReplacement::Removed)))
+            .unwrap_or_else(|| M::Replacement::from(TextReplacement::Removed)))
     }
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> TryOperator<M> for Clamp {
+impl<M: TextRedactable> TryOperator<M> for Clamp {
     async fn try_anonymize(
         &self,
         entity: &Entity<M>,
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         Ok(self
-            .render(M::value(data), entity.language.as_ref())
-            .map(|text| M::replacement(TextReplacement::substituted(text))))
+            .render(data.as_ref(), entity.language.as_ref())
+            .map(|text| M::Replacement::from(TextReplacement::substituted(text))))
     }
 }
 

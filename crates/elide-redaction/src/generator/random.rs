@@ -1,11 +1,10 @@
 //! [`RandomToken`]: the default [`Generator`], a random token per entity.
 
 use elide_core::entity::Entity;
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
 use elide_core::redaction::Generator;
 use uuid::Uuid;
-
-use crate::operators::TextValued;
 
 /// Default text [`Generator`]: a fresh random token per distinct entity.
 ///
@@ -18,9 +17,9 @@ use crate::operators::TextValued;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RandomToken;
 
-impl<M: TextValued> Generator<M> for RandomToken {
+impl<M: TextRedactable> Generator<M> for RandomToken {
     fn generate(&self, _entity: &Entity<M>, _data: &M::Data) -> M::Replacement {
-        M::replacement(TextReplacement::substituted(Uuid::new_v4().to_string()))
+        M::Replacement::from(TextReplacement::substituted(Uuid::new_v4().to_string()))
     }
 }
 

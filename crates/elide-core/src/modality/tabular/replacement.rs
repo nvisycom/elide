@@ -36,4 +36,34 @@ impl From<TextReplacement> for TabularReplacement {
     }
 }
 
+/// The cell treatment, or the replacement back when it drops a row or column.
+impl TryFrom<TabularReplacement> for TextReplacement {
+    type Error = TabularReplacement;
+
+    fn try_from(replacement: TabularReplacement) -> Result<Self, Self::Error> {
+        match replacement {
+            TabularReplacement::Cell(text) => Ok(text),
+            structural => Err(structural),
+        }
+    }
+}
+
 impl ModalityReplacement for TabularReplacement {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cell_treatment_converts_back_to_text() {
+        let cell = TabularReplacement::from(TextReplacement::Removed);
+        assert_eq!(
+            TextReplacement::try_from(cell),
+            Ok(TextReplacement::Removed)
+        );
+        assert_eq!(
+            TextReplacement::try_from(TabularReplacement::DropRow),
+            Err(TabularReplacement::DropRow)
+        );
+    }
+}

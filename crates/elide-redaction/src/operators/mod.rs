@@ -60,7 +60,6 @@ mod keep;
 mod key_provider;
 #[cfg(any(feature = "sha2", feature = "hmac"))]
 mod sha2_algorithm;
-mod text_valued;
 mod with_fallback;
 
 /// Replace an entity with a plausible, locale-aware fake value.
@@ -104,5 +103,4 @@ pub use self::text::{
 #[cfg(feature = "datetime")]
 #[cfg_attr(docsrs, doc(cfg(feature = "datetime")))]
 pub use self::text::{DateGranularity, DateStyle, GeneralizeDate};
-pub use self::text_valued::TextValued;
 pub use self::with_fallback::{TryOperator, WithFallback};

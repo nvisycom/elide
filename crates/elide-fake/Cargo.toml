@@ -22,7 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["tabular"] }
+elide-core = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["v4"] }

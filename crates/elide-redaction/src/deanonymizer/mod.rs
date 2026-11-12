@@ -18,11 +18,10 @@ mod registry;
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::modality::{DataReader, DataWriter, Modality};
+use elide_core::modality::{DataReader, DataWriter, Modality, TextRedactable};
 use elide_core::redaction::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
-use crate::operators::TextValued;
 
 /// The recovery engine: restores entities' originals through reversible
 /// operators.
@@ -79,7 +78,7 @@ impl<M: Modality> Deanonymizer<M> {
 ///
 /// [`Text`]: elide_core::modality::text::Text
 /// [`Tabular`]: elide_core::modality::tabular::Tabular
-impl<M: TextValued<Data = TextData>> Deanonymizer<M> {
+impl<M: TextRedactable<Data = TextData>> Deanonymizer<M> {
     /// Plan the recovery of every entity, reading values from `reader`,
     /// applying none.
     ///
@@ -105,7 +104,7 @@ impl<M: TextValued<Data = TextData>> Deanonymizer<M> {
             };
             // The document holds the replacement text as data; lift it back
             // to the modality's replacement so the operator can reverse it.
-            let current = M::replacement(TextReplacement::substituted(data.as_str()));
+            let current = M::Replacement::from(TextReplacement::substituted(data.as_str()));
             let Some(original) = operator.deanonymize(entity, &current).await? else {
                 tracing::debug!(
                     modality = M::NAME,
@@ -116,7 +115,7 @@ impl<M: TextValued<Data = TextData>> Deanonymizer<M> {
             };
             redactions.push(
                 entity.location.clone(),
-                M::replacement(TextReplacement::substituted(original.as_str())),
+                M::Replacement::from(TextReplacement::substituted(original.as_str())),
             );
         }
         Ok(redactions)

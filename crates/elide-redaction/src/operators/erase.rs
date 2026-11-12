@@ -4,15 +4,17 @@
 use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::text::TextReplacement;
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "image")]
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-use crate::operators::TextValued;
 
 /// Removes an entity entirely, leaving nothing in its place.
 ///
@@ -33,7 +35,7 @@ impl Erase {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Erase {
+impl Operator<Text> for Erase {
     fn id(&self) -> ComponentId {
         Erase::id()
     }
@@ -42,9 +44,49 @@ impl<M: TextValued> Operator<M> for Erase {
         LeakProfile::Irrecoverable
     }
 
-    async fn anonymize(&self, _entity: &Entity<M>, _data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(&self, _entity: &Entity<Text>, _data: &TextData) -> Result<TextReplacement> {
+        Ok(TextReplacement::Removed)
+    }
+}
+
+#[cfg(feature = "tabular")]
+#[async_trait::async_trait]
+impl Operator<Tabular> for Erase {
+    fn id(&self) -> ComponentId {
+        Erase::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Irrecoverable
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Tabular>,
+        _data: &TextData,
+    ) -> Result<TabularReplacement> {
         // A table cell loses its text, not its row.
-        Ok(M::replacement(TextReplacement::Removed))
+        Ok(TabularReplacement::Cell(TextReplacement::Removed))
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Erase {
+    fn id(&self) -> ComponentId {
+        Erase::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Irrecoverable
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        _data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Value(TextReplacement::Removed))
     }
 }
 

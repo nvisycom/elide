@@ -33,4 +33,35 @@ impl From<TextReplacement> for MetadataReplacement {
     }
 }
 
+/// The value treatment, or the replacement back when it leaves the field as it
+/// is.
+impl TryFrom<MetadataReplacement> for TextReplacement {
+    type Error = MetadataReplacement;
+
+    fn try_from(replacement: MetadataReplacement) -> Result<Self, Self::Error> {
+        match replacement {
+            MetadataReplacement::Value(text) => Ok(text),
+            unchanged @ MetadataReplacement::Unchanged => Err(unchanged),
+        }
+    }
+}
+
 impl ModalityReplacement for MetadataReplacement {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_treatment_converts_back_to_text() {
+        let value = MetadataReplacement::from(TextReplacement::substituted("x"));
+        assert_eq!(
+            TextReplacement::try_from(value),
+            Ok(TextReplacement::substituted("x"))
+        );
+        assert_eq!(
+            TextReplacement::try_from(MetadataReplacement::Unchanged),
+            Err(MetadataReplacement::Unchanged)
+        );
+    }
+}

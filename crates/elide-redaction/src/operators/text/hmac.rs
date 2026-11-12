@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
@@ -16,7 +17,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
 use sha2::{Sha256, Sha512};
 
-use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey, TextValued};
+use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
 
 /// Replaces an entity's text with its keyed one-way HMAC-SHA-2 hash.
 ///
@@ -97,7 +98,7 @@ impl fmt::Debug for HmacHash {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for HmacHash {
+impl<M: TextRedactable> Operator<M> for HmacHash {
     fn id(&self) -> ComponentId {
         ComponentId::new("hmac", "1.0.0")
     }
@@ -110,8 +111,8 @@ impl<M: TextValued> Operator<M> for HmacHash {
     }
 
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        let digest = self.digest(&entity.label, M::value(data))?;
-        Ok(M::replacement(TextReplacement::substituted(digest)))
+        let digest = self.digest(&entity.label, data.as_ref())?;
+        Ok(M::Replacement::from(TextReplacement::substituted(digest)))
     }
 }
 

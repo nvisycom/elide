@@ -5,13 +5,14 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::operators::{TextValued, TryOperator};
+use crate::operators::TryOperator;
 
 /// Physically truncate the value, keeping a leading and/or trailing run.
 ///
@@ -78,7 +79,7 @@ impl Truncate {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Truncate {
+impl<M: TextRedactable> Operator<M> for Truncate {
     fn id(&self) -> ComponentId {
         ComponentId::new("truncate", "1.0.0")
     }
@@ -94,20 +95,20 @@ impl<M: TextValued> Operator<M> for Truncate {
         Ok(self
             .try_anonymize(entity, data)
             .await?
-            .unwrap_or_else(|| M::replacement(TextReplacement::Removed)))
+            .unwrap_or_else(|| M::Replacement::from(TextReplacement::Removed)))
     }
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> TryOperator<M> for Truncate {
+impl<M: TextRedactable> TryOperator<M> for Truncate {
     async fn try_anonymize(
         &self,
         _entity: &Entity<M>,
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         Ok(self
-            .render(M::value(data))
-            .map(|text| M::replacement(TextReplacement::substituted(text))))
+            .render(data.as_ref())
+            .map(|text| M::Replacement::from(TextReplacement::substituted(text))))
     }
 }
 

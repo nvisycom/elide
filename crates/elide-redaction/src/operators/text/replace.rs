@@ -2,14 +2,12 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::Modality;
 use elide_core::modality::text::TextReplacement;
+use elide_core::modality::{Modality, TextRedactable};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-use crate::operators::TextValued;
 
 /// Replaces an entity's text with a template string, like `[EMAIL]`.
 ///
@@ -101,7 +99,7 @@ impl Replace {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Replace {
+impl<M: TextRedactable> Operator<M> for Replace {
     fn id(&self) -> ComponentId {
         ComponentId::new("replace", "1.0.0")
     }
@@ -118,7 +116,7 @@ impl<M: TextValued> Operator<M> for Replace {
     }
 
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        Ok(M::replacement(self.render(entity, M::value(data))))
+        Ok(M::Replacement::from(self.render(entity, data.as_ref())))
     }
 }
 

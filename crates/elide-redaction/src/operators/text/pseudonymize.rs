@@ -2,13 +2,12 @@
 //! backed by a vault so every mention of one entity reads the same.
 
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::Modality;
 use elide_core::modality::text::TextReplacement;
+use elide_core::modality::{Modality, TextRedactable};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{Generator, LeakProfile, Operator};
 use elide_core::{Error, Result};
 
-use crate::operators::TextValued;
 use crate::vault::Vault;
 
 /// Replace an entity with a consistent generated surrogate.
@@ -116,7 +115,7 @@ impl PseudonymizeSeed {
 #[async_trait::async_trait]
 impl<M, V, G> Operator<M> for Pseudonymize<V, G>
 where
-    M: TextValued,
+    M: TextRedactable,
     V: Vault<PseudonymizeKey, TextReplacement>,
     G: Generator<M>,
 {
@@ -133,21 +132,22 @@ where
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
         let key = PseudonymizeKey {
             label: entity.label.clone(),
-            seed: PseudonymizeSeed::of(entity, M::value(data)),
+            seed: PseudonymizeSeed::of(entity, data.as_ref()),
         };
         // The vault stores the text surrogate, so one vault serves every
         // modality; a generator must produce a text treatment.
         let surrogate = self
             .vault
             .get_or_try_insert_with(key, || {
-                M::text_of(&self.generator.generate(entity, data))
-                    .cloned()
-                    .ok_or_else(|| {
+                self.generator
+                    .generate(entity, data)
+                    .try_into()
+                    .map_err(|_| {
                         Error::redaction("pseudonymize generator must produce a text surrogate")
                     })
             })
             .await?;
-        Ok(M::replacement(surrogate))
+        Ok(M::Replacement::from(surrogate))
     }
 }
 

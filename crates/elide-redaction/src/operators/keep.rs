@@ -4,14 +4,17 @@
 use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "image")]
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-use crate::operators::TextValued;
 
 /// Passes an entity through unchanged, to exempt it from redaction.
 ///
@@ -44,7 +47,7 @@ impl Keep {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Keep {
+impl Operator<Text> for Keep {
     fn id(&self) -> ComponentId {
         Keep::id()
     }
@@ -53,8 +56,50 @@ impl<M: TextValued> Operator<M> for Keep {
         KEEP_LEAK
     }
 
-    async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        Ok(M::unchanged(data))
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+        Ok(TextReplacement::substituted(data.as_str()))
+    }
+}
+
+#[cfg(feature = "tabular")]
+#[async_trait::async_trait]
+impl Operator<Tabular> for Keep {
+    fn id(&self) -> ComponentId {
+        Keep::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        KEEP_LEAK
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Tabular>,
+        data: &TextData,
+    ) -> Result<TabularReplacement> {
+        Ok(TabularReplacement::Cell(TextReplacement::substituted(
+            data.as_str(),
+        )))
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Keep {
+    fn id(&self) -> ComponentId {
+        Keep::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        KEEP_LEAK
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        _data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Unchanged)
     }
 }
 

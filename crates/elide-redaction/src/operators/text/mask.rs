@@ -3,13 +3,12 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-use crate::operators::TextValued;
 
 /// Masks an entity's text by replacing its characters, like `****1234`.
 ///
@@ -87,7 +86,7 @@ impl Mask {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Mask {
+impl<M: TextRedactable> Operator<M> for Mask {
     fn id(&self) -> ComponentId {
         ComponentId::new("mask", "1.0.0")
     }
@@ -98,8 +97,8 @@ impl<M: TextValued> Operator<M> for Mask {
     }
 
     async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        let masked = self.render(M::value(data));
-        Ok(M::replacement(TextReplacement::substituted(masked)))
+        let masked = self.render(data.as_ref());
+        Ok(M::Replacement::from(TextReplacement::substituted(masked)))
     }
 }
 

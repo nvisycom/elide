@@ -54,4 +54,11 @@ impl MetadataData {
     }
 }
 
+/// The field's value, what a text operator reads.
+impl AsRef<str> for MetadataData {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl ModalityData for MetadataData {}

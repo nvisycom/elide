@@ -4,6 +4,7 @@
 use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::Entity;
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
@@ -11,7 +12,7 @@ use elide_core::redaction::{LeakProfile, Operator};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
 
-use crate::operators::{Sha2Algorithm, TextValued};
+use crate::operators::Sha2Algorithm;
 
 /// Replaces an entity's text with its one-way SHA-2 hash, in hex.
 ///
@@ -73,7 +74,7 @@ impl Sha2Hash {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for Sha2Hash {
+impl<M: TextRedactable> Operator<M> for Sha2Hash {
     fn id(&self) -> ComponentId {
         ComponentId::new("hash", "1.0.0")
     }
@@ -85,7 +86,7 @@ impl<M: TextValued> Operator<M> for Sha2Hash {
     }
 
     async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        let digest = self.digest(M::value(data));
-        Ok(M::replacement(TextReplacement::substituted(digest)))
+        let digest = self.digest(data.as_ref());
+        Ok(M::Replacement::from(TextReplacement::substituted(digest)))
     }
 }

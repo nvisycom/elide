@@ -38,12 +38,14 @@ mod data_reader;
 mod data_writer;
 mod hint;
 mod text_recognizable;
+mod text_redactable;
 
 pub use self::chunk::Chunk;
 pub use self::data_reader::{ChunkReader, DataReader};
 pub use self::data_writer::DataWriter;
 pub use self::hint::{Hint, ResolvedHint};
 pub use self::text_recognizable::TextRecognizable;
+pub use self::text_redactable::TextRedactable;
 
 /// The payload a recognizer inspects in a modality, like text or an image.
 ///

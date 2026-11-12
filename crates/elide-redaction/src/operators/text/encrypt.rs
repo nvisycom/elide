@@ -8,6 +8,7 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::entity::{Entity, LabelRef};
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator, ReversibleOperator};
@@ -15,7 +16,7 @@ use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-use crate::operators::{KeyProvider, StaticKey, TextValued};
+use crate::operators::{KeyProvider, StaticKey};
 
 /// Length of an AES-256 key, in bytes.
 const KEY_LEN: usize = 32;
@@ -143,7 +144,7 @@ impl fmt::Debug for AesEncrypt {
 }
 
 #[async_trait::async_trait]
-impl<M: TextValued> Operator<M> for AesEncrypt {
+impl<M: TextRedactable> Operator<M> for AesEncrypt {
     fn id(&self) -> ComponentId {
         ComponentId::new("encrypt", "1.0.0")
     }
@@ -154,8 +155,10 @@ impl<M: TextValued> Operator<M> for AesEncrypt {
     }
 
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        let ciphertext = self.encrypt_str(&entity.label, M::value(data))?;
-        Ok(M::replacement(TextReplacement::substituted(ciphertext)))
+        let ciphertext = self.encrypt_str(&entity.label, data.as_ref())?;
+        Ok(M::Replacement::from(TextReplacement::substituted(
+            ciphertext,
+        )))
     }
 }
 
@@ -163,16 +166,17 @@ impl<M: TextValued> Operator<M> for AesEncrypt {
 /// table cells): a metadata field's value carries its key and label too, which
 /// a ciphertext cannot restore.
 #[async_trait::async_trait]
-impl<M: TextValued<Data = TextData>> ReversibleOperator<M> for AesEncrypt {
+impl<M: TextRedactable<Data = TextData>> ReversibleOperator<M> for AesEncrypt {
     async fn deanonymize(
         &self,
         entity: &Entity<M>,
         replacement: &M::Replacement,
     ) -> Result<Option<TextData>> {
         // Only a text treatment carries a recoverable ciphertext.
-        match M::text_of(replacement) {
-            Some(text) => self.decrypt_replacement(&entity.label, text),
-            None => Ok(None),
+        let text: Result<TextReplacement, _> = replacement.clone().try_into();
+        match text {
+            Ok(text) => self.decrypt_replacement(&entity.label, &text),
+            Err(_) => Ok(None),
         }
     }
 }
