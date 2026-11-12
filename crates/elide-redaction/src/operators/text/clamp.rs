@@ -3,11 +3,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextRedactable;
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::{ComponentId, LanguageTag, LocalizedText};
 use elide_core::redaction::{LeakProfile, Operator};
 use hipstr::HipStr;
@@ -132,11 +129,6 @@ pub struct Clamp {
 }
 
 impl Clamp {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("clamp", "1.0.0")
-    }
-
     /// A clamp with no bounds, every value passes through until a
     /// ceiling or floor is added.
     pub fn new() -> Self {
@@ -232,7 +224,7 @@ impl Clamp {
     pub fn render(&self, value: &str, language: Option<&LanguageTag>) -> Option<String> {
         // Only finite numbers are clamped. `NaN`/`inf` parse as `f64` but
         // compare false against every bound, so without this filter they
-        // would fall through and pass the raw input string back unredacted ,
+        // would fall through and pass the raw input string back unredacted,
         // a leak. Reject them so they decline (and erase by default) instead.
         let number = value.trim().parse::<f64>().ok().filter(|n| n.is_finite())?;
         if let Some((ceiling, bucket)) = &self.ceiling
@@ -250,9 +242,9 @@ impl Clamp {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for Clamp {
+impl<M: TextRedactable> Operator<M> for Clamp {
     fn id(&self) -> ComponentId {
-        Clamp::id()
+        ComponentId::new("clamp", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -261,104 +253,32 @@ impl Operator<Text> for Clamp {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
         // Used on its own, a declined value erases, the safe default.
         Ok(self
             .try_anonymize(entity, data)
             .await?
-            .unwrap_or(TextReplacement::Removed))
+            .unwrap_or_else(|| M::Replacement::from(TextReplacement::Removed)))
     }
 }
 
 #[async_trait::async_trait]
-impl TryOperator<Text> for Clamp {
+impl<M: TextRedactable> TryOperator<M> for Clamp {
     async fn try_anonymize(
         &self,
-        entity: &Entity<Text>,
-        data: &TextData,
-    ) -> Result<Option<TextReplacement>> {
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         Ok(self
-            .render(data.as_str(), entity.language.as_ref())
-            .map(TextReplacement::substituted))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for Clamp {
-    fn id(&self) -> ComponentId {
-        Clamp::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(self
-            .try_anonymize(entity, data)
-            .await?
-            .unwrap_or(TabularReplacement::Cell(TextReplacement::Removed)))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl TryOperator<Tabular> for Clamp {
-    async fn try_anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<Option<TabularReplacement>> {
-        Ok(self
-            .render(data.as_str(), entity.language.as_ref())
-            .map(|text| TextReplacement::substituted(text).into()))
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Clamp {
-    fn id(&self) -> ComponentId {
-        Clamp::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(self
-            .try_anonymize(entity, data)
-            .await?
-            .unwrap_or(MetadataReplacement::Value(TextReplacement::Removed)))
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl TryOperator<Metadata> for Clamp {
-    async fn try_anonymize(
-        &self,
-        entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<Option<MetadataReplacement>> {
-        Ok(self
-            .render(data.as_str(), entity.language.as_ref())
-            .map(|text| TextReplacement::substituted(text).into()))
+            .render(data.as_ref(), entity.language.as_ref())
+            .map(|text| M::Replacement::from(TextReplacement::substituted(text))))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use elide_core::modality::text::{Text, TextData};
+
     use super::*;
 
     fn fr() -> LanguageTag {

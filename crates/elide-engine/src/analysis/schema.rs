@@ -142,7 +142,7 @@ impl JsonSchema for ArtifactSet {
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        // One arm per compiled-in modality, discriminated by `modality` ,
+        // One arm per compiled-in modality, discriminated by `modality`,
         // mirroring `Report`, so a client reads both halves the same way.
         let arms = vec![
             artifact_arm::<Text>(generator),

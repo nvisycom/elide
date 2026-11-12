@@ -3,9 +3,8 @@
 use std::str::FromStr;
 
 use elide_core::entity::Entity;
-use elide_core::modality::Modality;
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
+use elide_core::modality::{Modality, TextRedactable};
 use elide_core::primitive::LanguageTag;
 use elide_core::redaction::Generator;
 
@@ -83,16 +82,10 @@ impl Default for FakeGenerator {
     }
 }
 
-impl Generator<Text> for FakeGenerator {
-    fn generate(&self, entity: &Entity<Text>, data: &TextData) -> TextReplacement {
-        TextReplacement::substituted(self.value(entity, data.as_str()))
-    }
-}
-
-impl Generator<Tabular> for FakeGenerator {
-    fn generate(&self, entity: &Entity<Tabular>, data: &TextData) -> TabularReplacement {
-        TabularReplacement::Cell(TextReplacement::substituted(
-            self.value(entity, data.as_str()),
+impl<M: TextRedactable> Generator<M> for FakeGenerator {
+    fn generate(&self, entity: &Entity<M>, data: &M::Data) -> M::Replacement {
+        M::Replacement::from(TextReplacement::substituted(
+            self.value(entity, data.as_ref()),
         ))
     }
 }
@@ -100,7 +93,7 @@ impl Generator<Tabular> for FakeGenerator {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::{EntityCoRef, LabelRef};
-    use elide_core::modality::text::TextLocation;
+    use elide_core::modality::text::{Text, TextData, TextLocation};
     use uuid::Uuid;
 
     use super::*;

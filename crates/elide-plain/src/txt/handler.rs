@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn crlf_line_endings_are_not_carried_into_a_block() {
-        // A CRLF terminator is trimmed whole, no stray `\r` at the block end ,
+        // A CRLF terminator is trimmed whole, no stray `\r` at the block end,
         // while an internal CRLF between the block's lines is kept.
         let cs = collect_chunks("first\r\nsecond\r\n\r\nthird\r\n");
         assert_eq!(

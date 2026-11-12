@@ -1,10 +1,10 @@
-//! [`Beep`]: overlay a tone over the matched audio range.
+//! [`Beep`]: replace the matched audio range with a tone.
 
 use elide_audio::modality::{Audio, AudioData, AudioReplacement, Waveform};
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ const DEFAULT_HZ: f32 = 1000.0;
 /// painful and never clips.
 const DEFAULT_AMPLITUDE: f32 = 0.5;
 
-/// Overlay a tone (the broadcast "bleep") over the matched audio range.
+/// Replace the matched audio range with a tone (the broadcast "bleep").
 ///
 /// More obvious to a listener than [`Silence`] that something was removed,
 /// the timeline does not shift, but the redacted span is audibly marked.
@@ -23,6 +23,7 @@ const DEFAULT_AMPLITUDE: f32 = 0.5;
 /// [`Silence`]: crate::operators::Silence
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "BeepConfig"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Beep {
     /// Tone frequency, in hertz.
@@ -35,18 +36,37 @@ pub struct Beep {
 
 impl Beep {
     /// A beep at the given frequency (hz), default amplitude and sine shape.
-    pub fn new(hz: f32) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// [`Configuration`](elide_core::ErrorKind::Configuration) if `hz` is not
+    /// a finite, positive frequency.
+    pub fn new(hz: f32) -> Result<Self> {
+        if !hz.is_finite() || hz <= 0.0 {
+            return Err(Error::configuration(format!(
+                "beep frequency {hz} must be a finite, positive number of hertz"
+            )));
+        }
+        Ok(Self {
             hz,
             ..Self::default()
-        }
+        })
     }
 
     /// Set the peak amplitude, in `0.0..=1.0` of full scale.
-    #[must_use]
-    pub fn with_amplitude(mut self, amplitude: f32) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`Configuration`](elide_core::ErrorKind::Configuration) if `amplitude`
+    /// is outside `0.0..=1.0`.
+    pub fn with_amplitude(mut self, amplitude: f32) -> Result<Self> {
+        if !(0.0..=1.0).contains(&amplitude) {
+            return Err(Error::configuration(format!(
+                "beep amplitude {amplitude} must be within 0.0..=1.0"
+            )));
+        }
         self.amplitude = amplitude;
-        self
+        Ok(self)
     }
 
     /// Set the tone shape.
@@ -54,6 +74,31 @@ impl Beep {
     pub fn with_waveform(mut self, waveform: Waveform) -> Self {
         self.waveform = waveform;
         self
+    }
+}
+
+/// The deserialized form of a [`Beep`], validated through [`Beep::new`] and
+/// [`Beep::with_amplitude`].
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+struct BeepConfig {
+    /// Tone frequency, in hertz.
+    hz: f32,
+    /// Peak amplitude, in `0.0..=1.0` of full scale.
+    amplitude: f32,
+    /// Tone shape.
+    waveform: Waveform,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<BeepConfig> for Beep {
+    type Error = Error;
+
+    fn try_from(config: BeepConfig) -> Result<Self> {
+        Ok(Self::new(config.hz)?
+            .with_amplitude(config.amplitude)?
+            .with_waveform(config.waveform))
     }
 }
 
@@ -132,7 +177,9 @@ mod tests {
     #[tokio::test]
     async fn builders_set_frequency_amplitude_and_shape() {
         let out = Beep::new(440.0)
+            .unwrap()
             .with_amplitude(0.25)
+            .unwrap()
             .with_waveform(Waveform::Square)
             .anonymize(&audio_entity(), &elide_audio::fixtures::blank_audio_data())
             .await
@@ -145,5 +192,19 @@ mod tests {
                 waveform: Waveform::Square,
             }
         );
+    }
+
+    /// A frequency or amplitude outside its range is rejected.
+    #[test]
+    fn out_of_range_settings_are_rejected() {
+        for hz in [0.0, -440.0, f32::NAN, f32::INFINITY] {
+            assert!(Beep::new(hz).is_err(), "hz {hz}");
+        }
+        for amplitude in [-0.1, 1.5, f32::NAN] {
+            assert!(
+                Beep::default().with_amplitude(amplitude).is_err(),
+                "amplitude {amplitude}"
+            );
+        }
     }
 }

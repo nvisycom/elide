@@ -1,14 +1,11 @@
-//! Text-modality operators.
+//! Text operators.
 //!
-//! Each operates on the text slice under an entity. The value-editing
-//! operators ([`Mask`], [`Replace`], [`Truncate`], [`Clamp`],
-//! [`GeneralizeDate`], [`Sha2Hash`], [`HmacHash`], [`AesEncrypt`],
-//! [`Pseudonymize`]) also implement [`Operator`]`<Tabular>`, a table cell is
-//! text, so the same logic serves both, with a thin cell adapter. The
-//! shipped operators are re-exported from [`operators`](super), the public
-//! surface; this module is an internal grouping.
+//! Each operates on the text under an entity, through one implementation over
+//! every [`TextRedactable`] modality: plain text, table cells, and metadata
+//! fields. The shipped operators are re-exported from [`operators`](super),
+//! the public surface; this module is an internal grouping.
 //!
-//! [`Operator`]: elide_core::redaction::Operator
+//! [`TextRedactable`]: elide_core::modality::TextRedactable
 
 mod clamp;
 #[cfg(feature = "aes")]
@@ -32,7 +29,7 @@ pub use self::generalize_date::{DateGranularity, DateStyle, GeneralizeDate};
 #[cfg(feature = "hmac")]
 pub use self::hmac::HmacHash;
 pub use self::mask::Mask;
-pub use self::pseudonymize::{Pseudonymize, PseudonymizeKey};
+pub use self::pseudonymize::{Pseudonymize, PseudonymizeKey, PseudonymizeSeed};
 pub use self::replace::Replace;
 #[cfg(feature = "sha2")]
 pub use self::sha2::Sha2Hash;

@@ -10,7 +10,7 @@ use elide::prelude::*;
 
 let analyzer = Analyzer::<Text>::new()
     .with_layer(FuseLayer::max())
-    .with_layer(ReconcileLayer::cross_label(Structural::default()))
+    .with_layer(ReconcileLayer::structural())
     .with_layer(ThresholdLayer::default());
 ```
 
@@ -29,8 +29,9 @@ fused entity's audit trail keeps every recognizer's finding.
 
 ## Different labels
 
-`ReconcileLayer::cross_label` resolves findings of different labels that
-overlap. `Structural`, the default, reads how the two spans relate:
+`ReconcileLayer` resolves findings of different labels that overlap.
+`Structural`, the default (`ReconcileLayer::structural()`), reads how the
+two spans relate:
 
 - **Nested**: a postal code inside an address is a real hierarchy, so both
   are kept, unless the inner one is much weaker.

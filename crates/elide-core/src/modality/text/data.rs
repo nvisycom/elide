@@ -37,4 +37,10 @@ impl TextData {
     }
 }
 
+impl AsRef<str> for TextData {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl ModalityData for TextData {}

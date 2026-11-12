@@ -63,7 +63,7 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 
     Ok(analyzer
         .with_layer(FuseLayer::max())
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
+        .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default()))
 }
 

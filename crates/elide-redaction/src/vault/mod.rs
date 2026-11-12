@@ -27,16 +27,13 @@ pub use self::memory::InMemoryVault;
 ///
 /// Generic over `K` so the caller controls identity: keying on a digest
 /// trades space for collision risk, while keying on the full input keeps
-/// equality exact. The async methods return `impl Future`, matching
-/// [`Operator`]: a vault is a generic parameter (`V: Vault<K, …>`),
-/// resolved and monomorphized at compile time rather than held behind a
-/// trait object.
+/// equality exact. A vault is a generic parameter (`V: Vault<K, …>`), not a
+/// trait object: [`get_or_try_insert_with`] is generic over its `init`.
 ///
 /// The write path is fused into [`get_or_try_insert_with`]: a value is
 /// only ever stored as part of resolving a key, never blindly, so a
 /// stored entry always wins and consistency holds by construction.
 ///
-/// [`Operator`]: elide_core::redaction::Operator
 /// [`get_or_try_insert_with`]: Vault::get_or_try_insert_with
 #[async_trait::async_trait]
 pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {

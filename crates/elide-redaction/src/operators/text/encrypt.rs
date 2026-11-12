@@ -8,11 +8,8 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::entity::{Entity, LabelRef};
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextRedactable;
+use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator, ReversibleOperator};
 use elide_core::{Error, Result};
@@ -42,15 +39,17 @@ const NONCE_LEN: usize = 12;
 /// by [`LabelRef`], so a deployment can encrypt distinct label classes under
 /// distinct keys; [`deanonymize`] resolves the same entity's label, so it
 /// recovers under the same key. AES-256 needs a 32-byte key: a provider that
-/// returns any other length is a [`Redaction`](elide_core::ErrorKind::Redaction) error at
-/// apply time, not a silent truncation.
+/// returns any other length is a
+/// [`Redaction`](elide_core::ErrorKind::Redaction) error at apply time, not a
+/// silent truncation.
 ///
-/// [`deanonymize`]: ReversibleOperator::deanonymize
 /// `AesEncrypt` carries no policy config: its whole behavior is the secret
 /// key, which never serializes. It therefore serializes to an empty object,
 /// and the [`KeyProvider`] is re-wired at construction when a selection is
 /// rebuilt. `Serialize` only: the skipped provider has no default to
 /// deserialize back into.
+///
+/// [`deanonymize`]: ReversibleOperator::deanonymize
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -73,11 +72,6 @@ impl AesEncrypt {
     /// apply time, when the key is resolved.
     pub fn with_key(key: impl Into<Vec<u8>>) -> Self {
         Self::new(Arc::new(StaticKey::new(key)))
-    }
-
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("encrypt", "1.0.0")
     }
 
     /// The cipher for `label`'s key, or a [`Redaction`](elide_core::ErrorKind::Redaction)
@@ -125,15 +119,11 @@ impl AesEncrypt {
             // Not one of our replacements (not valid base64).
             return Ok(None);
         };
-        if blob.len() < NONCE_LEN {
-            return Ok(None);
-        }
-        let (nonce, ciphertext) = blob.split_at(NONCE_LEN);
-        let Ok(nonce) = Nonce::<Aes256Gcm>::try_from(nonce) else {
-            // Length was checked above, so this is unreachable in practice.
+        let Some((nonce, ciphertext)) = blob.split_first_chunk::<NONCE_LEN>() else {
+            // Too short to hold a nonce.
             return Ok(None);
         };
-
+        let nonce = Nonce::<Aes256Gcm>::from(*nonce);
         match self.cipher(label)?.decrypt(&nonce, ciphertext) {
             // Authentication failed or wrong key: not recoverable here.
             Err(_) => Ok(None),
@@ -154,9 +144,9 @@ impl fmt::Debug for AesEncrypt {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for AesEncrypt {
+impl<M: TextRedactable> Operator<M> for AesEncrypt {
     fn id(&self) -> ComponentId {
-        Self::id()
+        ComponentId::new("encrypt", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -164,77 +154,30 @@ impl Operator<Text> for AesEncrypt {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(
-            self.encrypt_str(&entity.label, data.as_str())?,
-        ))
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        let ciphertext = self.encrypt_str(&entity.label, data.as_ref())?;
+        Ok(M::Replacement::from(TextReplacement::substituted(
+            ciphertext,
+        )))
     }
 }
 
+/// Recovery for the modalities whose value is a plain [`TextData`] (text and
+/// table cells): a metadata field's value carries its key and label too, which
+/// a ciphertext cannot restore.
 #[async_trait::async_trait]
-impl ReversibleOperator<Text> for AesEncrypt {
+impl<M: TextRedactable<Data = TextData>> ReversibleOperator<M> for AesEncrypt {
     async fn deanonymize(
         &self,
-        entity: &Entity<Text>,
-        replacement: &TextReplacement,
+        entity: &Entity<M>,
+        replacement: &M::Replacement,
     ) -> Result<Option<TextData>> {
-        self.decrypt_replacement(&entity.label, replacement)
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for AesEncrypt {
-    fn id(&self) -> ComponentId {
-        Self::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(self.encrypt_str(&entity.label, data.as_str())?).into())
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl ReversibleOperator<Tabular> for AesEncrypt {
-    async fn deanonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        replacement: &TabularReplacement,
-    ) -> Result<Option<TextData>> {
-        // Only a cell treatment carries a recoverable ciphertext.
-        match replacement {
-            TabularReplacement::Cell(cell) => self.decrypt_replacement(&entity.label, cell),
-            _ => Ok(None),
+        // Only a text treatment carries a recoverable ciphertext.
+        let text: Result<TextReplacement, _> = replacement.clone().try_into();
+        match text {
+            Ok(text) => self.decrypt_replacement(&entity.label, &text),
+            Err(_) => Ok(None),
         }
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for AesEncrypt {
-    fn id(&self) -> ComponentId {
-        Self::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.encrypt_str(&entity.label, data.as_str())?).into())
     }
 }
 
@@ -242,7 +185,7 @@ impl Operator<Metadata> for AesEncrypt {
 mod tests {
     use elide_core::ErrorKind;
     use elide_core::entity::audit::{AuditEvent, PatternRule};
-    use elide_core::modality::text::TextLocation;
+    use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
 

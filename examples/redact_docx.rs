@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
                 .with_catalog(LabelCatalog::with_builtins()),
         )
         .with_modality::<Text>(build_text_analyzer()?, build_text_anonymizer())
-        .with_modality::<Image>(build_image_analyzer()?, build_image_anonymizer());
+        .with_modality::<Image>(build_image_analyzer()?, build_image_anonymizer()?);
 
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
@@ -138,7 +138,7 @@ fn build_text_analyzer() -> Result<Analyzer<Text>> {
         .with_recognizer(ner)
         .with_recognizer(llm)
         .with_layer(FuseLayer::max())
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
+        .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default()))
 }
 
@@ -182,12 +182,12 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
 /// and clear anything else visual. Inert offline (the mock backend detects
 /// nothing), but it wires the image redaction operators the real backend
 /// would drive.
-fn build_image_anonymizer() -> Anonymizer<Image> {
-    Anonymizer::new()
-        .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)))
+fn build_image_anonymizer() -> Result<Anonymizer<Image>> {
+    Ok(Anonymizer::new()
+        .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
         .with(Rule::label(
             builtins::SIGNATURE.to_ref(),
             Blackbox::default(),
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Erase)))
 }

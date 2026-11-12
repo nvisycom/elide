@@ -34,7 +34,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             // A vision model finds faces and signatures.
             Analyzer::new().with_recognizer(LlmRecognizer::with_default(vision)),
             Anonymizer::new()
-                .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)))
+                .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
                 .with(Rule::fallback(Blackbox::default())),
         );
 

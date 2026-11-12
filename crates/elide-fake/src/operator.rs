@@ -7,9 +7,8 @@ use std::str::FromStr;
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::Modality;
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::text::TextReplacement;
+use elide_core::modality::{Modality, TextRedactable};
 use elide_core::primitive::{ComponentId, LanguageTag};
 use elide_core::redaction::{LeakProfile, Operator};
 
@@ -22,13 +21,11 @@ use elide_core::redaction::{LeakProfile, Operator};
 /// so coreferent mentions of the same real-world entity collapse to
 /// the same fake value within a run.
 ///
-/// Entity labels outside the core PII catalogue delegate to the
-/// `fallback` operator passed at construction. The fallback's
-/// modality bound matches whichever `Operator<M>` impl is invoked,
-/// call `Fake` from a [`Text`] context and the fallback only
-/// needs `Operator<Text>`; call it from a [`Tabular`] context and
-/// it only needs `Operator<Tabular>`. Every built-in elide
-/// operator (`Mask`, `Replace`, `Erase`, `Sha2Hash`) implements both.
+/// Serves every [`TextRedactable`] modality: text, table cells, and metadata
+/// fields. Entity labels outside the core PII catalogue delegate to the
+/// `fallback` operator passed at construction, which needs to serve only
+/// the modality `Fake` runs in; every built-in text operator (`Mask`,
+/// `Replace`, `Erase`, `Sha2Hash`, …) serves them all.
 ///
 /// Structured labels (IBAN, payment card, postal code, phone,
 /// date-of-birth, etc.) always pattern-preserve the original, the
@@ -37,11 +34,9 @@ use elide_core::redaction::{LeakProfile, Operator};
 /// (names, addresses, organisations) emit a fresh locale-aware
 /// fake whose length doesn't need to match.
 ///
-/// Generic over the fallback operator type because
-/// [`elide_core::redaction::Operator`] is not dyn-compatible (its
-/// `anonymize` method returns `impl Future`), so a stored
-/// `Arc<dyn Operator<…>>` is not available. Each `Fake` instance
-/// binds one concrete fallback type at construction.
+/// Generic over the fallback operator type, so each `Fake` binds one
+/// concrete fallback at construction; pass an `Arc<dyn Operator<…>>` to
+/// choose it at runtime.
 #[derive(Clone, Debug)]
 pub struct Fake<F> {
     fallback: F,
@@ -90,53 +85,27 @@ impl<F> Fake<F> {
 }
 
 #[async_trait::async_trait]
-impl<F> Operator<Text> for Fake<F>
+impl<M, F> Operator<M> for Fake<F>
 where
-    F: Operator<Text>,
+    M: TextRedactable,
+    F: Operator<M>,
 {
     fn id(&self) -> ComponentId {
         Self::op_id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
-        // The original value is gone; only the entity's position
-        // and approximate shape (length differs from the original)
-        // leak.
-        LeakProfile::Partial
+        // A faked value leaves only the entity's position and approximate
+        // shape; a label it cannot fake takes the fallback, so the pair is
+        // only as safe as the leakier of the two.
+        LeakProfile::Partial.min(self.fallback.leak_profile())
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        match self.try_generate(entity, data.as_str()) {
-            Some(value) => Ok(TextReplacement::substituted(value)),
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        match self.try_generate(entity, data.as_ref()) {
+            Some(value) => Ok(M::Replacement::from(TextReplacement::substituted(value))),
             None => self.fallback.anonymize(entity, data).await,
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl<F> Operator<Tabular> for Fake<F>
-where
-    F: Operator<Tabular>,
-{
-    fn id(&self) -> ComponentId {
-        Self::op_id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        if let Some(value) = self.try_generate(entity, data.as_str()) {
-            return Ok(TabularReplacement::Cell(TextReplacement::substituted(
-                value,
-            )));
-        }
-        self.fallback.anonymize(entity, data).await
     }
 }
 
@@ -146,8 +115,8 @@ mod tests {
 
     use elide::redaction::operators::{Mask, Replace};
     use elide_core::entity::{EntityCoRef, LabelRef};
-    use elide_core::modality::tabular::TabularLocation;
-    use elide_core::modality::text::TextLocation;
+    use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
+    use elide_core::modality::text::{Text, TextData, TextLocation};
 
     use super::*;
 
@@ -187,6 +156,22 @@ mod tests {
         let entity = entity_over(diagnosis(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
         assert_eq!(out, TextReplacement::substituted("[redacted]"));
+    }
+
+    /// A label `Fake` cannot fake takes the fallback, so a leakier fallback
+    /// sets the profile.
+    #[test]
+    fn the_leak_profile_includes_the_fallback() {
+        use elide::redaction::operators::Keep;
+
+        assert_eq!(
+            Operator::<Text>::leak_profile(&Fake::new(Mask::stars())),
+            LeakProfile::Partial
+        );
+        assert_eq!(
+            Operator::<Text>::leak_profile(&Fake::new(Keep)),
+            LeakProfile::Recoverable
+        );
     }
 
     #[tokio::test]

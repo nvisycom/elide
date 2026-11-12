@@ -4,11 +4,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextRedactable;
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 use jiff::civil::{Date, DateTime, Time};
@@ -19,8 +16,9 @@ use crate::operators::TryOperator;
 
 /// The coarseness a [`GeneralizeDate`] reduces a date/timestamp to.
 ///
-/// Every rendering is an ISO-8601 form, so the output is locale-independent
-/// by construction, no localized month names or week markers to configure.
+/// Every rendering is numeric and keeps the input value's own layout (ISO
+/// dashes or US slashes), so there are no localized month names or week
+/// markers to configure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -102,11 +100,6 @@ pub struct GeneralizeDate {
 const DATETIME_SEPARATORS: [char; 3] = ['T', 't', ' '];
 
 impl GeneralizeDate {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("generalize_date", "1.0.0")
-    }
-
     /// A generalizer reducing to `granularity`, accepting ISO-8601 input.
     pub fn new(granularity: DateGranularity) -> Self {
         Self {
@@ -117,7 +110,8 @@ impl GeneralizeDate {
 
     /// Set the input date convention this operator accepts (see [`DateStyle`]).
     ///
-    /// ISO-8601 output is unaffected.
+    /// ISO-8601 input is always accepted; the output keeps each value's own
+    /// layout.
     #[must_use]
     pub fn with_style(mut self, style: DateStyle) -> Self {
         self.style = style;
@@ -210,9 +204,9 @@ impl GeneralizeDate {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for GeneralizeDate {
+impl<M: TextRedactable> Operator<M> for GeneralizeDate {
     fn id(&self) -> ComponentId {
-        GeneralizeDate::id()
+        ComponentId::new("generalize_date", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -221,102 +215,32 @@ impl Operator<Text> for GeneralizeDate {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
         // Used on its own, a declined value erases, the safe default.
         Ok(self
             .try_anonymize(entity, data)
             .await?
-            .unwrap_or(TextReplacement::Removed))
+            .unwrap_or_else(|| M::Replacement::from(TextReplacement::Removed)))
     }
 }
 
 #[async_trait::async_trait]
-impl TryOperator<Text> for GeneralizeDate {
+impl<M: TextRedactable> TryOperator<M> for GeneralizeDate {
     async fn try_anonymize(
         &self,
-        _entity: &Entity<Text>,
-        data: &TextData,
-    ) -> Result<Option<TextReplacement>> {
-        Ok(self.render(data.as_str()).map(TextReplacement::substituted))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for GeneralizeDate {
-    fn id(&self) -> ComponentId {
-        GeneralizeDate::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
+        _entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         Ok(self
-            .try_anonymize(entity, data)
-            .await?
-            .unwrap_or(TabularReplacement::Cell(TextReplacement::Removed)))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl TryOperator<Tabular> for GeneralizeDate {
-    async fn try_anonymize(
-        &self,
-        _entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<Option<TabularReplacement>> {
-        Ok(self
-            .render(data.as_str())
-            .map(|text| TextReplacement::substituted(text).into()))
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for GeneralizeDate {
-    fn id(&self) -> ComponentId {
-        GeneralizeDate::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Partial
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(self
-            .try_anonymize(entity, data)
-            .await?
-            .unwrap_or(MetadataReplacement::Value(TextReplacement::Removed)))
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl TryOperator<Metadata> for GeneralizeDate {
-    async fn try_anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<Option<MetadataReplacement>> {
-        Ok(self
-            .render(data.as_str())
-            .map(|text| TextReplacement::substituted(text).into()))
+            .render(data.as_ref())
+            .map(|text| M::Replacement::from(TextReplacement::substituted(text))))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use elide_core::modality::text::{Text, TextData};
+
     use super::*;
 
     #[test]
@@ -396,7 +320,7 @@ mod tests {
 
     #[test]
     fn iso_mode_declines_us_slashes() {
-        // The default is strict: month-first slashes are not ISO, so declined ,
+        // The default is strict: month-first slashes are not ISO, so declined,
         // never silently reinterpreted.
         let g = GeneralizeDate::new(DateGranularity::YearMonth);
         assert_eq!(g.render("03/14/1987"), None);

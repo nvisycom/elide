@@ -23,9 +23,9 @@ use serde::{Deserialize, Serialize};
 /// retain. The replacement records "leave this as-is" so the entity still
 /// shows up in the audit trail.
 ///
-/// Works across modalities, a text/tabular span stays verbatim, an image
-/// region or audio range is left untouched, a metadata field keeps its value. Like the other operators, [`Keep`]
-/// is implemented per modality, so the one type serves every modality.
+/// Works across modalities: a text or tabular span stays verbatim, an image
+/// region or audio range is left untouched, and a metadata field keeps its
+/// value.
 ///
 /// A field that stands for a group with others (an EXIF device or GPS field)
 /// goes with the group when another of its fields is redacted: removal wins,
@@ -77,7 +77,29 @@ impl Operator<Tabular> for Keep {
         _entity: &Entity<Tabular>,
         data: &TextData,
     ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(data.as_str()).into())
+        Ok(TabularReplacement::Cell(TextReplacement::substituted(
+            data.as_str(),
+        )))
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Keep {
+    fn id(&self) -> ComponentId {
+        Keep::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        KEEP_LEAK
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        _data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Unchanged)
     }
 }
 
@@ -118,26 +140,6 @@ impl Operator<Audio> for Keep {
         _data: &AudioData,
     ) -> Result<AudioReplacement> {
         Ok(AudioReplacement::Unchanged)
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Keep {
-    fn id(&self) -> ComponentId {
-        Keep::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        _data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(MetadataReplacement::Unchanged)
     }
 }
 

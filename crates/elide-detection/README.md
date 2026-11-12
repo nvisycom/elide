@@ -26,7 +26,7 @@ let analysis = Analyzer::new()
     // Fuse same-label overlaps into one entity...
     .with_layer(FuseLayer::max())
     // ...then arbitrate cross-label overlaps.
-    .with_layer(ReconcileLayer::cross_label(Structural::standard()))
+    .with_layer(ReconcileLayer::structural())
     .analyze(data, &scope)
     .await?;
 let entities = analysis.entities;

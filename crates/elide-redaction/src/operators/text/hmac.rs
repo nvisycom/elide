@@ -8,11 +8,8 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextRedactable;
+use elide_core::modality::text::TextReplacement;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 use hmac::{Hmac, KeyInit, Mac};
@@ -37,11 +34,12 @@ use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
 /// Key material comes from a [`KeyProvider`] wired at construction, never
 /// from serialized policy.
 ///
-/// [`Sha2Hash`]: crate::operators::Sha2Hash
 /// Only the policy config (`algorithm`) serializes; the [`KeyProvider`] is
 /// skipped, key material is never part of serialized policy and is re-wired
 /// at construction when a selection is rebuilt. `Serialize` only: the skipped
 /// provider has no default to deserialize back into.
+///
+/// [`Sha2Hash`]: crate::operators::Sha2Hash
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -53,11 +51,6 @@ pub struct HmacHash {
 }
 
 impl HmacHash {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("hmac", "1.0.0")
-    }
-
     /// An HMAC operator over `algorithm`, drawing keys from `keys`.
     pub fn new(algorithm: Sha2Algorithm, keys: Arc<dyn KeyProvider>) -> Self {
         Self { algorithm, keys }
@@ -105,9 +98,9 @@ impl fmt::Debug for HmacHash {
 }
 
 #[async_trait::async_trait]
-impl Operator<Text> for HmacHash {
+impl<M: TextRedactable> Operator<M> for HmacHash {
     fn id(&self) -> ComponentId {
-        HmacHash::id()
+        ComponentId::new("hmac", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -117,57 +110,16 @@ impl Operator<Text> for HmacHash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(
-            self.digest(&entity.label, data.as_str())?,
-        ))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for HmacHash {
-    fn id(&self) -> ComponentId {
-        HmacHash::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TextReplacement::substituted(self.digest(&entity.label, data.as_str())?).into())
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for HmacHash {
-    fn id(&self) -> ComponentId {
-        HmacHash::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(
-        &self,
-        entity: &Entity<Metadata>,
-        data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::substituted(self.digest(&entity.label, data.as_str())?).into())
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        let digest = self.digest(&entity.label, data.as_ref())?;
+        Ok(M::Replacement::from(TextReplacement::substituted(digest)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::{AuditEvent, PatternRule};
-    use elide_core::modality::text::TextLocation;
+    use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
 

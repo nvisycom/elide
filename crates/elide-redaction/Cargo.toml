@@ -60,7 +60,7 @@ aes = ["dep:aes-gcm", "dep:base64", "dep:zeroize"]
 ## The `GeneralizeDate` operator (reduce date/timestamp granularity).
 datetime = ["dep:jiff"]
 ## The locale-aware `Fake` redaction operator based on the `fake` crate.
-fake = ["dep:elide-fake", "tabular"]
+fake = ["dep:elide-fake"]
 
 [dependencies]
 # Internal crates
@@ -106,6 +106,9 @@ elide-image = { workspace = true, features = ["fixtures"] }
 # Likewise a real audio payload for the audio-operator tests (`wav` provides the
 # fixture encoder `fixtures::blank_audio_data` uses).
 elide-audio = { workspace = true, features = ["fixtures", "wav"] }
+
+# (De)serialization
+serde_json = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt", "macros"] }

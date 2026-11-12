@@ -45,10 +45,13 @@ regions of faces, signatures, and other visual identifiers; see
 use elide::prelude::operators::*;
 use elide::prelude::*;
 
+# fn main() -> Result<()> {
 let anonymizer = Anonymizer::<Image>::new()
-    .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)))
+    .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
     .with(Rule::label(builtins::SIGNATURE.to_ref(), Blackbox::default()))
-    .with(Rule::fallback(Pixelate::new(16)));
+    .with(Rule::fallback(Pixelate::new(16)?));
+# Ok(())
+# }
 ```
 
 ## Image operators
@@ -56,8 +59,8 @@ let anonymizer = Anonymizer::<Image>::new()
 | Operator | Effect |
 |---|---|
 | `Blackbox` | Fills the region with a solid color, black by default |
-| `Blur::new(sigma)` | Gaussian blur; a larger sigma blurs more |
-| `Pixelate::new(block_size)` | Replaces the region with blocks of that size |
+| `Blur::new(sigma)` | Gaussian blur; a larger sigma blurs more (at least 1 pixel) |
+| `Pixelate::new(block_size)` | Replaces the region with blocks of that size (at least 2 pixels) |
 
 A blur or pixelation can sometimes be reversed on small text. Prefer
 `Blackbox` for text found by OCR.

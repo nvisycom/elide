@@ -789,7 +789,7 @@ mod tests {
     /// *real* buffered entities, not just an empty array, and the data survive.
     #[test]
     fn entry_fields_may_arrive_in_any_order() {
-        // A real entity array, with `entities` before `modality` and `id` last ,
+        // A real entity array, with `entities` before `modality` and `id` last,
         // the reverse of what we emit.
         let entities = serde_json::to_string(&vec![text_entity("EMAIL_ADDRESS")]).unwrap();
         let json = format!(

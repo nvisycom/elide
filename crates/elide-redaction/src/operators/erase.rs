@@ -1,19 +1,18 @@
 //! [`Erase`]: remove the matched entity entirely, in any modality.
 
 #[cfg(feature = "audio")]
-use elide_audio::modality::{Audio, AudioReplacement};
+use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::Modality;
 #[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataReplacement};
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "image")]
-use elide_image::modality::{Image, ImageReplacement};
+use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -45,11 +44,7 @@ impl Operator<Text> for Erase {
         LeakProfile::Irrecoverable
     }
 
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Text>,
-        _data: &<Text as Modality>::Data,
-    ) -> Result<TextReplacement> {
+    async fn anonymize(&self, _entity: &Entity<Text>, _data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::Removed)
     }
 }
@@ -68,10 +63,30 @@ impl Operator<Tabular> for Erase {
     async fn anonymize(
         &self,
         _entity: &Entity<Tabular>,
-        _data: &<Tabular as Modality>::Data,
+        _data: &TextData,
     ) -> Result<TabularReplacement> {
-        // Erasing a tabular entity removes the cell's text, not the row.
+        // A table cell loses its text, not its row.
         Ok(TabularReplacement::Cell(TextReplacement::Removed))
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Erase {
+    fn id(&self) -> ComponentId {
+        Erase::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Irrecoverable
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        _data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Value(TextReplacement::Removed))
     }
 }
 
@@ -89,7 +104,7 @@ impl Operator<Audio> for Erase {
     async fn anonymize(
         &self,
         _entity: &Entity<Audio>,
-        _data: &<Audio as Modality>::Data,
+        _data: &AudioData,
     ) -> Result<AudioReplacement> {
         Ok(AudioReplacement::Removed)
     }
@@ -109,28 +124,8 @@ impl Operator<Image> for Erase {
     async fn anonymize(
         &self,
         _entity: &Entity<Image>,
-        _data: &<Image as Modality>::Data,
+        _data: &ImageData,
     ) -> Result<ImageReplacement> {
         Ok(ImageReplacement::Removed)
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Erase {
-    fn id(&self) -> ComponentId {
-        Erase::id()
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        LeakProfile::Irrecoverable
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        _data: &<Metadata as Modality>::Data,
-    ) -> Result<MetadataReplacement> {
-        Ok(TextReplacement::Removed.into())
     }
 }
