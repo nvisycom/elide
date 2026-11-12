@@ -9,7 +9,7 @@ use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, Result};
 use serde::Deserialize;
 
-pub(crate) use self::compiled::CompiledDictionary;
+pub(crate) use self::compiled::{CompiledDictionary, DictionaryTerms, TermOwner};
 pub use self::term::Term;
 use crate::context::RuleContext;
 
@@ -118,6 +118,7 @@ impl Default for Scoring {
     setter(into, strip_option, prefix = "with"),
     build_fn(private, name = "try_build", error = "UninitializedFieldError")
 )]
+#[serde(deny_unknown_fields)]
 pub struct Dictionary {
     /// Human-readable identifier surfaced in trail provenance
     /// (e.g. `"nationalities"`).
@@ -142,9 +143,9 @@ pub struct Dictionary {
     #[serde(default)]
     pub context: RuleContext,
     /// BCP-47 language tags the dictionary applies to. Empty means
-    /// "any language"; otherwise the recognizer skips the
-    /// dictionary when the per-call language hint is not in the
-    /// list.
+    /// "any language"; otherwise the recognizer skips the dictionary when
+    /// the caller asserts languages and none is in the list. A detected
+    /// language never skips it.
     #[builder(default)]
     #[serde(default)]
     pub languages: Vec<LanguageTag>,
@@ -275,6 +276,7 @@ impl Dictionary {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DictionaryMetadata {
     name: String,
     labels: Vec<LabelRef>,
@@ -323,6 +325,22 @@ labels = ["PRODUCT"]
         assert!(!words.contains(&"alias"));
         assert!(words.contains(&"WIDGET"));
         assert!(words.contains(&"wdg"));
+    }
+
+    #[test]
+    fn metadata_rejects_an_unknown_field() {
+        let typo = "name = \"widgets\"\nlabels = [\"PRODUCT\"]\nlangauges = [\"en\"]\n";
+        assert!(Dictionary::metadata_from_toml(typo).is_err());
+    }
+
+    #[test]
+    fn from_toml_rejects_an_unknown_term_field() {
+        let typo = r#"
+name = "widgets"
+labels = ["PRODUCT"]
+terms = [{ term = "WIDGET", scroe = 0.5 }]
+"#;
+        assert!(Dictionary::from_toml(typo).is_err());
     }
 
     #[test]

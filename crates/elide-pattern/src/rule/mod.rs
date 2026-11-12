@@ -7,8 +7,10 @@
 
 mod dictionary;
 mod pattern;
+mod scope;
 
-pub(crate) use self::dictionary::CompiledDictionary;
+pub(crate) use self::dictionary::{CompiledDictionary, DictionaryTerms, TermOwner};
 pub use self::dictionary::{Dictionary, DictionaryBuilder, Scoring, Term};
 pub(crate) use self::pattern::CompiledPattern;
 pub use self::pattern::{Pattern, PatternBuilder, Variant};
+pub(crate) use self::scope::RuleScope;

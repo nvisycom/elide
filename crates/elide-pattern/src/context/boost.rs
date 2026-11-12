@@ -8,7 +8,7 @@ use elide_core::primitive::{Confidence, LanguageTag};
 use hipstr::HipStr;
 
 use super::compiled::CompiledContext;
-use super::matching::{KeywordMatcher, is_whole_word};
+use super::matching::{KeywordMatcher, KeywordSet, is_whole_word};
 use super::window::{slice_tokens_around, token_span, word_window};
 use crate::recognizer::RawMatch;
 
@@ -198,7 +198,7 @@ fn first_hit(
     matcher: &dyn KeywordMatcher,
     text: &str,
     tokens: &[Token],
-    keywords: &[HipStr<'static>],
+    keywords: &KeywordSet,
 ) -> Option<Range<usize>> {
     matcher
         .matches(text, tokens, keywords)
@@ -256,7 +256,9 @@ mod tests {
     }
 
     fn compile(declared: &RuleContext) -> CompiledContext {
-        CompiledContext::compile(declared, &[]).expect("context declares something")
+        CompiledContext::compile(declared, &[])
+            .unwrap()
+            .expect("context declares something")
     }
 
     fn raw(label: &str, range: Range<usize>, score: f32, context: Option<usize>) -> RawMatch {

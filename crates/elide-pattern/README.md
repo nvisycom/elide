@@ -22,6 +22,57 @@ several jurisdictions, and you can add your own alongside them.
 Some of the shipped patterns and validators are adapted from
 [Microsoft Presidio](https://github.com/microsoft/presidio).
 
+```rust
+use elide_core::modality::text::{Text, TextData};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
+use elide_pattern::{Pattern, PatternRecognizer};
+
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> elide_core::Result<()> {
+let employee_id = Pattern::from_toml(r#"
+    name = "employee_id"
+    labels = ["internal_id"]
+
+    [[variants]]
+    regex = '\bEMP-\d{5}\b'
+    score = 0.95
+"#)?;
+
+let recognizer = PatternRecognizer::builder()
+    .with_builtin_patterns()
+    .with_builtin_dictionaries()
+    .with_pattern(employee_id)
+    .build()?;
+
+let scope = Scope::new();
+let subject = Subject::<Text>::new(TextData::new("EMP-12345, jane@example.com"));
+let entities = recognizer.recognize(&subject, &Context::new(&scope)).await?;
+let labels: Vec<&str> = entities.iter().map(|e| e.label.as_str()).collect();
+assert!(labels.contains(&"internal_id"));
+assert!(labels.contains(&"email_address"));
+# Ok(())
+# }
+```
+
+The crate holds:
+
+- **`PatternRecognizer`** — the recognizer, built with
+  `PatternRecognizer::builder()`. It scans the text once with every regex and
+  once with every dictionary term, then lifts each match whose rule's context
+  is found nearby.
+- **`Pattern`** and **`Dictionary`** — the two rule types, written in TOML or
+  with a builder. A pattern holds regex `Variant`s, each with a score and an
+  optional validator; a dictionary holds literal `Term`s, loaded from a list or
+  a CSV, scored uniformly or per column.
+- **`context`** — a rule's `[context]`: keywords, per language or in any, and
+  an anchor label, that raise a nearby match's confidence. Keywords match as
+  case-insensitive substrings (`SubstringMatcher`), or by lemma when the text
+  was tokenized (`LemmaMatcher`).
+- **`validators`** — checksum and structure checks (Luhn, IBAN, national IDs
+  across many jurisdictions), resolved by name from a `ValidatorRegistry`.
+- **`patterns`** and **`dictionaries`** — the shipped rules, by region and by
+  language.
+
 ## Documentation
 
 See [`docs/`](../../docs/) for architecture, security, and API documentation.

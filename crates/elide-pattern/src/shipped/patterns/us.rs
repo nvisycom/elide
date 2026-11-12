@@ -1,6 +1,7 @@
 //! United States, patterns scoped to US jurisdictional formats.
 
-use crate::{__shipped_pattern as shipped_pattern, Pattern};
+use super::shipped_pattern;
+use crate::Pattern;
 
 shipped_pattern!(
     /// US bank routing numbers (ABA RTN, mod-10 validated).

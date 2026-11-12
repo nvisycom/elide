@@ -5,7 +5,8 @@
 //! Cryptocurrency names (`Bitcoin`, `Ethereum`) and tickers
 //! (`BTC`, `ETH`) are the same string in every language.
 
-use crate::{__shipped_dictionary as shipped_dictionary, Dictionary};
+use super::shipped_dictionary;
+use crate::Dictionary;
 
 shipped_dictionary!(
     /// Cryptocurrency names and distinctive tickers: Bitcoin, BTC, Ethereum, ….

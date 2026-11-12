@@ -28,9 +28,7 @@ use crate::Dictionary;
 /// Paths are resolved with `include_str!` against the path of the
 /// file that *expands* the macro, so callers in sub-modules pass
 /// paths relative to themselves.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __shipped_dictionary {
+macro_rules! shipped_dictionary {
     ($(#[$meta:meta])* fn $name:ident from $meta_path:literal with csv $terms:literal) => {
         $(#[$meta])*
         #[must_use]
@@ -57,6 +55,8 @@ macro_rules! __shipped_dictionary {
         }
     };
 }
+
+use shipped_dictionary;
 
 /// Every built-in dictionary shipped by this crate, regardless of
 /// scope.

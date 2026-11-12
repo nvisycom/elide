@@ -2,7 +2,8 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Pattern};
+use super::shipped_pattern;
+use crate::Pattern;
 
 shipped_pattern!(
     /// ABN, 11-digit Australian Business Number with mod-89

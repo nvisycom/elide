@@ -3,7 +3,8 @@
 //! Algorithm sourced from the Department of Provincial
 //! Administration spec (not from the Presidio bundle).
 
-use crate::{__shipped_pattern as shipped_pattern, Pattern};
+use super::shipped_pattern;
+use crate::Pattern;
 
 shipped_pattern!(
     /// Thai national ID (เลขประจำตัวประชาชน), 13 digits with a check digit.

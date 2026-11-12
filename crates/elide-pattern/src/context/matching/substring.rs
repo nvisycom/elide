@@ -5,49 +5,20 @@
 use std::ops::Range;
 
 use elide_core::modality::text::Token;
-use hipstr::HipStr;
 
-use super::KeywordMatcher;
+use super::{KeywordMatcher, KeywordSet};
 
-/// A [`KeywordMatcher`] that finds keywords as ASCII case-insensitive
-/// substrings.
+/// A [`KeywordMatcher`] that finds keywords as case-insensitive substrings.
 ///
-/// The default matcher. It runs whenever no token artifact was
-/// stamped on `Context.artifacts`, or whenever the caller
-/// explicitly picks raw matching.
-///
-/// Fast, allocation-light, permissive: the keyword `"email"` fires
-/// inside `"MyEmailAddress"`. Ignores the `tokens` argument.
+/// The default matcher. Fast and permissive: the keyword `"email"` fires
+/// inside `"MyEmailAddress"`, and the rule's word-boundary policy decides
+/// whether that counts. Ignores the `tokens` argument.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SubstringMatcher;
 
 impl KeywordMatcher for SubstringMatcher {
-    fn matches(
-        &self,
-        window: &str,
-        _tokens: &[Token],
-        keywords: &[HipStr<'static>],
-    ) -> Vec<Range<usize>> {
-        // `to_ascii_lowercase` rewrites bytes in place without changing
-        // length, so an offset into `lowered` is the same offset into
-        // `window`, each match position is reusable as-is.
-        let lowered = window.to_ascii_lowercase();
-        let mut matches: Vec<Range<usize>> = keywords
-            .iter()
-            .flat_map(|kw| {
-                let needle = kw.as_str().to_ascii_lowercase();
-                // Every occurrence, so the boundary filter can skip
-                // a substring hit and still reach a later boundary-valid one.
-                lowered
-                    .match_indices(&needle)
-                    .map(|(start, _)| start..start + needle.len())
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        // Report in text-scan order (by position), not grouped by keyword, so
-        // the recognizer resolves the earliest matching keyword's location.
-        matches.sort_by_key(|range| range.start);
-        matches
+    fn matches(&self, window: &str, _tokens: &[Token], keywords: &KeywordSet) -> Vec<Range<usize>> {
+        keywords.find_all(window)
     }
 }
 
@@ -55,8 +26,8 @@ impl KeywordMatcher for SubstringMatcher {
 mod tests {
     use super::*;
 
-    fn kws(items: &[&'static str]) -> Vec<HipStr<'static>> {
-        items.iter().copied().map(HipStr::from).collect()
+    fn kws(items: &[&'static str]) -> KeywordSet {
+        KeywordSet::new(items.iter().copied()).unwrap()
     }
 
     #[test]

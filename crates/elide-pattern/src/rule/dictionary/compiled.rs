@@ -1,44 +1,47 @@
-//! [`CompiledDictionary`]: one dictionary's slice of the recognizer's shared
-//! Aho-Corasick automaton.
+//! [`CompiledDictionary`] and [`DictionaryTerms`]: dictionaries compiled into
+//! the recognizer's shared Aho-Corasick automaton.
 
 use std::ops::Range;
 
+use aho_corasick::AhoCorasick;
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::PatternRule;
-use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
+use elide_core::primitive::Confidence;
 
 use crate::recognizer::RawMatch;
+use crate::rule::RuleScope;
 
-/// Source of truth for one runtime dictionary: its term range
-/// inside the shared Aho-Corasick automaton, plus per-dictionary
-/// emission metadata.
+/// One dictionary's emission metadata, for the recognizer's shared
+/// Aho-Corasick automaton. Which of the automaton's terms belong to it, and at
+/// what score, is kept per term ([`TermOwner`]), since one term can belong to
+/// several dictionaries.
 pub(crate) struct CompiledDictionary {
-    pub name: String,
-    /// Candidate labels, most-specific first. The recognizer resolves one
-    /// against the request catalog before emitting.
-    pub labels: Vec<LabelRef>,
-    /// First term-id (inclusive) for this dictionary inside the
-    /// shared automaton.
-    pub term_start: usize,
-    /// One past the last term-id for this dictionary inside the
-    /// shared automaton.
-    pub term_end: usize,
-    /// Per-term confidence, indexed by `term_id - term_start`.
-    /// Resolved at compile time from the dictionary's `scoring`
-    /// policy and any per-term overrides.
-    pub term_scores: Vec<Confidence>,
-    /// Languages this dictionary applies to. Empty means "any
-    /// language".
-    pub languages: Vec<LanguageTag>,
-    /// Countries this dictionary applies to. Empty means "any
-    /// country".
-    pub countries: Vec<CountryCode>,
+    /// The dictionary's labels and locale scope.
+    pub scope: RuleScope,
     /// Reject matches whose immediate neighbours are word
     /// characters (alphanumeric or `_`). Mirrors regex `\b`.
     pub word_boundary: bool,
     /// The dictionary's context, as an index into the recognizer's
     /// contexts; `None` when it declares none.
     pub context: Option<usize>,
+    /// The provenance recorded on every match: the dictionary's name.
+    pub rule: PatternRule,
+}
+
+/// Every distinct dictionary term in one automaton, and the dictionaries
+/// holding each, indexed by the automaton's pattern id.
+pub(crate) struct DictionaryTerms {
+    pub automaton: AhoCorasick,
+    pub owners: Vec<Vec<TermOwner>>,
+}
+
+/// A dictionary that holds one of the automaton's terms, and the term's
+/// confidence there, resolved at build time from the dictionary's `scoring`
+/// policy and any per-term override.
+pub(crate) struct TermOwner {
+    /// Index of the dictionary in the recognizer's dictionaries.
+    pub dictionary: usize,
+    pub score: Confidence,
 }
 
 impl CompiledDictionary {
@@ -57,10 +60,7 @@ impl CompiledDictionary {
             confidence: score,
             range,
             context: self.context,
-            rule: PatternRule {
-                name: self.name.clone().into(),
-                ..PatternRule::default()
-            },
+            rule: self.rule.clone(),
         }
     }
 }

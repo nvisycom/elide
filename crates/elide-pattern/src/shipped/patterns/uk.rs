@@ -2,7 +2,8 @@
 //!
 //! See `assets/NOTICE.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Pattern};
+use super::shipped_pattern;
+use crate::Pattern;
 
 shipped_pattern!(
     /// UK NHS numbers (10-digit, mod-11 validated).

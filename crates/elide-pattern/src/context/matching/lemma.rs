@@ -3,51 +3,39 @@
 use std::ops::Range;
 
 use elide_core::modality::text::Token;
-use hipstr::HipStr;
 
-use super::{KeywordMatcher, SubstringMatcher};
+use super::{KeywordMatcher, KeywordSet, SubstringMatcher, by_position};
 
 /// A [`KeywordMatcher`] that matches keywords against token lemmas.
 ///
 /// Finds every [`SubstringMatcher`] hit, so an inflected keyword (`ruled`)
 /// or a phrase (`filed with`) still matches the text as written, plus each
-/// token in `tokens` whose lemma equals a keyword (ASCII case-insensitive).
+/// token in `tokens` whose lemma equals a keyword, ignoring case.
 /// Without `tokens` (no shared NLP artifact was produced), only the
 /// substring hits apply.
 ///
 /// Recognizes morphological variants the substring matcher cannot:
-/// `"running" → "run"`, `"dogs" → "dog"`, `"SSNs" → "ssn"`. Cost
-/// is one lowercase per keyword + one lowercase per lemma per
-/// match attempt.
+/// `"running" → "run"`, `"dogs" → "dog"`, `"SSNs" → "ssn"`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LemmaMatcher;
 
 impl KeywordMatcher for LemmaMatcher {
-    fn matches(
-        &self,
-        window: &str,
-        tokens: &[Token],
-        keywords: &[HipStr<'static>],
-    ) -> Vec<Range<usize>> {
+    fn matches(&self, window: &str, tokens: &[Token], keywords: &KeywordSet) -> Vec<Range<usize>> {
         let mut found = SubstringMatcher.matches(window, tokens, keywords);
         if tokens.is_empty() {
             return found;
         }
-        let lowered_keywords: Vec<String> = keywords
-            .iter()
-            .map(|k| k.as_str().to_ascii_lowercase())
-            .collect();
         // Tokens carry stream-relative offsets; the contract is a
         // *window*-relative range. The window spans from the first token
         // (see `token_span`), so subtracting its start rebases each match.
         let base = tokens[0].offset.start;
-        found.extend(tokens.iter().filter_map(|tok| {
-            let lemma = tok.lemma.as_str().to_ascii_lowercase();
-            lowered_keywords
-                .contains(&lemma)
-                .then(|| tok.offset.start - base..tok.offset.end - base)
-        }));
-        found.sort_by_key(|m| (m.start, m.end));
+        found.extend(
+            tokens
+                .iter()
+                .filter(|tok| keywords.contains(tok.lemma.as_str()))
+                .map(|tok| tok.offset.start - base..tok.offset.end - base),
+        );
+        found.sort_by(by_position);
         found.dedup();
         found
     }
@@ -57,8 +45,8 @@ impl KeywordMatcher for LemmaMatcher {
 mod tests {
     use super::*;
 
-    fn kws(items: &[&'static str]) -> Vec<HipStr<'static>> {
-        items.iter().copied().map(HipStr::from).collect()
+    fn kws(items: &[&'static str]) -> KeywordSet {
+        KeywordSet::new(items.iter().copied()).unwrap()
     }
 
     #[test]
@@ -92,7 +80,7 @@ mod tests {
         // check drops, and the token whose lemma is `rule`.
         assert_eq!(
             m.matches(window, &tokens, &kws(&["rule"])),
-            vec![12..16, 12..17]
+            vec![12..17, 12..16]
         );
         assert_eq!(
             m.matches(window, &tokens, &kws(&["filed with"])),

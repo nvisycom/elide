@@ -9,7 +9,8 @@
 //! dictionaries from firing when the caller asserts a
 //! non-English document.
 
-use crate::{__shipped_dictionary as shipped_dictionary, Dictionary};
+use super::shipped_dictionary;
+use crate::Dictionary;
 
 shipped_dictionary!(
     /// Long-form English fiat currency names: US Dollar, Euro, Polish Zloty, ….
