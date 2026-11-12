@@ -46,8 +46,8 @@ and this project adheres to
   backend
 - Speech-to-text and OCR enrichers that make audio and images text-recognizable
 - An `Analyzer` per modality that runs enrichers, then recognizers, then the
-  deduplication layers that fuse and arbitrate their findings; recognizer
-  decorators `resilient`, `chunked`, and `escalation`
+  layers that calibrate, fuse, arbitrate, and threshold their findings;
+  recognizer decorators `resilient`, `chunked`, and `escalation`
 - A caller's `Scope` names the entity types to detect (an empty catalog
   detects nothing), the asserted languages and jurisdictions, and free-form
   document tags, purpose, and audience
@@ -120,7 +120,7 @@ and this project adheres to
 - **elide:** Facade re-exporting the toolkit: recognizers, dedup layers,
   redaction operators, and codecs
 - **elide-core:** Domain types, traits, and errors
-- **elide-detection:** The `Analyzer` and its deduplication layers
+- **elide-detection:** The `Analyzer` and its detection layers
 - **elide-pattern:** Pattern and dictionary recognizers, with keyword-boost
   context enhancement
 - **elide-ner:** NER traits and language detection

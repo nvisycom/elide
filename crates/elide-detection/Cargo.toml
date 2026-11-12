@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-detection"
-description = "Detection engine for the Elide toolkit: the Analyzer and its deduplication layers"
+description = "Detection engine for the Elide toolkit: the Analyzer and its fusion, reconciliation, and threshold layers"
 keywords = ["pii", "detection", "deduplication", "ner"]
 categories = ["text-processing"]
 

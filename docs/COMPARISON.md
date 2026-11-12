@@ -114,9 +114,9 @@ independent of any single NER model.
 
 **Reconciliation.** Both assign confidence scores in [0, 1]. `elide` adds an
 explicit, layered reconciliation pipeline after recognition: calibrate
-(per-recognizer multiplier), reconcile (same-label pooling and cross-label
-structural arbitration for nesting and conflict), then filter (threshold and
-label allow-list). Presidio resolves overlaps but does not expose a comparably
+(per-recognizer multiplier), overlap (same-label fusion and cross-label
+structural arbitration for nesting and conflict), then filter (a confidence
+threshold). Presidio resolves overlaps but does not expose a comparably
 staged, swappable layer pipeline.
 
 ## 4. Redaction and reversibility

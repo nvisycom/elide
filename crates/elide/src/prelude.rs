@@ -59,7 +59,7 @@ pub use elide_detection::{
     Analyzer, Layer,
     calibrate::CalibrateLayer,
     filter::ThresholdLayer,
-    reconcile::{
+    overlap::{
         FuseLayer, ReconcileLayer, Structural,
         group::{CrossLabel, SameLabel},
         scoring::MaxConfidence,

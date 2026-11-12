@@ -49,7 +49,7 @@ pub trait DataReader<M: Modality>: Send + Sync {
 ///
 /// Recognizers see a chunk's decoded payload and emit entities whose locations
 /// address *that chunk's* coordinate system. [`lift`] maps such an entity back to
-/// a source-coordinate one, so everything downstream (deduplication,
+/// a source-coordinate one, so everything downstream (the detection layers,
 /// anonymization, writing) speaks the source's own coordinates. The default is
 /// the identity: a flat in-memory source whose single chunk *is* the source needs
 /// no remapping. Sources whose decoded chunks diverge from their bytes (escaped

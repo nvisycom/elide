@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    AuditEvent, AuditKind, Calibration, Conflict, Contested, Deduplication, Flagged, Manual,
-    ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
+    AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Manual, ManualIntent,
+    Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
 };
 pub use self::hash::AuditHash;
 pub use self::rule_match::RuleMatch;
@@ -27,8 +27,8 @@ use crate::{Error, Result};
 ///
 /// Where Presidio keeps a shallow, optional, per-stage explanation that is
 /// stripped by default, an `AuditLog` is always present and records the
-/// entity's *entire* life: each recognizer that found it, the deduplication
-/// that fused them, any confidence calibration, and the redaction that hid it.
+/// entity's *entire* life: each recognizer that found it, the fusion
+/// that joined them, any confidence calibration, and the redaction that hid it.
 /// Nothing is collapsed: every recognizer keeps its own recognition event with
 /// its location and score.
 ///
@@ -94,7 +94,7 @@ impl<M: Modality> AuditLog<M> {
 
     /// Consume the log, yielding its events in order.
     ///
-    /// For a deduplication step that folds one entity's trail into another's:
+    /// For a fusion step that folds one entity's trail into another's:
     /// take the events by value and [`absorb`](Self::absorb) them, so their
     /// hashes carry over without cloning.
     pub fn into_events(self) -> Vec<AuditEvent<M>> {
@@ -120,7 +120,7 @@ impl<M: Modality> AuditLog<M> {
 
     /// Move another trail's events into this log, preserving their hashes.
     ///
-    /// Used by a deduplication step before [`record_fusion`](Self::record_fusion):
+    /// Used by a fusion step before [`record_fusion`](Self::record_fusion):
     /// the absorbed events keep their own parent links (they are self-contained
     /// sub-DAGs), and the fusion event then names both trails' heads as its
     /// parents.
@@ -276,7 +276,7 @@ impl<M: Modality> AuditLog<M> {
     ///
     /// The parents' own events must already have been [absorbed](Self::absorb)
     /// into this log; their hashes are unchanged, so no earlier event is
-    /// re-linked. This is what a deduplication step records to join two trails
+    /// re-linked. This is what a fusion step records to join two trails
     /// without imposing a false linear order between them.
     pub fn record_fusion(&mut self, mut event: AuditEvent<M>, parents: impl Into<Vec<AuditHash>>) {
         event.parents = parents.into();
@@ -423,7 +423,7 @@ mod tests {
                 },
             ),
             AuditEvent::flagged("codec", conf, at.clone(), HiddenContentKind::Collaboration),
-            AuditEvent::deduplication("union", conf),
+            AuditEvent::fusion("union", conf),
             AuditEvent::conflict(Conflict::new(LabelRef::new("iban"), conf, "longest"), conf),
             AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
             AuditEvent::calibration(conf, 0.5),
@@ -481,7 +481,7 @@ mod tests {
         "be2a8bc8d489f497b7e7e57aad9d95576ba406a6306d7606bc91aacba48266e3",
         // flagged
         "05d48e609b150c7180fad9163c4e96bd160e540df3f2c5f7eb9c5a57b74937f3",
-        // deduplication
+        // fusion
         "d1b7c5290a168246ebb9cb2c5f4f3c16ede35f42637c7bb58dba1329d434d88c",
         // conflict
         "d7481599219daeab60f7ba1e35723a622a86fed5160a607228841fe3408b6575",

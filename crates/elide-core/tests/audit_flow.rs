@@ -22,7 +22,7 @@ fn recognized(label: &LabelRef, location: TextLocation, event: AuditEvent<Text>)
 }
 
 /// A trivial "highest confidence wins" fusion: absorb every other entity's
-/// trail, then record a deduplication event joining both trails' heads, what
+/// trail, then record a fusion event joining both trails' heads, what
 /// the toolkit fusion step does, assembled here by hand from core parts.
 fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
     entities.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
@@ -34,7 +34,7 @@ fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
         base.audit.absorb(other.audit.events().iter().cloned());
     }
     base.audit
-        .record_fusion(AuditEvent::deduplication("max", base.confidence), parents);
+        .record_fusion(AuditEvent::fusion("max", base.confidence), parents);
     base
 }
 
@@ -93,12 +93,12 @@ fn two_recognizers_fuse_into_one() {
         Some("ref-1")
     );
 
-    // Both recognitions survive, plus a deduplication event.
+    // Both recognitions survive, plus a fusion event.
     assert_eq!(entity.audit.recognizers().count(), 2);
     assert_eq!(entity.audit.events().len(), 3);
     assert_matches!(
         entity.audit.events().last().unwrap().kind,
-        AuditKind::Deduplication(ref dedup) if dedup.strategy == "max");
+        AuditKind::Fusion(ref dedup) if dedup.strategy == "max");
     assert_eq!(
         entity.audit.final_confidence(),
         Some(Confidence::new(0.95).unwrap())

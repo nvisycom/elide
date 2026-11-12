@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
 use super::{
-    Calibration, Conflict, Contested, Deduplication, Flagged, Manual, Model, Pattern, Redaction,
+    Calibration, Conflict, Contested, Flagged, Fusion, Manual, Model, Pattern, Redaction,
     Refinement, Selection,
 };
 use crate::modality::Modality;
@@ -70,7 +70,7 @@ pub enum AuditKind<M: Modality> {
     /// subject.
     Flagged(Flagged<M>),
     /// Several detections were fused into one entity.
-    Deduplication(Deduplication),
+    Fusion(Fusion),
     /// A competing detection of a different label over the same span was
     /// resolved against this (winning) entity.
     Conflict(Conflict),
@@ -118,8 +118,8 @@ impl<M: Modality> AuditKind<M> {
                 out.byte(Model::<M>::TAG);
                 m.hash_into(out);
             }
-            Self::Deduplication(d) => {
-                out.byte(Deduplication::TAG);
+            Self::Fusion(d) => {
+                out.byte(Fusion::TAG);
                 d.hash_into(out);
             }
             Self::Conflict(c) => {
@@ -176,9 +176,9 @@ impl<M: Modality> From<Flagged<M>> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Deduplication> for AuditKind<M> {
-    fn from(payload: Deduplication) -> Self {
-        Self::Deduplication(payload)
+impl<M: Modality> From<Fusion> for AuditKind<M> {
+    fn from(payload: Fusion) -> Self {
+        Self::Fusion(payload)
     }
 }
 

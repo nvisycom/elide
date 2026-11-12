@@ -2,7 +2,7 @@
 //!
 //! The [`Analyzer`] runs the enrichers and recognizers, then reconciles
 //! their findings through the [`Layer`] stages, [`calibrate`],
-//! [`reconcile`], [`filter`], each reshaping or pruning the working entity
+//! [`overlap`], [`filter`], each reshaping or pruning the working entity
 //! set. Re-exported from [`elide_detection`].
 //!
 //! Decorators that *wrap* a recognizer (escalation, resilience, chunking) are a
@@ -11,8 +11,8 @@
 //! [`Analyzer`]: crate::detection::Analyzer
 //! [`Layer`]: elide_detection::Layer
 //! [`calibrate`]: elide_detection::calibrate
-//! [`reconcile`]: elide_detection::reconcile
+//! [`overlap`]: elide_detection::overlap
 //! [`filter`]: elide_detection::filter
 
 #[doc(inline)]
-pub use elide_detection::{Analyzer, Layer, LayerOutput, calibrate, filter, reconcile};
+pub use elide_detection::{Analyzer, Layer, LayerOutput, calibrate, filter, overlap};

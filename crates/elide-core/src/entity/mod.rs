@@ -40,7 +40,7 @@ use crate::primitive::{Confidence, LanguageTag};
 /// several recognizers find the same thing, a fusion step (in
 /// `elide-detection`) combines their entities into one: the survivor's
 /// [`location`] and [`confidence`] are the *fused* values, and every
-/// contributing recognition event, plus a deduplication event, is
+/// contributing recognition event, plus a fusion event, is
 /// retained in its audit trail. The entity therefore carries its full
 /// audit trail with it.
 ///

@@ -12,7 +12,7 @@
 
 use elide::detection::Analyzer;
 use elide::detection::filter::ThresholdLayer;
-use elide::detection::reconcile::{Exclusive, FuseLayer, Permissive, ReconcileLayer, Structural};
+use elide::detection::overlap::{Exclusive, FuseLayer, Permissive, ReconcileLayer, Structural};
 use elide::modality::Modality;
 use elide::primitive::ConfidenceThreshold;
 use serde::Deserialize;

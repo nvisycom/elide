@@ -282,7 +282,7 @@ the find engine in the order they should run. In their usual order, they are:
          |
          v
 +------------------+
-|    reconcile     |  cluster overlaps, then:
+|     overlap      |  cluster overlaps, then:
 |                  |    fuse each same-label cluster,
 |                  |    keep / contest / resolve cross-label pairs
 +------------------+
@@ -378,7 +378,7 @@ contracts is what allows pluralism in the recognizers.
 Detection is the concurrent evaluation of many fallible recognizers against a
 chunked decomposition of a document, followed by an optional context-boost pass,
 followed by deterministic reconciliation of the findings through a
-calibrate-reconcile-filter pipeline, under the caller's scope; a reviewer's
+calibrate-overlap-filter pipeline, under the caller's scope; a reviewer's
 recorded corrections then decide what reaches redaction. The product is an attributable set of entities, lifted into source
 coordinates, that the toolkit hands to redaction. The model is conservative
 about what it guarantees and generous about what it allows to be extended.

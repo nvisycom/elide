@@ -4,7 +4,7 @@
 //! recognition [`AuditEvent`] in its provenance (its location, confidence,
 //! and pattern/model detail). When several recognizers find the same
 //! thing, a fusion step (in `elide-detection`) combines their entities into
-//! one, concatenating their events and appending a deduplication event.
+//! one, concatenating their events and appending a fusion event.
 //!
 //! [`AuditEvent`]: crate::entity::audit::AuditEvent
 
