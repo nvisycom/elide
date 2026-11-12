@@ -466,7 +466,8 @@ impl PatternRecognizerBuilder {
                     }
                 };
                 // A term listed twice in one dictionary keeps its first score.
-                if owners[id].iter().all(|o| o.dictionary != dictionary) {
+                // Dictionaries are visited in order, so a repeat is the last owner.
+                if owners[id].last().is_none_or(|o| o.dictionary != dictionary) {
                     owners[id].push(TermOwner { dictionary, score });
                 }
             }

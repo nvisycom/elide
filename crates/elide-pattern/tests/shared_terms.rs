@@ -92,3 +92,14 @@ async fn a_dictionary_keeps_its_longest_term_at_a_position() {
     let found = scan(&recognizer, "in New York today", Scope::new()).await;
     assert_eq!(found, vec![hit("location", "New York")]);
 }
+
+#[tokio::test]
+async fn nested_phrases_keep_the_longest_from_left_to_right() {
+    let recognizer = PatternRecognizer::builder()
+        .with_dictionary(dictionary("phrases", "phrase", &["a", "a a", "a a a"]))
+        .build()
+        .expect("recognizer builds");
+
+    let found = scan(&recognizer, "a a a a", Scope::new()).await;
+    assert_eq!(found, vec![hit("phrase", "a a a"), hit("phrase", "a")]);
+}

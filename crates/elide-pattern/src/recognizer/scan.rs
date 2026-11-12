@@ -1,5 +1,7 @@
 //! The two scans of a recognition pass: every regex, and every dictionary term.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 
 use elide_core::entity::LabelRef;
@@ -74,7 +76,11 @@ impl PatternRecognizer {
             return Vec::new();
         }
 
-        let mut hits = Vec::new();
+        // Only the longest hit per dictionary and start can be kept, so nested
+        // overlaps (a dictionary of `a`, `a a`, `a a a`, … over a run of `a`s)
+        // never pile up: at most one candidate per dictionary per position.
+        let mut hits: Vec<DictionaryHit> = Vec::new();
+        let mut longest: HashMap<(usize, usize), usize> = HashMap::new();
         for mat in terms.automaton.find_overlapping_iter(text) {
             for owner in &terms.owners[mat.pattern().as_usize()] {
                 if labels[owner.dictionary].is_none() {
@@ -86,19 +92,27 @@ impl PatternRecognizer {
                 {
                     continue;
                 }
-                hits.push(DictionaryHit {
+                let hit = DictionaryHit {
                     dictionary: owner.dictionary,
                     range,
                     score: owner.score,
-                });
+                };
+                match longest.entry((hit.dictionary, hit.range.start)) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(hits.len());
+                        hits.push(hit);
+                    }
+                    Entry::Occupied(slot) => {
+                        let kept = &mut hits[*slot.get()];
+                        if hit.range.end > kept.range.end {
+                            *kept = hit;
+                        }
+                    }
+                }
             }
         }
 
-        hits.sort_by(|a, b| {
-            (a.dictionary, a.range.start)
-                .cmp(&(b.dictionary, b.range.start))
-                .then(b.range.end.cmp(&a.range.end))
-        });
+        hits.sort_by_key(|hit| (hit.dictionary, hit.range.start));
         let mut kept: Vec<DictionaryHit> = Vec::with_capacity(hits.len());
         for hit in hits {
             if let Some(last) = kept.last()
