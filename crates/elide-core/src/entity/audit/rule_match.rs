@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use super::hash::AuditHasher;
 use crate::entity::LabelRef;
 
-/// A serializable summary of *which selection rule* bound an operator to an
-/// entity, the automatic "why" behind a redaction.
+/// Which selection rule bound an operator to an entity: why it was redacted.
+///
+/// A serializable summary, the automatic "why" behind a redaction.
 ///
 /// The anonymizer selects an operator by walking an ordered rule list and
 /// taking the first match. That decision is recorded on the [`Selection`]

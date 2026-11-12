@@ -1,4 +1,4 @@
-//! LLM provider connection parameters.
+//! LLM providers: which service a backend calls, and how to connect to it.
 //!
 //! The [`RigBackend`] consumes the [`Provider`] enum to dispatch to
 //! OpenAI / Anthropic / Google / Ollama clients. Connection parameters
@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 pub use self::authenticated::AuthenticatedProvider;
 pub use self::unauthenticated::UnauthenticatedProvider;
 
-/// Supported LLM providers for agent-based tasks.
+/// A supported LLM provider and its connection: OpenAI, Anthropic, Gemini,
+/// Ollama.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Provider {

@@ -11,7 +11,7 @@ use super::scoring::{MaxConfidence, NoisyOrConfidence, Scoring};
 use super::{Cluster, cluster};
 use crate::layer::{Layer, LayerOutput};
 
-/// The fusion stage: every cluster becomes one entity.
+/// The fusion stage: each cluster of the same finding becomes one entity.
 ///
 /// A [`GroupPredicate`] (by default [`SameLabel`]: same label, overlapping)
 /// decides which findings are the same finding; each cluster of them fuses into

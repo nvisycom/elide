@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Dpi;
 
-/// Policy for rendering a document's pages to images.
+/// Whether to render a document's pages to images: never, auto, or always.
 ///
 /// [`Auto`] is the default: use the text layer where it exists (redact by
 /// deleting glyphs) and render only where it is absent. [`Always`] renders

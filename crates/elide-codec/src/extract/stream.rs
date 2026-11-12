@@ -12,7 +12,7 @@ use super::{ExtractedItem, ItemEdit, Passage, SourceAddresser, SpliceState};
 use crate::string::RedactRange;
 use crate::{FlaggedItem, FormatId, Stream};
 
-/// The [`Stream`] machinery over an extracted item stream.
+/// The [`Stream`] over a structured document's extracted, redactable items.
 ///
 /// It yields each [`Passage`] of items as one [`Chunk`], so an entity a
 /// document stores across several items is read whole; reads and redacts by

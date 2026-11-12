@@ -10,7 +10,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// The token counts a model reported.
+/// The token counts a model reported for one call, as far as it gave them.
 ///
 /// Each is optional because providers differ in what they return: some give
 /// only a total, some none at all.
@@ -91,8 +91,7 @@ pub enum Meter {
     Characters(u64),
 }
 
-/// The billing meters a backend call spent — its cost, across every currency the
-/// backend meters in.
+/// The billing meters a backend call spent: its cost, in every currency.
 ///
 /// A call reports zero or more [`Meter`]s: an LLM one ([`Tokens`](Meter::Tokens)),
 /// a vision model several (tokens *and* [`Images`](Meter::Images)), a backend that

@@ -5,8 +5,10 @@ use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
 
-/// Wraps a [`Backend`] and caps how many requests one
-/// [`call_batch`](Backend::call_batch) sends to the provider at a time.
+/// Wraps a [`Backend`] and caps how many requests one batch sends at once.
+///
+/// It splits a [`call_batch`](Backend::call_batch) into provider calls of at
+/// most that many requests.
 ///
 /// A provider that accepts batches often caps the batch size (an embedding or
 /// NER endpoint that rejects more than, say, 64 inputs per request). The

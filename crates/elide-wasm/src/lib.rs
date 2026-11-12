@@ -33,15 +33,18 @@ pub mod rule;
 
 use wasm_bindgen::prelude::*;
 
-/// Install the panic hook once, so a Rust panic surfaces in the browser console
-/// with a readable message instead of an opaque `unreachable`.
+/// Install the panic hook, so a Rust panic reads clearly in the console.
+///
+/// The panic surfaces in the browser console with a readable message instead of
+/// an opaque `unreachable`.
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
 }
 
-/// Every built-in label id, in catalog order (`email_address`, `phone_number`,
-/// …). The single source of truth for the generated `Label` constants in the
+/// Every built-in label id in catalog order, like `email_address`.
+///
+/// The single source of truth for the generated `Label` constants in the
 /// `@nvisy/elide` package; see the `labels` example that emits them as JSON.
 pub fn builtin_label_ids() -> Vec<String> {
     elide::entity::LabelCatalog::with_builtins()

@@ -1,6 +1,7 @@
-//! Usage accounting: the [`Metered`] decorator that records each backend call's
-//! [`Usage`], the record itself, the [`UsageCollector`], and the [`UsageSink`]s
-//! that route it onward.
+//! Usage accounting: the [`Metered`] decorator and where its records go.
+//!
+//! [`Metered`] records each backend call's [`Usage`]; the [`UsageCollector`]
+//! keeps the records, and the other [`UsageSink`]s route them onward.
 //!
 //! Always compiled — the types pull no extra dependency. The sinks that forward
 //! to an external system are feature-gated by the system they target:

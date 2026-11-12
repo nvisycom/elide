@@ -1,4 +1,4 @@
-//! Backends: the model-call contract and its decorators.
+//! Backends: the model-call contract and the decorators that wrap it.
 //!
 //! Every hosted model in the toolkit — LLM/VLM, NER, speech-to-text, OCR — is a
 //! [`Backend`]: request in, model call, response out. A recognizer or enricher

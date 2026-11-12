@@ -1,4 +1,4 @@
-//! A mock codec format, behind the `mocks` feature.
+//! A mock codec format for tests, behind the `mocks` feature.
 //!
 //! For exercising registry, stream, and orchestration behavior without a real
 //! file format.
@@ -28,15 +28,16 @@ use crate::content::ContentData;
 use crate::string::RedactRange;
 use crate::{Blob, Document, DocumentLoader, Format, FormatId, LocalId, Native, Stream, StreamMut};
 
-/// Stable [`FormatId`] for the mock format.
+/// The stable [`FormatId`] of the mock format, `elide.test.mock`.
 pub const MOCK_FORMAT_ID: FormatId = FormatId::new("elide.test.mock");
 
 /// The extension the registry resolves the mock format on.
 pub const MOCK_EXT: &str = "mock";
 
-/// One embedded file of a mock document: its local id, its decoder hint, and its
-/// raw bytes. The hint is stored independent of the id so a file can be keyed by
-/// an extensionless id yet still carry a real hint.
+/// One embedded file of a mock document: its id, decoder hint, and bytes.
+///
+/// The hint is stored independent of the id, so a file can be keyed by an
+/// extensionless id yet still carry a real hint.
 #[derive(Clone, Debug)]
 pub struct MockPart {
     /// The part's container-local id.
@@ -91,12 +92,13 @@ pub fn decode_mock(bytes: &[u8]) -> (String, Vec<MockPart>) {
     (body, parts)
 }
 
-/// The id of a mock document's body stream.
+/// The id of a mock document's body, the one stream it has.
 pub const MOCK_BODY_ID: &str = "body";
 
-/// The body [`Stream`] of a mock document: an editable text line, yielded as one
-/// chunk and redacted by byte range. [`MockDocument`] writes it out with the
-/// blobs.
+/// The body [`Stream`] of a mock document: one editable line of text.
+///
+/// It is yielded as one chunk and redacted by byte range; [`MockDocument`]
+/// writes it out with the blobs.
 #[derive(Debug)]
 pub struct MockStream {
     body: String,
@@ -145,9 +147,11 @@ impl DataWriter<Text> for MockStream {
     }
 }
 
-/// The native mock document: the body [`MockStream`], re-serialized with each
-/// blob's `@PART <id> <hint> <hex>` line. A blob's bytes are its current
-/// (possibly redacted) ones; a removed blob is not written.
+/// The native mock document: the body [`MockStream`] and its blob lines.
+///
+/// It re-serializes with each blob's `@PART <id> <hint> <hex>` line. A blob's
+/// bytes are its current (possibly redacted) ones; a removed blob is not
+/// written.
 #[derive(Debug)]
 pub struct MockDocument {
     body: MockStream,
@@ -180,8 +184,9 @@ impl Native for MockDocument {
     }
 }
 
-/// A [`DocumentLoader`] that decodes the mock wire format into a [`Document`]: a
-/// [`MockDocument`] plus one [`Blob`] per embedded part.
+/// A [`DocumentLoader`] that decodes the mock wire format into a [`Document`].
+///
+/// The document is a [`MockDocument`] plus one [`Blob`] per embedded part.
 #[derive(Debug)]
 pub struct MockLoader;
 
@@ -204,7 +209,7 @@ impl DocumentLoader for MockLoader {
     }
 }
 
-/// The mock [`Format`], registered on [`MOCK_EXT`].
+/// The mock [`Format`], resolved by its [`MOCK_EXT`] extension, for tests.
 #[must_use]
 pub fn mock_format() -> Format {
     Format::with_document_loader(MOCK_FORMAT_ID, MockLoader).with_extensions([MOCK_EXT])

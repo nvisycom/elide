@@ -1,5 +1,7 @@
-//! Standalone value types the PDF codec is configured with: [`Dpi`] (a render
-//! resolution) and [`RasterMode`] (whether and how to flatten pages to images).
+//! The values the PDF codec is configured with: a render DPI and raster mode.
+//!
+//! [`Dpi`] is a render resolution, and [`RasterMode`] says whether and how to
+//! flatten pages to images.
 
 mod dpi;
 mod raster_mode;

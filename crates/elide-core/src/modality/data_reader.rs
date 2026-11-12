@@ -5,7 +5,7 @@ use super::{Chunk, Modality};
 use crate::entity::Entity;
 use crate::error::Result;
 
-/// Reads the [`Data`] at a [`Location`] within some source.
+/// Reads the [`Data`] at a [`Location`] within the content it decodes.
 ///
 /// Implemented by a modality's content holder (a text buffer, a decoded
 /// image, a parsed document): the thing being redacted. The anonymizer

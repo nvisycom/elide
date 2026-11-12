@@ -31,7 +31,7 @@ pub use self::part_id::PartId;
 use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
 use self::traversal::{Analyze, Redact, Walk};
 
-/// Drives analyze + redact across a set of documents.
+/// Drives detection and redaction across a set of documents, part by part.
 ///
 /// Covers each [`Document`]'s own content and its cross-modality container
 /// parts. Built with one [`with_modality`] call per modality the caller wants
@@ -109,9 +109,10 @@ impl Orchestrator {
         Self::default()
     }
 
-    /// Set the [`FormatRegistry`] used to decode a document's container parts,
-    /// taking ownership. A body-only document needs no registry; a container
-    /// (DOCX, …) needs one that covers its part formats, typically
+    /// Set the [`FormatRegistry`] that decodes a document's container parts.
+    ///
+    /// A body-only document needs no registry; a container (DOCX, …) needs one
+    /// that covers its part formats, typically
     /// [`FormatRegistry::with_builtin`].
     ///
     /// [`FormatRegistry::with_builtin`]: elide_format::FormatRegistry::with_builtin
@@ -121,9 +122,10 @@ impl Orchestrator {
         self
     }
 
-    /// Set the run-wide default [`Scope`] shared across every modality
-    /// pipeline, the caller's analysis-wide assertions (languages,
-    /// jurisdictions, tags, catalog, correlation id).
+    /// Set the run-wide default [`Scope`], shared by every modality pipeline.
+    ///
+    /// The caller's analysis-wide assertions: languages, jurisdictions, tags,
+    /// catalog, correlation id.
     ///
     /// A `Scope` is modality-free, so one drives the body and every
     /// container part alike; no need to repeat it per [`with_modality`].
@@ -135,11 +137,12 @@ impl Orchestrator {
         self
     }
 
-    /// Register the analyze + redact pipeline for modality `M`. A part
-    /// that decodes to `M` is driven by this pipeline; parts of a modality
-    /// with no registered pipeline pass through untouched. Re-registering
-    /// a modality replaces both halves. For [`Metadata`] the halves add to the
-    /// flagged fields rather than replace them.
+    /// Register the detection and redaction pipeline for modality `M`.
+    ///
+    /// A part that decodes to `M` is driven by this pipeline; parts of a
+    /// modality with no registered pipeline pass through untouched.
+    /// Re-registering a modality replaces both halves. For [`Metadata`] the
+    /// halves add to the flagged fields rather than replace them.
     ///
     /// When a modality only ever detects *or* only ever redacts, register just
     /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead,
@@ -167,9 +170,11 @@ impl Orchestrator {
         self
     }
 
-    /// Register (or update) only the *analyzer* for modality `M`, the detection
-    /// half. If a pipeline for `M` already exists, its analyzer is replaced and
-    /// its anonymizer kept; otherwise a new pipeline is created with a no-op
+    /// Register or update only the *analyzer* for modality `M`, the detection
+    /// half.
+    ///
+    /// If a pipeline for `M` already exists, its analyzer is replaced and its
+    /// anonymizer kept; otherwise a new pipeline is created with a no-op
     /// [`Anonymizer::new`] as the redaction half.
     ///
     /// For a modality a caller only ever [`analyze`]s (never redacts): there is
@@ -192,10 +197,12 @@ impl Orchestrator {
         self
     }
 
-    /// Register (or update) only the *anonymizer* for modality `M`, the
-    /// redaction half. If a pipeline for `M` already exists, its anonymizer is
-    /// replaced and its analyzer kept; otherwise a new pipeline is created with a
-    /// no-op [`Analyzer::new`] as the detection half.
+    /// Register or update only the *anonymizer* for modality `M`, the redaction
+    /// half.
+    ///
+    /// If a pipeline for `M` already exists, its anonymizer is replaced and its
+    /// analyzer kept; otherwise a new pipeline is created with a no-op
+    /// [`Analyzer::new`] as the detection half.
     ///
     /// For a modality whose entities are supplied out-of-band (a rebuilt report)
     /// and only redacted: there is no need to fabricate an analyzer.
@@ -261,15 +268,16 @@ impl Orchestrator {
         &self.registry
     }
 
-    /// Detect the entities of a set of documents without redacting: each
-    /// [`Document`]'s own content *and* every container part whose modality has
-    /// a registered pipeline. A single document is a one-element slice; a scan
-    /// stack or a batch shipped together is redacted as one logical unit, so
-    /// entities are found (and later removed) consistently across all of them.
-    /// Returns an [`AnalyzedDocument`]: its editable [`report`] to hand to
-    /// [`anonymize_with`], and the [`artifacts`] (the OCR/transcript enrichment)
-    /// to persist across a review gap and pass to [`re_analyze`], which reuses
-    /// them instead of re-enriching.
+    /// Detect the entities of a set of documents, without redacting them.
+    ///
+    /// Covers each [`Document`]'s own content *and* every container part whose
+    /// modality has a registered pipeline. A single document is a one-element
+    /// slice; a scan stack or a batch shipped together is redacted as one
+    /// logical unit, so entities are found (and later removed) consistently
+    /// across all of them. Returns an [`AnalyzedDocument`]: its editable
+    /// [`report`] to hand to [`anonymize_with`], and the [`artifacts`] (the
+    /// OCR/transcript enrichment) to persist across a review gap and pass to
+    /// [`re_analyze`], which reuses them instead of re-enriching.
     ///
     /// The orchestrator's [`with_scope`] applies to the whole set.
     ///
@@ -298,12 +306,14 @@ impl Orchestrator {
             .await
     }
 
-    /// Re-detect over `documents`, seeding each group's recognition with the
-    /// enrichment artifact from `prior` so the OCR/transcript is reused rather
-    /// than recomputed. The re-run counterpart to [`analyze`](Self::analyze),
-    /// for detection separated in time from a first pass: after the review gap,
-    /// re-run recognition (with another recognizer, say) without paying for
-    /// OCR/STT again.
+    /// Re-detect over `documents`, reusing the enrichment from a `prior`
+    /// analysis.
+    ///
+    /// Each group's recognition is seeded with the artifact from `prior`, so
+    /// the OCR/transcript is reused rather than recomputed. The re-run
+    /// counterpart to [`analyze`](Self::analyze), for detection separated in
+    /// time from a first pass: after the review gap, re-run recognition (with
+    /// another recognizer, say) without paying for OCR/STT again.
     ///
     /// A group `prior` has no artifact for, a document or part it never
     /// analyzed, re-runs from an empty (default) artifact, i.e. it re-enriches.
@@ -372,9 +382,10 @@ impl Orchestrator {
         Ok(AnalyzedDocument { report, artifacts })
     }
 
-    /// Apply a (possibly edited) [`Report`] back onto the same `documents`:
-    /// redact each stream in place and fold each blob's redacted
-    /// bytes back up its document's part tree, then re-encode each document
+    /// Apply a (possibly edited) [`Report`] back onto the same `documents`.
+    ///
+    /// It redacts each stream in place and folds each blob's redacted bytes
+    /// back up its document's part tree; re-encode each document
     /// (`document.encode()`) to serialize the result. `documents` must be the
     /// same set the report describes.
     ///
@@ -447,10 +458,11 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// Convenience: [`analyze`] then [`anonymize_with`] with no editing
-    /// step, redact a whole set of documents in one call. Returns the applied
-    /// [`Report`], whose entities carry the full audit trail (recognition
-    /// through redaction).
+    /// Detect and redact a whole set of documents in one call, with no review.
+    ///
+    /// Convenience: [`analyze`] then [`anonymize_with`] with no editing step.
+    /// Returns the applied [`Report`], whose entities carry the full audit
+    /// trail (recognition through redaction).
     ///
     /// Use the two phases directly when you need to inspect or edit the
     /// detected entities (drop a false positive, retag) between detection
@@ -466,8 +478,10 @@ impl Orchestrator {
         self.anonymize_with(&mut *documents, analyzed.report).await
     }
 
-    /// Reconstruct a [`Report`] from its serialized wire form, routing each
-    /// group back to the modality that produced it.
+    /// Reconstruct a [`Report`] from its serialized form, by producing
+    /// modality.
+    ///
+    /// Each group is routed back to the modality that produced it.
     ///
     /// The serialized report tags each group with its modality name but not the
     /// concrete type, and deserialization is not object-safe, so the report

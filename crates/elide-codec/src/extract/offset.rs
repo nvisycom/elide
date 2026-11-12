@@ -10,8 +10,8 @@
 
 use std::ops::Range;
 
-/// What a [`run`](OffsetRun) is: a one-for-one identity stretch, or a single
-/// entity reference that decodes atomically.
+/// What an [`OffsetRun`] is: an identity stretch or one atomic entity
+/// reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunKind {
     /// Decoded and raw advance one-for-one; the two ranges are equal length.
@@ -21,7 +21,7 @@ pub enum RunKind {
     Entity,
 }
 
-/// One stretch of the decoded-to-raw correspondence.
+/// One stretch of an [`OffsetMap`]'s decoded-to-raw byte correspondence.
 ///
 /// `decoded` is local to the text (its decoded form starts at 0); `raw` is
 /// **source-absolute**, a byte range in the containing document or part, ready
@@ -59,8 +59,9 @@ impl OffsetRun {
     }
 }
 
-/// The decoded-to-raw byte correspondence for one escaped text, as identity
-/// stretches interleaved with atomic entity runs.
+/// The decoded-to-raw byte correspondence of one text containing escapes.
+///
+/// It is a sequence of identity stretches interleaved with atomic entity runs.
 ///
 /// Runs are contiguous in the decoded dimension and cover the whole decoded
 /// text; a verbatim text (a comment, CDATA) is a single identity run. All raw
@@ -86,8 +87,9 @@ impl OffsetMap {
         Self::new(vec![OffsetRun::identity(0..len, base..base + len)])
     }
 
-    /// Translate a `decoded` byte range into the source-absolute raw byte
-    /// range(s) it came from.
+    /// Translate a `decoded` byte range into the raw byte ranges it came from.
+    ///
+    /// The raw ranges are source-absolute.
     ///
     /// A range within one identity run maps to a single range; one that crosses
     /// an entity reference picks up that entity's whole raw bytes (an entity is

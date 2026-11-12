@@ -3,8 +3,7 @@
 //! Reserved-prefix exclusion lives here in the validator because
 //! Rust's `regex` crate does not support look-around.
 
-/// Return `true` when `value`'s leading two-letter prefix is not
-/// a reserved NINO prefix.
+/// Return `true` when `value`'s two-letter prefix is not a reserved NINO one.
 ///
 /// Reserved prefixes (case-insensitive):
 ///

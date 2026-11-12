@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use elide_core::primitive::LanguageTag;
 use serde::Deserialize;
 
-/// The context a [`Pattern`] or [`Dictionary`] declares: the evidence near a
-/// match that raises its confidence.
+/// The context a rule declares: evidence near a match that raises confidence.
+///
+/// A [`Pattern`] or [`Dictionary`] declares it.
 ///
 /// ```toml
 /// [context]
@@ -81,10 +82,11 @@ impl From<Vec<String>> for RuleContext {
     }
 }
 
-/// A context [`anchor`](RuleContext::anchor): the neighbour match's `label`
-/// and the least confidence it must carry. `min_confidence` defaults to the
-/// acceptance threshold, so a bare `{ label = "currency" }` requires a
-/// confirmed neighbour.
+/// A context [`anchor`](RuleContext::anchor): a neighbouring match's `label`.
+///
+/// It also names the least confidence the neighbour must carry.
+/// `min_confidence` defaults to the acceptance threshold, so a bare `{ label =
+/// "currency" }` requires a confirmed neighbour.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Anchor {
@@ -96,7 +98,7 @@ pub struct Anchor {
     pub min_confidence: Option<f32>,
 }
 
-/// How a context keyword matches the surrounding text.
+/// How a context keyword matches nearby text: on word boundaries or anywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Matching {

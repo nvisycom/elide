@@ -50,8 +50,8 @@ impl<M: Modality> Redactions<M> {
         self.items.sort_by(|(a, _), (b, _)| a.position_cmp(b));
     }
 
-    /// Iterate the `(location, replacement)` pairs by reference, in the
-    /// batch's current order.
+    /// Iterate the `(location, replacement)` pairs by reference, in batch
+    /// order.
     ///
     /// Returns a [`slice::Iter`], a double-ended iterator, so callers can
     /// walk the batch in reverse with `.rev()` (a writer applies a

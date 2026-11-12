@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::primitive::{BoundingBox, Point, Polygon};
 
-/// Region within image content.
+/// A region of an image: a bounding box, optionally a tighter polygon.
 ///
 /// An axis-aligned [`BoundingBox`] in pixel coordinates locates the
 /// region; an optional [`Polygon`] captures a rotated or quadrilateral

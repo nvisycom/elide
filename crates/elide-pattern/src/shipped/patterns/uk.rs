@@ -26,8 +26,9 @@ shipped_pattern!(
     fn vehicle_registration from "../../../assets/patterns/uk/vehicle/registration.toml"
 );
 shipped_pattern!(
-    /// UK passport numbers (post-2015 format). Weak score; relies
-    /// on the context-keyword boost.
+    /// UK passport numbers (post-2015 format), confirmed by context.
+    ///
+    /// A weak score; it relies on the context-keyword boost.
     fn passport from "../../../assets/patterns/uk/identity/passport.toml"
 );
 

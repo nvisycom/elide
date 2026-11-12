@@ -20,7 +20,7 @@ use elide_core::recognition::{Context, Subject};
 
 use crate::lingua_detector::LinguaDetector;
 
-/// Lingua-backed language-detection enricher.
+/// An enricher that detects the languages of text with the `lingua` crate.
 ///
 /// Stateless: every call builds a fresh detector for the
 /// configured language scope (the candidate set passed at construction,
@@ -33,8 +33,8 @@ pub struct LinguaEnricher {
 }
 
 impl LinguaEnricher {
-    /// An enricher that considers every language compiled into the
-    /// `lingua` crate's feature set.
+    /// An enricher that considers every language the `lingua` features compile
+    /// in.
     #[must_use]
     pub fn unrestricted() -> Self {
         Self {

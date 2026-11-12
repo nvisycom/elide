@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use super::Modality;
 
-/// Located, out-of-band context a recognizer may treat as in-context for a
-/// nearby value.
+/// Located context a recognizer may treat as in-context for a nearby value.
+///
+/// Out-of-band: the column header of a cell, or the key of a value.
 ///
 /// A hint is *not* a sub-span of the value it informs; it lives elsewhere in
 /// the source (a table's column header, a JSON object key, a log field name).
@@ -40,8 +41,7 @@ impl<M: Modality> Hint<M> {
     }
 }
 
-/// A [`Hint`] paired with the content at its location, the transient form a
-/// recognizer sees.
+/// A [`Hint`] paired with the content at its location, as a recognizer sees it.
 ///
 /// A [`Hint`] itself carries only a location (all that a boost's audit trail
 /// needs to record). During recognition, though, the enhancer must read the

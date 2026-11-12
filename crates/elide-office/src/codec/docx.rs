@@ -26,7 +26,7 @@ impl OoxmlCodec for DocxCodec {
 /// Stable [`FormatId`] for the DOCX codec.
 pub const FORMAT_ID: FormatId = DocxCodec::FORMAT_ID;
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The DOCX [`Format`]: Word documents, resolved by `.docx`.
 pub fn format() -> Format {
     Format::with_document_loader(FORMAT_ID, OoxmlLoader::<DocxCodec>::new())
         .with_extensions(["docx"])

@@ -143,9 +143,11 @@ impl Clamp {
         Self::default()
     }
 
-    /// Collapse values `>= ceiling` into an explicit `label` (e.g. `90.0`,
-    /// `"90 or older"`). The label is any [`Into<LocalizedText>`]: a bare
-    /// `&str` is English-only; pass a [`LocalizedText`] for other languages.
+    /// Collapse values `>= ceiling` into an explicit `label`, like `"90 or
+    /// older"`.
+    ///
+    /// The label is any [`Into<LocalizedText>`]: a bare `&str` is English-only;
+    /// pass a [`LocalizedText`] for other languages.
     ///
     /// To skip writing the number twice, use [`with_ceiling_auto`] (renders
     /// `"90+"`) or [`with_ceiling_fmt`] (a custom template).
@@ -162,9 +164,11 @@ impl Clamp {
         self
     }
 
-    /// Collapse values `>= ceiling` into a label derived from the threshold
-    /// with the default template `"{n}+"`, a ceiling of `90` renders
-    /// `"90+"`. Use [`with_ceiling_fmt`] for a different wording.
+    /// Collapse values `>= ceiling` into a label like `"90+"` for a ceiling of
+    /// `90`.
+    ///
+    /// The label uses the default template `"{n}+"`. Use [`with_ceiling_fmt`]
+    /// for a different wording.
     ///
     /// [`with_ceiling_fmt`]: Self::with_ceiling_fmt
     #[must_use]
@@ -172,10 +176,12 @@ impl Clamp {
         self.with_ceiling_fmt(ceiling, DEFAULT_CEILING_FORMAT)
     }
 
-    /// Collapse values `>= ceiling` into a label derived from `format`, where
-    /// `{n}` is replaced by the threshold, e.g. `"{n} or older"` renders
-    /// `"90 or older"` for a ceiling of `90`. A derived label is the same in
-    /// every language; use [`with_ceiling`] for localized wording.
+    /// Collapse values `>= ceiling` into a label from `format`, `{n}` the
+    /// threshold.
+    ///
+    /// E.g. `"{n} or older"` renders `"90 or older"` for a ceiling of `90`. A
+    /// derived label is the same in every language; use [`with_ceiling`] for
+    /// localized wording.
     ///
     /// [`with_ceiling`]: Self::with_ceiling
     #[must_use]
@@ -201,16 +207,19 @@ impl Clamp {
         self
     }
 
-    /// Collapse values `<= floor` into a label derived with the default
-    /// template `"<{n}"`, a floor of `18` renders `"<18"`.
+    /// Collapse values `<= floor` into a label like `"<18"` for a floor of
+    /// `18`.
+    ///
+    /// The label uses the default template `"<{n}"`.
     #[must_use]
     pub fn with_floor_auto(self, floor: f64) -> Self {
         self.with_floor_fmt(floor, DEFAULT_FLOOR_FORMAT)
     }
 
-    /// Collapse values `<= floor` into a label derived from `format`, where
-    /// `{n}` is replaced by the threshold, e.g. `"under {n}"` renders
-    /// `"under 18"` for a floor of `18`.
+    /// Collapse values `<= floor` into a label from `format`, `{n}` the
+    /// threshold.
+    ///
+    /// E.g. `"under {n}"` renders `"under 18"` for a floor of `18`.
     #[must_use]
     pub fn with_floor_fmt(mut self, floor: f64, format: impl Into<HipStr<'static>>) -> Self {
         self.floor = Some((floor, Bucket::Derived(format.into())));

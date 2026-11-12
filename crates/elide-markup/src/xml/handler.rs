@@ -7,7 +7,7 @@ use super::XmlLoader;
 /// Stable [`FormatId`] for the XML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.xml");
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The XML [`Format`], resolved by `.xml` and the XML content types.
 pub fn format() -> Format {
     Format::with_document_loader(FORMAT_ID, XmlLoader)
         .with_extensions(["xml"])

@@ -11,8 +11,10 @@
 //! `elide-core = { ..., features = ["fixtures"] }`, then
 //! `use elide_core::{assert_label_present, assert_label_absent};`.
 
-/// Assert that some detected entity carries each given label. Accepts one or
-/// more labels; fails with the full label list on the first that is missing.
+/// Assert that some detected entity carries each given label.
+///
+/// Accepts one or more labels; fails with the full label list on the first that
+/// is missing.
 ///
 /// ```ignore
 /// assert_label_present!(entities, EMAIL);
@@ -34,9 +36,10 @@ macro_rules! assert_label_present {
     }};
 }
 
-/// Assert that no detected entity carries any of the given labels — the
-/// negative of [`assert_label_present!`], for precision cases where a weak or
-/// shaped-but-not-real value must not be flagged at all. Accepts one or more
+/// Assert that no detected entity carries any of the given labels.
+///
+/// The negative of [`assert_label_present!`], for precision cases where a weak
+/// or shaped-but-not-real value must not be flagged at all. Accepts one or more
 /// labels.
 ///
 /// ```ignore

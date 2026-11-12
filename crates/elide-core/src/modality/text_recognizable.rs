@@ -5,8 +5,9 @@ use std::ops::Range;
 use super::Modality;
 use super::text::Token;
 
-/// A modality whose content can be read as text for recognition, and that can
-/// place a text match back into its own location coordinate space.
+/// A modality whose content reads as text, so text recognizers can run on it.
+///
+/// It can also place a text match back into its own location coordinate space.
 ///
 /// The text recognizers (pattern, NER) and the language enricher require two
 /// things of a modality: a way to view its content as a string ([`as_text`]),

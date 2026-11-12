@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::modality::ModalityReplacement;
 use crate::modality::text::TextReplacement;
 
-/// What a tabular operator produces.
+/// What a tabular operator produces: a cell treatment, or a dropped row or
+/// column.
 ///
 /// A cell holds text, so most treatments are a [`TextReplacement`] applied
 /// to the cell, carried as [`Cell`]. Structural treatments that the text

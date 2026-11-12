@@ -25,7 +25,7 @@ use crate::primitive::TimeSpan;
 /// text, so adjacent segments don't run their words together.
 const SEGMENT_SEPARATOR: &str = " ";
 
-/// Timestamped transcript of an audio stream.
+/// A timestamped transcript of an audio clip, its text keyed by time span.
 ///
 /// An ordered set of [`TranscriptSegment`]s. The flat
 /// [`text`], the segments joined, is what a recognizer
@@ -51,9 +51,9 @@ pub struct Transcription {
     text: String,
 }
 
-/// One segment of a [`Transcription`]: a span of audio and the text
-/// recognised within it, with optional diarization, language, confidence,
-/// and per-word timings.
+/// One span of a [`Transcription`]: the audio it covers and the text heard.
+///
+/// It may also carry diarization, language, confidence, and per-word timings.
 ///
 /// `speaker_id` is populated only by backends with diarization;
 /// `language` by backends that emit per-segment language detection;
@@ -279,8 +279,10 @@ impl Transcription {
     }
 
     /// Resolve a byte `range` of [`text`] to the [`AudioLocation`] it was
-    /// spoken in: the time span plus the speaker, when diarization assigned
-    /// one *and* the range stays within a single speaker's segments.
+    /// spoken in.
+    ///
+    /// The location is the time span, plus the speaker when diarization
+    /// assigned one *and* the range stays within a single speaker's segments.
     ///
     /// The span runs from the start of the first overlapped word (or segment,
     /// when word timings are absent) to the end of the last, falling back to

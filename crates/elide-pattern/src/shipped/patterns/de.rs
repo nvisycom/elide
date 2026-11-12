@@ -19,8 +19,9 @@ shipped_pattern!(
     fn health_insurance from "../../../assets/patterns/de/health/health_insurance.toml"
 );
 shipped_pattern!(
-    /// Personalausweisnummer, nPA (post-2010 ICAO) and legacy
-    /// `T`+8-digit ID card formats.
+    /// Personalausweisnummer, the German ID card number, current and legacy.
+    ///
+    /// The nPA (post-2010 ICAO) and legacy `T`+8-digit ID card formats.
     fn id_card from "../../../assets/patterns/de/identity/id_card.toml"
 );
 shipped_pattern!(
@@ -28,13 +29,16 @@ shipped_pattern!(
     fn passport from "../../../assets/patterns/de/identity/passport.toml"
 );
 shipped_pattern!(
-    /// Rentenversicherungsnummer (RVNR/SVNR), Deutsche
-    /// Rentenversicherung pension/social-security ID per VKVV § 4.
+    /// Rentenversicherungsnummer (RVNR/SVNR), the German pension insurance
+    /// number.
+    ///
+    /// The Deutsche Rentenversicherung pension/social-security ID per VKVV § 4.
     fn social_security from "../../../assets/patterns/de/identity/social_security.toml"
 );
 shipped_pattern!(
-    /// Steueridentifikationsnummer (Steuer-IdNr), 11-digit
-    /// lifetime tax identifier with ISO 7064 Mod 11, 10 checksum.
+    /// Steueridentifikationsnummer (Steuer-IdNr), the 11-digit German tax ID.
+    ///
+    /// A lifetime tax identifier with an ISO 7064 Mod 11, 10 checksum.
     fn tax_id from "../../../assets/patterns/de/identity/tax_id.toml"
 );
 shipped_pattern!(
@@ -61,8 +65,9 @@ shipped_pattern!(
     fn plz from "../../../assets/patterns/de/contact/plz.toml"
 );
 shipped_pattern!(
-    /// Handelsregisternummer, court-registered company ID with
-    /// `HRA`/`HRB` section prefix.
+    /// Handelsregisternummer, the German court-registered company ID.
+    ///
+    /// With an `HRA`/`HRB` section prefix.
     fn handelsregister from "../../../assets/patterns/de/finance/handelsregister.toml"
 );
 

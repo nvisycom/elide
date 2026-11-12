@@ -1,4 +1,4 @@
-//! Content containers a codec decodes and re-encodes.
+//! Content containers: the raw bytes a codec decodes and re-encodes.
 //!
 //! - [`ContentData`]: raw bytes plus the helpers a stream needs (byte access,
 //!   text decoding).

@@ -41,8 +41,10 @@ pub enum Attribution {
     Cited(CitedAttribution),
 }
 
-/// A [`Freeform`](Attribution::Freeform) rationale: a policy label and an
-/// optional human description, with no formal citation.
+/// A [`Freeform`](Attribution::Freeform) rationale: a policy label, no
+/// citation.
+///
+/// It may carry a human description too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -81,8 +83,10 @@ impl FreeformAttribution {
     }
 }
 
-/// A [`Cited`](Attribution::Cited) rationale: a citable authority, the citation
-/// within it, and an optional rationale for why it applies.
+/// A [`Cited`](Attribution::Cited) rationale: an authority and a citation in
+/// it.
+///
+/// It may also carry a rationale for why the citation applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -113,8 +117,7 @@ impl CitedAttribution {
         }
     }
 
-    /// Attach the `rationale` for why the citation applies, consuming and
-    /// returning `self`.
+    /// Attach the `rationale` for why the citation applies, returning `self`.
     #[must_use]
     pub fn with_rationale(mut self, rationale: impl Into<HipStr<'static>>) -> Self {
         self.rationale = Some(rationale.into());
@@ -132,18 +135,21 @@ impl CitedAttribution {
 }
 
 impl Attribution {
-    /// Start a [`Freeform`](Attribution::Freeform) attribution named `name`:
-    /// returns a [`FreeformAttribution`] to refine (e.g.
+    /// Start a [`Freeform`](Attribution::Freeform) attribution named `name`.
+    ///
+    /// It returns a [`FreeformAttribution`] to refine (e.g.
     /// [`with_description`](FreeformAttribution::with_description)) before it
     /// [converts](From) into an `Attribution`. So
-    /// `Attribution::freeform("gdpr-art-17").with_description("right to erasure")`
-    /// reads naturally where an `Attribution` is expected.
+    /// `Attribution::freeform("gdpr-art-17").with_description("right to
+    /// erasure")` reads naturally where an `Attribution` is expected.
     pub fn freeform(name: impl Into<HipStr<'static>>) -> FreeformAttribution {
         FreeformAttribution::new(name)
     }
 
-    /// Start a [`Cited`](Attribution::Cited) attribution from an `authority` and
-    /// its `citation`: returns a [`CitedAttribution`] to refine (e.g.
+    /// Start a [`Cited`](Attribution::Cited) attribution from an `authority`.
+    ///
+    /// The `citation` names the passage within it. Returns a
+    /// [`CitedAttribution`] to refine (e.g.
     /// [`with_rationale`](CitedAttribution::with_rationale)) before it
     /// [converts](From) into an `Attribution`.
     pub fn cited(

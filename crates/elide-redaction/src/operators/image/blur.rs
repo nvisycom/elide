@@ -8,7 +8,7 @@ use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Gaussian-blur the matched image region.
+/// Hides an image region under a Gaussian blur.
 ///
 /// The soft visual treatment: the region is smeared but its rough shape
 /// and surroundings stay legible, so the document still reads naturally.

@@ -31,8 +31,10 @@ pub use elide_codec::{
 #[doc(inline)]
 pub use elide_format::FormatRegistry;
 
-/// PDF codec: the [`pdf_format`]/[`pdf_format_with`] constructors, plus the
-/// [`RasterMode`] and [`Dpi`] configuration a PDF format is built with.
+/// PDF codec: the format constructors and the raster settings they take.
+///
+/// [`pdf_format`] and [`pdf_format_with`] build the format, configured with a
+/// [`RasterMode`] and a [`Dpi`].
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
 /// registered handler for a specific format (e.g. the raster path).
@@ -54,8 +56,7 @@ pub mod pdf {
     pub use elide_pdf::primitive::{Dpi, RasterMode};
 }
 
-/// Raster-image codec: the `*_format` constructors for the PNG, JPEG, and TIFF
-/// handlers.
+/// Raster-image codec: the PNG, JPEG, and TIFF format constructors.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
 /// registered handler for a specific format.
@@ -78,8 +79,10 @@ pub mod image {
     pub use elide_image::codec::tiff_format;
 }
 
-/// Plain-text codec: the `*_format` constructors for the plain-text formats
-/// (TXT, JSON, CSV), and [`csv_format_with`] for a custom CSV dialect.
+/// Plain-text codec constructors: the TXT, JSON, and CSV formats.
+///
+/// The `*_format` constructors build the plain-text formats, and
+/// [`csv_format_with`] builds one for a custom CSV dialect.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
 /// registered handler for a specific format.
@@ -120,8 +123,10 @@ pub mod markup {
     pub use elide_markup::xml_format;
 }
 
-/// Office-document codec: the `*_format` constructors for the OOXML containers
-/// (DOCX, PPTX, XLSX). No format takes configuration.
+/// Office-document codec: the DOCX, PPTX, and XLSX format constructors.
+///
+/// The `*_format` constructors build the OOXML containers; none takes
+/// configuration.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
 /// registered handler for a specific format.

@@ -9,7 +9,7 @@ use elide_core::modality::{Modality, ModalityLocation, Overlap};
 use elide_core::primitive::Confidence;
 use uuid::Uuid;
 
-/// One part of a report, typed to its modality, to read.
+/// One part of a report, typed to its modality, for reading its entities.
 ///
 /// Returned by [`Report::part`] and [`Report::document`].
 ///
@@ -51,7 +51,7 @@ impl<'r, M: Modality> Part<'r, M> {
     }
 }
 
-/// One part of a report, typed to its modality, to edit.
+/// One part of a report, typed to its modality, for editing its entities.
 ///
 /// Returned by [`Report::part_mut`] and [`Report::document_mut`]. Every edit
 /// made through it is recorded on the entities it touches as a `Manual` audit

@@ -22,7 +22,7 @@ use sha2::{Sha256, Sha512};
 
 use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
 
-/// Keyed one-way HMAC-SHA-2 hash operator.
+/// Replaces an entity's text with its keyed one-way HMAC-SHA-2 hash.
 ///
 /// Replaces the value with the lowercase hex of `HMAC-SHA-N(key, value)`.
 /// Unlike [`Sha2Hash`]'s salt, which is public and only blocks precomputed

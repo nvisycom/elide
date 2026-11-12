@@ -16,8 +16,10 @@ pub use self::layout::{Layout, LayoutRegion};
 pub use self::location::ImageLocation;
 pub use self::replacement::ImageReplacement;
 
-/// Image modality: data is [`ImageData`], locations are
-/// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
+/// The image modality: located by region, redacted by a visual treatment.
+///
+/// Data is [`ImageData`], locations are [`ImageLocation`] regions, and
+/// replacements are [`ImageReplacement`]s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Image;

@@ -24,7 +24,7 @@ use minijinja::{Environment, context};
 
 use super::Prompt;
 
-/// Jinja2-template-driven [`Prompt`] impl.
+/// A [`Prompt`] whose wording comes from caller-supplied Jinja2 templates.
 ///
 /// Construct via [`from_file`] or [`from_template`]; the modality `M`
 /// selects which template variables are populated.

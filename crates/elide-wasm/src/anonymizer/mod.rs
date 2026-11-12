@@ -1,5 +1,6 @@
-//! The [`Anonymizer`]: the redaction side of a modality's stage, mirroring the
-//! Rust [`Anonymizer`](elide::redaction::Anonymizer) builder.
+//! The [`Anonymizer`]: the redaction side of a modality's stage.
+//!
+//! It mirrors the Rust [`Anonymizer`](elide::redaction::Anonymizer) builder.
 //!
 //! A caller builds one per modality — [`Anonymizer::text`], [`Anonymizer::image`],
 //! … — folds in [`Rule`]s, and hands it to
@@ -22,8 +23,7 @@ use crate::analyzer::StageModality;
 use crate::error::ElideError;
 use crate::rule::{Rule, RuleKind};
 
-/// The redaction side of a modality's stage: a sequence of rules, fixed to one
-/// modality.
+/// The redaction side of a modality's stage: its rules, for one modality.
 ///
 /// Mirrors the Rust [`Anonymizer`](elide::redaction::Anonymizer) builder. Built
 /// with [`Anonymizer::text`] / [`Anonymizer::tabular`] / [`Anonymizer::image`] /
@@ -61,8 +61,9 @@ impl Anonymizer {
         Anonymizer::new(StageModality::Audio)
     }
 
-    /// Add a rule, in the order it should be tried. Consumes the rule. With no
-    /// rules added, the stage uses the default redaction policy.
+    /// Add a rule, in the order it should be tried; consumes the rule.
+    ///
+    /// With no rules added, the stage uses the default redaction policy.
     #[wasm_bindgen(js_name = rule)]
     pub fn rule(mut self, rule: Rule) -> Anonymizer {
         self.rules.push(rule);

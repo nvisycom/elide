@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256, Sha512};
 
 use crate::operators::Sha2Algorithm;
 
-/// One-way SHA-2 hash operator.
+/// Replaces an entity's text with its one-way SHA-2 hash, in hex.
 ///
 /// Replaces the value with the lowercase hex of its digest. An optional
 /// salt is prepended before hashing, which blocks precomputed rainbow

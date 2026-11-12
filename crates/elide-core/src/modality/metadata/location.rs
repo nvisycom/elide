@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::modality::{ModalityLocation, Overlap};
 
-/// A metadata field, addressed by its key within a metadata modality, and
-/// optionally narrowed to a byte range of its value.
+/// A metadata field addressed by its key, optionally narrowed to some bytes.
+///
+/// The byte range narrows to part of the field's value.
 ///
 /// The owning stream already says *which* scheme the field belongs to, so the
 /// location only needs the field's [`key`](Self::key) within it

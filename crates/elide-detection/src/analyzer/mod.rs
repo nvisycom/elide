@@ -76,8 +76,10 @@ impl<M: Modality> Analyzer<M> {
         }
     }
 
-    /// Add an enricher. Enrichers run in the order added, sequentially, before any
-    /// recognizer (so a recognizer sees what they wrote onto the input).
+    /// Add an enricher; enrichers run in order, before any recognizer.
+    ///
+    /// They run sequentially, so a recognizer sees what they wrote onto the
+    /// input.
     #[must_use]
     pub fn with_enricher<E: Enricher<M> + 'static>(mut self, enricher: E) -> Self {
         self.enrichers.push(Arc::new(enricher));
@@ -114,8 +116,7 @@ impl<M: Modality> Analyzer<M> {
         self.analyze_subject(&mut Subject::new(data), &ctx).await
     }
 
-    /// Analyze a streamed source end to end, returning entities in the source's
-    /// own coordinate system.
+    /// Analyze a streamed source end to end, in the source's own coordinates.
     ///
     /// The [`analyze`](Self::analyze) counterpart for I/O-backed sources (a
     /// decoded codec document, say): the caller never sees a chunk or a
@@ -131,8 +132,9 @@ impl<M: Modality> Analyzer<M> {
         Ok(analyses.pop().expect("one analysis per source"))
     }
 
-    /// Analyze several streamed sources together and return one [`Analysis`] per
-    /// source, in order.
+    /// Analyze several streamed sources together, one [`Analysis`] per source.
+    ///
+    /// The analyses come back in source order.
     ///
     /// Each source is seeded from its paired `seeds` entry: a prior run's
     /// enrichment artifact, so a re-run re-recognizes without re-enriching (the

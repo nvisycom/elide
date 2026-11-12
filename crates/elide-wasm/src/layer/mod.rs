@@ -88,7 +88,7 @@ enum LayerKind {
     CrossLabel(CrossLabelKind),
 }
 
-/// A detection layer, ready to fold into an [`Analyzer`](crate::analyzer::Analyzer).
+/// A detection layer: a threshold, fusion, or reconcile stage, for an analyzer.
 ///
 /// Built with [`Layer::filter`], [`Layer::reconcile_same_label`], or
 /// [`Layer::reconcile_cross_label`], and consumed by
@@ -115,8 +115,9 @@ impl Layer {
         Ok(Self(LayerKind::Filter(threshold)))
     }
 
-    /// Build a same-label reconcile layer that merges overlapping findings of the
-    /// same label with the given `scoring`.
+    /// Build a fusion layer that fuses overlapping findings of the same label.
+    ///
+    /// The fused confidence is folded with the given `scoring`.
     ///
     /// # Errors
     ///
@@ -136,8 +137,9 @@ impl Layer {
         Ok(Self(LayerKind::SameLabel(kind)))
     }
 
-    /// Build a cross-label reconcile layer that arbitrates overlapping findings
-    /// of different labels per `config`.
+    /// Build a layer that arbitrates overlapping findings of different labels.
+    ///
+    /// It arbitrates per `config`.
     ///
     /// # Errors
     ///

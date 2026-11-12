@@ -22,9 +22,10 @@ macro_rules! impl_audio_handler {
         /// [`FormatId`]: elide_codec::FormatId
         pub const FORMAT_ID: ::elide_codec::FormatId = ::elide_codec::FormatId::new($format_id);
 
-        /// [`Format`] descriptor registered into `FormatRegistry`. Decodes into a
-        /// one-stream [`Document`](elide_codec::Document) of the clip, its tags
-        /// stripped.
+        /// This container's [`Format`], decoding a clip with its tags stripped.
+        ///
+        /// Decodes into a one-stream [`Document`](elide_codec::Document) of the
+        /// clip.
         ///
         /// [`Format`]: elide_codec::Format
         pub fn format() -> ::elide_codec::Format {

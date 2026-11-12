@@ -7,7 +7,7 @@ use std::path::Path;
 use bytes::Bytes;
 use elide_core::{Error, Result};
 
-/// Raw content bytes with optional descriptive metadata.
+/// Raw content bytes, with the filename and content type a caller knows.
 ///
 /// The data the codec moves around: the bytes, plus the caller-supplied
 /// hints a registry can use to resolve a format: an original [`filename`]

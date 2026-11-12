@@ -1,4 +1,4 @@
-//! Detection: recognizers and the entities they emit.
+//! Detection: the recognizer contract, its inputs, and the entities it emits.
 //!
 //! A [`Recognizer`] inspects content and emits entities, each carrying a
 //! recognition [`AuditEvent`] in its provenance (its location, confidence,

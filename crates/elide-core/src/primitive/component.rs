@@ -6,8 +6,8 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Identifies a pipeline component (a recognizer, an enricher, or a redaction
-/// operator) by name and version.
+/// A pipeline component's name and version: a recognizer, enricher, or
+/// operator.
 ///
 /// Pairs a stable name with a free-form version string so the audit trail and
 /// usage report record not just *which* component ran but *which build* of it:

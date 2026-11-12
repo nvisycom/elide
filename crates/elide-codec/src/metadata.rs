@@ -1,5 +1,4 @@
-//! [`MetadataFields`]: the fields a metadata stream surfaces, read and redacted
-//! in place.
+//! The fields a metadata stream surfaces, read and redacted in place.
 
 use elide_core::Result;
 use elide_core::modality::Chunk;
@@ -62,10 +61,11 @@ impl MetadataFields {
         }
     }
 
-    /// Apply `redactions` to the fields' values, returning each edited field's
-    /// key and new value, trimmed, and blank for a field now removed. The
-    /// fields keep the same trimmed value, so a later read matches what the
-    /// format wrote.
+    /// Apply `redactions` to the fields' values, returning each edited field.
+    ///
+    /// Each edited field comes back as its key and new value, trimmed, and
+    /// blank for a field now removed. The fields keep the same trimmed value,
+    /// so a later read matches what the format wrote.
     ///
     /// Applied right to left, so an edit's length delta does not move an
     /// earlier span in the same value. A redaction for a key no field has is

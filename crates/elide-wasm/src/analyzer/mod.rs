@@ -1,5 +1,6 @@
-//! The [`Analyzer`]: the detect side of a modality's stage, mirroring the Rust
-//! [`Analyzer`](elide::detection::Analyzer) builder.
+//! The [`Analyzer`]: the detect side of a modality's stage.
+//!
+//! It mirrors the Rust [`Analyzer`](elide::detection::Analyzer) builder.
 //!
 //! A caller builds one per modality — [`Analyzer::text`], [`Analyzer::image`], … —
 //! then folds in enrichers, recognizers, and layers with [`enrich`],
@@ -36,8 +37,9 @@ pub(crate) enum StageModality {
     Audio,
 }
 
-/// The detect side of a modality's stage: enrichers, recognizers, and layers,
-/// fixed to one modality.
+/// The detect side of a modality's stage: its enrichers, recognizers, layers.
+///
+/// Fixed to one modality.
 ///
 /// Mirrors the Rust [`Analyzer`](elide::detection::Analyzer) builder. Built with
 /// [`Analyzer::text`] / [`Analyzer::tabular`] / [`Analyzer::image`] /
@@ -91,9 +93,10 @@ impl Analyzer {
         self
     }
 
-    /// Add a reconcile or filter layer, in the order it should run. Consumes the
-    /// handle. With no layers added, the stage uses the default reconcile-and-
-    /// filter stack.
+    /// Add a layer, in the order it should run; consumes the handle.
+    ///
+    /// With no layers added, the stage uses the default reconcile-and-filter
+    /// stack.
     #[wasm_bindgen(js_name = layer)]
     pub fn layer(mut self, layer: Layer) -> Analyzer {
         self.layers.push(layer);

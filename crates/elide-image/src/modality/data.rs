@@ -11,8 +11,9 @@ use super::ImageFormat;
 use crate::RasterImage;
 use crate::primitive::Dimensions;
 
-/// Per-call payload a recognizer inspects for the [`Image`] modality: the image
-/// decoded once, plus its original container bytes.
+/// The image a recognizer inspects: decoded pixels and the original bytes.
+///
+/// The image is decoded once, and its container bytes are kept.
 ///
 /// The image is decoded at ingestion and shared here, so [`format`] and
 /// [`dimensions`] are intrinsic facts read for free — no consumer re-decodes to

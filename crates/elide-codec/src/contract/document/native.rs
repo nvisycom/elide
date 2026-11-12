@@ -11,8 +11,7 @@ use super::{Blob, LocalId};
 use crate::content::ContentData;
 use crate::{Stream, StreamMut};
 
-/// A format's decoded document: its streams, as typed fields, and how it writes
-/// itself back into native bytes.
+/// A format's decoded document: owns its streams and writes itself back out.
 ///
 /// The engine reaches the streams through [`streams`](Self::streams), each lent
 /// type-erased by modality; detection reads them and redaction edits them in
@@ -53,9 +52,10 @@ pub trait Native: Send + Sync {
     fn validate(&self, output: &ContentData) -> Result<()>;
 }
 
-/// A stream that is a whole document by itself: a `.txt`, a JSON or CSV file,
-/// whose redacted content is its output bytes. A leaf [`Loader`](crate::Loader)
-/// produces one.
+/// A stream that is a whole document by itself, encoding into its bytes.
+///
+/// A `.txt`, a JSON or CSV file: its redacted content is its output. A leaf
+/// [`Loader`](crate::Loader) produces one.
 pub trait Encode {
     /// The stream's current content as the document's bytes.
     ///
@@ -68,8 +68,10 @@ pub trait Encode {
 /// The id of a leaf document's one stream.
 const LEAF_ID: &str = "body";
 
-/// The native document of a leaf format: one stream `S` of modality `M`, which
-/// encodes itself. Built by [`Document::leaf`](super::Document::leaf).
+/// The native document of a leaf format: one stream that encodes itself.
+///
+/// Its stream is an `S` of modality `M`. Built by
+/// [`Document::leaf`](super::Document::leaf).
 pub struct LeafDocument<M, S> {
     stream: S,
     _modality: PhantomData<fn() -> M>,

@@ -9,8 +9,9 @@ use uuid::Uuid;
 use crate::entity::LabelCatalog;
 use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 
-/// Free-form, caller-asserted request context: the *document* it is about and
-/// the *request* driving it.
+/// Free-form request context the caller asserts: the document and the request.
+///
+/// The *document* the request is about, and the *request* driving it.
 ///
 /// Three axes of opaque classification strings elide neither ships nor
 /// interprets, a downstream policy layer chooses what `"medical"` or
@@ -72,8 +73,7 @@ impl ScopeMetadata {
     }
 }
 
-/// The caller's request for one analysis: what to detect and the context to
-/// detect it in.
+/// The caller's request for one analysis: what to detect, and the context.
 ///
 /// Carries the [`catalog`] of entity types to find (empty means detect
 /// nothing), the asserted [`languages`] and [`countries`] that gate
@@ -156,8 +156,10 @@ impl Scope {
         self
     }
 
-    /// The caller-asserted language claims, in the order given. Empty means the
-    /// caller asserted none, leaving detection (if an enricher runs) to fill in.
+    /// The caller-asserted language claims, in the order given.
+    ///
+    /// Empty means the caller asserted none, leaving detection (if an enricher
+    /// runs) to fill in.
     #[must_use]
     pub fn languages(&self) -> &[LanguageClaim] {
         &self.languages

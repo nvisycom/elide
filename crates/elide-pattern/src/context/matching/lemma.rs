@@ -7,7 +7,7 @@ use hipstr::HipStr;
 
 use super::{KeywordMatcher, SubstringMatcher};
 
-/// Lemma-aware [`KeywordMatcher`].
+/// A [`KeywordMatcher`] that matches keywords against token lemmas.
 ///
 /// Finds every [`SubstringMatcher`] hit, so an inflected keyword (`ruled`)
 /// or a phrase (`filed with`) still matches the text as written, plus each

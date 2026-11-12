@@ -14,9 +14,10 @@ use crate::modality::{Modality, ModalityLocation};
 use crate::primitive::ComponentId;
 use crate::redaction::LeakProfile;
 
-/// The redaction *decision*: an operator was picked to hide the entity,
-/// recorded before it is applied so it can be reviewed (and the entity edited)
-/// first.
+/// The redaction *decision*: which operator was picked to hide the entity.
+///
+/// It is recorded before the operator is applied, so it can be reviewed (and
+/// the entity edited) first.
 ///
 /// It carries the whole decision: which operator, how much its output leaks,
 /// which rule chose it, and the policy's rationale. The [`Redaction`] that
@@ -107,11 +108,12 @@ impl Redaction {
     }
 }
 
-/// A human override, outside automatic detection: an entity a reviewer added by
-/// hand, or a detected one they marked to ignore. Its provenance is a person's
-/// decision, not a recognizer's, so the trail records *why* (an
-/// [`Attribution`], when supplied). *Who* made the override is the event's
-/// [`source`], not a payload field.
+/// A human override: an entity a reviewer added, flagged, or suppressed.
+///
+/// An entity a reviewer added by hand, or a detected one they marked to ignore.
+/// Its provenance is a person's decision, not a recognizer's, so the trail
+/// records *why* (an [`Attribution`], when supplied). *Who* made the override
+/// is the event's [`source`], not a payload field.
 ///
 /// [`source`]: super::AuditEvent::source
 #[derive(Debug, Clone)]
@@ -177,9 +179,10 @@ impl<M: Modality> Manual<M> {
     }
 }
 
-/// Which human decision a [`Manual`] event records, the reviewer actions on a
-/// finding: [`Flag`](ManualIntent::Flag) a miss, [`Suppress`](ManualIntent::Suppress)
-/// a false positive, or [`Amend`](ManualIntent::Amend) an existing finding.
+/// Which reviewer decision a [`Manual`] event records about a finding.
+///
+/// [`Flag`](ManualIntent::Flag) a miss, [`Suppress`](ManualIntent::Suppress) a
+/// false positive, or [`Amend`](ManualIntent::Amend) an existing finding.
 // Explicit discriminants: `Manual::hash_into` folds `intent as u8` into the
 // tamper-evident hash, so these values are part of the hash. Pinning them makes
 // that dependence visible and keeps a reorder or mid-enum insertion from

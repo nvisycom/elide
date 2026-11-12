@@ -33,9 +33,10 @@ use super::alignment::AlignmentMode;
 use crate::backend::MockBackend;
 use crate::backend::{NerRequest, NerResponse, NerSpan};
 
-/// Trait-driven NER recognizer, generic over its NER backend `B` — any
-/// [`Backend`] whose request is [`NerRequest`] and
-/// whose response is [`NerResponse`].
+/// A recognizer that runs a NER model over text, through a NER backend.
+///
+/// Generic over its backend `B`: any [`Backend`] whose request is
+/// [`NerRequest`] and whose response is [`NerResponse`].
 #[derive(Clone)]
 pub struct NerRecognizer<B = ()> {
     /// Optional recognizer name, surfaced in the recognition event on every

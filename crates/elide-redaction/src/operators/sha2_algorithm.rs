@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Which SHA-2 variant a hashing operator uses.
+/// Which SHA-2 variant a hashing operator uses: SHA-256 or SHA-512.
 ///
 /// Shared by [`Sha2Hash`] (unkeyed digest) and [`HmacHash`] (keyed HMAC):
 /// both pick the same underlying width, so the choice lives in one enum

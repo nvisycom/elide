@@ -60,8 +60,9 @@ impl<C: Coordinate> BoundingBox<C> {
         }
     }
 
-    /// Whether this box overlaps `other`: they share interior area. Touching
-    /// edges alone do not count.
+    /// Whether this box shares interior area with `other`.
+    ///
+    /// Touching edges alone do not count.
     pub fn overlaps(&self, other: &Self) -> bool {
         self.min.x < other.max.x
             && other.min.x < self.max.x

@@ -35,8 +35,9 @@ impl TextDoc {
         }
     }
 
-    /// A document whose [`write_at`](DataWriter::write_at) always fails, to
-    /// exercise the apply-error path. Reads still work.
+    /// A document whose every [`write_at`](DataWriter::write_at) fails.
+    ///
+    /// It exercises the apply-error path; reads still work.
     pub fn failing(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),

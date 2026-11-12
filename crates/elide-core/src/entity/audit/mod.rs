@@ -21,8 +21,9 @@ use crate::modality::Modality;
 use crate::primitive::Confidence;
 use crate::{Error, Result};
 
-/// Full audit trail of an [`Entity`]: every [`AuditEvent`] in its life, as a
-/// tamper-evident DAG.
+/// An [`Entity`]'s full audit trail, as a tamper-evident DAG of events.
+///
+/// It holds every [`AuditEvent`] in the entity's life.
 ///
 /// Where Presidio keeps a shallow, optional, per-stage explanation that is
 /// stripped by default, an `AuditLog` is always present and records the
@@ -172,10 +173,12 @@ impl<M: Modality> AuditLog<M> {
         })
     }
 
-    /// The [`Selection`] the entity's most recent [`Redaction`] applied, found
-    /// through the hash the redaction names: which operator ran, why, and how
-    /// much its output leaks. `None` when the entity was not redacted, or when
-    /// the named selection is not on this trail (which [`verify`] reports).
+    /// The [`Selection`] that the entity's most recent [`Redaction`] applied.
+    ///
+    /// It is found through the hash the redaction names: which operator ran,
+    /// why, and how much its output leaks. `None` when the entity was not
+    /// redacted, or when the named selection is not on this trail (which
+    /// [`verify`] reports).
     ///
     /// [`Selection`]: crate::entity::audit::Selection
     /// [`Redaction`]: crate::entity::audit::Redaction
@@ -206,10 +209,12 @@ impl<M: Modality> AuditLog<M> {
             .any(|e| matches!(e.kind, AuditKind::Flagged(_)))
     }
 
-    /// Whether a reviewer has suppressed this entity, i.e. its most recent
-    /// [`Manual`] event carries [`ManualIntent::Suppress`]. The audit trail is
-    /// the single source of truth: there is no separate flag to keep in sync.
-    /// A [flagged](ManualIntent::Flag) or [amended](ManualIntent::Amend) entity
+    /// Whether a reviewer has suppressed this entity with a [`Manual`] event.
+    ///
+    /// That is, its most recent [`Manual`] event carries
+    /// [`ManualIntent::Suppress`]. The audit trail is the single source of
+    /// truth: there is no separate flag to keep in sync. A
+    /// [flagged](ManualIntent::Flag) or [amended](ManualIntent::Amend) entity
     /// is not suppressed, and is redacted like any detection.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
@@ -251,9 +256,10 @@ impl<M: Modality> AuditLog<M> {
         self.events.last().map(|e| e.confidence)
     }
 
-    /// Record `event` as following the current head: it links to the last
-    /// recorded event (or nothing, for the first event), and its hash is
-    /// computed over its payload and that parent.
+    /// Record `event` as following the current head of the trail.
+    ///
+    /// It links to the last recorded event (or nothing, for the first event),
+    /// and its hash is computed over its payload and that parent.
     pub fn record(&mut self, mut event: AuditEvent<M>) {
         event.parents = match self.events.last() {
             Some(head) => vec![head.hash],
@@ -263,8 +269,10 @@ impl<M: Modality> AuditLog<M> {
         self.events.push(event);
     }
 
-    /// Record a fusion `event` following several parents at once, named by
-    /// their hashes: the heads of the trails being combined.
+    /// Record a fusion `event` that follows several parents at once.
+    ///
+    /// The parents are named by their hashes: the heads of the trails being
+    /// combined.
     ///
     /// The parents' own events must already have been [absorbed](Self::absorb)
     /// into this log; their hashes are unchanged, so no earlier event is

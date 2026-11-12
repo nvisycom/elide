@@ -73,8 +73,10 @@ impl CharacterReferences {
     }
 }
 
-/// The decoded form of the escaped text `raw`, whose first byte sits at `base`
-/// in its source, with the map from it back to the source.
+/// Decode the escaped text `raw`, with the map back to its source bytes.
+///
+/// `raw`'s first byte sits at `base` in its source; the map translates decoded
+/// offsets back to the source.
 ///
 /// Character references decode by `rules`. A reference that does not decode
 /// (an unknown name, a code that is no character, a `&` that starts no

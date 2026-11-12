@@ -1,4 +1,4 @@
-//! [`Enricher<M>`]: the pre-recognition context-enrichment contract.
+//! The [`Enricher`] contract: context computed before recognizers run.
 
 use futures::future;
 
@@ -7,7 +7,7 @@ use crate::modality::Modality;
 use crate::primitive::ComponentId;
 use crate::recognition::{Context, Subject};
 
-/// Enriches a [`Context`] before recognizers run over it.
+/// Computes context for a [`Subject`] before the recognizers run over it.
 ///
 /// An enricher produces no entities. It fills in per-call context that
 /// recognizers consume: detecting the payload's language and asserting it

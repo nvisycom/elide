@@ -20,8 +20,9 @@ shipped_pattern!(
     fn gstin from "../../../assets/patterns/in/finance/gstin.toml"
 );
 shipped_pattern!(
-    /// Indian passport, 8-char alphanumeric (letter + non-zero
-    /// digit + 5 digits + non-zero digit).
+    /// Indian passport numbers, 8 alphanumeric characters.
+    ///
+    /// A letter + non-zero digit + 5 digits + non-zero digit.
     fn passport from "../../../assets/patterns/in/identity/passport.toml"
 );
 shipped_pattern!(

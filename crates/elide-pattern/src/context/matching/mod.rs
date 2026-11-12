@@ -1,4 +1,4 @@
-//! Keyword-matching strategies for a rule's context.
+//! Keyword-matching strategies for a rule's context: substrings or lemmas.
 //!
 //! - [`KeywordMatcher`] is the strategy trait, selected with
 //!   [`PatternRecognizerBuilder::with_keyword_matcher`].
@@ -40,7 +40,7 @@ pub(crate) fn is_whole_word(text: &str, m: &Range<usize>) -> bool {
     before_ok && after_ok
 }
 
-/// Finds where keywords fire near an entity match.
+/// Finds where a rule's context keywords occur near an entity match.
 ///
 /// The strategy slot that swaps raw substring
 /// matching for lemma-aware matching (or a third-party

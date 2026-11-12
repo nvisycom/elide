@@ -16,7 +16,7 @@ use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Pass the matched entity through unchanged.
+/// Passes an entity through unchanged, to exempt it from redaction.
 ///
 /// Useful in mixed policies: redact everything by default but keep, say,
 /// currency amounts readable, or every face except the ones tagged to

@@ -1,5 +1,6 @@
-//! [`Prompt`]: the per-modality prompt wording consumed by
-//! [`LlmRecognizer`].
+//! The [`Prompt`] contract: the per-modality wording an LLM recognizer sends.
+//!
+//! Consumed by [`LlmRecognizer`].
 //!
 //! One trait per modality (`Prompt<Text>`, `Prompt<Image>`): the
 //! recognizer holds `Arc<dyn Prompt<M>>` and renders the user prompt with
@@ -62,7 +63,7 @@ pub use self::default_prompt::DefaultPrompt;
 #[cfg_attr(docsrs, doc(cfg(feature = "jinja2")))]
 pub use self::jinja2_prompt::Jinja2Prompt;
 
-/// The per-modality prompt wording.
+/// The per-modality prompt wording an LLM recognizer sends its model.
 ///
 /// Renders the user prompt for one modality's [`Subject`] plus its
 /// [`Context<'_>`]. Wording only: the response shape and how

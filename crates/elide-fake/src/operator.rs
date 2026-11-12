@@ -13,7 +13,7 @@ use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::{ComponentId, LanguageTag};
 use elide_core::redaction::{LeakProfile, Operator};
 
-/// Locale-aware fake-data operator.
+/// An operator that replaces an entity with locale-aware fake data.
 ///
 /// Picks a locale from the entity's BCP-47 `language` field, falling
 /// back to the `default_language` (English unless overridden) when

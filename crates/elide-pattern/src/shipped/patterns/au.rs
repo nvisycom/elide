@@ -15,8 +15,9 @@ shipped_pattern!(
     fn acn from "../../../assets/patterns/au/finance/acn.toml"
 );
 shipped_pattern!(
-    /// Medicare, 10-digit Australian Medicare card number
-    /// (prefix 2-6, mod-10 weighted check).
+    /// Medicare, the 10-digit Australian Medicare card number.
+    ///
+    /// Prefix 2-6, with a weighted mod-10 check.
     fn medicare from "../../../assets/patterns/au/health/medicare.toml"
 );
 shipped_pattern!(

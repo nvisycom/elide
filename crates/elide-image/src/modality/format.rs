@@ -1,6 +1,6 @@
 //! [`ImageFormat`]: the raster formats this crate names.
 
-/// A raster image format.
+/// A raster image container format: PNG, JPEG, or TIFF.
 ///
 /// A closed set, not a re-export of [`image::ImageFormat`]: the `image` crate
 /// knows many formats this crate does not model, so a caller can only name one

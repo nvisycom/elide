@@ -9,7 +9,7 @@ use elide_core::primitive::UnitBoundingBox;
 
 use super::{BoundingBox, Dimensions, Point};
 
-/// Pixel-space conversions for a [`UnitBoundingBox`].
+/// Converts a [`UnitBoundingBox`] to and from an image's pixel space.
 pub trait UnitBoundingBoxExt {
     /// Scale into a pixel-space [`BoundingBox`] for an image of `dims`,
     /// multiplying each axis by the matching dimension.

@@ -14,9 +14,10 @@ use little_exif::rational::uR64;
 use crate::ImageBuffer;
 use crate::modality::{ImageData, ImageFormat};
 
-/// Decode `bytes` of the given `format` into an [`ImageData`] the way ingestion
-/// does, for a test that needs the image modality's payload from raw container
-/// bytes.
+/// Decode fixture `bytes` of a known `format` into an [`ImageData`] payload.
+///
+/// The way ingestion does, for a test that needs the image modality's payload
+/// from raw container bytes.
 ///
 /// # Panics
 ///
@@ -29,9 +30,11 @@ pub fn image_data(bytes: impl Into<Bytes>, format: ImageFormat) -> ImageData {
     ImageData::new(buffer.raster().clone(), bytes)
 }
 
-/// A tiny (1x1) decoded [`ImageData`], for a test that needs *some* valid image
-/// payload but does not care about its pixels (it exercises the OCR artifact or
-/// an empty-recognition path, not the image itself).
+/// A tiny (1x1) decoded [`ImageData`], for a test that needs an image.
+///
+/// For a test that needs *some* valid image payload but does not care about its
+/// pixels (it exercises the OCR artifact or an empty-recognition path, not the
+/// image itself).
 #[must_use]
 pub fn blank_image_data() -> ImageData {
     image_data(png(1, 1), ImageFormat::Png)
@@ -98,7 +101,7 @@ pub fn jpeg_with_description(description: &str) -> Bytes {
     Bytes::from(bytes)
 }
 
-/// The EXIF `ImageDescription` `jpeg` carries, if any.
+/// The EXIF `ImageDescription` that `jpeg` carries, if any, for assertions.
 #[must_use]
 pub fn description(jpeg: &[u8]) -> Option<String> {
     let exif = ExifMetadata::new_from_vec(&jpeg.to_vec(), FileExtension::JPEG).ok()?;
@@ -169,14 +172,13 @@ pub fn png_with_gps() -> Bytes {
     Bytes::from(bytes)
 }
 
-/// Whether `jpeg` bytes still carry a GPS latitude tag, for asserting a strip
-/// took effect.
+/// Whether `jpeg` bytes still carry a GPS latitude tag, to assert a strip.
 #[must_use]
 pub fn has_gps(jpeg: &[u8]) -> bool {
     has_gps_of(jpeg, FileExtension::JPEG)
 }
 
-/// Whether `png` bytes still carry a GPS latitude tag.
+/// Whether `png` bytes still carry a GPS latitude tag, to assert a strip.
 #[must_use]
 pub fn has_gps_png(png: &[u8]) -> bool {
     has_gps_of(
@@ -187,7 +189,7 @@ pub fn has_gps_png(png: &[u8]) -> bool {
     )
 }
 
-/// Whether `tiff` bytes still carry a GPS latitude tag.
+/// Whether `tiff` bytes still carry a GPS latitude tag, to assert a strip.
 #[must_use]
 pub fn has_gps_tiff(tiff: &[u8]) -> bool {
     has_gps_of(tiff, FileExtension::TIFF)
@@ -203,7 +205,7 @@ fn has_gps_of(bytes: &[u8], format: FileExtension) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether `bytes` decode as a valid image.
+/// Whether `bytes` decode as a valid image, to assert an output is intact.
 #[must_use]
 pub fn is_valid_image(bytes: &[u8]) -> bool {
     image::load_from_memory(bytes).is_ok()

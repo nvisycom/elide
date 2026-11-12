@@ -25,9 +25,10 @@ use super::MockBackend;
 use super::{OcrRequest, OcrResponse};
 use crate::modality::{Image, Layout};
 
-/// An [`Enricher<Image>`] that OCRs the image, generic over its OCR backend `B`
-/// — any [`Backend`] whose request is [`OcrRequest`] and whose response is
-/// [`OcrResponse`].
+/// An [`Enricher<Image>`] that OCRs each image through an OCR backend.
+///
+/// Generic over its backend `B`: any [`Backend`] whose request is
+/// [`OcrRequest`] and whose response is [`OcrResponse`].
 ///
 /// Stamps the resulting [`Layout`] onto the call's artifact. Registered on an
 /// `Analyzer<Image>` ahead of its recognizers, the same way a language detector

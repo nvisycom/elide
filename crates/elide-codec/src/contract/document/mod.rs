@@ -41,9 +41,11 @@ pub struct Document {
     policy: HiddenContentPolicy,
 }
 
-/// A self-contained file embedded in a document (an image in a DOCX, a PDF
-/// attachment), re-decoded through the registry into its own [`Document`]. Its
-/// redacted bytes fold back through [`Document::replace_blob`].
+/// A file embedded in a document, decoded and redacted as one of its own.
+///
+/// An image in a DOCX, a PDF attachment: it is re-decoded through the registry
+/// into its own [`Document`], and its redacted bytes fold back through
+/// [`Document::replace_blob`].
 #[derive(Clone)]
 pub struct Blob {
     /// The blob's document-local id.
@@ -70,9 +72,11 @@ impl Document {
         }
     }
 
-    /// Build a leaf document: one `stream` that [encodes](Encode) itself into
-    /// the document's bytes (a [`LeafDocument`]). For a single-modality format
-    /// with no embedded files (TXT, JSON, CSV).
+    /// Build a leaf document: one `stream` that [encodes](Encode) itself as
+    /// bytes.
+    ///
+    /// The document is a [`LeafDocument`], for a single-modality format with no
+    /// embedded files (TXT, JSON, CSV).
     pub fn leaf<M: Modality, S: Stream<M> + Encode>(format_id: FormatId, stream: S) -> Self {
         Self::new(format_id, LeafDocument::<M, S>::new(stream), Vec::new())
     }
@@ -97,9 +101,12 @@ impl Document {
         !self.stripped.is_empty()
     }
 
-    /// The [`HiddenContentPolicy`] the document was decoded under, which every
-    /// document embedded in it is decoded under too, so one policy governs the
-    /// whole tree. [`Format::decode`](crate::Format::decode) records it.
+    /// The [`HiddenContentPolicy`] this document and its embedded ones decode
+    /// under.
+    ///
+    /// Every document embedded in it is decoded under the same policy, so one
+    /// policy governs the whole tree. [`Format::decode`](crate::Format::decode)
+    /// records it.
     pub fn hidden_content_policy(&self) -> HiddenContentPolicy {
         self.policy
     }
@@ -178,8 +185,8 @@ impl Document {
         Ok(())
     }
 
-    /// Write the (possibly redacted) document into native bytes and validate
-    /// the result.
+    /// Write the (possibly redacted) document as native bytes, and validate
+    /// them.
     ///
     /// The [`Native`] document writes its streams' current content with each
     /// blob's current bytes (its staged redaction if

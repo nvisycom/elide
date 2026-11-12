@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::modality::AudioFormat;
 
-/// One per-call STT request handed to an STT backend.
+/// One clip handed to an STT backend: its bytes, format, and language hint.
 ///
 /// Bundles the audio bytes with the format the caller knows from ingestion,
 /// plus optional language and correlation hints. Borrowed (`SttRequest<'a>`) so

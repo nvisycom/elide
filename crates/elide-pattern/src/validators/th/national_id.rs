@@ -10,9 +10,10 @@
 
 const WEIGHTS: [u32; 12] = [13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
 
-/// Return `true` when `value` is a valid 13-digit Thai NID.
-/// Whitespace and `-` separators in the rendering `X-XXXX-XXXXX-XX-X`
-/// are stripped before validation.
+/// Return `true` when `value` is a valid 13-digit Thai national ID.
+///
+/// Whitespace and `-` separators in the rendering `X-XXXX-XXXXX-XX-X` are
+/// stripped before validation.
 pub fn national_id(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

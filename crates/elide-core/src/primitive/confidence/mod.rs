@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::threshold::ConfidenceThreshold;
 
-/// Confidence score in the closed range `0.0..=1.0`.
+/// How sure a detection is: a score in the closed range `0.0..=1.0`.
 ///
 /// Carried by every provenance [`AuditEvent`] (the `before`/`after` of a
 /// recognition, fusion, or calibration) and by the effective confidence

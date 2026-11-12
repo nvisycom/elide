@@ -6,8 +6,9 @@
 //! check = `sum mod 11`. A computed value of 10 means the NIP is
 //! invalid (never assigned).
 
-/// Return `true` when `value` is a valid 10-digit NIP. Hyphen
-/// and space separators in the conventional `XXX-XXX-XX-XX` or
+/// Return `true` when `value` is a valid 10-digit Polish NIP.
+///
+/// Hyphen and space separators in the conventional `XXX-XXX-XX-XX` or
 /// `XXX-XX-XX-XXX` renderings are stripped before validation.
 pub fn nip(value: &str) -> bool {
     let chars: Vec<char> = value

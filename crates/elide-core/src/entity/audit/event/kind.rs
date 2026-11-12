@@ -13,8 +13,9 @@ use super::{
 };
 use crate::modality::Modality;
 
-/// Kind of an [`AuditEvent`], carrying its event-specific detail and the
-/// rationale for why it happened.
+/// What kind of [`AuditEvent`] happened, with its event-specific detail.
+///
+/// It also carries the rationale for why it happened.
 ///
 /// A thin tagged union: each variant wraps one payload struct (e.g.
 /// [`Redaction`], [`Selection`], [`Manual`]) that owns that kind's fields, its

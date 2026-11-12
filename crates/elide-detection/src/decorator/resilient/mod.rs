@@ -1,5 +1,7 @@
-//! [`ResilientRecognizer`]: a [`Recognizer`] decorator that turns its inner's errors into
-//! empty results instead of failing the whole analysis.
+//! A [`Recognizer`] decorator that turns its errors into empty results.
+//!
+//! [`ResilientRecognizer`] keeps one failing recognizer from failing the whole
+//! analysis.
 
 use elide_core::Result;
 use elide_core::entity::Entity;
@@ -8,8 +10,9 @@ use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use futures::future;
 
-/// Wraps a [`Recognizer`] so that an error from it is logged and swallowed,
-/// yielding no entities for the affected subjects rather than aborting the run.
+/// Wraps a [`Recognizer`] so that its errors are logged, not propagated.
+///
+/// A failing subject yields no entities rather than aborting the run.
 ///
 /// The analyzer joins its recognizers and fails the whole analysis on the first
 /// error, which is the safe default: for a redaction tool, a recognizer that

@@ -16,10 +16,10 @@ use super::icao::mrz_check_digit;
 
 const FORBIDDEN_LETTERS: &str = "ABDEIOQSU";
 
-/// Return `true` when `value` is a structurally-plausible
-/// German Personalausweis number, either an nPA serial with a
-/// valid ICAO Doc 9303 check digit, or a legacy `T` + 8-digit
-/// number.
+/// Return `true` when `value` is a plausible German Personalausweis number.
+///
+/// Either an nPA serial with a valid ICAO Doc 9303 check digit, or a legacy `T`
+/// + 8-digit number.
 pub fn id_card(value: &str) -> bool {
     let trimmed = value.trim().to_ascii_uppercase();
     if trimmed.len() != 9 {

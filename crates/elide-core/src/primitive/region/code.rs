@@ -7,7 +7,7 @@ use celes::Country;
 
 use crate::{Error, Result};
 
-/// [ISO 3166-1] country, identified by its code.
+/// An [ISO 3166-1] country, identified by its alpha-2 code, like `DE`.
 ///
 /// Wraps [`celes::Country`], a static table entry carrying the numeric,
 /// alpha-2, and alpha-3 codes together with the country's name. Because

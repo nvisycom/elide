@@ -2,7 +2,7 @@
 
 use super::{Modality, ResolvedHint};
 
-/// One decoded unit yielded by a [`ChunkReader`].
+/// One decoded unit a [`ChunkReader`] yields: its data, location, and hints.
 ///
 /// `data` is the per-modality wire payload; `location` is the coordinate
 /// the source accepts in [`read_at`] / [`write_at`] to address the same

@@ -14,7 +14,7 @@ use super::HtmlLoader;
 /// Stable [`FormatId`] for the HTML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The HTML [`Format`], resolved by `.html`/`.htm` and `text/html`.
 pub fn format() -> Format {
     Format::with_document_loader(FORMAT_ID, HtmlLoader)
         .with_extensions(["html", "htm"])

@@ -6,9 +6,10 @@
 
 const WEIGHTS: [u32; 9] = [1, 4, 3, 7, 5, 8, 6, 9, 10];
 
-/// Return `true` when `value` is a valid 9-digit TFN. Whitespace
-/// and dash separators in the canonical `NNN NNN NNN` rendering
-/// are stripped before validation.
+/// Return `true` when `value` is a valid 9-digit Australian TFN.
+///
+/// Whitespace and dash separators in the canonical `NNN NNN NNN` rendering are
+/// stripped before validation.
 pub fn tfn(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

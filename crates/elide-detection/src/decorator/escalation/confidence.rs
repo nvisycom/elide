@@ -7,8 +7,10 @@ use elide_core::recognition::Subject;
 
 use super::Decider;
 
-/// A [`Decider`] that escalates when the baseline's strongest entity falls below
-/// a confidence threshold — including when it found nothing at all.
+/// A [`Decider`] that escalates when the baseline's findings are weak.
+///
+/// It escalates when the strongest entity falls below a confidence threshold,
+/// including when the baseline found nothing at all.
 ///
 /// The reasoning: a confident cheap detection does not need the escalated
 /// recognizer, but a sparse or low-confidence one (or no detection) is exactly

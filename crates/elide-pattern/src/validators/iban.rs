@@ -6,10 +6,11 @@
 
 use iban::Iban;
 
-/// Return `true` when `value` is a valid IBAN, both the mod-97
-/// checksum and the country-specific length/BBAN structure must
-/// match the SWIFT registry. Whitespace and dashes are stripped
-/// before validation.
+/// Return `true` when `value` is a valid IBAN, by checksum and structure.
+///
+/// Both the mod-97 checksum and the country-specific length/BBAN structure must
+/// match the SWIFT registry. Whitespace and dashes are stripped before
+/// validation.
 pub fn iban(value: &str) -> bool {
     let cleaned: String = value
         .chars()

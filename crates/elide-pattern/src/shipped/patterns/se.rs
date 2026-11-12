@@ -5,13 +5,15 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// Personnummer, 10/12-digit personal identity number with
-    /// date validity (incl. samordningsnummer) and Luhn checksum.
+    /// Personnummer, the 10- or 12-digit Swedish personal identity number.
+    ///
+    /// With date validity (incl. samordningsnummer) and a Luhn checksum.
     fn personnummer from "../../../assets/patterns/se/identity/personnummer.toml"
 );
 shipped_pattern!(
-    /// Organisationsnummer, 10-digit Bolagsverket company ID
-    /// with third digit ≥ 2 and Luhn checksum.
+    /// Organisationsnummer, the 10-digit Swedish Bolagsverket company ID.
+    ///
+    /// Its third digit is ≥ 2, with a Luhn checksum.
     fn organisationsnummer from "../../../assets/patterns/se/finance/organisationsnummer.toml"
 );
 shipped_pattern!(

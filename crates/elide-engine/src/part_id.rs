@@ -13,9 +13,10 @@ use std::fmt;
 use elide_codec::LocalId;
 use smallvec::{SmallVec, smallvec};
 
-/// A path from the top-level document to one part, one segment per container
-/// level. A single-container document (a plain DOCX/PDF) yields one-segment
-/// paths; nesting appends segments.
+/// A path from the top-level document to one part, a segment per container.
+///
+/// A single-container document (a plain DOCX/PDF) yields one-segment paths;
+/// nesting appends segments.
 ///
 /// Keyed on by [`Report`](crate::Report) / [`ArtifactSet`](crate::ArtifactSet),
 /// so it is `Hash + Eq`. Each segment is a container's own [`LocalId`], opaque
@@ -78,9 +79,10 @@ impl PartId {
         self.0.last().map_or("", LocalId::as_str)
     }
 
-    /// This path's last segment as a [`LocalId`], the typed local id in its
-    /// *immediate* container, the value passed to that container's
-    /// `replace_blob`. `None` for the empty (top-level) path.
+    /// This path's last segment, as a [`LocalId`] in its *immediate* container.
+    ///
+    /// It is the value passed to that container's `replace_blob`. `None` for
+    /// the empty (top-level) path.
     #[must_use]
     pub fn last_segment_id(&self) -> Option<&LocalId> {
         self.0.last()

@@ -29,7 +29,7 @@ use super::TxtLoader;
 /// Stable [`FormatId`] for the plain-text codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
-/// [`Format`] descriptor registered into `FormatRegistry`.
+/// The plain-text [`Format`], resolved by `.txt`/`.log` and `text/plain`.
 pub fn format() -> Format {
     Format::new(FORMAT_ID, TxtLoader)
         .with_extensions(["txt", "log"])

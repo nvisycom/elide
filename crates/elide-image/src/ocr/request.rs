@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::modality::ImageFormat;
 use crate::primitive::Dimensions;
 
-/// One per-call OCR request handed to an OCR backend.
+/// One image handed to an OCR backend: its bytes, format, size, and language.
 ///
 /// Bundles the image bytes with the format and pixel dimensions the caller
 /// knows from decoding the image, plus optional language and correlation hints.

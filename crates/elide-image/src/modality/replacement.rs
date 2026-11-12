@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::primitive::Color;
 
-/// What an image operator produces to hide an entity: a visual treatment
-/// applied to the entity's region.
+/// What an image operator produces to hide an entity: a visual treatment.
+///
+/// The treatment applies to the entity's region.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]

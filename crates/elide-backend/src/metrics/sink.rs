@@ -7,7 +7,8 @@
 
 use super::{Usage, UsageSink};
 
-/// A [`UsageSink`] that forwards each record to two sinks.
+/// A [`UsageSink`] that forwards each record to two sinks, a log and metrics,
+/// say.
 ///
 /// For the common case where a run's usage should reach both a per-run
 /// [`UsageCollector`](super::UsageCollector) (for that request's total) and a

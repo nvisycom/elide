@@ -20,8 +20,9 @@ use rten_imageproc::Rect;
 use crate::modality::{ImageLocation, LayoutRegion};
 use crate::primitive::{BoundingBox, Dimensions, Point};
 
-/// Environment variable naming the directory that holds the two `ocrs` model
-/// files, read by [`OcrsBackend::from_env`](super::OcrsBackend::from_env).
+/// The environment variable naming the directory of the two `ocrs` models.
+///
+/// Read by [`OcrsBackend::from_env`](super::OcrsBackend::from_env).
 pub const OCRS_MODELS_DIR_ENV: &str = "ELIDE_OCRS_MODELS_DIR";
 
 /// File name of the text-detection model within the models directory (the

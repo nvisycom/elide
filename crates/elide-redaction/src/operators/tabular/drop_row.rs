@@ -9,7 +9,7 @@ use elide_core::redaction::{LeakProfile, Operator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Drop the entire row a matched entity sits in.
+/// Drops the entire row an entity sits in, rather than editing one cell.
 ///
 /// A structural treatment, not a cell edit: where [`Erase`] blanks one
 /// cell's text, [`DropRow`] removes the whole record. Useful for "this row

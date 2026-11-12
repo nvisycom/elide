@@ -97,8 +97,9 @@ impl Rate {
         Self::new(count, Duration::from_secs(60))
     }
 
-    /// Let up to `burst` calls through at once after an idle period, in place of
-    /// the default (the rate's count). `1` paces every call evenly.
+    /// Let up to `burst` calls through at once after an idle period.
+    ///
+    /// The default burst is the rate's count; `1` paces every call evenly.
     ///
     /// # Panics
     ///
@@ -126,8 +127,9 @@ impl Rate {
     }
 }
 
-/// Wraps a [`Backend`] and admits at most a fixed number of its calls per
-/// interval, leaving the request and response untouched.
+/// Wraps a [`Backend`] and admits at most a fixed number of calls per interval.
+///
+/// The request and response pass through untouched.
 ///
 /// A token bucket meters the [`Rate`]: the bucket holds up to the burst in
 /// tokens and refills the count of them every interval, so a full bucket lets a

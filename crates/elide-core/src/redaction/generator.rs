@@ -3,7 +3,7 @@
 use crate::entity::Entity;
 use crate::modality::Modality;
 
-/// Mints a synthetic replacement for an entity.
+/// Mints a synthetic replacement value for an entity: pure and infallible.
 ///
 /// Owns *what* a synthetic value looks like, the seam a pseudonymizing
 /// operator delegates to. Generic over the [`Modality`] `M` so the same seam

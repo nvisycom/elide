@@ -1,5 +1,6 @@
-//! [`EscalatingRecognizer`]: run a cheap recognizer always, a costly one only
-//! when it is worth it.
+//! Run a cheap recognizer always, and a costly one only when it is worth it.
+//!
+//! See [`EscalatingRecognizer`].
 //!
 //! A [`Recognizer`] that wraps two: a `baseline` that runs on every subject, and
 //! an `escalated` one (a hosted LLM/VLM, say) that runs only when a [`Decider`]
@@ -24,8 +25,9 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 pub use self::confidence::ConfidenceDecider;
 use crate::batch::expect_one_per_input;
 
-/// Decides whether a subject warrants the escalated recognizer, given what the
-/// cheap baseline already found.
+/// Decides whether a subject warrants the escalated recognizer.
+///
+/// It decides given what the cheap baseline already found.
 ///
 /// Called once per subject, after the baseline has run. Returning `false` keeps
 /// only the baseline's entities; `true` also runs the escalated recognizer.
@@ -37,8 +39,10 @@ pub trait Decider<M: Modality>: Send + Sync {
     fn escalate(&self, subject: &Subject<M>, baseline: &[Entity<M>]) -> bool;
 }
 
-/// A [`Recognizer`] that runs a cheap `baseline` always and a costly `escalated`
-/// one only when a [`Decider`] says the subject warrants it.
+/// Runs a cheap `baseline` recognizer always, and a costly one only if needed.
+///
+/// The `escalated` recognizer runs when a [`Decider`] says the subject warrants
+/// it.
 ///
 /// Both wrapped recognizers recognize the same modality `M`. When recognition
 /// succeeds, the baseline's entities are always returned; when the decider

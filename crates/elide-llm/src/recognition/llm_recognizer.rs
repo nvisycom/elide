@@ -20,7 +20,7 @@ use crate::backend::{LlmBackend, LlmRequest};
 use crate::modality::LlmModality;
 use crate::prompt::{DefaultPrompt, Prompt};
 
-/// LLM-driven recognizer over an [`LlmBackend`] `B`.
+/// A recognizer that prompts an LLM, over an [`LlmBackend`] `B`.
 ///
 /// The backend fixes both the plumbing and the modality: `B::Modality` is what
 /// the recognizer recognizes for, so there is no separate modality type
@@ -55,8 +55,7 @@ impl<B: LlmBackend> LlmRecognizer<B> {
         }
     }
 
-    /// An LLM recognizer over `backend` using the built-in [`DefaultPrompt`] for
-    /// its modality.
+    /// An LLM recognizer over `backend` with its modality's [`DefaultPrompt`].
     ///
     /// [`DefaultPrompt`]: crate::prompt::DefaultPrompt
     #[must_use]

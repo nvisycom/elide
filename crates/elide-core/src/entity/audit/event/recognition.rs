@@ -15,8 +15,9 @@ use super::super::hash::AuditHasher;
 use crate::modality::{Modality, ModalityLocation};
 use crate::redaction::HiddenContentKind;
 
-/// Detail of a pattern/dictionary recognition: the [`PatternRule`] in `rule`
-/// matched at `location`.
+/// Detail of a pattern or dictionary recognition: the rule and its location.
+///
+/// The [`PatternRule`] in `rule` matched at `location`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -51,8 +52,9 @@ impl<M: Modality> Pattern<M> {
     }
 }
 
-/// Detail of a model/NER recognition: the model named by `model` matched at
-/// `location`.
+/// Detail of a model or NER recognition: the model and where it matched.
+///
+/// The model named by `model` matched at `location`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -85,9 +87,11 @@ impl<M: Modality> Model<M> {
     }
 }
 
-/// Detail of a flagged item: an item of hidden content its format labels (a
-/// metadata field, a comment, an author, a tracked deletion) was made a
-/// redaction subject at `location`, with its kind in `content`.
+/// Detail of a flagged item: hidden content made a redaction subject.
+///
+/// An item of hidden content its format labels (a metadata field, a comment, an
+/// author, a tracked deletion) was made a redaction subject at `location`, with
+/// its kind in `content`.
 ///
 /// Distinct from [`Pattern`]/[`Model`] because a flagged item is not *matched*
 /// out of free content: the format names it, and it is simply present. There
@@ -125,8 +129,10 @@ impl<M: Modality> Flagged<M> {
     }
 }
 
-/// The pattern or dictionary rule behind a [`Pattern`] match: its name, the
-/// regex it matched with, and the validator that confirmed it.
+/// The rule behind a [`Pattern`] match: its name, regex, and validator.
+///
+/// The pattern or dictionary rule's name, the regex it matched with, and the
+/// validator that confirmed it.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

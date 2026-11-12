@@ -60,7 +60,7 @@ pub enum DateStyle {
     Us,
 }
 
-/// Reduce a date or timestamp to a coarser granularity.
+/// Reduces a date or timestamp to a coarser granularity, like its year.
 ///
 /// Parses the entity value as an ISO-8601 date (`1987-03-14`) or datetime
 /// (`1987-03-14T09:32:15`), or, in [`DateStyle::Us`], a `MM/DD/YYYY` slash
@@ -115,8 +115,9 @@ impl GeneralizeDate {
         }
     }
 
-    /// Set the input date convention this operator accepts (see
-    /// [`DateStyle`]). ISO-8601 output is unaffected.
+    /// Set the input date convention this operator accepts (see [`DateStyle`]).
+    ///
+    /// ISO-8601 output is unaffected.
     #[must_use]
     pub fn with_style(mut self, style: DateStyle) -> Self {
         self.style = style;
@@ -131,9 +132,10 @@ impl GeneralizeDate {
         self.with_style(DateStyle::Us)
     }
 
-    /// The generalized rendering of `value`, or `None` when it can't be
-    /// parsed as a date or reduced at this granularity (the operator
-    /// declines it).
+    /// The generalized rendering of `value`, or `None` when the operator
+    /// declines.
+    ///
+    /// `None` when it can't be parsed as a date or reduced at this granularity.
     ///
     /// The output mirrors the *input value's own* convention, decided per
     /// value rather than by a configured style: a slash date keeps slashes

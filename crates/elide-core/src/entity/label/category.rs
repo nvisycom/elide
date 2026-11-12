@@ -6,8 +6,10 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// The coarse group a [`Label`] belongs to, for organizing detected entities
-/// by kind (`financial`, `health`, `identity`, …).
+/// The coarse group a [`Label`] belongs to, like `financial` or `health`.
+///
+/// For organizing detected entities by kind (`financial`, `health`, `identity`,
+/// …).
 ///
 /// A category answers "what *sort* of information is this" at a display level:
 /// a consumer groups a redaction audit into sections by category. It is

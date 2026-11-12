@@ -5,13 +5,15 @@
 use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
-    /// RRN, 13-digit Resident Registration Number with
-    /// weighted Mod-11 checksum (pre-Oct 2020) or random tail.
+    /// RRN, the 13-digit Korean Resident Registration Number.
+    ///
+    /// With a weighted Mod-11 checksum (pre-Oct 2020) or a random tail.
     fn rrn from "../../../assets/patterns/kr/identity/rrn.toml"
 );
 shipped_pattern!(
-    /// FRN, Foreigner Registration Number (RRN shape with
-    /// gender/century digit 5-8 and (13 - sum) Mod-10 checksum).
+    /// FRN, the Korean Foreigner Registration Number, in the RRN shape.
+    ///
+    /// Its gender/century digit is 5-8, with a (13 - sum) Mod-10 checksum.
     fn frn from "../../../assets/patterns/kr/identity/frn.toml"
 );
 shipped_pattern!(

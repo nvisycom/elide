@@ -16,7 +16,7 @@ use crate::entity::LabelRef;
 use crate::modality::{Hint, Modality, ModalityLocation};
 use crate::primitive::Confidence;
 
-/// Several detections were fused into one entity.
+/// Several detections of the same finding were fused into this one entity.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -35,8 +35,10 @@ impl Deduplication {
     }
 }
 
-/// A competing detection of a *different* label over the same span was resolved
-/// against this (winning) entity, the loser is recorded, not dropped.
+/// A competing detection of a *different* label lost to this entity.
+///
+/// It covered the same span and was resolved against this (winning) entity; the
+/// loser is recorded, not dropped.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -76,9 +78,10 @@ impl Conflict {
     }
 }
 
-/// A competing detection of a different label over the same span was left
-/// *unresolved*: both entities survive, flagged for a human. Recorded on each
-/// entity of the contested pair, naming the other.
+/// A competing detection of a different label was left *unresolved*.
+///
+/// It covered the same span; both entities survive, flagged for a human.
+/// Recorded on each entity of the contested pair, naming the other.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

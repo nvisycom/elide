@@ -13,7 +13,7 @@ use elide_core::redaction::HiddenContentPolicy;
 use super::{Document, Encode, Stream};
 use crate::content::ContentData;
 
-/// Per-modality leaf-format loader.
+/// A per-modality loader for a leaf format: decodes bytes into one stream.
 ///
 /// A loader validates and parses raw content for its [`Modality`], producing a
 /// single [`Stream`]. Leaf formats with no hidden content (a `.txt`, a JSON or
@@ -52,7 +52,7 @@ pub trait Loader: Send + Sync + 'static {
     async fn decode(&self, content: ContentData) -> Result<Self::Stream>;
 }
 
-/// Decode raw content into a [`Document`].
+/// Decodes raw bytes into a whole [`Document`], sanitizing hidden content.
 ///
 /// Where a [`Loader`] produces a single [`Stream`](super::Stream), a
 /// `DocumentLoader` produces the whole [`Document`]: the format's

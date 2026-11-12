@@ -4,7 +4,7 @@ use elide_core::modality::ModalityReplacement;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Shape of a synthesized tone.
+/// The shape of the tone an audio operator synthesizes over a span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -17,8 +17,9 @@ pub enum Waveform {
     Square,
 }
 
-/// What an audio operator produces to hide an entity: an acoustic
-/// treatment applied to the entity's time range.
+/// What an audio operator produces to hide an entity: a sound treatment.
+///
+/// The treatment applies to the entity's time range.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]

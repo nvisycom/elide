@@ -26,8 +26,9 @@ pub use self::category::Category;
 pub use self::reference::LabelRef;
 use crate::primitive::{LanguageTag, LocalizedText};
 
-/// A label's human-facing text in one language: a display name and an
-/// optional fuller description.
+/// A label's human-facing text in one language: a display name and description.
+///
+/// The description is optional and fuller than the name.
 ///
 /// The `name` is a short, natural-language phrase (`"phone number"`), the
 /// label a zero-shot NER model like GLiNER matches on, and the primary
@@ -73,8 +74,10 @@ impl LabelLocale {
     }
 }
 
-/// Kind of sensitive information: a stable [`id`], per-language
-/// [`LabelLocale`]s, an optional [`category`], and zero or more tags.
+/// A kind of sensitive information: its id, names, category, and tags.
+///
+/// A stable [`id`], per-language [`LabelLocale`]s, an optional [`category`],
+/// and zero or more tags.
 ///
 /// # Identity
 ///
@@ -165,8 +168,7 @@ impl Label {
         }
     }
 
-    /// Add (or replace) the [`LabelLocale`] for `language`, returning
-    /// `self` for chaining.
+    /// Add or replace the [`LabelLocale`] for `language`, returning `self`.
     #[must_use]
     pub fn with_localization(mut self, language: LanguageTag, localization: LabelLocale) -> Self {
         self.localizations.insert(language, localization);
@@ -201,10 +203,11 @@ impl Label {
         self.category.as_ref()
     }
 
-    /// The [`LabelLocale`] for `language`, falling back to English, then to
-    /// any localization present. The constructors always seed English, so
-    /// this is `Some` for any label they built; it is `None` only for a
-    /// label deserialized with an empty localization map.
+    /// The [`LabelLocale`] for `language`, falling back to English, then any.
+    ///
+    /// The constructors always seed English, so this is `Some` for any label
+    /// they built; it is `None` only for a label deserialized with an empty
+    /// localization map.
     pub fn localization(&self, language: &LanguageTag) -> Option<&LabelLocale> {
         self.localizations.resolve(language)
     }

@@ -18,7 +18,7 @@ use elide_core::redaction::HiddenContentPolicy;
 use super::{Document, DocumentLoader, LeafLoader, Loader};
 use crate::content::ContentData;
 
-/// Stable identifier for a registered codec format.
+/// A registered codec format's stable identifier, like `elide.text.txt`.
 ///
 /// Open string namespace: downstream crates ship their own formats by
 /// registering a [`Format`] with a unique [`FormatId`].
@@ -53,7 +53,7 @@ impl AsRef<str> for FormatId {
     }
 }
 
-/// Descriptor for one registered codec format.
+/// The descriptor of one codec format: its id, lookup keys, and loader.
 ///
 /// Indexed by `FormatRegistry` under its [`FormatId`], every extension
 /// in `extensions`, and every MIME in `content_types`.
@@ -72,8 +72,9 @@ pub struct Format {
 }
 
 impl Format {
-    /// Build a leaf [`Format`] from a per-modality [`Loader`]: the stream it
-    /// decodes becomes the single part of a leaf [`Document`].
+    /// Build a leaf [`Format`] from a per-modality [`Loader`] of one stream.
+    ///
+    /// The stream it decodes becomes the single part of a leaf [`Document`].
     ///
     /// Extensions and content types default to empty; chain
     /// [`with_extensions`] / [`with_content_types`] to declare the lookup
@@ -90,10 +91,12 @@ impl Format {
         }
     }
 
-    /// Build a [`Format`] from a [`DocumentLoader`], which decodes bytes into a
-    /// whole [`Document`]: several streams, embedded blobs, or hidden content to
-    /// sanitize (e.g. a raster format whose pixels and EXIF metadata are two
-    /// streams).
+    /// Build a [`Format`] from a [`DocumentLoader`] that decodes a whole
+    /// document.
+    ///
+    /// For a format whose [`Document`] has several streams, embedded blobs, or
+    /// hidden content to sanitize (e.g. a raster format whose pixels and EXIF
+    /// metadata are two streams).
     pub fn with_document_loader<D: DocumentLoader>(id: FormatId, loader: D) -> Self {
         Self {
             id,
@@ -103,8 +106,9 @@ impl Format {
         }
     }
 
-    /// Declare the file extensions (lowercased, no leading dot) that
-    /// resolve to this format. Extends any previously-declared list.
+    /// Declare the file extensions that resolve to this format, like `docx`.
+    ///
+    /// Lowercased, with no leading dot. Extends any previously-declared list.
     #[must_use]
     pub fn with_extensions<I, S>(mut self, extensions: I) -> Self
     where
@@ -116,8 +120,9 @@ impl Format {
         self
     }
 
-    /// Declare the MIME content types (lowercased) that resolve to this
-    /// format. Extends any previously-declared list.
+    /// Declare the MIME content types that resolve to this format.
+    ///
+    /// Lowercased. Extends any previously-declared list.
     #[must_use]
     pub fn with_content_types<I, S>(mut self, content_types: I) -> Self
     where
@@ -145,11 +150,13 @@ impl Format {
         &self.content_types
     }
 
-    /// Decode raw content through this format's loader into a [`Document`],
-    /// stripping its hidden content under `policy`, and record `policy` on the
+    /// Decode raw content into a [`Document`], stripping hidden content under
+    /// `policy`.
+    ///
+    /// The format's loader decodes the bytes, and `policy` is recorded on the
     /// document so every document embedded in it is decoded under the same one
-    /// ([`Document::hidden_content_policy`]). Equivalent to resolving the format
-    /// yourself and calling `FormatRegistry::decode`.
+    /// ([`Document::hidden_content_policy`]). Equivalent to resolving the
+    /// format yourself and calling `FormatRegistry::decode`.
     ///
     /// # Errors
     ///

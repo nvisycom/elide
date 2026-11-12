@@ -77,7 +77,7 @@ impl HiddenContentPolicy {
     }
 }
 
-/// What happens to one kind of hidden content.
+/// What happens to one kind of hidden content: stripped, scanned, or flagged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -107,7 +107,7 @@ impl Disposition {
     }
 }
 
-/// One item of hidden content a codec strips.
+/// One item of hidden content a codec strips, like a comment or EXIF tag.
 ///
 /// An item is named by what it is, never by the format that carries it: EXIF,
 /// a PDF's `/Info`, an ID3 tag, and an HTML `<meta>` field are all
@@ -217,7 +217,7 @@ impl HiddenContent {
     }
 }
 
-/// The kind of a [`HiddenContent`] item.
+/// The kind of a [`HiddenContent`] item, for choosing what to do with it.
 ///
 /// [`Metadata`](Self::Metadata) and [`Collaboration`](Self::Collaboration) are
 /// what a [`HiddenContentPolicy`] chooses for; every other kind is always

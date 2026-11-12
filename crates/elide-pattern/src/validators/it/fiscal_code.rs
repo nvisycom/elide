@@ -38,8 +38,10 @@ fn even_value(c: char) -> u32 {
     }
 }
 
-/// Return `true` when `value` is a 16-character Codice Fiscale
-/// whose control letter matches the computed checksum.
+/// Return `true` when `value` is a Codice Fiscale with a matching control
+/// letter.
+///
+/// A 16-character code whose control letter matches the computed checksum.
 pub fn fiscal_code(value: &str) -> bool {
     let normalized = value.trim().to_ascii_uppercase();
     let chars: Vec<char> = normalized.chars().collect();

@@ -6,8 +6,9 @@
 
 use super::luhn::luhn10;
 
-/// Return `true` when `value` is a valid organisationsnummer.
-/// Hyphen separator is accepted; whitespace is ignored.
+/// Return `true` when `value` is a valid Swedish organisationsnummer.
+///
+/// A hyphen separator is accepted; whitespace is ignored.
 pub fn organisationsnummer(value: &str) -> bool {
     let digits: Vec<u32> = value
         .chars()

@@ -33,8 +33,9 @@ use crate::modality::Modality;
 use crate::primitive::Confidence;
 use crate::redaction::HiddenContentKind;
 
-/// One node in an entity's audit DAG: a thing that happened, with its
-/// effect on confidence and its tamper-evident links.
+/// One node of an entity's audit DAG: something that happened to the entity.
+///
+/// It records the effect on confidence and its tamper-evident links.
 ///
 /// Events are recorded on an entity's [`AuditLog`], forming the full audit
 /// trail of its life: each recognizer that found it, the deduplication that
@@ -170,8 +171,9 @@ impl<M: Modality> AuditEvent<M> {
         hasher.finish()
     }
 
-    /// Recognition event from a pattern/dictionary recognizer: the `source`
-    /// recognizer's `rule` matched at `location`.
+    /// A recognition event from a pattern or dictionary recognizer's match.
+    ///
+    /// The `source` recognizer's `rule` matched at `location`.
     pub fn pattern(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
@@ -181,8 +183,9 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, Pattern { location, rule })
     }
 
-    /// Recognition event from a model/NER recognizer: the `source` recognizer
-    /// matched at `location` with `model`.
+    /// A recognition event from a model or NER recognizer's match.
+    ///
+    /// The `source` recognizer matched at `location` with `model`.
     pub fn model(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
@@ -250,8 +253,10 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, refinement)
     }
 
-    /// Redaction event: the `source` operator hid the entity by applying the
-    /// selection `redaction` names. The entity's `confidence` is unchanged.
+    /// A redaction event: the `source` operator applied a selection.
+    ///
+    /// The selection `redaction` names is the one applied; the entity's
+    /// `confidence` is unchanged.
     pub fn redaction(
         source: impl Into<HipStr<'static>>,
         redaction: Redaction,
@@ -269,11 +274,14 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(selection.operator.name.clone(), confidence, selection)
     }
 
-    /// A human override recording `manual` (built with its intent, location, and
-    /// optional [`Attribution`]) at the entity's asserted `confidence`. The
-    /// `source` names the reviewer who made the override, pass their id, or
-    /// `"manual"` when unattributed. To record one on an entity, use
-    /// `Entity::record_manual`, which takes the entity's own confidence.
+    /// A human override recording `manual` at the entity's asserted
+    /// `confidence`.
+    ///
+    /// The `manual` detail is built with its intent, location, and optional
+    /// [`Attribution`]. The `source` names the reviewer who made the override:
+    /// pass their id, or `"manual"` when unattributed. To record one on an
+    /// entity, use `Entity::record_manual`, which takes the entity's own
+    /// confidence.
     ///
     /// [`Attribution`]: crate::entity::audit::Attribution
     pub fn manual(
@@ -292,8 +300,9 @@ impl<M: Modality> AuditEvent<M> {
         )
     }
 
-    /// The events this one follows, by their [`hash`](Self::hash): none for a
-    /// birth event, one for a normal step, several for a fusion.
+    /// The events this one follows, by their [`hash`](Self::hash).
+    ///
+    /// None for a birth event, one for a normal step, several for a fusion.
     pub fn parents(&self) -> &[AuditHash] {
         &self.parents
     }

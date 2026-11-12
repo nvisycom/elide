@@ -8,9 +8,10 @@ use elide_core::entity::audit::ModelId;
 use elide_core::primitive::LanguageTag;
 use elide_core::{Error, Result};
 
-/// Routes each request to the backend registered for its language (the call's
-/// primary language: caller-asserted, or else detected), falling back to a
-/// default backend.
+/// Routes each request to the backend registered for its language.
+///
+/// The language is the call's primary one, caller-asserted or else detected; a
+/// request in no registered language goes to the default backend.
 ///
 /// Language-specific models often beat a multilingual one on their language (a
 /// Polish NER model on Polish text, an English-only Whisper on English audio),

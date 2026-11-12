@@ -85,8 +85,9 @@ impl FormatRegistry {
         Self::default()
     }
 
-    /// Pre-populated registry containing every built-in format the
-    /// active feature set enables (TXT, JSON, Markdown, HTML, and so on).
+    /// A registry of every built-in format the enabled features compile in.
+    ///
+    /// TXT, JSON, CSV, HTML, and so on.
     ///
     /// Add custom formats afterward with [`with_format`] (chainable) or
     /// [`add_format`] (in-place); they take precedence on extension /
@@ -171,8 +172,9 @@ impl FormatRegistry {
         self
     }
 
-    /// Register a [`Format`], **replacing** any already registered under the
-    /// same [`FormatId`], and return `self` for chained builder calls.
+    /// Register a [`Format`], **replacing** any with the same [`FormatId`].
+    ///
+    /// Returns `self` for chained builder calls.
     ///
     /// This is the explicit override path: where [`with_format`] panics on a
     /// duplicate id, this swaps the existing format out in place. Use it to

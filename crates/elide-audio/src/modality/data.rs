@@ -7,8 +7,7 @@ use elide_core::modality::ModalityData;
 
 use super::AudioFormat;
 
-/// Per-call payload a recognizer inspects for the [`Audio`] modality: the
-/// encoded audio bytes plus the container format they were ingested as.
+/// The audio a recognizer inspects: encoded bytes and their container format.
 ///
 /// The [`format`] is resolved at ingestion (a self-describing container had to
 /// be identified to read it) and carried here as an intrinsic fact, so a remote

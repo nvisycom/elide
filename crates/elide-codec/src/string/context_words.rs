@@ -5,8 +5,10 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
 
-/// Turn a structural *name* — an XML element or attribute name, a JSON object
-/// key — into context words for the value it labels.
+/// Turn a structural name (an element, attribute, or key) into context words.
+///
+/// An XML element or attribute name or a JSON object key becomes the context
+/// words for the value it labels.
 ///
 /// So a recognizer's context boost can fire on it: an `<ssn>` element or an
 /// `"ssn"` key vouches for its content the way a CSV header vouches for its cell.

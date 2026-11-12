@@ -27,8 +27,10 @@ pub use self::location::MetadataLocation;
 pub use self::replacement::MetadataReplacement;
 use super::{Modality, NoArtifact, TextRecognizable};
 
-/// A document's out-of-band named fields — EXIF tags, filesystem timestamps and
-/// attributes, document properties — as redaction subjects.
+/// The metadata modality: a document's out-of-band named fields, as subjects.
+///
+/// EXIF tags, filesystem timestamps and attributes, document properties: each a
+/// redaction subject.
 ///
 /// One modality for every metadata source: a field is a keyed
 /// [`MetadataLocation`] holding [`MetadataData`], hidden by a

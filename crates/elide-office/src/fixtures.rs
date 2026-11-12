@@ -1,5 +1,4 @@
-//! Test fixtures for Office documents: build an OPC package from its parts,
-//! and read a rewritten one back.
+//! Test fixtures for Office documents: build OPC packages and read them back.
 //!
 //! Reading a part out of a rewritten package means reversing the same
 //! zip container the engine writes. Downstream crates test redaction by
@@ -19,10 +18,11 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::opc::props;
 
-/// Pack `(part name, bytes)` pairs into an OPC package (a deflate zip), the
-/// inverse of [`read_part`], for building a minimal fixture package inline.
-/// A dependent crate's test supplies exactly the parts it needs (e.g. the
-/// three parts of a one-body `.docx`) without reconstructing the packaging.
+/// Pack `(part name, bytes)` pairs into an OPC package, a deflate zip.
+///
+/// The inverse of [`read_part`], for building a minimal fixture package inline.
+/// A dependent crate's test supplies exactly the parts it needs (e.g. the three
+/// parts of a one-body `.docx`) without reconstructing the packaging.
 ///
 /// # Panics
 ///
@@ -38,9 +38,10 @@ pub fn pack_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {
     zip.finish().expect("finish fixture package").into_inner()
 }
 
-/// Read one part out of an OPC package by its full part name (e.g.
-/// `word/document.xml`), decompressed. Returns `None` if the package
-/// cannot be opened or the part is absent.
+/// Read one part out of an OPC package by its full name, decompressed.
+///
+/// The name is the full part name (e.g. `word/document.xml`). Returns `None` if
+/// the package cannot be opened or the part is absent.
 pub fn read_part(package: &[u8], name: &str) -> Option<Vec<u8>> {
     let mut zip = ZipArchive::new(Cursor::new(package)).ok()?;
     let mut entry = zip.by_name(name).ok()?;
@@ -49,8 +50,9 @@ pub fn read_part(package: &[u8], name: &str) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// Every part name in the package, in archive order. Useful to sweep the
-/// whole package for leaked values.
+/// Every part name in the package, in archive order.
+///
+/// Useful to sweep the whole package for leaked values.
 pub fn part_names(package: &[u8]) -> Vec<String> {
     let mut zip = match ZipArchive::new(Cursor::new(package)) {
         Ok(zip) => zip,
@@ -64,10 +66,11 @@ pub fn part_names(package: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// Every text-bearing part, the `.xml` and `.rels` parts, decompressed
-/// to `(name, text)`. These parts carry all of a document's text; binary
-/// parts (fonts, images, media) hold none and are skipped, so a leak scan
-/// over the result covers every part that could carry text PII.
+/// Every text-bearing part, the `.xml` and `.rels` parts, as `(name, text)`.
+///
+/// These parts carry all of a document's text; binary parts (fonts, images,
+/// media) hold none and are skipped, so a leak scan over the result covers
+/// every part that could carry text PII.
 ///
 /// A text part that is not valid UTF-8 **panics** rather than being
 /// dropped: silently omitting a part a leak scan can't read would let PII
@@ -99,9 +102,10 @@ pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The privacy-relevant fields a document-property part (`docProps/core.xml`,
-/// `app.xml`, `custom.xml`) carries, as `(local_name, value)` pairs, each with
-/// a non-empty value.
+/// The privacy-relevant fields of a document-property part, with their values.
+///
+/// The part is `docProps/core.xml`, `app.xml`, or `custom.xml`; each field
+/// comes back as a `(local_name, value)` pair with a non-empty value.
 #[must_use]
 pub fn property_fields(xml: &[u8]) -> Vec<(String, String)> {
     props::fields(xml)

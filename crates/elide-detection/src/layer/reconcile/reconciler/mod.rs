@@ -18,7 +18,8 @@ pub use self::exclusive::Exclusive;
 pub use self::permissive::Permissive;
 pub use self::structural::{OnConflict, Structural};
 
-/// Which of two entities wins a [`Resolve`][Disposition::Resolve].
+/// Which of two entities wins a [`Resolve`][Disposition::Resolve]: first or
+/// second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Winner {
     /// The first entity wins; the second is dropped.
@@ -48,8 +49,9 @@ pub enum Disposition {
     },
 }
 
-/// Decides what happens to two grouped entities, the `R` parameter of
-/// [`ReconcileLayer`].
+/// Decides what happens to two overlapping entities: keep, contest, or resolve.
+///
+/// The `R` parameter of [`ReconcileLayer`].
 ///
 /// Pairwise: the layer owns clustering and folds the per-pair
 /// [`Disposition`]s. The crate ships [`Structural`] (geometry-aware: nesting

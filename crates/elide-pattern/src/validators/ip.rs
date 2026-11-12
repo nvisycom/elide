@@ -8,8 +8,11 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-/// Return `true` if `value` is a valid IPv4 address, optionally with a `/N`
-/// CIDR prefix (`0..=32`). The address itself is parsed by [`Ipv4Addr`].
+/// Return `true` if `value` is a valid IPv4 address, with an optional CIDR
+/// prefix.
+///
+/// The prefix is `/N` with `N` in `0..=32`. The address itself is parsed by
+/// [`Ipv4Addr`].
 pub fn ipv4(value: &str) -> bool {
     let (addr, prefix) = split_cidr(value.trim());
     if let Some(bits) = prefix
@@ -20,9 +23,12 @@ pub fn ipv4(value: &str) -> bool {
     addr.parse::<Ipv4Addr>().is_ok()
 }
 
-/// Return `true` if `value` is a valid IPv6 address, optionally with a `%zone`
-/// scope id and/or a `/N` CIDR prefix (`0..=128`). The address itself is
-/// parsed by [`Ipv6Addr`], which accepts every canonical compression form.
+/// Return `true` if `value` is a valid IPv6 address, with optional zone and
+/// CIDR.
+///
+/// The optional parts are a `%zone` scope id and a `/N` CIDR prefix
+/// (`0..=128`). The address itself is parsed by [`Ipv6Addr`], which accepts
+/// every canonical compression form.
 pub fn ipv6(value: &str) -> bool {
     let (addr, prefix) = split_cidr(value.trim());
     if let Some(bits) = prefix

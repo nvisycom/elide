@@ -4,9 +4,10 @@ use crate::entity::Entity;
 use crate::modality::Modality;
 use crate::primitive::{LanguageClaim, LanguageTag};
 
-/// The languages in play for one recognition call: the caller-asserted ones
-/// (from the scope) and the ones a detector found (on the subject), viewed
-/// together.
+/// The languages in play for one recognition call: asserted and detected.
+///
+/// The caller-asserted ones (from the scope) and the ones a detector found (on
+/// the subject), viewed together.
 ///
 /// A borrowed view built by
 /// [`Context::languages`](super::Context::languages); it
@@ -81,8 +82,10 @@ impl<'a> Languages<'a> {
         matches_any(self.all(), allowed)
     }
 
-    /// Whether a rule scoped to `allowed` languages should run, filtering
-    /// **only** on caller-asserted languages.
+    /// Whether a rule scoped to `allowed` languages should run, by asserted
+    /// ones.
+    ///
+    /// It filters **only** on caller-asserted languages.
     ///
     /// The locale hard filter: a language-scoped pattern is suppressed when the
     /// caller asserted a language and none of the asserted languages match the

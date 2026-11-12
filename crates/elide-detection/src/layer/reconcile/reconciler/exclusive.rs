@@ -6,7 +6,7 @@ use elide_core::modality::Modality;
 use super::super::tiebreaker::{HighestConfidence, LongestSpan, Tiebreaker};
 use super::{Disposition, Reconciler, Winner};
 
-/// The aggressive reconciler: one finding per span.
+/// The aggressive reconciler: one finding per span, resolving every overlap.
 ///
 /// Every grouped pair is a conflict, resolved by `tiebreaker`, never keeps
 /// both. For callers who want a strict, mutually-exclusive output (no nesting,

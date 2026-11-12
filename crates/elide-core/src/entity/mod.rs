@@ -1,4 +1,4 @@
-//! The detected [`Entity`] and the parts it is built from.
+//! The detected [`Entity`]: its label, location, confidence, and audit trail.
 //!
 //! An [`Entity`] is the unit that flows through the toolkit: a single
 //! piece of sensitive information located somewhere in a medium, the
@@ -129,8 +129,10 @@ impl<M: Modality> Entity<M> {
         }
     }
 
-    /// Record `event` on the audit trail; the entity's confidence becomes the
-    /// event's, so it always matches the trail's last event.
+    /// Record `event` on the audit trail, taking its confidence as the
+    /// entity's.
+    ///
+    /// The entity's confidence always matches the trail's last event.
     #[must_use]
     pub fn with_event(mut self, event: AuditEvent<M>) -> Self {
         self.record(event);
@@ -191,8 +193,10 @@ impl<M: Modality> Entity<M> {
         true
     }
 
-    /// Whether a reviewer has suppressed this entity, the
-    /// audit trail is the single source of truth. Delegates to
+    /// Whether a reviewer has suppressed this entity, as its audit trail
+    /// records.
+    ///
+    /// The audit trail is the single source of truth. Delegates to
     /// [`AuditLog::is_suppressed`](crate::entity::audit::AuditLog::is_suppressed).
     #[must_use]
     pub fn is_suppressed(&self) -> bool {
@@ -214,8 +218,10 @@ impl<M: Modality> Entity<M> {
 #[cfg(feature = "fixtures")]
 #[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
 impl Entity<Text> {
-    /// A text entity for `label` over the byte range `loc`, born from a pattern
-    /// recognition at `Confidence::MAX`, the standard test fixture.
+    /// A test text entity for `label` over the byte range `loc`.
+    ///
+    /// Born from a pattern recognition at `Confidence::MAX`, the standard test
+    /// fixture.
     pub fn fixture(label: &str, loc: (usize, usize)) -> Self {
         Self::fixture_conf(label, loc, Confidence::MAX)
     }

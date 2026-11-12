@@ -27,8 +27,7 @@ const FORMAT_C_ENTITY_TYPES: &[&str] = &[
     "PA", "PB", "SS", "MC", "SM", "GA", "GB",
 ];
 
-/// Return `true` when `value` is a valid UEN in any of the three
-/// ACRA-published formats.
+/// Return `true` when `value` is a valid UEN in any of ACRA's three formats.
 pub fn uen(value: &str) -> bool {
     let normalized = value.trim().to_ascii_uppercase();
     let chars: Vec<char> = normalized.chars().collect();

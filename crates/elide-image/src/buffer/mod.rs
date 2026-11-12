@@ -12,8 +12,7 @@ use elide_core::{Error, Result};
 
 pub use self::raster::RasterImage;
 
-/// What a metadata strip removed from an image: how many metadata blocks and
-/// tags, and how many embedded thumbnails.
+/// What a metadata strip removed from an image: properties and thumbnails.
 #[cfg(feature = "exif")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StrippedMetadata {
@@ -57,8 +56,8 @@ pub struct ImageBuffer {
 }
 
 impl ImageBuffer {
-    /// Open `bytes` as the caller-resolved `format`: decode the pixels and keep
-    /// the source.
+    /// Open `bytes` as the caller-resolved `format`, decoding pixels, keeping
+    /// source.
     ///
     /// The format is not detected here — the ingestion registry already resolved
     /// it (from the extension, content type, or a magic-byte sniff) and routes
@@ -162,13 +161,13 @@ impl ImageBuffer {
         self.source.clone()
     }
 
-    /// Write each EXIF field's new value in place, a blank value removing the
-    /// field, each with its whole logical group cleared first (the GPS IFD for
-    /// a coordinate, the lens tags for a device). A field that cannot hold
-    /// text, such as a coordinate or a timestamp, is removed instead of
-    /// overwritten. Every metadata block outside EXIF is removed too. The
-    /// pixels are untouched; a later [`encode`](Self::encode) carries the
-    /// edited metadata.
+    /// Write each EXIF field's new value in place, a blank value removing it.
+    ///
+    /// Each field's whole logical group is cleared first (the GPS IFD for a
+    /// coordinate, the lens tags for a device). A field that cannot hold text,
+    /// such as a coordinate or a timestamp, is removed instead of overwritten.
+    /// Every metadata block outside EXIF is removed too. The pixels are
+    /// untouched; a later [`encode`](Self::encode) carries the edited metadata.
     ///
     /// # Errors
     ///
@@ -180,9 +179,10 @@ impl ImageBuffer {
         Ok(())
     }
 
-    /// Remove the source's metadata in place, keeping only what a viewer needs
-    /// to render the image (its orientation), so every later read and encode
-    /// sees the stripped container. Returns what was removed.
+    /// Remove the source's metadata in place, keeping only its orientation.
+    ///
+    /// Only what a viewer needs to render the image is kept, so every later
+    /// read and encode sees the stripped container. Returns what was removed.
     ///
     /// # Errors
     ///
@@ -261,17 +261,20 @@ impl ImageBuffer {
         self.raster.encode_raw()
     }
 
-    /// Crop the in-bounds intersection of `region` out as a bare
-    /// [`RasterImage`], or `None` when the region does not overlap the image (out
-    /// of bounds or zero-area). The crop carries no source or metadata.
+    /// Crop the in-bounds part of `region` out as a bare [`RasterImage`].
+    ///
+    /// `None` when the region does not overlap the image (out of bounds or
+    /// zero-area). The crop carries no source or metadata.
     #[must_use]
     pub fn crop(&self, region: BoundingBox<u32>) -> Option<RasterImage> {
         self.raster.crop(region)
     }
 
-    /// Paint `replacement` over `region` in place (blur, pixelate, block, or
-    /// remove). A region that does not overlap the image is a silent no-op, and
-    /// leaves the buffer clean; redaction acts on the in-bounds intersection.
+    /// Paint `replacement` over `region` in place: blur, pixelate, block, or
+    /// remove.
+    ///
+    /// A region that does not overlap the image is a silent no-op, and leaves
+    /// the buffer clean; redaction acts on the in-bounds intersection.
     pub fn redact(&mut self, region: BoundingBox<u32>, replacement: &ImageReplacement) {
         if self.raster.redact(region, replacement) {
             self.dirty = true;

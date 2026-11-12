@@ -17,7 +17,7 @@ use elide_image::modality::{Image, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Remove the matched entity entirely.
+/// Removes an entity entirely, leaving nothing in its place.
 ///
 /// The strongest treatment: no trace of the value, its shape, or its extent
 /// remains, text drops the characters, audio cuts the interval, an image

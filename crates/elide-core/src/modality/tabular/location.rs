@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modality::{ModalityLocation, Overlap};
 
-/// Cell-addressed location within tabular content.
+/// A cell in tabular content by row and column, optionally a byte range in it.
 ///
 /// Identifies a cell by zero-based [`row_index`] and
 /// [`column_index`], optionally narrowed to a byte

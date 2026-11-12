@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How a sub-word span snaps to character boundaries.
+/// How a sub-word span of a NER model snaps to character boundaries.
 ///
 /// Mirrors spaCy `Doc.char_span(alignment_mode=...)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
-//! The enrichment building blocks: the pre-recognition passes that let a modality
-//! be detected at all.
+//! The enrichment building blocks: passes that run before recognition.
+//!
+//! They let a modality be detected at all.
 //!
 //! An image has no text to scan until OCR reads it; an audio clip has none until
 //! STT transcribes it; a language-aware recognizer needs the language detected
@@ -69,8 +70,10 @@ pub struct Enricher(Kind);
 
 #[wasm_bindgen]
 impl Enricher {
-    /// Build the built-in language-detection enricher over `languages` — a preset
-    /// (`"english"`, `"common"`, `"all"`) or an explicit list of BCP-47 tags.
+    /// Build the built-in language-detection enricher over `languages`.
+    ///
+    /// A preset (`"english"`, `"common"`, `"all"`) or an explicit list of
+    /// BCP-47 tags.
     ///
     /// The resulting [`Enricher`] applies to any text-shaped modality (text,
     /// tabular, image, audio). It runs in wasm; no callback is needed.

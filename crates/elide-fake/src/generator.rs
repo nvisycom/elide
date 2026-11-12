@@ -11,8 +11,9 @@ use elide_core::redaction::Generator;
 
 use crate::synth::{fake_value, fallback_token};
 
-/// A [`Generator`] that produces believable, locale-aware, label-aware
-/// surrogates, the readable alternative to an opaque UUID token.
+/// A [`Generator`] of believable surrogates, aware of locale and label.
+///
+/// The readable alternative to an opaque UUID token.
 ///
 /// Where `RandomToken` mints a UUID with no resemblance to the original, this
 /// dispatches on the entity's label: a `person_name` becomes a plausible name,

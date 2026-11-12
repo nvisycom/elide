@@ -6,7 +6,7 @@ use elide::redaction::{HiddenContent, HiddenContentKind};
 use serde::Serialize;
 use tsify::Tsify;
 
-/// The modality an entity was detected in.
+/// The modality an entity was detected in: text, tabular, image, or audio.
 #[derive(Serialize, Tsify, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
 pub enum Modality {
@@ -102,10 +102,11 @@ pub enum Location {
     },
 }
 
-/// One item of hidden content the run stripped, mirroring the toolkit's
-/// `StrippedItem`: the part it came from (its path, one segment per container
-/// level), the item and its kind (snake-case names, e.g. `comment` /
-/// `collaboration`), and how many.
+/// One item of hidden content the run stripped: where, what, and how many.
+///
+/// It mirrors the toolkit's `StrippedItem`: the part it came from (its path,
+/// one segment per container level), the item and its kind (snake-case names,
+/// e.g. `comment` / `collaboration`), and how many.
 #[derive(Serialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub struct Stripped {
@@ -121,9 +122,11 @@ pub struct Stripped {
     pub count: usize,
 }
 
-/// The outcome of a pipeline run, mirroring the toolkit's own `Report`: the
-/// redacted blob, every entity it detected, and the hidden content it
+/// The outcome of a run: the redacted blob, its findings, and what was
 /// stripped.
+///
+/// It mirrors the toolkit's own `Report`: every entity it detected, and the
+/// hidden content it stripped.
 ///
 /// `redacted` is the re-encoded document in the same format as the input, as raw
 /// bytes; the caller decodes it however it consumed the input (a `Blob`, a data

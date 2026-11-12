@@ -4,7 +4,7 @@ use elide_core::backend::{BackendResponse, Meter, Units};
 
 use crate::modality::LayoutRegion;
 
-/// One per-call OCR response from an OCR backend.
+/// The text an OCR backend recognized in one image: its located regions.
 ///
 /// Wraps the [`LayoutRegion`]s the backend recognized in reading order. These
 /// are the core OCR type, so an enricher folds them into a [`Layout`] and onto

@@ -7,8 +7,9 @@
 
 const WEIGHTS: [u32; 11] = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
 
-/// Return `true` when `value` is a valid 11-digit ABN. Whitespace
-/// and dash separators in the canonical `NN NNN NNN NNN` rendering
+/// Return `true` when `value` is a valid 11-digit Australian ABN.
+///
+/// Whitespace and dash separators in the canonical `NN NNN NNN NNN` rendering
 /// are stripped before validation.
 pub fn abn(value: &str) -> bool {
     let digits: Vec<u32> = value

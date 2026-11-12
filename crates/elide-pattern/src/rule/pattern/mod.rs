@@ -12,7 +12,7 @@ use serde::Deserialize;
 pub(crate) use self::compiled::CompiledPattern;
 use crate::context::RuleContext;
 
-/// One regex strategy inside a [`Pattern`] rule.
+/// One regex strategy in a [`Pattern`] rule, with its own score and validator.
 ///
 /// A variant pairs a regex source with the confidence stamped on
 /// every match it produces and, optionally, a validator name
@@ -113,8 +113,10 @@ fn default_score() -> Confidence {
     Confidence::MAX
 }
 
-/// Pattern detection rule: one or more candidate labels, optional keyword
-/// boosts, and one or more [`Variant`]s.
+/// A detection rule of regex variants, with candidate labels and context.
+///
+/// One or more candidate labels, optional keyword boosts, and one or more
+/// [`Variant`]s.
 ///
 /// A rule groups several regex strategies under a shared entity-type
 /// candidate list plus a shared context-keyword list. Every variant emits

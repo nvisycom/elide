@@ -6,8 +6,9 @@ use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
 use tokio::sync::Semaphore;
 
-/// Wraps a [`Backend`] and admits at most a fixed number of its calls *at once*,
-/// leaving the request and response untouched.
+/// Wraps a [`Backend`] and admits at most a fixed number of calls *at once*.
+///
+/// The request and response pass through untouched.
 ///
 /// Concurrency against a provider is bounded here, at the one place every call
 /// to that provider passes through, rather than at each fan-out site above it (an
