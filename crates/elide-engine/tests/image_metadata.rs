@@ -9,13 +9,13 @@
 
 #![cfg(feature = "image")]
 
-use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
-use elide_core::primitive::{ComponentId, Confidence};
+use elide_core::primitive::Confidence;
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_core::{Component, Result};
 use elide_detection::Analyzer;
 use elide_engine::{Document, Orchestrator};
 use elide_format::FormatRegistry;
@@ -276,15 +276,12 @@ async fn registering_a_metadata_analyzer_keeps_the_flagged_fields() {
 
 /// An image recognizer that flags the whole frame, so the pixel track redacts
 /// and the buffer goes dirty, exercising the both-dirty composition.
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[component(name = "whole-frame", version = "1.0.0")]
 struct WholeFrame;
 
 #[async_trait::async_trait]
 impl Recognizer<Image> for WholeFrame {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("whole-frame", "1.0.0")
-    }
-
     async fn recognize(
         &self,
         subject: &Subject<Image>,
@@ -300,7 +297,7 @@ impl Recognizer<Image> for WholeFrame {
             "whole-frame",
             Confidence::MAX,
             location.clone(),
-            ModelId::default(),
+            ModelId::new("model"),
         );
         let entity = Entity::new(builtins::PERSON_NAME.to_ref(), location).with_event(event);
         Ok(vec![entity])

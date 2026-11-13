@@ -1,12 +1,12 @@
 //! [`Clamp`]: collapse a numeric value above a ceiling or below a floor
 //! into a bucket label, passing the middle range through unchanged.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
-use elide_core::primitive::{ComponentId, LanguageTag, LocalizedText};
+use elide_core::primitive::{LanguageTag, LocalizedText};
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -120,7 +120,8 @@ fn format_threshold(n: f64) -> String {
 /// let auto = Clamp::new().with_ceiling_auto(90.0);
 /// assert_eq!(auto.render("94", None), Some("90+".to_owned()));
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Component)]
+#[component(name = "clamp", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Clamp {
@@ -243,10 +244,6 @@ impl Clamp {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for Clamp {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("clamp", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // In-range values pass through exactly; clamped values collapse to
         // a bucket. Some of the original survives, so: partial.

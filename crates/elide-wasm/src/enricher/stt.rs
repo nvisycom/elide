@@ -62,13 +62,6 @@ impl Backend for JsCallbackBackend {
     type Request<'a> = SttRequest<'a>;
     type Response = SttResponse;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "js-callback-stt".into(),
-            ..Default::default()
-        }
-    }
-
     async fn call(&self, request: SttRequest<'_>) -> Result<SttResponse> {
         let value = self
             .call_js(request.audio.to_vec())
@@ -94,11 +87,16 @@ impl Backend for JsCallbackBackend {
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(SttResponse::new(segments))
+        Ok(SttResponse::new(model(), segments))
     }
 }
 
 /// Build an STT enricher whose transcription is the JavaScript `callback`.
 pub(super) fn build_stt(callback: Function) -> SttEnricher<JsCallbackBackend> {
     SttEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-stt")
+}
+
+/// The model every response of the JavaScript callback names.
+fn model() -> ModelId {
+    ModelId::new("js-callback-stt")
 }

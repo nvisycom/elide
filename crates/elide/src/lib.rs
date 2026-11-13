@@ -31,7 +31,7 @@ pub use async_trait::async_trait;
 #[doc(inline)]
 pub use elide_core::entity;
 #[doc(inline)]
-pub use elide_core::{Error, ErrorKind, Result};
+pub use elide_core::{Component, Error, ErrorKind, Result};
 // The orchestration engine (`Orchestrator`, `Report`, `PartMut`, …), a
 // small curated set, re-exported flat at the root under the `engine` feature.
 // `engine` implies `codec` (the orchestrator decodes through it) and serde.
@@ -44,6 +44,11 @@ pub use elide_engine::{
 };
 
 pub mod prelude;
+
+/// The derives' path to `elide-core` for a crate that depends only on this
+/// facade.
+#[doc(hidden)]
+pub use elide_core as __core;
 
 /// The book's examples, one item per chapter, compiled as doctests. The book is
 /// not published with the crate, so this only builds in the repository, and

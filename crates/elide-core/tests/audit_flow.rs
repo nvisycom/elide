@@ -5,13 +5,13 @@
 
 use std::assert_matches;
 
-use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, ModelId, PatternRule};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::{
     Confidence, ConfidenceThreshold, CountryCode, LanguageClaim, LanguageTag,
 };
+use elide_core::{Component, Result};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
@@ -268,14 +268,12 @@ fn operator_trait_shape() {
 
     /// A trivial `[LABEL]`-style replace operator, to exercise the
     /// trait shape and the pure `Replacement` model.
+    #[derive(Component)]
+    #[component(name = "replace", version = "1.0.0")]
     struct Replace;
 
     #[async_trait::async_trait]
     impl Operator<Text> for Replace {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("replace", "1.0.0")
-        }
-
         fn leak_profile(&self) -> LeakProfile {
             LeakProfile::Partial
         }

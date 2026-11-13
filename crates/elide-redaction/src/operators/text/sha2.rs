@@ -2,12 +2,11 @@
 //! SHA-2 hash.
 
 use bytes::Bytes;
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
@@ -20,7 +19,8 @@ use crate::operators::Sha2Algorithm;
 /// salt is prepended before hashing, which blocks precomputed rainbow
 /// attacks and makes equal plaintext hash differently across
 /// deployments.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Component)]
+#[component(name = "hash", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Sha2Hash {
@@ -75,10 +75,6 @@ impl Sha2Hash {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for Sha2Hash {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("hash", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // Recoverable when the candidate plaintext space is small enough
         // to brute-force; salting raises the bar but doesn't remove it.

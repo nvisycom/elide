@@ -5,12 +5,12 @@
 
 use std::str::FromStr;
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::TextReplacement;
 use elide_core::modality::{Modality, TextRedactable};
-use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::primitive::LanguageTag;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 
 /// An operator that replaces an entity with locale-aware fake data.
 ///
@@ -37,7 +37,8 @@ use elide_core::redaction::{LeakProfile, Operator};
 /// Generic over the fallback operator type, so each `Fake` binds one
 /// concrete fallback at construction; pass an `Arc<dyn Operator<…>>` to
 /// choose it at runtime.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Component)]
+#[component(name = "fake", version = "1.0.0")]
 pub struct Fake<F> {
     fallback: F,
     default_language: LanguageTag,
@@ -45,11 +46,6 @@ pub struct Fake<F> {
 }
 
 impl<F> Fake<F> {
-    /// Operator id stamped on every redaction event.
-    fn op_id() -> ComponentId {
-        ComponentId::new("fake", "1.0.0")
-    }
-
     /// Build a `Fake` operator with `fallback` as the operator
     /// used for entity labels outside the core PII catalogue.
     pub fn new(fallback: F) -> Self {
@@ -90,10 +86,6 @@ where
     M: TextRedactable,
     F: Operator<M>,
 {
-    fn id(&self) -> ComponentId {
-        Self::op_id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // A faked value leaves only the entity's position and approximate
         // shape; a label it cannot fake takes the fallback, so the pair is

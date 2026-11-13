@@ -57,21 +57,20 @@ impl Backend for MockBackend {
     type Request<'a> = SttRequest<'a>;
     type Response = SttResponse;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "mock-stt".into(),
-            ..ModelId::default()
-        }
-    }
-
     async fn call(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
-        Ok(SttResponse::new(self.segments.clone()))
+        Ok(self.answer())
     }
 
     async fn call_batch(&self, requests: Vec<SttRequest<'_>>) -> Result<Vec<SttResponse>> {
         let kept = requests.len().saturating_sub(self.dropped);
-        Ok((0..kept)
-            .map(|_| SttResponse::new(self.segments.clone()))
-            .collect())
+        Ok((0..kept).map(|_| self.answer()).collect())
+    }
+}
+
+impl MockBackend {
+    /// The mock's answer to any request: its canned segments, from the model
+    /// `mock-stt`.
+    fn answer(&self) -> SttResponse {
+        SttResponse::new(ModelId::new("mock-stt"), self.segments.clone())
     }
 }

@@ -30,10 +30,10 @@ pub use self::hidden_content::{
 };
 pub use self::leak_profile::LeakProfile;
 pub use self::redactions::Redactions;
+use crate::Component;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
-use crate::primitive::ComponentId;
 
 /// A redaction operator: computes what replaces an entity to hide it.
 ///
@@ -56,10 +56,7 @@ use crate::primitive::ComponentId;
 /// [`Data`]: Modality::Data
 /// [`Replacement`]: Modality::Replacement
 #[async_trait::async_trait]
-pub trait Operator<M: Modality>: Send + Sync {
-    /// This operator's identity (name + version).
-    fn id(&self) -> ComponentId;
-
+pub trait Operator<M: Modality>: Component + Send + Sync {
     /// How much this operator's output leaks about the original it replaces,
     /// for policy authoring and audit reporting.
     fn leak_profile(&self) -> LeakProfile;
@@ -75,10 +72,6 @@ where
     M: Modality,
     T: Operator<M> + ?Sized,
 {
-    fn id(&self) -> ComponentId {
-        (**self).id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         (**self).leak_profile()
     }
@@ -94,10 +87,6 @@ where
     M: Modality,
     T: Operator<M> + ?Sized,
 {
-    fn id(&self) -> ComponentId {
-        (**self).id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         (**self).leak_profile()
     }
@@ -122,7 +111,7 @@ where
 /// cannot recover the original for the given replacement (e.g. the
 /// replacement wasn't produced by it).
 ///
-/// [`id`]: Operator::id
+/// [`id`]: Component::id
 /// [`Replacement`]: Modality::Replacement
 /// [`Data`]: Modality::Data
 #[async_trait::async_trait]

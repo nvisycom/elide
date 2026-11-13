@@ -1,9 +1,8 @@
 //! [`Blackbox`]: cover the matched image region with a solid fill.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 use elide_image::primitive::Color;
 #[cfg(feature = "serde")]
@@ -19,7 +18,8 @@ use serde::{Deserialize, Serialize};
 /// [`Erase`]: crate::operators::Erase
 /// [`Blur`]: crate::operators::Blur
 /// [`Pixelate`]: crate::operators::Pixelate
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(name = "blackbox", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Blackbox {
@@ -44,10 +44,6 @@ impl Default for Blackbox {
 
 #[async_trait::async_trait]
 impl Operator<Image> for Blackbox {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("blackbox", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // The original content is gone, but the region's position and
         // bounding box stay observable.

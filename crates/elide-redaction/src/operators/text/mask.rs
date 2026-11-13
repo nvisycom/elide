@@ -1,12 +1,11 @@
 //! [`Mask`]: replace characters of the matched value with a fixed mask
 //! character, optionally leaving a prefix and/or suffix visible.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +20,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Common patterns: mask everything ([`Mask::stars`]); show the last 4
 /// of a card (`Mask::stars().with_keep_suffix(4)`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(name = "mask", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Mask {
@@ -87,10 +87,6 @@ impl Mask {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for Mask {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("mask", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // Length, position, and any kept prefix/suffix are observable.
         LeakProfile::Partial

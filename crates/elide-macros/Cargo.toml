@@ -1,0 +1,31 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-macros"
+description = "Derive macros for Elide: component identity and the backend request/response contract"
+keywords = ["elide", "derive", "macros"]
+categories = ["development-tools::procedural-macro-helpers"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# Procedural macros
+proc-macro2 = { workspace = true, features = [] }
+proc-macro-crate = { workspace = true, features = [] }
+quote = { workspace = true, features = [] }
+syn = { workspace = true, features = [] }

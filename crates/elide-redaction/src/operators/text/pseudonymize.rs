@@ -4,9 +4,8 @@
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::TextReplacement;
 use elide_core::modality::{Modality, TextRedactable};
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{Generator, LeakProfile, Operator};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use crate::vault::Vault;
 
@@ -55,7 +54,8 @@ use crate::vault::Vault;
 /// [coreference]: elide_core::entity::EntityCoRef
 /// [`Replace`]: crate::operators::Replace
 /// [`Sha2Hash`]: crate::operators::Sha2Hash
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Component)]
+#[component(name = "pseudonymize", version = "1.0.0")]
 pub struct Pseudonymize<V, G> {
     vault: V,
     generator: G,
@@ -119,10 +119,6 @@ where
     V: Vault<PseudonymizeKey, TextReplacement>,
     G: Generator<M>,
 {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("pseudonymize", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // The surrogate-to-original mapping is recoverable to whoever
         // holds the vault.

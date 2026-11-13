@@ -32,8 +32,7 @@ impl<B: Backend + ?Sized> BackendBatchExt for B {
         let responses = self.call_batch(requests).await?;
         if responses.len() != sent {
             return Err(Error::provider(format!(
-                "backend `{}` returned {} responses for {sent} requests",
-                self.provenance().name,
+                "the backend returned {} responses for {sent} requests",
                 responses.len(),
             )));
         }
@@ -131,9 +130,7 @@ impl<R> BatchMerge<R> {
     ///
     /// # Panics
     ///
-    /// Panics if a part was not [`call`](Self::call)ed; use
-    /// [`finish_or_else`](Self::finish_or_else) when some parts are answered
-    /// without a call.
+    /// Panics if a part was not [`call`](Self::call)ed.
     #[must_use]
     pub fn finish(self) -> Vec<R> {
         self.slots
@@ -141,33 +138,30 @@ impl<R> BatchMerge<R> {
             .map(|slot| slot.expect("every part of the batch was called"))
             .collect()
     }
-
-    /// The responses in request order, with `fill` answering each request
-    /// whose part was not called.
-    #[must_use]
-    pub fn finish_or_else(self, mut fill: impl FnMut() -> R) -> Vec<R> {
-        self.slots
-            .into_iter()
-            .map(|slot| slot.unwrap_or_else(&mut fill))
-            .collect()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
+    use std::sync::LazyLock;
 
     use super::*;
     use crate::ErrorKind;
-    use crate::backend::{BackendRequest, BackendResponse};
+    use crate::backend::{Request, Response};
     use crate::entity::audit::ModelId;
 
     struct Req<'a>(usize, PhantomData<&'a ()>);
-    impl BackendRequest for Req<'_> {}
+    impl Request for Req<'_> {}
+
+    static ECHO: LazyLock<ModelId> = LazyLock::new(|| ModelId::new("echo"));
 
     #[derive(Debug, PartialEq)]
     struct Resp(usize);
-    impl BackendResponse for Resp {}
+    impl Response for Resp {
+        fn model(&self) -> &ModelId {
+            &ECHO
+        }
+    }
 
     /// Echoes each request's id, dropping the last `short` responses.
     struct Echo {
@@ -178,10 +172,6 @@ mod tests {
     impl Backend for Echo {
         type Request<'a> = Req<'a>;
         type Response = Resp;
-
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
 
         async fn call(&self, request: Req<'_>) -> Result<Resp> {
             Ok(Resp(request.0))
@@ -221,18 +211,5 @@ mod tests {
         }
         let responses: Vec<usize> = merge.finish().into_iter().map(|r| r.0).collect();
         assert_eq!(responses, vec![0, 1, 2, 3, 4]);
-    }
-
-    #[tokio::test]
-    async fn uncalled_parts_are_filled() {
-        let split = BatchSplit::by(reqs(0..4), |r| r.0 < 2);
-        let mut merge = split.merge();
-        for (called, part) in split {
-            if called {
-                merge.call(&Echo { short: 0 }, part).await.unwrap();
-            }
-        }
-        let responses = merge.finish_or_else(|| Resp(99));
-        assert_eq!(responses, vec![Resp(0), Resp(1), Resp(99), Resp(99)]);
     }
 }

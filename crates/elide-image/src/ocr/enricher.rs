@@ -13,11 +13,10 @@
 //! [`Image`]: crate::modality::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
-use elide_core::Result;
 use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::enrichment::Enricher;
-use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Subject};
+use elide_core::{Component, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -34,12 +33,11 @@ use crate::modality::{Image, Layout};
 /// `Analyzer<Image>` ahead of its recognizers, the same way a language detector
 /// is registered on a text analyzer. `B` may be a
 /// decorated backend.
-#[derive(Clone)]
+#[derive(Clone, Component)]
 pub struct OcrEnricher<B = ()> {
-    /// Optional caller-chosen name, surfaced as this enricher's id so a caller
-    /// running more than one OCR enricher can tell them apart. `None` falls back
-    /// to the crate name at [`id`](Enricher::id) time.
-    name: Option<HipStr<'static>>,
+    /// Enricher name, its id; the crate name unless set.
+    #[component(name)]
+    name: HipStr<'static>,
     /// Backend that OCRs the image.
     backend: B,
 }
@@ -50,13 +48,12 @@ where
 {
     /// An OCR enricher over `backend`.
     ///
-    /// Unnamed by default (its id falls back to the crate name); set a name with
-    /// [`with_name`](Self::with_name) when running more than one so their ids
-    /// stay distinct.
+    /// Named after the crate until [`with_name`](Self::with_name) sets another;
+    /// set one when running more than one so their ids stay distinct.
     #[must_use]
     pub fn new(backend: B) -> Self {
         Self {
-            name: None,
+            name: HipStr::borrowed(env!("CARGO_PKG_NAME")),
             backend,
         }
     }
@@ -64,7 +61,7 @@ where
     /// Set the enricher name, surfaced as its id.
     #[must_use]
     pub fn with_name(mut self, name: impl Into<HipStr<'static>>) -> Self {
-        self.name = Some(name.into());
+        self.name = name.into();
         self
     }
 }
@@ -86,7 +83,7 @@ impl<B> OcrEnricher<B> {
     /// [`with_name`](Self::with_name), or the crate name when unset.
     #[must_use]
     pub fn name(&self) -> &str {
-        self.name.as_deref().unwrap_or(env!("CARGO_PKG_NAME"))
+        &self.name
     }
 }
 
@@ -95,10 +92,6 @@ impl<B> Enricher<Image> for OcrEnricher<B>
 where
     B: for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>,
 {
-    fn id(&self) -> ComponentId {
-        ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
-    }
-
     async fn enrich(&self, subject: &mut Subject<Image>, ctx: &Context<'_>) -> Result<()> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
@@ -157,11 +150,11 @@ fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &'a Context<'_>) -> OcrRequ
 // `fixtures` feature provides (it implies the decoders).
 #[cfg(all(test, feature = "fixtures"))]
 mod tests {
-    use elide_core::ErrorKind;
     use elide_core::backend::Backend;
     use elide_core::entity::audit::ModelId;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
+    use elide_core::{Component, ErrorKind};
 
     use super::*;
     use crate::fixtures;
@@ -223,7 +216,6 @@ mod tests {
         impl Backend for OcrSpy {
             type Request<'a> = OcrRequest<'a>;
             type Response = OcrResponse;
-            fn provenance(&self) -> ModelId;
             #[mockall::concretize]
             async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
         }
@@ -235,16 +227,12 @@ mod tests {
     #[tokio::test]
     async fn a_present_artifact_skips_the_backend() {
         let mut backend = MockOcrSpy::new();
-        backend.expect_provenance().returning(|| ModelId {
-            name: "spy".into(),
-            ..ModelId::default()
-        });
         // The self-skip, asserted as a call cardinality: recognize fires exactly
         // once across both enrich calls. mockall fails the test on drop if not.
         backend
             .expect_call()
             .times(1)
-            .returning(|_| Ok(OcrResponse::new(canned_regions())));
+            .returning(|_| Ok(OcrResponse::new(ModelId::new("spy"), canned_regions())));
 
         let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
@@ -276,10 +264,6 @@ mod tests {
     #[tokio::test]
     async fn a_restored_empty_artifact_skips_the_backend() {
         let mut backend = MockOcrSpy::new();
-        backend.expect_provenance().returning(|| ModelId {
-            name: "spy".into(),
-            ..ModelId::default()
-        });
         // The backend must never run: the seeded (empty) artifact is enrichment.
         backend.expect_call().times(0);
 
@@ -312,17 +296,13 @@ mod tests {
         type Request<'a> = OcrRequest<'a>;
         type Response = OcrResponse;
 
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "batch-counting".into(),
-                ..ModelId::default()
-            }
-        }
-
         async fn call(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
             self.single_calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(OcrResponse::new(canned_regions()))
+            Ok(OcrResponse::new(
+                ModelId::new("batch-counting"),
+                canned_regions(),
+            ))
         }
 
         async fn call_batch(&self, requests: Vec<OcrRequest<'_>>) -> Result<Vec<OcrResponse>> {
@@ -330,7 +310,7 @@ mod tests {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Ok(requests
                 .iter()
-                .map(|_| OcrResponse::new(canned_regions()))
+                .map(|_| OcrResponse::new(ModelId::new("batch-counting"), canned_regions()))
                 .collect())
         }
     }

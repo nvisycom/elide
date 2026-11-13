@@ -10,12 +10,12 @@ mod scan;
 
 use std::sync::Arc;
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{AuditEvent, Refinement};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Context, Languages, Recognizer, Subject};
+use elide_core::{Component, Result};
 use regex::RegexSet;
 
 pub use self::builder::{PatternRecognizerBuilder, RegexBudget};
@@ -55,6 +55,7 @@ use crate::rule::{CompiledDictionary, CompiledPattern, DictionaryTerms};
 ///
 /// [`Pattern`]: crate::Pattern
 /// [`Dictionary`]: crate::Dictionary
+#[derive(Component)]
 pub struct PatternRecognizer {
     patterns: Vec<CompiledPattern>,
     regex_set: Option<RegexSet>,
@@ -137,10 +138,6 @@ impl PatternRecognizer {
 
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
-    }
-
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): nothing to match.

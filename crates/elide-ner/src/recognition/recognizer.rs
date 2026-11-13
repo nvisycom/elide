@@ -19,13 +19,12 @@
 //! [`ScoreScaled`]: crate::backend::ScoreScaled
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
-use elide_core::Result;
 use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, Label};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::{Component, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -38,11 +37,12 @@ const TARGET: &str = "elide_ner::recognition";
 ///
 /// Generic over its backend `B`: any [`Backend`] whose request is
 /// [`NerRequest`] and whose response is [`NerResponse`]. Each entity's audit
-/// event names the model the backend reports through
-/// [`provenance`](Backend::provenance).
-#[derive(Clone)]
+/// event names the model its response came from, so entities stay attributed
+/// to the model that answered behind a router.
+#[derive(Clone, Component)]
 pub struct NerRecognizer<B> {
     /// Recognizer name, its id; the crate name unless set.
+    #[component(name)]
     name: HipStr<'static>,
     /// Backend that turns `(text, labels)` into canonical spans. May be a
     /// decorated backend.
@@ -99,10 +99,6 @@ where
     M: TextRecognizable,
     B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
 {
-    fn id(&self) -> ComponentId {
-        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
-    }
-
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
@@ -111,13 +107,12 @@ where
             return Ok(Vec::new());
         };
         let response = self.backend.call(request).await?;
-        let model = self.backend.provenance();
         let spans = response.spans.len();
-        let entities = entities(response.spans, subject, &model);
+        let entities = entities(response.spans, subject, &response.model);
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
-            model = %model.name,
+            model = %response.model.name,
             spans,
             entities = entities.len(),
             unplaced = spans - entities.len(),
@@ -149,16 +144,14 @@ where
             return Ok(per_subject);
         }
         let responses = self.backend.call_aligned(requests).await?;
-        let model = self.backend.provenance();
         let spans: usize = responses.iter().map(|response| response.spans.len()).sum();
         for (&index, response) in targets.iter().zip(responses) {
-            per_subject[index] = entities(response.spans, subjects[index], &model);
+            per_subject[index] = entities(response.spans, subjects[index], &response.model);
         }
         let placed: usize = per_subject.iter().map(Vec::len).sum();
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
-            model = %model.name,
             subjects = subjects.len(),
             requests = targets.len(),
             spans,
@@ -247,23 +240,24 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "batch-counting".into(),
-                ..ModelId::default()
-            }
-        }
-
         async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
             self.single_calls.fetch_add(1, Ordering::Relaxed);
-            Ok(NerResponse::new(vec![NerSpan::new("EMAIL", 0.9, 0..1)]))
+            Ok(NerResponse::new(
+                ModelId::new("batch-counting"),
+                vec![NerSpan::new("EMAIL", 0.9, 0..1)],
+            ))
         }
 
         async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
             self.batch_calls.fetch_add(1, Ordering::Relaxed);
             Ok(requests
                 .iter()
-                .map(|_| NerResponse::new(vec![NerSpan::new("EMAIL", 0.9, 0..1)]))
+                .map(|_| {
+                    NerResponse::new(
+                        ModelId::new("batch-counting"),
+                        vec![NerSpan::new("EMAIL", 0.9, 0..1)],
+                    )
+                })
                 .collect())
         }
     }

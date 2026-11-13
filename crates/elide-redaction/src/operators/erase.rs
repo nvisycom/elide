@@ -2,15 +2,14 @@
 
 #[cfg(feature = "audio")]
 use elide_audio::modality::{Audio, AudioData, AudioReplacement};
-use elide_core::Result;
 use elide_core::entity::Entity;
 #[cfg(feature = "metadata")]
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 #[cfg(feature = "image")]
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
@@ -22,24 +21,14 @@ use serde::{Deserialize, Serialize};
 /// remains, text drops the characters, audio cuts the interval, an image
 /// clears the region. One [`Erase`] serves every medium, with a per-modality
 /// [`Operator`] impl that maps to that modality's "removed" replacement.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
+#[component(name = "erase", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Erase;
 
-impl Erase {
-    /// Identity shared by every modality's impl.
-    fn id() -> ComponentId {
-        ComponentId::new("erase", "1.0.0")
-    }
-}
-
 #[async_trait::async_trait]
 impl Operator<Text> for Erase {
-    fn id(&self) -> ComponentId {
-        Erase::id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         LeakProfile::Irrecoverable
     }
@@ -52,10 +41,6 @@ impl Operator<Text> for Erase {
 #[cfg(feature = "tabular")]
 #[async_trait::async_trait]
 impl Operator<Tabular> for Erase {
-    fn id(&self) -> ComponentId {
-        Erase::id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         LeakProfile::Irrecoverable
     }
@@ -73,10 +58,6 @@ impl Operator<Tabular> for Erase {
 #[cfg(feature = "metadata")]
 #[async_trait::async_trait]
 impl Operator<Metadata> for Erase {
-    fn id(&self) -> ComponentId {
-        Erase::id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         LeakProfile::Irrecoverable
     }
@@ -93,10 +74,6 @@ impl Operator<Metadata> for Erase {
 #[cfg(feature = "audio")]
 #[async_trait::async_trait]
 impl Operator<Audio> for Erase {
-    fn id(&self) -> ComponentId {
-        Erase::id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         LeakProfile::Irrecoverable
     }
@@ -113,10 +90,6 @@ impl Operator<Audio> for Erase {
 #[cfg(feature = "image")]
 #[async_trait::async_trait]
 impl Operator<Image> for Erase {
-    fn id(&self) -> ComponentId {
-        Erase::id()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         LeakProfile::Irrecoverable
     }

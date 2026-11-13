@@ -4,22 +4,25 @@
 //! substitutes a fixed string, so a downstream crate can drive a pipeline
 //! without a real detection model or operator.
 
+use hipstr::HipStr;
+
 use crate::entity::Entity;
 use crate::modality::Modality;
 use crate::modality::text::{Text, TextData, TextReplacement};
-use crate::primitive::ComponentId;
 use crate::recognition::{Context, Recognizer, Subject};
 use crate::redaction::{LeakProfile, Operator};
-use crate::{Error, Result};
+use crate::{Component, Error, Result};
 
 /// A recognizer that replays a fixed list of entities, ignoring the subject.
 ///
 /// For a pipeline test that needs to control exactly which entities are
 /// detected (reconciliation, filtering, redaction) without running a real
 /// recognizer.
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[component(version = "1")]
 pub struct MockRecognizer<M: Modality> {
-    id: ComponentId,
+    #[component(name)]
+    name: HipStr<'static>,
     entities: Vec<Entity<M>>,
 }
 
@@ -28,26 +31,24 @@ impl<M: Modality> MockRecognizer<M> {
     #[must_use]
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
-            id: ComponentId::new("mock-recognizer", "1"),
+            name: HipStr::borrowed("mock-recognizer"),
             entities,
         }
     }
 
-    /// Override the recognizer's [`ComponentId`] (e.g. to distinguish two mocks
-    /// in one analysis).
+    /// Override the name in the recognizer's [`ComponentId`] (e.g. to
+    /// distinguish two mocks in one analysis).
+    ///
+    /// [`ComponentId`]: crate::primitive::ComponentId
     #[must_use]
-    pub fn with_id(mut self, name: impl Into<String>) -> Self {
-        self.id = ComponentId::new(name.into(), "1");
+    pub fn with_id(mut self, name: impl Into<HipStr<'static>>) -> Self {
+        self.name = name.into();
         self
     }
 }
 
 #[async_trait::async_trait]
 impl<M: Modality> Recognizer<M> for MockRecognizer<M> {
-    fn id(&self) -> ComponentId {
-        self.id.clone()
-    }
-
     async fn recognize(&self, _subject: &Subject<M>, _ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         Ok(self.entities.clone())
     }
@@ -58,9 +59,9 @@ impl<M: Modality> Recognizer<M> for MockRecognizer<M> {
 /// [`Text`]-only: it produces a [`TextReplacement::Substituted`]. Its
 /// [`LeakProfile`] defaults to [`Irrecoverable`](LeakProfile::Irrecoverable);
 /// override it for a test that asserts on leak reporting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Component)]
+#[component(name = "mock-operator", version = "1")]
 pub struct MockOperator {
-    id: ComponentId,
     replacement: String,
     leak: LeakProfile,
 }
@@ -70,7 +71,6 @@ impl MockOperator {
     #[must_use]
     pub fn new(replacement: impl Into<String>) -> Self {
         Self {
-            id: ComponentId::new("mock-operator", "1"),
             replacement: replacement.into(),
             leak: LeakProfile::Irrecoverable,
         }
@@ -86,10 +86,6 @@ impl MockOperator {
 
 #[async_trait::async_trait]
 impl Operator<Text> for MockOperator {
-    fn id(&self) -> ComponentId {
-        self.id.clone()
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         self.leak
     }

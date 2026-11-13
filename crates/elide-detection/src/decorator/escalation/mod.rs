@@ -16,11 +16,10 @@
 
 mod confidence;
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::{Component, Result};
 
 pub use self::confidence::ConfidenceDecider;
 use crate::batch::expect_one_per_input;
@@ -50,7 +49,11 @@ pub trait Decider<M: Modality>: Send + Sync {
 /// either recognizer propagates without returning partial results. Overlap
 /// between the two is left to the reconcile layer, matching the pipeline's "keep
 /// the redundant set, reconcile later" model.
+#[derive(Component)]
 pub struct EscalatingRecognizer<B, E, D> {
+    /// Names the decorator. Each emitted entity carries its originating
+    /// recognizer (the baseline or the escalated one) in its audit trail.
+    #[component(delegate)]
     baseline: B,
     escalated: E,
     decider: D,
@@ -77,13 +80,6 @@ where
     E: Recognizer<M>,
     D: Decider<M>,
 {
-    /// The baseline's id. Each emitted entity already carries its own
-    /// originating recognizer in its audit trail (the baseline's or the
-    /// escalated one's), so this is only the decorator's own baseline identity.
-    fn id(&self) -> ComponentId {
-        self.baseline.id()
-    }
-
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         let mut entities = self.baseline.recognize(subject, ctx).await?;
         if self.decider.escalate(subject, &entities) {
@@ -125,11 +121,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
+    use elide_core::Component;
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::{ComponentId, Confidence};
+    use elide_core::primitive::Confidence;
     use elide_core::recognition::{Context, Scope};
 
     use super::*;
@@ -154,6 +151,8 @@ mod tests {
 
     /// A recognizer that replays canned entities and counts how often it ran, so
     /// a test can assert whether escalation reached the escalated recognizer.
+    #[derive(Component)]
+    #[component(name = "spy", version = "1")]
     struct Spy {
         entities: Vec<Entity<Text>>,
         calls: Arc<AtomicUsize>,
@@ -161,10 +160,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for Spy {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("spy", "1")
-        }
-
         async fn recognize(
             &self,
             _subject: &Subject<Text>,
@@ -296,13 +291,11 @@ mod tests {
         // for "a"/"c". With the default threshold, "a"/"c" (empty) escalate and
         // "b" (weak) escalates too — so vary it: make the baseline strong, so
         // only the empty subjects escalate.
+        #[derive(Component)]
+        #[component(name = "per-subject", version = "1")]
         struct PerSubject;
         #[async_trait::async_trait]
         impl Recognizer<Text> for PerSubject {
-            fn id(&self) -> ComponentId {
-                ComponentId::new("per-subject", "1")
-            }
-
             async fn recognize(
                 &self,
                 subject: &Subject<Text>,
@@ -318,15 +311,13 @@ mod tests {
         }
 
         /// Records the subjects of every batch it is handed.
+        #[derive(Component)]
+        #[component(name = "batches", version = "1")]
         struct Batches {
             seen: Arc<Mutex<Vec<Vec<String>>>>,
         }
         #[async_trait::async_trait]
         impl Recognizer<Text> for Batches {
-            fn id(&self) -> ComponentId {
-                ComponentId::new("batches", "1")
-            }
-
             async fn recognize(
                 &self,
                 subject: &Subject<Text>,

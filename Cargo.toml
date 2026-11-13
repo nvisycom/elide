@@ -21,6 +21,7 @@ members = [
     "./crates/elide-redaction",
     "./crates/elide-engine",
     "./crates/elide-backend",
+    "./crates/elide-macros",
     "./crates/elide",
     "./crates/elide-wasm",
     "./examples",
@@ -62,6 +63,7 @@ elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
 elide-redaction = { path = "./crates/elide-redaction", version = "0.1.0" }
 elide-engine = { path = "./crates/elide-engine", version = "0.1.0" }
 elide-backend = { path = "./crates/elide-backend", version = "0.1.0" }
+elide-macros = { path = "./crates/elide-macros", version = "0.1.0" }
 elide = { path = "./crates/elide", version = "0.1.0" }
 
 # (De)serialization
@@ -106,6 +108,12 @@ blake3 = { version = "1.8", features = [] }
 # Cryptography
 aes-gcm = { version = "0.11", features = [] }
 zeroize = { version = "1.9", features = [] }
+
+# Procedural macros
+proc-macro2 = { version = "1.0", features = [] }
+proc-macro-crate = { version = "3.5", features = [] }
+quote = { version = "1.0", features = [] }
+syn = { version = "2.0", default-features = false, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
 
 # Async runtime & parallelism
 tokio = { version = "1.50", features = [] }

@@ -23,10 +23,10 @@ pub use self::label::LabelMap;
 pub use self::languages::Languages;
 pub use self::scope::{Scope, ScopeMetadata};
 pub use self::subject::Subject;
+use crate::Component;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
-use crate::primitive::ComponentId;
 
 /// Detection layer: inspects content and reports recognized entities.
 ///
@@ -49,13 +49,10 @@ use crate::primitive::ComponentId;
 /// [`Entity`]: crate::entity::Entity
 /// [`AuditEvent`]: crate::entity::audit::AuditEvent
 #[async_trait::async_trait]
-pub trait Recognizer<M>: Send + Sync
+pub trait Recognizer<M>: Component + Send + Sync
 where
     M: Modality,
 {
-    /// This recognizer's identity (name + version).
-    fn id(&self) -> ComponentId;
-
     /// Inspect the [`Subject`] in the given context and return the recognized
     /// entities, in modality-local coordinates.
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>>;
@@ -101,10 +98,6 @@ where
     M: Modality,
     R: Recognizer<M> + ?Sized,
 {
-    fn id(&self) -> ComponentId {
-        (**self).id()
-    }
-
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         (**self).recognize(subject, ctx).await
     }
@@ -132,10 +125,6 @@ where
     M: Modality,
     R: Recognizer<M> + ?Sized,
 {
-    fn id(&self) -> ComponentId {
-        (**self).id()
-    }
-
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         (**self).recognize(subject, ctx).await
     }
@@ -157,7 +146,8 @@ mod tests {
     use crate::modality::text::{Text, TextData};
 
     /// A recognizer that records the most `recognize` calls in flight at once.
-    #[derive(Default)]
+    #[derive(Default, Component)]
+    #[component(name = "in-flight", version = "0")]
     struct InFlight {
         now: AtomicUsize,
         most: AtomicUsize,
@@ -165,10 +155,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for InFlight {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("in-flight", "0")
-        }
-
         async fn recognize(
             &self,
             _subject: &Subject<Text>,

@@ -2,8 +2,8 @@
 //!
 //! Every hosted model in the toolkit — LLM/VLM, NER, speech-to-text, OCR — is a
 //! [`Backend`]: request in, model call, response out. A recognizer or enricher
-//! holds one and drives it. The contract ([`Backend`], [`BackendRequest`],
-//! [`BackendResponse`]) is always available, with [`BackendBatchExt::call_aligned`],
+//! holds one and drives it. The contract ([`Backend`], [`Request`],
+//! [`Response`]) is always available, with [`BackendBatchExt::call_aligned`],
 //! the batch call a caller makes, and [`BatchSplit`] / [`BatchMerge`] for a
 //! batch served in parts.
 //!
@@ -27,5 +27,5 @@ pub use elide_backend::routing;
 pub use elide_backend::{BackendExt, limit};
 #[doc(inline)]
 pub use elide_core::backend::{
-    Backend, BackendBatchExt, BackendRequest, BackendResponse, BatchMerge, BatchPart, BatchSplit,
+    Backend, BackendBatchExt, BatchMerge, BatchPart, BatchSplit, Request, Response,
 };

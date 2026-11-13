@@ -16,7 +16,6 @@ use async_trait::async_trait;
 use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::ModelId;
 
 use crate::backend::{NerRequest, NerResponse};
 
@@ -77,10 +76,6 @@ where
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelId {
-        self.inner.provenance()
-    }
-
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let mut response = self.inner.call(request).await?;
         self.filter(slice::from_mut(&mut response));
@@ -98,6 +93,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use elide_core::entity::audit::ModelId;
     use elide_core::primitive::Confidence;
 
     use super::*;
@@ -110,15 +106,8 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "fixed".into(),
-                ..ModelId::default()
-            }
-        }
-
         async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
-            Ok(NerResponse::new(self.0.clone()))
+            Ok(NerResponse::new(ModelId::new("fixed"), self.0.clone()))
         }
     }
 
@@ -155,17 +144,13 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "counting".into(),
-                ..ModelId::default()
-            }
-        }
-
         async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
             self.single_calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(NerResponse::new(vec![NerSpan::new("MISC", 0.9, 0..1)]))
+            Ok(NerResponse::new(
+                ModelId::new("counting"),
+                vec![NerSpan::new("MISC", 0.9, 0..1)],
+            ))
         }
 
         async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
@@ -173,7 +158,12 @@ mod tests {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Ok(requests
                 .iter()
-                .map(|_| NerResponse::new(vec![NerSpan::new("MISC", 0.9, 0..1)]))
+                .map(|_| {
+                    NerResponse::new(
+                        ModelId::new("counting"),
+                        vec![NerSpan::new("MISC", 0.9, 0..1)],
+                    )
+                })
                 .collect())
         }
     }

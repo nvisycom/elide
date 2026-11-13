@@ -1160,6 +1160,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "celes",
+ "elide-macros",
  "futures",
  "hex",
  "hipstr",
@@ -1308,6 +1309,16 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "uuid",
+]
+
+[[package]]
+name = "elide-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

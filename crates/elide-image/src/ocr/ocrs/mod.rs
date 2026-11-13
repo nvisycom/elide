@@ -5,7 +5,7 @@
 //! single elide-shaped [`Engine::recognize`](engine::Engine::recognize) that
 //! takes image bytes and returns core [`LayoutRegion`]s. This backend layer holds
 //! only elide concerns: the [`Backend`] impl,
-//! provenance, and the async offload of the CPU-bound engine call, no
+//! the model its responses name, and the async offload of the CPU-bound engine call, no
 //! `ocrs`/`rten` type appears here.
 //!
 //! Construct once (loading the models is not cheap) via
@@ -35,13 +35,14 @@ use super::{OcrRequest, OcrResponse};
 #[derive(Clone)]
 pub struct OcrsBackend {
     engine: Arc<Engine>,
-    version: &'static str,
+    /// The model each response names.
+    model: ModelId,
 }
 
 impl std::fmt::Debug for OcrsBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OcrsBackend")
-            .field("version", &self.version)
+            .field("model", &self.model)
             .finish_non_exhaustive()
     }
 }
@@ -84,7 +85,7 @@ impl OcrsBackend {
     fn wrap(engine: Engine) -> Self {
         Self {
             engine: Arc::new(engine),
-            version: env!("CARGO_PKG_VERSION"),
+            model: ModelId::new(format!("ocrs {}", env!("CARGO_PKG_VERSION"))),
         }
     }
 }
@@ -93,13 +94,6 @@ impl OcrsBackend {
 impl Backend for OcrsBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
-
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: format!("ocrs {}", self.version).into(),
-            ..ModelId::default()
-        }
-    }
 
     async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
         // OCR inference is CPU-bound and has no await points; running it inline
@@ -129,6 +123,6 @@ impl Backend for OcrsBackend {
         let regions = rx
             .await
             .map_err(|_| Error::processing("OCR worker canceled before returning a result"))??;
-        Ok(OcrResponse::new(regions))
+        Ok(OcrResponse::new(self.model.clone(), regions))
     }
 }

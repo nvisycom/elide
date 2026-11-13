@@ -9,11 +9,10 @@ use std::collections::HashMap;
 use std::mem;
 use std::ops::Range;
 
-use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextData};
-use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::{Component, Result};
 
 pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
 use crate::batch::expect_one_per_input;
@@ -51,7 +50,9 @@ use crate::batch::expect_one_per_input;
 /// that reads only the text loses nothing to windowing. One that also reads
 /// the subject's hints still sees them, since every window carries them, but
 /// one that reads the enrichment artifact (tokens) gets none inside a window.
+#[derive(Component)]
 pub struct ChunkedRecognizer<R, C = WordWindows> {
+    #[component(delegate)]
     inner: R,
     chunking: C,
 }
@@ -157,10 +158,6 @@ fn dedupe_exact(entities: Vec<Entity<Text>>) -> Vec<Entity<Text>> {
 
 #[async_trait::async_trait]
 impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R, C> {
-    fn id(&self) -> ComponentId {
-        self.inner.id()
-    }
-
     async fn recognize(
         &self,
         subject: &Subject<Text>,
@@ -250,6 +247,7 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use elide_core::Component;
     use elide_core::entity::audit::{AuditEvent, ModelId};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
@@ -263,6 +261,8 @@ mod tests {
     /// in the text it is given, under each of its `labels`, at a configured
     /// confidence. It records the texts it was asked to scan, so a test can
     /// assert how the input was windowed.
+    #[derive(Component)]
+    #[component(name = "finds-substring", version = "0")]
     struct FindsSubstring {
         needle: &'static str,
         labels: &'static [&'static str],
@@ -297,7 +297,7 @@ mod tests {
                 "finds-substring",
                 confidence,
                 location.clone(),
-                ModelId::default(),
+                ModelId::new("model"),
             );
             Entity::new(LabelRef::new(label), location)
                 .with_recognized_range(span)
@@ -307,10 +307,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for FindsSubstring {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("finds-substring", "0")
-        }
-
         async fn recognize(
             &self,
             subject: &Subject<Text>,
@@ -339,17 +335,14 @@ mod tests {
     type Batch = Vec<(String, Vec<LanguageClaim>)>;
 
     /// A recognizer that finds `needle` and records each batch it is handed.
-    #[derive(Default)]
+    #[derive(Default, Component)]
+    #[component(name = "recorder", version = "0")]
     struct Recorder {
         batches: Mutex<Vec<Batch>>,
     }
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for Recorder {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("recorder", "0")
-        }
-
         async fn recognize(
             &self,
             subject: &Subject<Text>,
@@ -563,16 +556,14 @@ mod tests {
 
     /// Records how many hints each window subject carried, to assert chunk-global
     /// context survives the split.
+    #[derive(Component)]
+    #[component(name = "records-hints", version = "0")]
     struct RecordsHints {
         per_window_hint_count: Mutex<Vec<usize>>,
     }
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for RecordsHints {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("records-hints", "0")
-        }
-
         async fn recognize(
             &self,
             subject: &Subject<Text>,

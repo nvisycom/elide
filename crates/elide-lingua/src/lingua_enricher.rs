@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use elide_core::enrichment::Enricher;
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Context, Subject};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use crate::lingua_detector::{LinguaDetector, compiled_language};
 
@@ -28,7 +28,7 @@ const TARGET: &str = "elide_lingua";
 ///   asserted languages, attributing each region to the one it is in; when
 ///   `lingua` was compiled with none of them, detection is skipped rather
 ///   than widened to languages the caller never declared.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Component)]
 pub struct LinguaEnricher {
     detector: Arc<LinguaDetector>,
 }
@@ -90,10 +90,6 @@ impl Default for LinguaEnricher {
 /// scopes a text, tabular, transcript, or OCR pipeline to its language.
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
-    fn id(&self) -> ComponentId {
-        ComponentId::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-    }
-
     async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_>) -> Result<()> {
         let asserted = ctx.scope().languages();
         let call_detector;

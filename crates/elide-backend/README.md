@@ -28,7 +28,7 @@ language, the call's primary language whether caller-asserted or detected
 (exact tag first, then primary language subtag), and falls back to a default
 backend for unhinted or unrouted languages. A mixed batch is split by route and
 the responses reassembled in request order. Every request exposes its language
-through `BackendRequest::language` (NER, STT, and OCR requests carry one; others
+through `Request::language` (NER, STT, and OCR requests carry one; others
 route to the fallback), so the router works for any backend.
 `FallbackRouted<P, F>` calls a primary backend and, when it fails with an error
 another backend could avoid (transport, provider, or an unsupported

@@ -17,8 +17,7 @@ use std::slice;
 
 use async_trait::async_trait;
 use elide_core::Result;
-use elide_core::backend::{Backend, BatchSplit};
-use elide_core::entity::audit::ModelId;
+use elide_core::backend::Backend;
 use elide_core::entity::{Label, LabelRef};
 
 use crate::backend::{NerRequest, NerResponse};
@@ -33,8 +32,10 @@ const TARGET: &str = "elide_ner::backend::label_scoped";
 /// supported ones, keeping their definitions and requested order, so a zero-shot
 /// model is prompted with only what it can find: fewer labels make it faster
 /// and more accurate, and keep the prompt within its input limit. A request
-/// left with no supported label is answered with no spans, without calling the
-/// model. Spans the model returns outside the set are dropped.
+/// left with no supported label is forwarded asking for none, which the backend
+/// answers with no spans without calling its model
+/// ([`NerRequest::wants_nothing`]). Spans the model returns outside the set are
+/// dropped.
 ///
 /// A request with no labels (an empty catalog, a fixed-label model's path)
 /// passes through, and only its spans are filtered.
@@ -67,13 +68,23 @@ impl<B> LabelScoped<B> {
         &self.inner
     }
 
-    /// The `requested` labels the model supports, in their requested order.
-    fn narrow(&self, requested: &[Label]) -> Vec<Label> {
-        requested
+    /// The labels of `request` the model supports, in their requested order;
+    /// `None` when it requests none.
+    fn narrow_request(&self, request: &NerRequest<'_>) -> Option<Vec<Label>> {
+        let requested = request.labels?;
+        let narrowed: Vec<Label> = requested
             .iter()
             .filter(|label| self.labels.contains(&label.to_ref()))
             .cloned()
-            .collect()
+            .collect();
+        if narrowed.is_empty() && !requested.is_empty() {
+            tracing::debug!(
+                target: TARGET,
+                requested = requested.len(),
+                "no requested label is supported; the request asks for none",
+            );
+        }
+        Some(narrowed)
     }
 
     /// Drop every span outside the supported set from `responses`.
@@ -100,20 +111,8 @@ where
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelId {
-        self.inner.provenance()
-    }
-
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
-        let narrowed = request.labels.map(|labels| self.narrow(labels));
-        if narrowed.as_ref().is_some_and(Vec::is_empty) {
-            tracing::debug!(
-                target: TARGET,
-                requested = request.labels.map_or(0, <[Label]>::len),
-                "no requested label is supported; the model is not called",
-            );
-            return Ok(NerResponse::default());
-        }
+        let narrowed = self.narrow_request(&request);
         let request = NerRequest {
             labels: narrowed.as_deref(),
             ..request
@@ -126,24 +125,8 @@ where
     async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
         let narrowed: Vec<Option<Vec<Label>>> = requests
             .iter()
-            .map(|request| request.labels.map(|labels| self.narrow(labels)))
+            .map(|request| self.narrow_request(request))
             .collect();
-        let skipped = narrowed
-            .iter()
-            .filter(|labels| labels.as_ref().is_some_and(Vec::is_empty))
-            .count();
-        if skipped > 0 {
-            tracing::debug!(
-                target: TARGET,
-                skipped,
-                requests = narrowed.len(),
-                "requests with no supported label are answered without the model",
-            );
-        }
-
-        // Forward the requests left with a supported label (or with none
-        // requested) as one inner batch, keeping its native batching; the rest
-        // are answered empty without a model call.
         let requests = requests
             .into_iter()
             .zip(&narrowed)
@@ -152,16 +135,7 @@ where
                 ..request
             })
             .collect();
-        let split = BatchSplit::by(requests, |request: &NerRequest<'_>| {
-            !request.labels.is_some_and(<[Label]>::is_empty)
-        });
-        let mut merge = split.merge();
-        for (forwarded, part) in split {
-            if forwarded {
-                merge.call(&self.inner, part).await?;
-            }
-        }
-        let mut responses = merge.finish_or_else(NerResponse::default);
+        let mut responses = self.inner.call_batch(requests).await?;
         self.filter(&mut responses);
         Ok(responses)
     }
@@ -171,7 +145,7 @@ where
 mod tests {
     use std::sync::Mutex;
 
-    use elide_core::ErrorKind;
+    use elide_core::entity::audit::ModelId;
     use elide_core::entity::builtins;
     use elide_core::primitive::{Confidence, LanguageTag};
 
@@ -179,7 +153,7 @@ mod tests {
     use crate::backend::NerSpan;
 
     /// A backend that records the label names it was asked for and returns one
-    /// span per label in `emits`.
+    /// span per label in `emits`, or none when asked for no labels.
     #[derive(Default)]
     struct Recording {
         asked: Mutex<Vec<Option<Vec<String>>>>,
@@ -191,10 +165,6 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
-
         async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
             self.asked
                 .lock()
@@ -205,12 +175,15 @@ mod tests {
                         .map(|l| l.to_ref().as_str().to_owned())
                         .collect()
                 }));
-            Ok(NerResponse::new(
+            let spans = if request.wants_nothing() {
+                Vec::new()
+            } else {
                 self.emits
                     .iter()
                     .map(|label| NerSpan::with_label(label.clone(), Confidence::MAX, 0..1))
-                    .collect(),
-            ))
+                    .collect()
+            };
+            Ok(NerResponse::new(ModelId::new("recording"), spans))
         }
     }
 
@@ -269,13 +242,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_supported_label_requested_skips_the_model() {
+    async fn no_supported_label_asks_the_backend_for_none() {
         let backend = person_and_address(Recording::default());
         let labels = vec![(*builtins::EMAIL_ADDRESS).clone()];
         let response = backend.call(request(Some(&labels))).await.unwrap();
 
         assert!(response.spans.is_empty());
-        assert!(backend.inner().asked.lock().unwrap().is_empty());
+        assert_eq!(response.model.name, "recording");
+        assert_eq!(
+            backend.inner().asked.lock().unwrap().clone(),
+            vec![Some(Vec::new())]
+        );
     }
 
     #[tokio::test]
@@ -295,7 +272,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_batch_skips_unsupported_requests_and_stays_aligned() {
+    async fn a_batch_asks_for_none_where_no_label_is_supported() {
         let inner = Recording {
             emits: vec![builtins::PERSON_NAME.to_ref()],
             ..Recording::default()
@@ -315,44 +292,14 @@ mod tests {
 
         let counts: Vec<usize> = responses.iter().map(|r| r.spans.len()).collect();
         assert_eq!(counts, vec![1, 0, 1]);
-        // The unsupported request never reached the model.
-        assert_eq!(backend.inner().asked.lock().unwrap().len(), 2);
-    }
-
-    /// A backend that answers every batch with one response too few.
-    struct ShortBatch;
-
-    #[async_trait]
-    impl Backend for ShortBatch {
-        type Request<'a> = NerRequest<'a>;
-        type Response = NerResponse;
-
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
-
-        async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
-            Ok(NerResponse::default())
-        }
-
-        async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
-            Ok(requests
-                .iter()
-                .skip(1)
-                .map(|_| NerResponse::default())
-                .collect())
-        }
-    }
-
-    #[tokio::test]
-    async fn a_short_inner_batch_is_an_error() {
-        let backend = LabelScoped::new(ShortBatch, [builtins::PERSON_NAME.to_ref()]);
-        let all = catalog_labels();
-
-        let error = backend
-            .call_batch(vec![request(Some(&all)), request(Some(&all))])
-            .await
-            .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Provider);
+        let asked: Vec<usize> = backend
+            .inner()
+            .asked
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|labels| labels.as_ref().map_or(0, Vec::len))
+            .collect();
+        assert_eq!(asked, vec![2, 0, 2]);
     }
 }

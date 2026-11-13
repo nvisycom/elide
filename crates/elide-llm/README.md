@@ -38,12 +38,8 @@ use elide_llm::LlmRecognizer;
 #     type Request<'a> = LlmRequest<'a, Text>;
 #     type Response = LlmResponse<Text>;
 #
-#     fn provenance(&self) -> ModelId {
-#         ModelId { name: "my-model".into(), ..ModelId::default() }
-#     }
-#
 #     async fn call(&self, _request: LlmRequest<'_, Text>) -> elide_core::Result<LlmResponse<Text>> {
-#         Ok(LlmResponse::new(Candidates {
+#         Ok(LlmResponse::new(ModelId::new("my-model"), Candidates {
 #             entities: vec![TextCandidate {
 #                 value: "Jane Doe".to_owned(),
 #                 description: None,

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelId;
 use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
@@ -143,8 +142,8 @@ impl Rate {
 /// This caps requests *over time* — a provider's requests-per-interval quota —
 /// which is different from bounding *simultaneous* calls. For that, wrap with
 /// [`ConcurrencyLimited`]; the two compose, one capping the rate and the other
-/// the open connections. Because it is itself a `Backend` (same request/response,
-/// same provenance), it drops in anywhere the inner backend goes.
+/// the open connections. Because it is itself a `Backend` (same request and
+/// response), it drops in anywhere the inner backend goes.
 ///
 /// [`ConcurrencyLimited`]: crate::limit::ConcurrencyLimited
 pub struct RateLimited<B> {
@@ -197,10 +196,6 @@ impl<B: Backend> Backend for RateLimited<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelId {
-        self.inner.provenance()
-    }
-
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
         self.acquire(1).await;
         self.inner.call(request).await
@@ -220,19 +215,26 @@ impl<B: Backend> Backend for RateLimited<B> {
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, LazyLock};
 
-    use elide_core::backend::{BackendRequest, BackendResponse};
+    use elide_core::backend::{Request, Response};
+    use elide_core::entity::audit::ModelId;
 
     use super::*;
 
     struct Req<'a>(PhantomData<&'a ()>);
-    impl BackendRequest for Req<'_> {}
+    impl Request for Req<'_> {}
+
+    static MODEL: LazyLock<ModelId> = LazyLock::new(|| ModelId::new("inner"));
 
     #[derive(PartialEq, Eq, Debug)]
     struct Resp(usize);
-    impl BackendResponse for Resp {}
+    impl Response for Resp {
+        fn model(&self) -> &ModelId {
+            &MODEL
+        }
+    }
 
     /// A backend that counts how many calls reached it, so a test can assert how
     /// many the limiter admitted in a window of time.
@@ -244,13 +246,6 @@ mod tests {
     impl Backend for Counting {
         type Request<'a> = Req<'a>;
         type Response = Resp;
-
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "counting".into(),
-                ..ModelId::default()
-            }
-        }
 
         async fn call(&self, _request: Req<'_>) -> Result<Resp> {
             let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;

@@ -10,9 +10,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextRedactable;
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator, ReversibleOperator};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
@@ -50,7 +49,8 @@ const NONCE_LEN: usize = 12;
 /// deserialize back into.
 ///
 /// [`deanonymize`]: ReversibleOperator::deanonymize
-#[derive(Clone)]
+#[derive(Clone, Component)]
+#[component(name = "encrypt", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AesEncrypt {
@@ -145,10 +145,6 @@ impl fmt::Debug for AesEncrypt {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for AesEncrypt {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("encrypt", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // The original is recoverable given the key.
         LeakProfile::Recoverable

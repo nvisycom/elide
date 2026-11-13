@@ -2,9 +2,11 @@
 
 A recognizer of your own covers what the shipped ones do not: a lookup in
 your customer database, a rule that needs code rather than a regex. It
-implements `Recognizer<M>`:
+derives `Component` and implements `Recognizer<M>`:
 
-- `id` names it, with a version, for the audit trail.
+- `Component` gives it a name and a version for the audit trail. Without
+  attributes the derive takes your crate's name and version;
+  `#[component(name = "...", version = "...")]` sets them.
 - `recognize` inspects one subject, a chunk of the input, and returns its
   entities in the subject's coordinates. The analyzer moves them to the
   document's.
@@ -15,18 +17,15 @@ implements `Recognizer<M>`:
 use elide::entity::audit::{AuditEvent, PatternRule};
 use elide::modality::text::TextLocation;
 use elide::prelude::*;
-use elide::primitive::ComponentId;
 use elide::recognition::{Context, Subject};
 
 /// Finds the ticket numbers of an internal tracker, such as `OPS-1234`.
+#[derive(Component)]
+#[component(name = "ticket-recognizer", version = "1.0.0")]
 struct TicketRecognizer;
 
 #[elide::async_trait]
 impl Recognizer<Text> for TicketRecognizer {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("ticket-recognizer", "1.0.0")
-    }
-
     async fn recognize(&self, subject: &Subject<Text>, _ctx: &Context<'_>) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
         let confidence = Confidence::clamped(0.9);

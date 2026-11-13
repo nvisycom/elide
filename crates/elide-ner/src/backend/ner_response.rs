@@ -16,31 +16,33 @@
 
 use std::ops::Range;
 
-use elide_core::backend::BackendResponse;
+use elide_core::backend::Response;
 use elide_core::entity::LabelRef;
+use elide_core::entity::audit::ModelId;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
-/// The spans a NER backend predicted for one request.
+/// The spans a NER backend predicted for one request, and the model that
+/// predicted them.
 ///
-/// Wraps the spans the backend produced. Each span already carries a
-/// canonical [`LabelRef`]; the recognizer applies its ignore-set before
-/// emitting entities.
-#[derive(Debug, Clone, Default)]
+/// Each span already carries a canonical [`LabelRef`]; the recognizer applies
+/// its ignore-set before emitting entities, each attributed to the model.
+#[derive(Debug, Clone, Response)]
 pub struct NerResponse {
+    /// The model that predicted the spans.
+    #[backend(model)]
+    pub model: ModelId,
     /// Spans predicted for the request's text, in backend order.
     pub spans: Vec<NerSpan>,
 }
 
 impl NerResponse {
-    /// Construct a response from spans.
+    /// The `spans` `model` predicted.
     #[must_use]
-    pub fn new(spans: Vec<NerSpan>) -> Self {
-        Self { spans }
+    pub fn new(model: ModelId, spans: Vec<NerSpan>) -> Self {
+        Self { model, spans }
     }
 }
-
-impl BackendResponse for NerResponse {}
 
 /// One entity span a NER model predicted: its range, label, and score.
 ///
