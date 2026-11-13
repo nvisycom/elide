@@ -55,7 +55,7 @@ all = ["lingua/default"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde"] }
+elide-core = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
@@ -68,7 +68,7 @@ lingua = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde", "tabular"] }
+elide-core = { workspace = true, features = ["tabular"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

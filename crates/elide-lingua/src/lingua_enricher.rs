@@ -1,79 +1,79 @@
 //! [`LinguaEnricher`]: a language-detection [`Enricher`] backed by the
 //! [`lingua`] crate.
 //!
-//! Runs language detection over the input text and adds the detected
-//! languages to the call. A pattern-only pipeline that wants its rules
-//! scoped to the document's language registers one of these ahead of its
-//! recognizers; the context enhancer and any language-aware recognizer
-//! then read the call's languages back from the input.
-//!
-//! When the caller has already asserted a language on the input,
-//! detection is skipped: the assertion is authoritative.
-//!
 //! [`lingua`]: https://crates.io/crates/lingua
 
-use elide_core::Result;
+use std::sync::Arc;
+
 use elide_core::enrichment::Enricher;
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{ComponentId, LanguageTag};
 use elide_core::recognition::{Context, Subject};
+use elide_core::{Error, Result};
 
-use crate::lingua_detector::LinguaDetector;
+use crate::lingua_detector::{LinguaDetector, compiled_language};
 
-/// An enricher that detects the languages of text with the `lingua` crate.
+/// The `tracing` target of this crate's events.
+const TARGET: &str = "elide_lingua";
+
+/// An enricher that detects the languages of text with the `lingua` crate,
+/// and adds them to the subject for the stages that follow.
 ///
-/// Stateless: every call builds a fresh detector for the
-/// configured language scope (the candidate set passed at construction,
-/// or every language when unrestricted). The scope is fixed at
-/// construction; pipelines that need different scopes per call hold
-/// multiple enrichers.
+/// Its candidate languages are fixed at construction, and its detector is
+/// built once and shared by its clones. A caller that asserts languages
+/// overrides them for the call:
+///
+/// - one asserted language is authoritative, so detection is skipped;
+/// - two or more mean a mixed document, so detection runs over just the
+///   asserted languages, attributing each region to the one it is in; when
+///   `lingua` was compiled with none of them, detection is skipped rather
+///   than widened to languages the caller never declared.
 #[derive(Debug, Clone)]
 pub struct LinguaEnricher {
-    candidates: Vec<LanguageTag>,
+    detector: Arc<LinguaDetector>,
 }
 
 impl LinguaEnricher {
-    /// An enricher that considers every language the `lingua` features compile
-    /// in.
+    /// An enricher over every language `lingua` was compiled with.
     #[must_use]
     pub fn unrestricted() -> Self {
         Self {
-            candidates: Vec::new(),
+            detector: Arc::new(LinguaDetector::for_all_languages()),
         }
     }
 
-    /// An enricher restricted to `candidates`. Tags lingua doesn't
-    /// recognise are silently skipped at detector-build time; an empty
-    /// input is equivalent to [`unrestricted`].
+    /// An enricher over `candidates`: fewer candidates detect faster and more
+    /// precisely. Candidates `lingua` was not compiled with are skipped, with
+    /// a warning.
     ///
-    /// [`unrestricted`]: Self::unrestricted
-    #[must_use]
-    pub fn with_candidates(candidates: impl IntoIterator<Item = LanguageTag>) -> Self {
-        Self {
-            candidates: candidates.into_iter().collect(),
-        }
-    }
-
-    /// A detector scoped to the caller's `asserted` languages, or `None` when
-    /// detection should not run.
+    /// # Errors
     ///
-    /// For a nonempty **asserted** set the detector is restricted to it, and if
-    /// none of those tags is a language `lingua` supports the result is `None`
-    /// — detection is skipped rather than widened, because falling back to all
-    /// languages would stamp a document with a language the caller never
-    /// declared. For the enricher's own configured candidates (or none), the
-    /// all-language fallback stands: that path wants a best-effort guess.
-    fn detector_for(&self, asserted: &[LanguageTag]) -> Option<LinguaDetector> {
-        if !asserted.is_empty() {
-            // Asserted: restrict, and do not widen past the assertion.
-            return LinguaDetector::for_languages(asserted);
+    /// [`Configuration`](elide_core::ErrorKind::Configuration) when `lingua`
+    /// was compiled with none of `candidates`; its `common` and `all` features
+    /// add languages.
+    pub fn restricted(candidates: impl IntoIterator<Item = LanguageTag>) -> Result<Self> {
+        let candidates: Vec<LanguageTag> = candidates.into_iter().collect();
+        let detector = LinguaDetector::for_languages(&candidates).ok_or_else(|| {
+            let tags: Vec<&str> = candidates.iter().map(LanguageTag::as_str).collect();
+            Error::configuration(format!(
+                "lingua was compiled with none of the candidate languages [{}]",
+                tags.join(", ")
+            ))
+        })?;
+        let skipped: Vec<&str> = candidates
+            .iter()
+            .filter(|tag| compiled_language(tag).is_none())
+            .map(LanguageTag::as_str)
+            .collect();
+        if !skipped.is_empty() {
+            tracing::warn!(
+                target: TARGET,
+                skipped = ?skipped,
+                "lingua was not compiled with these candidate languages; enable its `common` or `all` feature to detect them",
+            );
         }
-        // Configured candidates, else every language — both best-effort.
-        Some(if self.candidates.is_empty() {
-            LinguaDetector::for_all_languages()
-        } else {
-            LinguaDetector::for_languages(&self.candidates)
-                .unwrap_or_else(LinguaDetector::for_all_languages)
+        Ok(Self {
+            detector: Arc::new(detector),
         })
     }
 }
@@ -84,46 +84,57 @@ impl Default for LinguaEnricher {
     }
 }
 
-/// Detects language over any [`TextRecognizable`] modality, `Text` and
+/// Detects language over any [`TextRecognizable`] modality: `Text` and
 /// `Tabular` project their payload as text identically, and an audio transcript
-/// is read from the call's artifacts, so the same enricher scopes a text,
-/// tabular (CSV/XLSX), or transcript pipeline to its detected language.
+/// or OCR layout is read from the subject's artifact, so the same enricher
+/// scopes a text, tabular, transcript, or OCR pipeline to its language.
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
     fn id(&self) -> ComponentId {
-        ComponentId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
+        ComponentId::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
     }
 
     async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_>) -> Result<()> {
-        // One asserted language is authoritative and monolingual: skip detection
-        // and let every entity be attributed to it. Two or more means a mixed
-        // document, so detection still runs, but restricted to the asserted set,
-        // so each entity is attributed to the asserted language its own text is
-        // in rather than to whichever was asserted first.
-        let asserted: Vec<LanguageTag> = ctx
-            .scope()
-            .languages()
-            .iter()
-            .map(|claim| claim.language.clone())
-            .collect();
-        if asserted.len() == 1 {
-            return Ok(());
-        }
-        // A nonempty asserted set none of whose tags lingua supports yields no
-        // detector: skip detection rather than widen to all languages.
-        let Some(detector) = self.detector_for(&asserted) else {
-            return Ok(());
+        let asserted = ctx.scope().languages();
+        let call_detector;
+        let detector = match asserted {
+            [] => &*self.detector,
+            [claim] => {
+                tracing::debug!(
+                    target: TARGET,
+                    language = claim.language.as_str(),
+                    "one language asserted; detection skipped",
+                );
+                return Ok(());
+            }
+            claims => {
+                let Some(detector) =
+                    LinguaDetector::for_languages(claims.iter().map(|claim| &claim.language))
+                else {
+                    tracing::debug!(
+                        target: TARGET,
+                        asserted = claims.len(),
+                        "lingua was compiled with none of the asserted languages; detection skipped",
+                    );
+                    return Ok(());
+                };
+                call_detector = detector;
+                &call_detector
+            }
         };
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): no language to detect.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
             return Ok(());
         };
-        // Detect into an owned list first so the immutable borrow of the payload
-        // text ends before `detect_language` takes `&mut subject`.
-        let detections = detector.detect(text)?;
-        for detection in detections {
-            subject.detect_language(detection);
+        let claims = detector.detect(text);
+        tracing::debug!(
+            target: TARGET,
+            languages = ?claims.iter().map(|claim| claim.language.as_str()).collect::<Vec<_>>(),
+            "languages detected",
+        );
+        for claim in claims {
+            subject.detect_language(claim);
         }
         Ok(())
     }
@@ -131,6 +142,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::modality::tabular::Tabular;
     use elide_core::modality::text::{Text, TextData};
     use elide_core::recognition::{Scope, Subject};
@@ -246,5 +258,27 @@ mod tests {
             subject.detected_languages().is_empty(),
             "no detection widens past an unsupported asserted set",
         );
+    }
+
+    #[tokio::test]
+    async fn a_restricted_enricher_detects_within_its_candidates() {
+        let enricher = LinguaEnricher::restricted(["en".parse().unwrap()]).unwrap();
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let mut subject = Subject::<Text>::new(TextData::new(
+            "The quick brown fox jumps over the lazy dog.",
+        ));
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
+        assert_eq!(
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
+            "en"
+        );
+    }
+
+    #[test]
+    fn restricting_to_no_compiled_language_is_a_configuration_error() {
+        let error = LinguaEnricher::restricted(["zz".parse().unwrap()]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Configuration);
+        assert!(LinguaEnricher::restricted([]).is_err());
     }
 }

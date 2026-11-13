@@ -67,8 +67,8 @@ pattern = ["dep:elide-pattern"]
 ## Re-export the NER recognizer crate.
 ner = ["dep:elide-ner"]
 
-## Re-export the lingua language-detection crate. On its own no language
-## models are compiled in — add `lingua-common` or `lingua-all` for coverage.
+## Re-export the lingua language-detection crate. On its own it detects
+## English only; add `lingua-common` or `lingua-all` for more languages.
 lingua = ["dep:elide-lingua"]
 ## Lingua with the most widely-used language models.
 lingua-common = ["lingua", "elide-lingua/common"]
