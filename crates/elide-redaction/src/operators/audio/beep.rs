@@ -55,18 +55,18 @@ impl Beep {
 
     /// Set the peak amplitude, in `0.0..=1.0` of full scale.
     ///
-    /// # Errors
-    ///
-    /// [`Configuration`](elide_core::ErrorKind::Configuration) if `amplitude`
-    /// is outside `0.0..=1.0`.
-    pub fn with_amplitude(mut self, amplitude: f32) -> Result<Self> {
-        if !(0.0..=1.0).contains(&amplitude) {
-            return Err(Error::configuration(format!(
-                "beep amplitude {amplitude} must be within 0.0..=1.0"
-            )));
-        }
-        self.amplitude = amplitude;
-        Ok(self)
+    /// A value outside the range is clamped into it, and NaN falls back to the
+    /// default amplitude. Amplitude sets only how loud the tone is: the
+    /// matched audio is replaced whatever it is, so no value weakens the
+    /// redaction.
+    #[must_use]
+    pub fn with_amplitude(mut self, amplitude: f32) -> Self {
+        self.amplitude = if amplitude.is_nan() {
+            DEFAULT_AMPLITUDE
+        } else {
+            amplitude.clamp(0.0, 1.0)
+        };
+        self
     }
 
     /// Set the tone shape.
@@ -77,15 +77,15 @@ impl Beep {
     }
 }
 
-/// The deserialized form of a [`Beep`], validated through [`Beep::new`] and
-/// [`Beep::with_amplitude`].
+/// The deserialized form of a [`Beep`], validated through [`Beep::new`], its
+/// amplitude clamped by [`Beep::with_amplitude`].
 #[cfg(feature = "serde")]
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 struct BeepConfig {
     /// Tone frequency, in hertz.
     hz: f32,
-    /// Peak amplitude, in `0.0..=1.0` of full scale.
+    /// Peak amplitude, in `0.0..=1.0` of full scale; clamped into it.
     amplitude: f32,
     /// Tone shape.
     waveform: Waveform,
@@ -97,7 +97,7 @@ impl TryFrom<BeepConfig> for Beep {
 
     fn try_from(config: BeepConfig) -> Result<Self> {
         Ok(Self::new(config.hz)?
-            .with_amplitude(config.amplitude)?
+            .with_amplitude(config.amplitude)
             .with_waveform(config.waveform))
     }
 }
@@ -179,7 +179,6 @@ mod tests {
         let out = Beep::new(440.0)
             .unwrap()
             .with_amplitude(0.25)
-            .unwrap()
             .with_waveform(Waveform::Square)
             .anonymize(&audio_entity(), &elide_audio::fixtures::blank_audio_data())
             .await
@@ -194,17 +193,36 @@ mod tests {
         );
     }
 
-    /// A frequency or amplitude outside its range is rejected.
+    /// A frequency that is not finite and positive is rejected.
     #[test]
-    fn out_of_range_settings_are_rejected() {
+    fn invalid_frequencies_are_rejected() {
         for hz in [0.0, -440.0, f32::NAN, f32::INFINITY] {
             assert!(Beep::new(hz).is_err(), "hz {hz}");
         }
-        for amplitude in [-0.1, 1.5, f32::NAN] {
-            assert!(
-                Beep::default().with_amplitude(amplitude).is_err(),
+    }
+
+    /// An amplitude outside `0.0..=1.0` is clamped into it; NaN falls back to
+    /// the default.
+    #[test]
+    fn out_of_range_amplitudes_are_clamped() {
+        for (amplitude, expected) in [(-0.1, 0.0), (1.5, 1.0), (0.3, 0.3), (f32::NAN, 0.5)] {
+            assert_eq!(
+                Beep::default().with_amplitude(amplitude).amplitude,
+                expected,
                 "amplitude {amplitude}"
             );
         }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserializing_validates_the_frequency_and_clamps_the_amplitude() {
+        assert!(
+            serde_json::from_str::<Beep>(r#"{"hz":0.0,"amplitude":0.5,"waveform":"sine"}"#)
+                .is_err()
+        );
+        let beep: Beep =
+            serde_json::from_str(r#"{"hz":440.0,"amplitude":1.5,"waveform":"sine"}"#).unwrap();
+        assert_eq!(beep.amplitude, 1.0);
     }
 }

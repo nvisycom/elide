@@ -3,12 +3,11 @@
 //!
 //! Wraps any inner backend and multiplies the confidence of every emitted
 //! span whose label is in a configured set, clamping the result to
-//! `[0, 1]`. Use it to boost labels a model under-scores (the default, a
-//! multiplier of 1.2) or to demote noisy-but-high-recall ones (below `1.0`):
+//! `[0, 1]`. Use it to boost labels a model under-scores (above `1.0`) or to
+//! demote noisy-but-high-recall ones (below `1.0`):
 //!
 //! ```ignore
-//! let backend = ScoreScaled::new(inner, [builtins::PERSON_NAME.to_ref()])
-//!     .with_multiplier(0.8);
+//! let backend = ScoreScaled::new(inner, [builtins::PERSON_NAME.to_ref()], 0.8);
 //! ```
 
 use std::collections::HashSet;
@@ -21,10 +20,6 @@ use elide_core::entity::audit::ModelId;
 
 use crate::backend::{NerRequest, NerResponse};
 
-/// Default multiplier: a 1.2× boost, for a model that under-scores the
-/// configured labels.
-const DEFAULT_MULTIPLIER: f32 = 1.2;
-
 /// A NER backend that scales the confidence of spans with configured labels.
 ///
 /// Delegates recognition to the wrapped backend, then multiplies the
@@ -32,7 +27,7 @@ const DEFAULT_MULTIPLIER: f32 = 1.2;
 /// into `[0, 1]`. Spans whose label is not in the set pass through
 /// unchanged.
 ///
-/// [`multiplier`]: Self::with_multiplier
+/// [`multiplier`]: Self::multiplier
 #[derive(Debug, Clone)]
 pub struct ScoreScaled<B> {
     inner: B,
@@ -41,25 +36,15 @@ pub struct ScoreScaled<B> {
 }
 
 impl<B> ScoreScaled<B> {
-    /// Scale the scores of `inner`'s spans labelled with any of `labels`, by
-    /// 1.2× until [`with_multiplier`](Self::with_multiplier) sets another.
-    pub fn new(inner: B, labels: impl IntoIterator<Item = LabelRef>) -> Self {
+    /// Multiply the scores of `inner`'s spans labelled with any of `labels` by
+    /// `multiplier`: below `1.0` demotes, above `1.0` boosts, and the result
+    /// is clamped to `[0, 1]`.
+    pub fn new(inner: B, labels: impl IntoIterator<Item = LabelRef>, multiplier: f32) -> Self {
         Self {
             inner,
             labels: labels.into_iter().collect(),
-            multiplier: DEFAULT_MULTIPLIER,
+            multiplier,
         }
-    }
-
-    /// Set the multiplier applied to the configured labels' scores (default
-    /// 1.2).
-    ///
-    /// Below `1.0` demotes, above `1.0` boosts; the result is clamped to `[0,
-    /// 1]`.
-    #[must_use]
-    pub fn with_multiplier(mut self, multiplier: f32) -> Self {
-        self.multiplier = multiplier;
-        self
     }
 
     /// The labels whose scores are scaled.
@@ -159,7 +144,7 @@ mod tests {
             NerSpan::new("PHONE", 0.9, 1..2),
         ]);
         // Boost EMAIL by 1.2 (0.5 -> 0.6); PHONE untouched.
-        let scaled = ScoreScaled::new(inner, [LabelRef::new("EMAIL")]).with_multiplier(1.2);
+        let scaled = ScoreScaled::new(inner, [LabelRef::new("EMAIL")], 1.2);
 
         let out = scaled.call(request("x")).await.unwrap();
         assert!(
@@ -173,22 +158,9 @@ mod tests {
     #[tokio::test]
     async fn boost_past_one_clamps_to_one() {
         let inner = FixedBackend(vec![NerSpan::new("EMAIL", 0.9, 0..1)]);
-        let scaled = ScoreScaled::new(inner, [LabelRef::new("EMAIL")]).with_multiplier(2.0);
+        let scaled = ScoreScaled::new(inner, [LabelRef::new("EMAIL")], 2.0);
 
         let out = scaled.call(request("x")).await.unwrap();
         assert_eq!(out.spans[0].confidence, Confidence::MAX);
-    }
-
-    #[tokio::test]
-    async fn default_multiplier_boosts_by_a_fifth() {
-        let inner = FixedBackend(vec![NerSpan::new("EMAIL", 0.5, 0..1)]);
-        let scaled = ScoreScaled::new(inner, [LabelRef::new("EMAIL")]);
-
-        let out = scaled.call(request("x")).await.unwrap();
-        assert!(
-            (out.spans[0].confidence.get() - 0.6).abs() < 1e-6,
-            "{:?}",
-            out.spans[0]
-        );
     }
 }

@@ -27,7 +27,7 @@ use crate::backend::{NerRequest, NerResponse};
 /// The recognizer asks for every label in the call's catalog; which of them a
 /// model can detect is a property of the model, so it is declared here, on the
 /// backend. On each call this decorator narrows the requested labels to the
-/// supported ones, keeping their catalog definitions and order, so a zero-shot
+/// supported ones, keeping their definitions and requested order, so a zero-shot
 /// model is prompted with only what it can find: fewer labels make it faster
 /// and more accurate, and keep the prompt within its input limit. A request
 /// left with no supported label is answered with no spans, without calling the

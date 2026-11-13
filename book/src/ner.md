@@ -63,7 +63,7 @@ and scores, each also a method of `NerBackendExt`:
 |---|---|---|
 | `LabelScoped` | `label_scoped(labels)` | Asks the model only for these labels, and keeps only these |
 | `LabelExcluded` | `label_excluded(labels)` | Drops spans with these labels, such as a generic `MISC` |
-| `ScoreScaled` | `score_scaled(labels)` | Boosts these labels' scores by 1.2×, or by `with_multiplier(m)` |
+| `ScoreScaled` | `score_scaled(labels, multiplier)` | Multiplies these labels' scores: above `1.0` boosts, below demotes |
 
 Elide ships no NER model of its own: you bring one, hosted or local, by
 writing a small backend for it. See [Custom backends](custom-backends.md).

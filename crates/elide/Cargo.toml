@@ -47,7 +47,7 @@ serde = [
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
 ## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
 ## the always-present engine crates; each optional crate (`audio`/`image`/`pdf`/
-## `codec`/`format`/`engine`/`ner`) is forwarded only when it is enabled.
+## `codec`/`format`/`engine`) is forwarded only when it is enabled.
 ## (`elide-office` has no schema-relevant config types, so no forward there.)
 schema = [
     "serde",
@@ -60,7 +60,6 @@ schema = [
     "elide-codec?/schema",
     "elide-format?/schema",
     "elide-engine?/schema",
-    "elide-ner?/schema",
 ]
 
 ## Re-export the pattern recognizer crate.

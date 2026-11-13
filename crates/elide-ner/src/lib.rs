@@ -5,4 +5,4 @@
 pub mod backend;
 mod recognition;
 
-pub use self::recognition::{AggregationStrategy, AlignmentMode, NerRecognizer};
+pub use self::recognition::NerRecognizer;

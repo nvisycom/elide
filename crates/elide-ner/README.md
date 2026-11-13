@@ -8,16 +8,75 @@ Named-entity recognition for PII/PHI detection.
 
 Some sensitive data has no fixed shape: a person's name, an organization, a
 place. Recognizing it takes a model that reads the surrounding language rather
-than a regular expression. This crate provides the recognizer that turns
-model-produced spans into typed entities, with a pluggable backend so the model
-itself can run wherever suits the deployment: in process, as a hosted service,
-or as a future local inference engine. A no-op backend ships built in for wiring
-and tests, and concrete inference backends live downstream.
+than a regular expression. This crate provides the recognizer that turns a
+model's spans into located entities, over a pluggable backend, so the model
+runs wherever suits the deployment: in process or as a hosted service. Elide
+ships no NER model; a backend is a small adapter you write for yours.
 
-Raw backend labels are projected onto the toolkit's canonical label set, so
-consumers reason about one fixed taxonomy regardless of the upstream model.
-Language detection — resolving the language of a piece of text for language-aware
-recognizers and policies — lives in the separate `elide-lingua` crate.
+A backend returns spans already carrying the toolkit's canonical labels, so
+consumers reason about one taxonomy whatever the upstream model. Which labels
+a model supports, which it emits but should be dropped, and how its scores
+compare are properties of the model, so they are decorators on its backend
+rather than recognizer settings.
+
+```rust
+use elide_core::entity::{LabelCatalog, LabelRef, builtins};
+use elide_core::modality::text::{Text, TextData};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
+use elide_ner::NerRecognizer;
+use elide_ner::backend::NerBackendExt;
+# use elide_core::backend::Backend;
+# use elide_core::entity::audit::ModelId;
+# use elide_ner::backend::{NerRequest, NerResponse, NerSpan};
+#
+# /// Stands in for a real model: finds a person name at the start.
+# struct MyModel;
+#
+# #[async_trait::async_trait]
+# impl Backend for MyModel {
+#     type Request<'a> = NerRequest<'a>;
+#     type Response = NerResponse;
+#
+#     fn provenance(&self) -> ModelId {
+#         ModelId { name: "my-model".into(), ..ModelId::default() }
+#     }
+#
+#     async fn call(&self, _request: NerRequest<'_>) -> elide_core::Result<NerResponse> {
+#         Ok(NerResponse::new(vec![NerSpan::new("person_name", 0.8, 0..8)]))
+#     }
+# }
+
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> elide_core::Result<()> {
+let backend = MyModel
+    .label_scoped([builtins::PERSON_NAME.to_ref(), builtins::ADDRESS.to_ref()])
+    .label_excluded([LabelRef::new("misc")])
+    .score_scaled([builtins::PERSON_NAME.to_ref()], 1.2);
+let recognizer = NerRecognizer::new(backend);
+
+let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
+let subject = Subject::<Text>::new(TextData::new("Jane Doe lives in Berlin"));
+let entities = recognizer.recognize(&subject, &Context::new(&scope)).await?;
+assert_eq!(entities[0].label.as_str(), "person_name");
+# Ok(())
+# }
+```
+
+The crate holds:
+
+- **`NerRecognizer`** — the recognizer. Per call it asks its backend for the
+  catalog's labels, sorted by id, and turns every span into an entity whose
+  audit event names the backend's model. `recognize_batch` sends one batch
+  for many subjects.
+- **`backend::NerRequest`** and **`backend::NerResponse`** — the contract a
+  NER backend speaks: text, the labels to look for (`None` for a fixed-label
+  model), and the language in; canonical `NerSpan`s out.
+- **`backend::LabelScoped`**, **`LabelExcluded`**, and **`ScoreScaled`** —
+  decorators that scope a model to the labels it supports, drop labels it
+  emits but should not, and rescale chosen labels' scores. `NerBackendExt`
+  applies each by method.
+- **`backend::MockBackend`** (feature `mocks`) — a backend that finds
+  nothing, for tests and examples.
 
 ## Documentation
 
