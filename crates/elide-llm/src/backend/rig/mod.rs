@@ -4,6 +4,7 @@
 //! Gemini, Ollama) behind the modality-agnostic LLM backend surface.
 
 mod config;
+mod error;
 
 use std::marker::PhantomData;
 
@@ -23,21 +24,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use self::config::RigConfig;
-use super::http::{HttpConfig, build_http_client};
+use self::error::Error;
+use super::http::http_client;
 use super::{LlmRequest, LlmResponse};
-use crate::error::Error;
 use crate::provider::Provider;
 
 const TARGET: &str = "elide_llm::backend::rig";
 
 /// An [`LlmBackend`](crate::backend::LlmBackend) that calls a provider through the `rig` crate.
 ///
-/// Construct with [`new`] (default config) or [`new_with_config`]. Owns the
-/// provider's completion model (type-erased to [`DynModel`] at construction, so
-/// one field serves every provider) and the [`RigConfig`] driving sampling.
-///
-/// [`new`]: Self::new
-/// [`new_with_config`]: Self::new_with_config
+/// Owns the provider's completion model (type-erased to [`DynModel`] at
+/// construction, so one field serves every provider) and the [`RigConfig`]
+/// driving sampling.
 pub struct RigBackend<M> {
     model: DynModel<Completion>,
     config: RigConfig,
@@ -46,30 +44,17 @@ pub struct RigBackend<M> {
 }
 
 impl<M> RigBackend<M> {
-    /// Build a backend for `provider` with the default [`RigConfig`].
+    /// A backend calling `provider`, configured by `config`
+    /// ([`RigConfig::default`] for the defaults).
+    ///
+    /// The config shapes the HTTP retry policy and the extractor's sampling
+    /// and preamble, all fixed at construction.
     ///
     /// # Errors
     ///
-    /// Returns the underlying rig / HTTP error when client construction
-    /// fails.
-    pub fn new(provider: Provider) -> Result<Self> {
-        Self::new_with_config(provider, RigConfig::default())
-    }
-
-    /// Build a backend for `provider` with an explicit [`RigConfig`].
-    ///
-    /// The config is consumed here: it shapes the HTTP retry policy and the
-    /// extractor's sampling and preamble, all fixed at construction.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying rig / HTTP error when client construction
-    /// fails.
-    pub fn new_with_config(provider: Provider, config: RigConfig) -> Result<Self> {
-        let http = build_http_client(&HttpConfig {
-            max_retries: config.max_retries,
-            ..HttpConfig::default()
-        })?;
+    /// A configuration error when the HTTP client cannot be built.
+    pub fn new(provider: Provider, config: RigConfig) -> Result<Self> {
+        let http = http_client(config.max_retries)?;
 
         // Each provider's completion method yields a `Model<Wire>`; erase it to
         // one `DynModel<Completion>` so the backend holds a single field
@@ -136,7 +121,7 @@ impl Backend for RigBackend<Text> {
         }
     }
 
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name, modality = "text"))]
     async fn call(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
         let candidates = self.extract_batch(Message::user(request.prompt)).await?;
         Ok(LlmResponse::new(candidates))
@@ -155,7 +140,7 @@ impl Backend for RigBackend<Image> {
         }
     }
 
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name, modality = "image"))]
     async fn call(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
         let message = image_message(request.prompt, request.data)?;
         let candidates = self.extract_batch(message).await?;

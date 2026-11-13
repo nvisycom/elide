@@ -10,6 +10,7 @@
 //! ```
 
 use std::collections::HashSet;
+use std::slice;
 
 use async_trait::async_trait;
 use elide_core::Result;
@@ -18,6 +19,8 @@ use elide_core::entity::LabelRef;
 use elide_core::entity::audit::ModelId;
 
 use crate::backend::{NerRequest, NerResponse};
+
+const TARGET: &str = "elide_ner::backend::label_excluded";
 
 /// A NER backend that drops spans whose label is in a configured set.
 ///
@@ -50,11 +53,19 @@ impl<B> LabelExcluded<B> {
         &self.inner
     }
 
-    /// Drop every span whose label is excluded.
-    fn filter(&self, response: &mut NerResponse) {
-        response
-            .spans
-            .retain(|span| !self.labels.contains(&span.label));
+    /// Drop every span whose label is excluded from `responses`.
+    fn filter(&self, responses: &mut [NerResponse]) {
+        let mut dropped = 0;
+        for response in responses {
+            let before = response.spans.len();
+            response
+                .spans
+                .retain(|span| !self.labels.contains(&span.label));
+            dropped += before - response.spans.len();
+        }
+        if dropped > 0 {
+            tracing::debug!(target: TARGET, dropped, "dropped spans with excluded labels");
+        }
     }
 }
 
@@ -72,7 +83,7 @@ where
 
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let mut response = self.inner.call(request).await?;
-        self.filter(&mut response);
+        self.filter(slice::from_mut(&mut response));
         Ok(response)
     }
 
@@ -80,9 +91,7 @@ where
         // Forward to the inner backend's batch path so its native batching (if
         // any) is preserved, then apply the label filter to each response.
         let mut responses = self.inner.call_batch(requests).await?;
-        for response in &mut responses {
-            self.filter(response);
-        }
+        self.filter(&mut responses);
         Ok(responses)
     }
 }

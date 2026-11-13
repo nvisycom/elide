@@ -1,53 +1,50 @@
 //! [`LlmModality`] for [`Image`]: scale each candidate's normalised box to
 //! pixel space and build the entity.
 
-use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, LabelRef};
-use elide_core::primitive::{Confidence, UnitBoundingBox};
+use elide_core::entity::Entity;
+use elide_core::entity::audit::ModelId;
 use elide_image::modality::{Image, ImageData, ImageLocation};
 use elide_image::primitive::UnitBoundingBoxExt;
 
-use super::{CorefScope, DEFAULT_CONFIDENCE, LlmModality};
+use super::{Lifter, LlmModality};
 use crate::candidates::{Candidates, ImageCandidate};
+
+const TARGET: &str = "elide_llm::modality::image";
 
 impl LlmModality for Image {
     type Item = ImageCandidate;
 
-    fn lift(batch: Candidates<ImageCandidate>, data: &ImageData) -> Vec<Entity<Image>> {
+    fn lift(
+        batch: Candidates<ImageCandidate>,
+        data: &ImageData,
+        model: &ModelId,
+    ) -> Vec<Entity<Image>> {
         // The model reports boxes in normalised `0.0..=1.0` coordinates; scaling
         // them to pixels needs the image's pixel size, an intrinsic fact of the
-        // decoded payload (no re-probe, no drift).
+        // decoded payload.
         let dims = data.dimensions();
-
-        let scope = CorefScope::new();
-        let mut out = Vec::with_capacity(batch.entities.len());
-        for d in batch.entities {
-            let label = LabelRef::new(d.label.clone());
-            let raw = d.confidence.unwrap_or(DEFAULT_CONFIDENCE);
-            let Some(confidence) = Confidence::new(raw.clamp(0.0, 1.0) as f32) else {
-                continue;
-            };
-            let bbox = UnitBoundingBox::from(d.bbox).denormalize(dims);
-            let location = ImageLocation::new(bbox);
-            let event = AuditEvent::model(
-                "llm-image",
-                confidence,
-                location.clone(),
-                ModelId {
-                    name: "llm-image".into(),
-                    ..ModelId::default()
-                },
-            );
-            let mut entity = Entity::new(label, location).with_event(event);
-            // The model groups mentions of the same real-world entity under
-            // a shared handle; scoped to this call, it is the entity's
-            // coreference cluster.
-            if let Some(handle) = &d.coreference {
-                entity = entity.with_coref(scope.coref(handle));
-            }
-            out.push(entity);
-        }
-        out
+        let lifter = Lifter::new("llm-image", model);
+        batch
+            .entities
+            .into_iter()
+            .filter_map(|candidate| {
+                let Some(bbox) = candidate.bbox.to_unit_bounding_box() else {
+                    tracing::warn!(
+                        target: TARGET,
+                        label = %candidate.label,
+                        bbox = ?candidate.bbox,
+                        "dropping image candidate with an empty or non-finite box",
+                    );
+                    return None;
+                };
+                lifter.entity(
+                    candidate.label,
+                    candidate.confidence,
+                    ImageLocation::new(bbox.denormalize(dims)),
+                    candidate.coreference.as_deref(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -84,11 +81,46 @@ mod tests {
         let batch = Candidates {
             entities: vec![candidate(0.0, 0.0, 0.5, 1.0)],
         };
-        let entities = Image::lift(batch, &data);
+        let entities = Image::lift(batch, &data, &ModelId::default());
         assert_eq!(entities.len(), 1);
         let bbox = entities[0].location.bounding_box;
         assert_eq!(bbox.min.x, 0.0);
         assert_eq!(bbox.max.x, 50.0);
         assert_eq!(bbox.max.y, 80.0);
+    }
+
+    /// Swapped corners and coordinates outside the image still cover the
+    /// region the model meant, clamped to the image.
+    #[test]
+    fn lift_orders_corners_and_clamps_to_the_image() {
+        let data = fixtures::image_data(
+            fixtures::png(100, 80),
+            elide_image::modality::ImageFormat::Png,
+        );
+        let batch = Candidates {
+            entities: vec![candidate(0.5, 1.2, -0.1, 0.0)],
+        };
+        let bbox = Image::lift(batch, &data, &ModelId::default())[0]
+            .location
+            .bounding_box;
+        assert_eq!((bbox.min.x, bbox.min.y), (0.0, 0.0));
+        assert_eq!((bbox.max.x, bbox.max.y), (50.0, 80.0));
+    }
+
+    /// A box with no area, or a non-finite coordinate, redacts nothing: it is
+    /// dropped.
+    #[test]
+    fn lift_drops_empty_and_non_finite_boxes() {
+        let data = fixtures::image_data(
+            fixtures::png(100, 80),
+            elide_image::modality::ImageFormat::Png,
+        );
+        let batch = Candidates {
+            entities: vec![
+                candidate(0.3, 0.3, 0.3, 0.9),
+                candidate(f64::NAN, 0.0, 0.5, 0.5),
+            ],
+        };
+        assert!(Image::lift(batch, &data, &ModelId::default()).is_empty());
     }
 }

@@ -1302,7 +1302,9 @@ dependencies = [
  "rig-reqwest",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
  "unicode-normalization",
  "uuid",
@@ -1328,6 +1330,7 @@ dependencies = [
  "elide-core",
  "hipstr",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

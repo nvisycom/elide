@@ -13,6 +13,7 @@
 //! [`LlmRecognizer`]: crate::LlmRecognizer
 //! [`LlmRecognizer::new`]: crate::LlmRecognizer::new
 
+use elide_core::Result;
 use elide_core::entity::Label;
 use elide_core::modality::Modality;
 use elide_core::primitive::LanguageTag;
@@ -75,5 +76,11 @@ where
     /// Render the user prompt for `subject` in `ctx`. Fold in tags, target
     /// labels, and any instruction the model needs; the source payload (text,
     /// image bytes) is attached to the provider message by the backend.
-    fn build(&self, subject: &Subject<M>, ctx: &Context<'_>) -> String;
+    ///
+    /// # Errors
+    ///
+    /// When the wording cannot be rendered (a template that fails at render
+    /// time). The recognizer fails the call rather than send the model an
+    /// incomplete prompt.
+    fn build(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<String>;
 }

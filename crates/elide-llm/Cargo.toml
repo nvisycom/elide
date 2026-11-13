@@ -33,6 +33,7 @@ rig = [
     "dep:reqwest-retry",
     "dep:reqwest-tracing",
     "dep:thiserror",
+    "dep:serde_json",
     # The vision path transcodes any source image to PNG before sending (rig's
     # providers reject a raw source, and every model takes PNG). PNG is the
     # required target; JPEG and TIFF are enabled so those inputs decode.
@@ -59,11 +60,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde"] }
-elide-image = { workspace = true, features = ["serde"] }
+elide-core = { workspace = true, features = [] }
+elide-image = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
+serde_json = { workspace = true, features = [], optional = true }
 
 # Derive macros & error handling
 thiserror = { workspace = true, features = [], optional = true }
@@ -99,3 +101,6 @@ reqwest-tracing = { workspace = true, features = [], optional = true }
 # elide-image test fixtures (a real in-memory PNG) so the image `lift` test can
 # decode true dimensions without pulling in the `image` crate directly.
 elide-image = { workspace = true, features = ["fixtures"] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

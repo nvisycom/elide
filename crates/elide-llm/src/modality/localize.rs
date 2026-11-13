@@ -5,7 +5,10 @@
 //! collapse) before searching to absorb LLM whitespace drift. Byte
 //! offsets returned are in the *original*, un-normalized text.
 
+use std::ops::Range;
+
 use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::canonical_combining_class;
 
 use crate::candidates::TextCandidate;
 
@@ -29,58 +32,32 @@ struct NormalizedText {
     index: OriginIndex,
 }
 
-/// A candidate that's been resolved to a byte range in the source.
-#[derive(Debug, Clone)]
+/// A candidate resolved to a byte range in the source.
 pub(super) struct LocalizedCandidate {
     pub candidate: TextCandidate,
-    pub start_offset: usize,
-    pub end_offset: usize,
+    pub range: Range<usize>,
 }
 
-/// What to do with candidates that can't be uniquely localized.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub(super) enum UnresolvedCandidatePolicy {
-    /// Drop ambiguous and missing candidates. Default.
-    #[default]
-    Drop,
-    /// Pick the first match for ambiguous candidates; drop only
-    /// when there are zero matches.
-    FirstMatch,
+/// Localize every candidate against the source text, dropping (with a
+/// warning) each whose context or value is missing or ambiguous.
+pub(super) fn localize_all(text: &str, candidates: Vec<TextCandidate>) -> Vec<LocalizedCandidate> {
+    let source = normalize_with_index_map(text);
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let range = localize_one(&source, &candidate)?;
+            Some(LocalizedCandidate { candidate, range })
+        })
+        .collect()
 }
 
-/// Localize every candidate against the source text.
-pub(super) fn localize_all(
-    text: &str,
-    candidates: Vec<TextCandidate>,
-    policy: UnresolvedCandidatePolicy,
-) -> Vec<LocalizedCandidate> {
-    let normalized = normalize_with_index_map(text);
-
-    let mut out = Vec::with_capacity(candidates.len());
-    for c in candidates {
-        if let Some(localized) = localize_one(&normalized, &c, policy) {
-            out.push(localized);
-        }
-    }
-    out
-}
-
-fn localize_one(
-    source: &NormalizedText,
-    candidate: &TextCandidate,
-    policy: UnresolvedCandidatePolicy,
-) -> Option<LocalizedCandidate> {
-    let context = match candidate.context.as_deref() {
-        Some(c) => c,
-        None => {
-            warn_dropped(candidate, "no context");
-            return None;
-        }
+fn localize_one(source: &NormalizedText, candidate: &TextCandidate) -> Option<Range<usize>> {
+    let Some(context) = candidate.context.as_deref() else {
+        warn_dropped(candidate, "no context");
+        return None;
     };
-    let normalized_context = normalize_with_index_map(context).text;
-    let normalized_value = normalize_with_index_map(&candidate.value).text;
+    let normalized_context = normalize(context);
+    let normalized_value = normalize(&candidate.value);
 
     let context_matches: Vec<usize> = source
         .text
@@ -88,19 +65,16 @@ fn localize_one(
         .map(|(i, _)| i)
         .collect();
 
-    let context_start = match context_matches.len() {
-        0 => {
+    let context_start = match context_matches[..] {
+        [] => {
             warn_dropped(candidate, "context not found");
             return None;
         }
-        1 => context_matches[0],
-        _ => match policy {
-            UnresolvedCandidatePolicy::FirstMatch => context_matches[0],
-            _ => {
-                warn_dropped(candidate, "context ambiguous");
-                return None;
-            }
-        },
+        [start] => start,
+        _ => {
+            warn_dropped(candidate, "context ambiguous");
+            return None;
+        }
     };
 
     let context_end = context_start + normalized_context.len();
@@ -109,19 +83,16 @@ fn localize_one(
         .match_indices(&normalized_value)
         .map(|(i, _)| i)
         .collect();
-    let value_offset = match value_matches.len() {
-        0 => {
+    let value_offset = match value_matches[..] {
+        [] => {
             warn_dropped(candidate, "value not found in context");
             return None;
         }
-        1 => value_matches[0],
-        _ => match policy {
-            UnresolvedCandidatePolicy::FirstMatch => value_matches[0],
-            _ => {
-                warn_dropped(candidate, "value ambiguous within context");
-                return None;
-            }
-        },
+        [offset] => offset,
+        _ => {
+            warn_dropped(candidate, "value ambiguous within context");
+            return None;
+        }
     };
 
     let norm_start = context_start + value_offset;
@@ -135,62 +106,114 @@ fn localize_one(
         *index.end.get(norm_end - 1)?
     };
 
-    Some(LocalizedCandidate {
-        candidate: candidate.clone(),
-        start_offset,
-        end_offset,
-    })
+    Some(start_offset..end_offset)
 }
 
-fn warn_dropped(c: &TextCandidate, reason: &str) {
+/// Warn that `candidate` was dropped for `reason`. Its value and context are
+/// the detected text, so they are never logged.
+fn warn_dropped(candidate: &TextCandidate, reason: &str) {
     tracing::warn!(
         target: TARGET,
-        coreference = ?c.coreference,
-        value = %c.value,
+        label = %candidate.label,
         reason,
-        "dropping unresolvable text candidate"
+        "dropping a text candidate that can't be located in the source",
     );
+}
+
+/// `text` normalized (NFC + whitespace collapse), without the map back to it.
+fn normalize(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    normalize_each(text, |c, _| out.push(c));
+    out
 }
 
 /// Normalize text (NFC + whitespace collapse) and return it with the
 /// [`OriginIndex`] mapping its byte positions back to the original text.
 fn normalize_with_index_map(text: &str) -> NormalizedText {
     let mut out = String::with_capacity(text.len());
-    let mut start_index: Vec<usize> = Vec::with_capacity(text.len());
-    let mut end_index: Vec<usize> = Vec::with_capacity(text.len());
-    let mut last_was_space = false;
-    let mut orig_pos = 0usize;
-
-    for orig_ch in text.chars() {
-        let orig_ch_len = orig_ch.len_utf8();
-        let orig_end = orig_pos + orig_ch_len;
-
-        if orig_ch.is_whitespace() {
-            if !last_was_space {
-                start_index.push(orig_pos);
-                end_index.push(orig_end);
-                out.push(' ');
-                last_was_space = true;
-            }
-        } else {
-            for nfc_ch in orig_ch.to_string().nfc() {
-                for _ in 0..nfc_ch.len_utf8() {
-                    start_index.push(orig_pos);
-                    end_index.push(orig_end);
-                }
-                out.push(nfc_ch);
-            }
-            last_was_space = false;
+    let mut start = Vec::with_capacity(text.len() + 1);
+    let mut end = Vec::with_capacity(text.len() + 1);
+    normalize_each(text, |c, origin| {
+        out.push(c);
+        for _ in 0..c.len_utf8() {
+            start.push(origin.start);
+            end.push(origin.end);
         }
-        orig_pos += orig_ch_len;
-    }
-    start_index.push(orig_pos);
-    end_index.push(orig_pos);
+    });
+    start.push(text.len());
+    end.push(text.len());
     NormalizedText {
         text: out,
-        index: OriginIndex {
-            start: start_index,
-            end: end_index,
-        },
+        index: OriginIndex { start, end },
+    }
+}
+
+/// Feed `emit` each character of `text` normalized, with the byte range of
+/// the source it came from.
+///
+/// A run of whitespace becomes one space. Everything else is NFC-normalized
+/// a character at a time together with the combining marks that follow it,
+/// the unit NFC composes (`e` + U+0301 becomes `é`), so a model echoing either
+/// form matches the source.
+fn normalize_each(text: &str, mut emit: impl FnMut(char, Range<usize>)) {
+    let mut chars = text.char_indices().peekable();
+    let mut last_was_space = false;
+    while let Some((start, c)) = chars.next() {
+        let mut end = start + c.len_utf8();
+        if c.is_whitespace() {
+            if !last_was_space {
+                emit(' ', start..end);
+                last_was_space = true;
+            }
+            continue;
+        }
+        last_was_space = false;
+        while let Some(&(next, mark)) = chars.peek()
+            && canonical_combining_class(mark) != 0
+        {
+            end = next + mark.len_utf8();
+            chars.next();
+        }
+        for normalized in text[start..end].nfc() {
+            emit(normalized, start..end);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate(value: &str, context: &str) -> TextCandidate {
+        TextCandidate {
+            value: value.to_owned(),
+            description: None,
+            label: "person_name".to_owned(),
+            confidence: None,
+            context: Some(context.to_owned()),
+            coreference: None,
+        }
+    }
+
+    #[test]
+    fn a_composed_value_matches_decomposed_source_text() {
+        // The source spells é as e + U+0301; the model echoes the composed é.
+        let text = "Name: Rene\u{301} Dupont, Paris";
+        let localized = localize_all(text, vec![candidate("René", "Name: René Dupont")]);
+        assert_eq!(localized.len(), 1);
+        assert_eq!(&text[localized[0].range.clone()], "Rene\u{301}");
+    }
+
+    #[test]
+    fn whitespace_runs_match_a_single_space() {
+        let text = "Call  Jane\n\tDoe today";
+        let localized = localize_all(text, vec![candidate("Jane Doe", "Call Jane Doe")]);
+        assert_eq!(&text[localized[0].range.clone()], "Jane\n\tDoe");
+    }
+
+    #[test]
+    fn an_ambiguous_context_is_dropped() {
+        let localized = localize_all("Jane and Jane", vec![candidate("Jane", "Jane")]);
+        assert!(localized.is_empty());
     }
 }

@@ -27,15 +27,15 @@ fn text_prompt_renders_template() {
     let ctx = Context::new(&scope);
     let subject = Subject::<Text>::new(TextData::new(body));
 
-    let rendered = prompt.build(&subject, &ctx);
+    let rendered = prompt.build(&subject, &ctx).expect("text.j2 renders");
     assert!(rendered.contains(body), "source text missing: {rendered}");
     assert!(
         rendered.contains("Document tags: medical, gdpr-request"),
         "tags `| join` filter not applied: {rendered}",
     );
     assert!(
-        rendered.contains("Emit only: person_name"),
-        "target labels not rendered: {rendered}",
+        rendered.contains("- person_name (person name)"),
+        "target labels not rendered with their localized names: {rendered}",
     );
 }
 
@@ -51,9 +51,20 @@ fn image_prompt_renders_template() {
     let ctx = Context::new(&scope);
     let subject = Subject::<Image>::new(data);
 
-    let rendered = prompt.build(&subject, &ctx);
+    let rendered = prompt.build(&subject, &ctx).expect("image.j2 renders");
     assert!(
         rendered.contains("Tags: badge"),
         "tags `| join` not rendered: {rendered}",
     );
+}
+
+#[test]
+fn a_render_error_is_returned_not_an_empty_prompt() {
+    // Iterating over an integer compiles but fails when rendered.
+    let prompt = Jinja2Prompt::<Text>::from_template("{% for x in 3 %}{{ x }}{% endfor %}")
+        .expect("compiles");
+    let scope = Scope::new();
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(TextData::new("x"));
+    assert!(prompt.build(&subject, &ctx).is_err());
 }

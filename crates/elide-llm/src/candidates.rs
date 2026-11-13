@@ -89,8 +89,9 @@ pub struct ImageCandidate {
 /// `[ymin, xmin, ymax, xmax]`) and the document-OCR convention (Google
 /// Document AI, Azure, AWS Textract all report corner vertices), so the
 /// model is asked for the shape it already produces. A corner-based DTO
-/// distinct from [`UnitBoundingBox`]'s origin-plus-size shape; [`From`]
-/// converts to the box the rest of the pipeline uses.
+/// distinct from [`UnitBoundingBox`]'s origin-plus-size shape;
+/// [`to_unit_bounding_box`](Self::to_unit_bounding_box) converts to the box
+/// the rest of the pipeline uses.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UnitBox {
     /// Left edge x in `0.0..=1.0` (fraction of image width).
@@ -103,10 +104,28 @@ pub struct UnitBox {
     pub y_max: f64,
 }
 
-impl From<UnitBox> for UnitBoundingBox {
-    fn from(b: UnitBox) -> Self {
-        let width = (b.x_max - b.x_min).max(0.0);
-        let height = (b.y_max - b.y_min).max(0.0);
-        UnitBoundingBox::new(b.x_min, b.y_min, width, height)
+impl UnitBox {
+    /// The region this box covers as a [`UnitBoundingBox`], or `None` when it
+    /// covers none.
+    ///
+    /// A model's box is taken for the region it means rather than the field
+    /// order it used: each pair of edges is ordered, so swapped corners still
+    /// cover their region, and each edge is clamped into the image. A
+    /// non-finite edge, or a box with no width or height, covers nothing.
+    #[must_use]
+    pub fn to_unit_bounding_box(self) -> Option<UnitBoundingBox> {
+        let (x_min, x_max) = edges(self.x_min, self.x_max)?;
+        let (y_min, y_max) = edges(self.y_min, self.y_max)?;
+        let (width, height) = (x_max - x_min, y_max - y_min);
+        (width > 0.0 && height > 0.0).then(|| UnitBoundingBox::new(x_min, y_min, width, height))
     }
+}
+
+/// Two edges of one axis, ordered and clamped into `0.0..=1.0`, or `None`
+/// when either is not finite.
+fn edges(a: f64, b: f64) -> Option<(f64, f64)> {
+    if !a.is_finite() || !b.is_finite() {
+        return None;
+    }
+    Some((a.min(b).clamp(0.0, 1.0), a.max(b).clamp(0.0, 1.0)))
 }

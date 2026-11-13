@@ -1,4 +1,7 @@
 You are an image PII detector. Inspect the attached image.
-{% if target_labels %}Emit only: {{ target_labels | join(", ") }}{% endif %}
+{% if language %}Language: {{ language }}{% endif %}
+{% if target_labels %}Emit only these labels:
+{% for label in target_labels %}- {{ label.id }} ({{ label.name }}){% if label.description %}: {{ label.description }}{% endif %}
+{% endfor %}{% endif %}
 {% if tags %}Tags: {{ tags | join(", ") }}{% endif %}
 Return JSON: {"entities": [...]}.

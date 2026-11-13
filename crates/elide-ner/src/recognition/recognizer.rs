@@ -22,7 +22,7 @@
 use elide_core::Result;
 use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, Label, LabelCatalog};
+use elide_core::entity::{Entity, Label};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
@@ -31,6 +31,8 @@ use hipstr::HipStr;
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
 use crate::backend::{NerRequest, NerResponse, NerSpan};
+
+const TARGET: &str = "elide_ner::recognition";
 
 /// A recognizer that runs a NER model over text, through a NER backend.
 ///
@@ -104,16 +106,24 @@ where
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
-        let labels = target_labels(ctx.catalog());
+        let labels = ctx.target_label_defs();
         let Some(request) = ner_request(subject, ctx, &labels) else {
             return Ok(Vec::new());
         };
         let response = self.backend.call(request).await?;
-        Ok(entities(
-            response.spans,
-            subject,
-            &self.backend.provenance(),
-        ))
+        let model = self.backend.provenance();
+        let spans = response.spans.len();
+        let entities = entities(response.spans, subject, &model);
+        tracing::debug!(
+            target: TARGET,
+            recognizer = %self.name,
+            model = %model.name,
+            spans,
+            entities = entities.len(),
+            unplaced = spans - entities.len(),
+            "ner spans placed",
+        );
+        Ok(entities)
     }
 
     async fn recognize_batch(
@@ -124,7 +134,7 @@ where
         // One NER request per subject with recognizable text; no-text subjects are
         // skipped and recognize nothing. `targets` keeps each request aligned with
         // its subject index, so a response scatters back to the right subject.
-        let labels = target_labels(ctx.catalog());
+        let labels = ctx.target_label_defs();
         let mut requests = Vec::new();
         let mut targets = Vec::new();
         for (index, subject) in subjects.iter().enumerate() {
@@ -140,9 +150,22 @@ where
         }
         let responses = self.backend.call_aligned(requests).await?;
         let model = self.backend.provenance();
+        let spans: usize = responses.iter().map(|response| response.spans.len()).sum();
         for (&index, response) in targets.iter().zip(responses) {
             per_subject[index] = entities(response.spans, subjects[index], &model);
         }
+        let placed: usize = per_subject.iter().map(Vec::len).sum();
+        tracing::debug!(
+            target: TARGET,
+            recognizer = %self.name,
+            model = %model.name,
+            subjects = subjects.len(),
+            requests = targets.len(),
+            spans,
+            entities = placed,
+            unplaced = spans - placed,
+            "ner spans placed",
+        );
         Ok(per_subject)
     }
 }
@@ -169,17 +192,6 @@ fn entities<M: TextRecognizable>(
         .collect()
 }
 
-/// The target labels for a call: every label in `catalog`, as full [`Label`]s
-/// (localized name + optional description) so a zero-shot backend gets the
-/// localized text in the analysis language, in id order so the model is
-/// prompted the same way on every run. An empty catalog leaves the backend to
-/// emit whatever it natively produces.
-fn target_labels(catalog: &LabelCatalog) -> Vec<Label> {
-    let mut labels: Vec<Label> = catalog.iter().cloned().collect();
-    labels.sort_by(|a, b| a.id().cmp(b.id()));
-    labels
-}
-
 /// The per-call NER request for `subject`, or `None` when it carries no
 /// recognizable text (an un-transcribed clip, an un-OCR'd image).
 fn ner_request<'a, M: TextRecognizable>(
@@ -202,10 +214,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use elide_core::ErrorKind;
+    use elide_core::entity::LabelCatalog;
     use elide_core::entity::audit::AuditKind;
-    use elide_core::entity::{LabelCatalog, LabelLocale};
     use elide_core::modality::text::{Text, TextData};
-    use elide_core::primitive::LanguageTag;
     use elide_core::recognition::Scope;
 
     use super::*;
@@ -219,28 +230,6 @@ mod tests {
         let subject = Subject::<Text>::new(data);
         let out = rec.recognize(&subject, &ctx).await.unwrap();
         assert!(out.is_empty());
-    }
-
-    #[test]
-    fn targets_the_whole_catalog_as_full_labels() {
-        // Every catalog label is a target, as a full `Label`, so a zero-shot
-        // backend gets the localized name *and* the description.
-        let mut catalog = LabelCatalog::new();
-        catalog.insert(Label::new("email", "email address").with_localization(
-            LanguageTag::english(),
-            LabelLocale::described("email address", "an email address"),
-        ));
-
-        let en = LanguageTag::english();
-        let labels = target_labels(&catalog);
-        assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].name(&en), "email address");
-        assert!(labels[0].description(&en).is_some());
-    }
-
-    #[test]
-    fn an_empty_catalog_has_no_target_labels() {
-        assert!(target_labels(&LabelCatalog::new()).is_empty());
     }
 
     /// A backend recording how it was called, to prove `recognize_batch`
@@ -323,19 +312,6 @@ mod tests {
             .await
             .expect_err("a short batch response is a contract violation");
         assert_eq!(err.kind(), ErrorKind::Provider);
-    }
-
-    #[test]
-    fn target_labels_come_in_id_order() {
-        let mut catalog = LabelCatalog::new();
-        for id in ["phone_number", "email_address", "person_name"] {
-            catalog.insert(Label::new(id, id));
-        }
-        let ids: Vec<String> = target_labels(&catalog)
-            .iter()
-            .map(|label| label.id().to_owned())
-            .collect();
-        assert_eq!(ids, ["email_address", "person_name", "phone_number"]);
     }
 
     /// Every span becomes an entity, in the catalog or not, and its audit event

@@ -8,23 +8,28 @@
 //!
 //! # Template variables
 //!
-//! - `tags`: document classification tags (e.g. `medical`)
-//! - `target_labels`: the entity types to emit
 //! - `text`: the source text (text modality only)
+//! - `language`: the call's primary language tag (`en`, `de-AT`), when known
+//! - `target_labels`: the entity types to emit, in id order, each with an
+//!   `id` (what the model must return as a detection's label), and a `name`
+//!   and optional `description` localized in `language` (English fallback)
+//! - `tags`: document classification tags (e.g. `medical`)
 
 use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
 
+use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Context, Subject};
 use elide_core::{Error, Result};
 use elide_image::modality::Image;
-use minijinja::{Environment, context};
+use minijinja::{Environment, Value, context};
 
 use super::Prompt;
 
-/// A [`Prompt`] whose wording comes from caller-supplied Jinja2 templates.
+/// A [`Prompt`] whose wording comes from a caller-supplied Jinja2 template.
 ///
 /// Construct via [`from_file`] or [`from_template`]; the modality `M`
 /// selects which template variables are populated.
@@ -41,11 +46,11 @@ impl<M> Jinja2Prompt<M> {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when the template fails to compile.
+    /// A configuration error when the template fails to compile.
     pub fn from_template(template: impl Into<String>) -> Result<Self> {
         let mut env = Environment::new();
         env.add_template_owned("prompt", template.into())
-            .map_err(|e| Error::configuration(format!("template compile error: {e}")))?;
+            .map_err(|e| Error::configuration(format!("compiling prompt template: {e}")))?;
         Ok(Self {
             env,
             _modality: PhantomData,
@@ -56,55 +61,63 @@ impl<M> Jinja2Prompt<M> {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when the file is missing or the template
+    /// A configuration error when the file cannot be read or the template
     /// fails to compile.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let raw = fs::read_to_string(path.as_ref())
-            .map_err(|e| Error::configuration(format!("reading prompt file: {e}")))?;
+            .map_err(|e| Error::configuration(format!("reading prompt template: {e}")))?;
         Self::from_template(raw)
     }
 
-    fn render(&self, ctx: minijinja::Value) -> String {
+    /// Render the template with `variables`, plus the variables every
+    /// modality shares.
+    fn render<N: Modality>(
+        &self,
+        subject: &Subject<N>,
+        ctx: &Context<'_>,
+        variables: Value,
+    ) -> Result<String> {
+        let language = ctx.languages(subject).primary();
+        let shared = context! {
+            language => language.map(LanguageTag::as_str),
+            target_labels => target_labels(ctx, language),
+            tags => ctx.tags().iter().map(|tag| tag.to_string()).collect::<Vec<_>>(),
+        };
         self.env
             .get_template("prompt")
-            .and_then(|t| t.render(ctx))
-            .unwrap_or_default()
+            .and_then(|template| template.render(context! { ..variables, ..shared }))
+            .map_err(|e| Error::configuration(format!("rendering prompt template: {e}")))
     }
 }
 
 impl Prompt<Text> for Jinja2Prompt<Text> {
-    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_>) -> String {
-        self.render(context! {
-            text => subject.data().text.as_str(),
-            tags => tag_names(ctx),
-            target_labels => target_label_names(ctx),
-        })
+    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_>) -> Result<String> {
+        self.render(
+            subject,
+            ctx,
+            context! { text => subject.data().text.as_str() },
+        )
     }
 }
 
 impl Prompt<Image> for Jinja2Prompt<Image> {
-    fn build(&self, _subject: &Subject<Image>, ctx: &Context<'_>) -> String {
-        self.render(context! {
-            tags => tag_names(ctx),
-            target_labels => target_label_names(ctx),
-        })
+    fn build(&self, subject: &Subject<Image>, ctx: &Context<'_>) -> Result<String> {
+        self.render(subject, ctx, context! {})
     }
 }
 
-/// The catalog's target label ids, for the `{{ target_labels }}` template
-/// variable. Ids (not localized names) so a custom template keys on the
-/// stable identifier the model must return; the template author controls
-/// their own wording and localization.
-fn target_label_names(ctx: &Context<'_>) -> Vec<String> {
-    ctx.target_labels()
+/// The catalog's labels for the `target_labels` variable, each an `id`,
+/// `name`, and `description` localized in `language` (English fallback).
+fn target_labels(ctx: &Context<'_>, language: Option<&LanguageTag>) -> Vec<Value> {
+    let language = language.cloned().unwrap_or_else(LanguageTag::english);
+    ctx.target_label_defs()
         .iter()
-        .map(|l| l.as_str().to_owned())
+        .map(|label| {
+            context! {
+                id => label.id(),
+                name => label.name(&language),
+                description => label.description(&language),
+            }
+        })
         .collect()
-}
-
-/// The context's tags as owned strings, the shape a template value takes
-/// (minijinja builds a `Value` from `String`, not from the `HipStr` the context
-/// stores them in).
-fn tag_names(ctx: &Context<'_>) -> Vec<String> {
-    ctx.tags().iter().map(|t| t.as_str().to_owned()).collect()
 }
