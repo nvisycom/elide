@@ -8,11 +8,11 @@ faces, signatures, and handwriting in an image.
 ```rust,no_run
 use elide::prelude::*;
 use elide::recognition::llm::LlmRecognizer;
-use elide::recognition::llm::backend::RigBackend;
+use elide::recognition::llm::backend::{RigBackend, RigConfig};
 use elide::recognition::llm::provider::Provider;
 
 # fn main() -> Result<()> {
-let backend = RigBackend::<Text>::new(Provider::ollama("llama3.1"))?;
+let backend = RigBackend::<Text>::new(Provider::ollama("llama3.1"), RigConfig::default())?;
 let llm = LlmRecognizer::with_default(backend).with_name("llama");
 
 let analyzer = Analyzer::<Text>::new().with_recognizer(llm);

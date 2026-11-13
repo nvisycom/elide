@@ -46,10 +46,10 @@ impl Provider {
     /// Create an OpenAI provider.
     #[cfg(feature = "openai-gpt")]
     #[cfg_attr(docsrs, doc(cfg(feature = "openai-gpt")))]
-    pub fn openai(api_key: &str, model: &str) -> Self {
+    pub fn openai(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::OpenAi(AuthenticatedProvider {
-            api_key: api_key.to_owned(),
-            model: model.to_owned(),
+            api_key: api_key.into(),
+            model: model.into(),
             base_url: None,
         })
     }
@@ -57,10 +57,10 @@ impl Provider {
     /// Create an Anthropic provider.
     #[cfg(feature = "anthropic-claude")]
     #[cfg_attr(docsrs, doc(cfg(feature = "anthropic-claude")))]
-    pub fn anthropic(api_key: &str, model: &str) -> Self {
+    pub fn anthropic(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::Anthropic(AuthenticatedProvider {
-            api_key: api_key.to_owned(),
-            model: model.to_owned(),
+            api_key: api_key.into(),
+            model: model.into(),
             base_url: None,
         })
     }
@@ -68,27 +68,27 @@ impl Provider {
     /// Create a Google Gemini provider.
     #[cfg(feature = "google-gemini")]
     #[cfg_attr(docsrs, doc(cfg(feature = "google-gemini")))]
-    pub fn gemini(api_key: &str, model: &str) -> Self {
+    pub fn gemini(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::Gemini(AuthenticatedProvider {
-            api_key: api_key.to_owned(),
-            model: model.to_owned(),
+            api_key: api_key.into(),
+            model: model.into(),
             base_url: None,
         })
     }
 
     /// Create an Ollama provider using the default local URL.
-    pub fn ollama(model: &str) -> Self {
+    pub fn ollama(model: impl Into<String>) -> Self {
         Self::Ollama(UnauthenticatedProvider {
-            model: model.to_owned(),
+            model: model.into(),
             base_url: None,
         })
     }
 
-    /// Create an Ollama provider with a custom base URL.
-    pub fn ollama_with_url(model: &str, url: &str) -> Self {
+    /// Create an Ollama provider served at `url`.
+    pub fn ollama_at(model: impl Into<String>, url: impl Into<String>) -> Self {
         Self::Ollama(UnauthenticatedProvider {
-            model: model.to_owned(),
-            base_url: Some(url.to_owned()),
+            model: model.into(),
+            base_url: Some(url.into()),
         })
     }
 

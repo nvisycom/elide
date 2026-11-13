@@ -1,51 +1,35 @@
 //! [`LlmModality`] for [`Text`]: localize each text candidate into a byte
 //! range and build the entity.
 
-use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, LabelRef};
+use elide_core::entity::Entity;
+use elide_core::entity::audit::ModelId;
 use elide_core::modality::text::{Text, TextData, TextLocation};
-use elide_core::primitive::Confidence;
 
-use super::localize::{UnresolvedCandidatePolicy, localize_all};
-use super::{CorefScope, DEFAULT_CONFIDENCE, LlmModality};
+use super::localize::localize_all;
+use super::{Lifter, LlmModality};
 use crate::candidates::{Candidates, TextCandidate};
 
 impl LlmModality for Text {
     type Item = TextCandidate;
 
-    fn lift(batch: Candidates<TextCandidate>, data: &TextData) -> Vec<Entity<Text>> {
-        let text = data.text.as_str();
-        let localized = localize_all(text, batch.entities, UnresolvedCandidatePolicy::default());
-
-        let scope = CorefScope::new();
-        let mut out = Vec::with_capacity(localized.len());
-        for l in localized {
-            let label = LabelRef::new(l.candidate.label.clone());
-            let raw = l.candidate.confidence.unwrap_or(DEFAULT_CONFIDENCE);
-            let Some(confidence) = Confidence::new(raw.clamp(0.0, 1.0) as f32) else {
-                continue;
-            };
-            let location = TextLocation::inline(l.start_offset..l.end_offset);
-            let event = AuditEvent::model(
-                "llm-ner",
-                confidence,
-                location.clone(),
-                ModelId {
-                    name: "llm-ner".into(),
-                    ..ModelId::default()
-                },
-            );
-
-            let mut entity = Entity::new(label, location).with_event(event);
-            // The model groups mentions of the same real-world entity under
-            // a shared handle; scoped to this call, it is the entity's
-            // coreference cluster.
-            if let Some(handle) = &l.candidate.coreference {
-                entity = entity.with_coref(scope.coref(handle));
-            }
-            out.push(entity);
-        }
-        out
+    fn lift(
+        batch: Candidates<TextCandidate>,
+        data: &TextData,
+        model: &ModelId,
+    ) -> Vec<Entity<Text>> {
+        let lifter = Lifter::new("llm-ner", model);
+        localize_all(data.text.as_str(), batch.entities)
+            .into_iter()
+            .filter_map(|localized| {
+                let candidate = localized.candidate;
+                lifter.entity(
+                    candidate.label,
+                    candidate.confidence,
+                    TextLocation::inline(localized.range),
+                    candidate.coreference.as_deref(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -70,6 +54,7 @@ mod tests {
                 entities: candidates,
             },
             &TextData::new(text),
+            &ModelId::default(),
         )
     }
 

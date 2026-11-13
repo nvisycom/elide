@@ -4,8 +4,6 @@
 
 pub mod backend;
 pub mod candidates;
-#[cfg(feature = "rig")]
-pub(crate) mod error;
 mod modality;
 pub mod prompt;
 #[cfg(feature = "rig")]

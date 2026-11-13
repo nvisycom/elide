@@ -1,6 +1,6 @@
 //! [`LabelCatalog`] registry.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
@@ -14,7 +14,8 @@ use crate::modality::Modality;
 /// A registry of [`Label`]s keyed by id: the entity types a call detects.
 ///
 /// Holds the authoritative definitions (localized names + descriptions)
-/// for a run.
+/// for a run, and iterates them in id order, so a prompt or request built
+/// from it is the same on every run.
 /// A [`LabelRef`] carried on a detection or entity is resolved back to
 /// its full [`Label`] with [`get`].
 ///
@@ -27,9 +28,9 @@ use crate::modality::Modality;
 pub struct LabelCatalog(
     #[cfg_attr(
         feature = "schema",
-        schemars(with = "std::collections::HashMap<String, Label>")
+        schemars(with = "std::collections::BTreeMap<String, Label>")
     )]
-    HashMap<HipStr<'static>, Label>,
+    BTreeMap<HipStr<'static>, Label>,
 );
 
 impl LabelCatalog {
@@ -103,13 +104,14 @@ impl LabelCatalog {
         self.0.is_empty()
     }
 
-    /// Iterate over every [`Label`] in the catalog.
+    /// Iterate over every [`Label`] in the catalog, in id order.
     pub fn iter(&self) -> impl Iterator<Item = &Label> {
         self.0.values()
     }
 
-    /// A [`LabelRef`] for every label in the catalog, the set of labels
-    /// recognizers are asked to emit (zero-shot NER, LLM prompt targets).
+    /// A [`LabelRef`] for every label in the catalog, in id order: the set of
+    /// labels recognizers are asked to emit (zero-shot NER, LLM prompt
+    /// targets).
     pub fn refs(&self) -> impl Iterator<Item = LabelRef> + '_ {
         self.0.values().map(|label| label.to_ref())
     }
@@ -185,5 +187,15 @@ mod tests {
         );
         // Unknown ref -> no category.
         assert!(catalog.category(&LabelRef::new("nope")).is_none());
+    }
+
+    #[test]
+    fn iterates_in_id_order() {
+        let catalog: LabelCatalog = ["phone_number", "email_address", "person_name"]
+            .into_iter()
+            .map(|id| Label::new(id, id))
+            .collect();
+        let ids: Vec<&str> = catalog.iter().map(Label::id).collect();
+        assert_eq!(ids, ["email_address", "person_name", "phone_number"]);
     }
 }

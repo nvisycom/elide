@@ -6,6 +6,11 @@
 //! source (a recognizer's failure, an operator's failure) travels
 //! along for diagnostics without widening the public enum. New failure
 //! modes can be added as kinds without breaking the struct's API.
+//!
+//! An error's message and source describe the failure, never the content
+//! being processed: no document text, no detected value, no model reply.
+//! Errors reach logs and callers, so content in one is a leak. Report what
+//! went wrong and where (a kind, a position, a count), not what was there.
 
 use std::fmt;
 

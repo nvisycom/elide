@@ -13,6 +13,7 @@
 //! ```
 
 use std::collections::HashSet;
+use std::slice;
 
 use async_trait::async_trait;
 use elide_core::Result;
@@ -21,6 +22,8 @@ use elide_core::entity::audit::ModelId;
 use elide_core::entity::{Label, LabelRef};
 
 use crate::backend::{NerRequest, NerResponse};
+
+const TARGET: &str = "elide_ner::backend::label_scoped";
 
 /// A NER backend limited to the labels its model supports.
 ///
@@ -73,11 +76,19 @@ impl<B> LabelScoped<B> {
             .collect()
     }
 
-    /// Drop every span outside the supported set.
-    fn filter(&self, response: &mut NerResponse) {
-        response
-            .spans
-            .retain(|span| self.labels.contains(&span.label));
+    /// Drop every span outside the supported set from `responses`.
+    fn filter(&self, responses: &mut [NerResponse]) {
+        let mut dropped = 0;
+        for response in responses {
+            let before = response.spans.len();
+            response
+                .spans
+                .retain(|span| self.labels.contains(&span.label));
+            dropped += before - response.spans.len();
+        }
+        if dropped > 0 {
+            tracing::debug!(target: TARGET, dropped, "dropped spans outside the supported labels");
+        }
     }
 }
 
@@ -96,6 +107,11 @@ where
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let narrowed = request.labels.map(|labels| self.narrow(labels));
         if narrowed.as_ref().is_some_and(Vec::is_empty) {
+            tracing::debug!(
+                target: TARGET,
+                requested = request.labels.map_or(0, <[Label]>::len),
+                "no requested label is supported; the model is not called",
+            );
             return Ok(NerResponse::default());
         }
         let request = NerRequest {
@@ -103,7 +119,7 @@ where
             ..request
         };
         let mut response = self.inner.call(request).await?;
-        self.filter(&mut response);
+        self.filter(slice::from_mut(&mut response));
         Ok(response)
     }
 
@@ -112,6 +128,18 @@ where
             .iter()
             .map(|request| request.labels.map(|labels| self.narrow(labels)))
             .collect();
+        let skipped = narrowed
+            .iter()
+            .filter(|labels| labels.as_ref().is_some_and(Vec::is_empty))
+            .count();
+        if skipped > 0 {
+            tracing::debug!(
+                target: TARGET,
+                skipped,
+                requests = narrowed.len(),
+                "requests with no supported label are answered without the model",
+            );
+        }
 
         // Forward the requests left with a supported label (or with none
         // requested) as one inner batch, keeping its native batching; the rest
@@ -134,9 +162,7 @@ where
             }
         }
         let mut responses = merge.finish_or_else(NerResponse::default);
-        for response in &mut responses {
-            self.filter(response);
-        }
+        self.filter(&mut responses);
         Ok(responses)
     }
 }

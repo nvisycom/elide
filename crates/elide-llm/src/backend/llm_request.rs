@@ -2,6 +2,9 @@
 
 use elide_core::backend::BackendRequest;
 use elide_core::modality::Modality;
+use elide_core::primitive::LanguageTag;
+
+use crate::modality::LlmModality;
 
 /// One per-call LLM request handed to an LLM backend, generic over
 /// the modality.
@@ -18,14 +21,13 @@ pub struct LlmRequest<'a, M: Modality> {
     /// The source payload (text, image bytes, …) the backend folds into
     /// the provider message.
     pub data: &'a M::Data,
+    /// The call's primary language, asserted or detected, for a
+    /// language-routed backend.
+    pub language: Option<&'a LanguageTag>,
 }
 
-impl<'a, M: Modality> LlmRequest<'a, M> {
-    /// Construct a request from rendered `prompt` wording and the source
-    /// `data`.
-    pub fn new(prompt: &'a str, data: &'a M::Data) -> Self {
-        Self { prompt, data }
+impl<M: LlmModality> BackendRequest for LlmRequest<'_, M> {
+    fn language(&self) -> Option<&LanguageTag> {
+        self.language
     }
 }
-
-impl<M: crate::modality::LlmModality> BackendRequest for LlmRequest<'_, M> {}

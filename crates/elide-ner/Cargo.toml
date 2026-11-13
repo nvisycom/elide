@@ -38,6 +38,9 @@ hipstr = { workspace = true, features = [] }
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
+# Observability
+tracing = { workspace = true, features = [] }
+
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

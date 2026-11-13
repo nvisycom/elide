@@ -10,6 +10,7 @@
 //! [`Text`]: elide_core::modality::text::Text
 //! [`Image`]: elide_image::modality::Image
 
+use elide_core::Result;
 use elide_core::modality::text::Text;
 use elide_core::recognition::{Context, Subject};
 use elide_image::modality::Image;
@@ -29,22 +30,24 @@ use super::text_prompt::TextPromptBuilder;
 pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
-    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_>) -> String {
+    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_>) -> Result<String> {
         let target_labels = ctx.target_label_defs();
-        TextPromptBuilder::new(
+        Ok(TextPromptBuilder::new(
             subject.data().text.as_str(),
             ctx.tags(),
             &target_labels,
             ctx.languages(subject).primary(),
         )
-        .build()
+        .build())
     }
 }
 
 impl Prompt<Image> for DefaultPrompt {
-    fn build(&self, subject: &Subject<Image>, ctx: &Context<'_>) -> String {
+    fn build(&self, subject: &Subject<Image>, ctx: &Context<'_>) -> Result<String> {
         let target_labels = ctx.target_label_defs();
-        ImagePromptBuilder::new(ctx.tags(), &target_labels, ctx.languages(subject).primary())
-            .build()
+        Ok(
+            ImagePromptBuilder::new(ctx.tags(), &target_labels, ctx.languages(subject).primary())
+                .build(),
+        )
     }
 }
