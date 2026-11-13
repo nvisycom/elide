@@ -15,7 +15,8 @@
 //! (the HTTP status, the provider's machine code, its request id).
 
 use std::borrow::Cow;
-use std::fmt;
+use std::error::Error as StdError;
+use std::{fmt, io};
 
 use elide_core::{Error as CoreError, ErrorKind};
 use rig::ProviderResponseError;
@@ -51,7 +52,7 @@ pub(crate) enum Error {
 #[derive(Debug)]
 pub(crate) struct Fault {
     /// What happened, in this module's words, or from a source whose message
-    /// names no content (an HTTP client's connection failure, a URL parse).
+    /// names no content (an HTTP protocol error, a URL parse).
     what: Cow<'static, str>,
     /// The HTTP status of the provider's reply.
     status: Option<u16>,
@@ -82,7 +83,11 @@ impl Fault {
         Self {
             what: Cow::Borrowed(what),
             status: response.status.map(|status| status.as_u16()),
-            code: response.code.clone().or_else(|| body_code(&response.body)),
+            code: response
+                .code
+                .as_deref()
+                .and_then(identifier)
+                .or_else(|| body_code(&response.body)),
             request_id: response.provider_request_id.clone(),
         }
     }
@@ -93,7 +98,7 @@ impl Fault {
         Self {
             what: Cow::Borrowed("a relayed failure"),
             status: report.http_status,
-            code: report.code.clone(),
+            code: report.code.as_deref().and_then(identifier),
             request_id: report.request_id.clone(),
         }
     }
@@ -141,27 +146,50 @@ impl fmt::Display for Fault {
 fn body_code(body: &str) -> Option<String> {
     let value: Value = serde_json::from_str(body).ok()?;
     let error = value.get("error")?;
-    ["code", "status", "type"].iter().find_map(|field| {
-        let code = error.get(field)?.as_str()?;
-        let is_code = !code.is_empty()
-            && code.len() <= 64
-            && code
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
-        is_code.then(|| code.to_owned())
-    })
+    ["code", "status", "type"]
+        .iter()
+        .find_map(|field| identifier(error.get(field)?.as_str()?))
+}
+
+/// `code` when it is a short identifier (`rate_limit_exceeded`,
+/// `ThrottlingException`), never free text: a provider may fill its code
+/// from the reply body, which echoes the document.
+fn identifier(code: &str) -> Option<String> {
+    let is_identifier = !code.is_empty()
+        && code.len() <= 64
+        && code
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    is_identifier.then(|| code.to_owned())
+}
+
+/// The kind of the first I/O error in `err`'s source chain (`connection
+/// refused`, `timed out`). The client's own message is not kept: it names the
+/// request URL, which can carry credentials.
+fn io_kind(err: &(dyn StdError + 'static)) -> Option<io::ErrorKind> {
+    let mut next = Some(err);
+    while let Some(err) = next {
+        if let Some(io) = err.downcast_ref::<io::Error>() {
+            return Some(io.kind());
+        }
+        next = err.source();
+    }
+    None
 }
 
 /// The transport fault for an HTTP client failure. A failed status keeps the
-/// status, not the body; the client's own connection and protocol messages
-/// name no content and are kept.
+/// status, not the body; a client failure keeps the kind of its I/O cause, not
+/// its message; protocol messages name no content and are kept.
 fn transport(err: &HttpClientError) -> Fault {
     match err {
         HttpClientError::InvalidStatusCodeWithDetails { status, .. } => {
             Fault::new("the provider answered with a failure status").with_status(status.as_u16())
         }
         HttpClientError::Protocol(e) => Fault::new(format!("an HTTP protocol error: {e}")),
-        HttpClientError::Instance(e) => Fault::new(format!("the HTTP client failed: {e}")),
+        HttpClientError::Instance(e) => match io_kind(e.as_ref()) {
+            Some(kind) => Fault::new(format!("the HTTP client failed: {kind}")),
+            None => Fault::new("the HTTP client failed"),
+        },
         HttpClientError::InvalidHeaderValue(_) => Fault::new("an invalid header value"),
         HttpClientError::NoHeaders => Fault::new("the response had no headers"),
         HttpClientError::StreamEnded => Fault::new("the response stream ended"),
@@ -378,6 +406,29 @@ mod tests {
         report.provider_response = Some(echoing_response());
         let display = assert_content_free(ProviderError::Relayed(Box::new(report)));
         assert!(display.contains("code overloaded"), "{display}");
+    }
+
+    #[test]
+    fn a_relayed_free_text_code_is_dropped() {
+        let mut report = ErrorReport::new(RigErrorKind::ProviderResponse, SECRET);
+        report.code = Some(format!("flagged {SECRET}"));
+        report.http_status = Some(400);
+        let display = assert_content_free(ProviderError::Relayed(Box::new(report)));
+        assert!(display.contains("status 400"), "{display}");
+        assert!(!display.contains("code"), "{display}");
+    }
+
+    /// A transport error whose message names the request URL, as reqwest's
+    /// does, caused by an I/O failure.
+    #[derive(Debug, thiserror::Error)]
+    #[error("error sending request for url (https://api.example/?key={SECRET})")]
+    struct ClientFailure(#[source] io::Error);
+
+    #[test]
+    fn a_client_failure_keeps_its_io_kind_not_its_message() {
+        let failure = ClientFailure(io::Error::from(io::ErrorKind::ConnectionRefused));
+        let display = assert_content_free(HttpClientError::instance(failure));
+        assert!(display.contains("connection refused"), "{display}");
     }
 
     #[test]
