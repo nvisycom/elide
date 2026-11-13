@@ -66,7 +66,11 @@ labels of its own maps them in the backend; `LabelMap` helps.
 The default `call_batch` calls `call` once per request. If the provider
 accepts several inputs in one request, override `call_batch` to send them
 together: an analysis batches its chunks, so this saves a round trip per
-chunk. Return one response per request, in order. If the provider caps the
+chunk. Return one response per request, in order: callers reach a backend
+through `call_aligned`, which turns any other count into a provider error.
+A decorator that forwards only some requests, or sends them to different
+backends, splits the batch with `BatchSplit` and puts the answers back
+with `BatchMerge`. If the provider caps the
 batch size, wrap the backend in `BatchChunked` rather than splitting batches
 yourself; see [Rate limits](rate-limits.md).
 

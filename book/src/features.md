@@ -62,14 +62,11 @@ modality) are always available. The rest are opt-in:
 
 ## Backend decorators
 
-Any of these features also brings `BackendExt` and `BatchChunked`, which
+Either of these features also brings `BackendExt` and `BatchChunked`, which
 need no dependency of their own.
 
 | Feature | Enables |
 |---|---|
-| `metrics` | `Metered`, `UsageCollector`, and `Tee` |
-| `metrics-tracing` | `TracingSink`; enables `metrics` |
-| `metrics-recorder` | `MetricsSink`; enables `metrics` |
 | `ratelimit` | `ConcurrencyLimited` and `RateLimited` |
 | `routing` | `LanguageRouted` and `FallbackRouted` |
 

@@ -21,10 +21,7 @@ use tokio::sync::Semaphore;
 /// This caps *simultaneity*, not requests over time: it bounds open connections,
 /// not a requests-per-interval quota. For the latter, wrap with [`RateLimited`]
 /// — the two compose. Because it is itself a `Backend` (same request/response,
-/// same provenance), it drops in anywhere the inner backend goes, and composes
-/// with [`Metered`](crate::metrics::Metered): wrap the inner with whichever
-/// ordering the caller wants to meter (metering the waited call, or the call plus
-/// its wait).
+/// same provenance), it drops in anywhere the inner backend goes.
 ///
 /// [`RateLimited`]: crate::limit::RateLimited
 pub struct ConcurrencyLimited<B> {
@@ -70,7 +67,7 @@ impl<B: Backend> Backend for ConcurrencyLimited<B> {
             .permits
             .acquire()
             .await
-            .expect("rate-limit semaphore is never closed");
+            .expect("concurrency semaphore is never closed");
         self.inner.call(request).await
     }
 
@@ -80,7 +77,7 @@ impl<B: Backend> Backend for ConcurrencyLimited<B> {
             .permits
             .acquire()
             .await
-            .expect("rate-limit semaphore is never closed");
+            .expect("concurrency semaphore is never closed");
         self.inner.call_batch(requests).await
     }
 }

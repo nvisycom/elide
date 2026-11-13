@@ -10,11 +10,11 @@ use std::marker::PhantomData;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::Result;
-use elide_core::backend::{Backend, TokenCounts};
+use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
 use elide_core::modality::text::Text;
 use elide_image::modality::{Image, ImageData, ImageFormat};
-use rig::completion::{Message, Usage};
+use rig::completion::Message;
 use rig::extractor::ExtractorBuilder;
 use rig::message::{ImageMediaType, UserContent};
 use rig::operation::Completion;
@@ -103,12 +103,8 @@ impl<M> RigBackend<M> {
     /// [`Extractor`], built from this backend's provider model. The extractor
     /// constrains the model to `T`'s schema and parses the reply internally.
     ///
-    /// Returns the batch alongside the provider-reported [`TokenCounts`] for the
-    /// call (accumulated across rig's internal retries), so a `Metered` wrapper
-    /// can bill it.
-    ///
     /// [`Extractor`]: rig::extractor::Extractor
-    async fn extract_batch<T>(&self, message: Message) -> Result<(T, TokenCounts), Error>
+    async fn extract_batch<T>(&self, message: Message) -> Result<T, Error>
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
@@ -124,24 +120,7 @@ impl<M> RigBackend<M> {
             builder = builder.append_preamble(p);
         }
         let response: TypedPromptResponse<T> = builder.build().extract(message).await?;
-        Ok((response.output, token_counts(&response.usage)))
-    }
-}
-
-/// Map rig's completion [`Usage`] onto our [`TokenCounts`].
-///
-/// Both sides carry each count as `Option<u64>`, with the same meaning: `None`
-/// is "the provider did not report this", distinct from `Some(0)`. So the fields
-/// pass straight through — a `None` stays `None` rather than becoming a false,
-/// billable-looking zero. `cached_input_tokens` is part of, not additional to,
-/// the input count, matching [`TokenCounts::cached`].
-fn token_counts(usage: &Usage) -> TokenCounts {
-    TokenCounts {
-        input: usage.input_tokens,
-        output: usage.output_tokens,
-        total: usage.total_tokens,
-        cached: usage.cached_input_tokens,
-        reasoning: usage.reasoning_tokens,
+        Ok(response.output)
     }
 }
 
@@ -159,8 +138,8 @@ impl Backend for RigBackend<Text> {
 
     #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
     async fn call(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
-        let (candidates, tokens) = self.extract_batch(Message::user(request.prompt)).await?;
-        Ok(LlmResponse::new(candidates).with_tokens(tokens))
+        let candidates = self.extract_batch(Message::user(request.prompt)).await?;
+        Ok(LlmResponse::new(candidates))
     }
 }
 
@@ -179,8 +158,8 @@ impl Backend for RigBackend<Image> {
     #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
     async fn call(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
         let message = image_message(request.prompt, request.data)?;
-        let (candidates, tokens) = self.extract_batch(message).await?;
-        Ok(LlmResponse::new(candidates).with_tokens(tokens))
+        let candidates = self.extract_batch(message).await?;
+        Ok(LlmResponse::new(candidates))
     }
 }
 

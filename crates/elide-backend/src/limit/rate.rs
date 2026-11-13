@@ -1,22 +1,23 @@
 //! [`RateLimited`]: a [`Backend`] decorator that caps requests *over time*.
 
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
-use tokio::sync::Mutex;
-use tokio::time::Instant;
+use tokio::time::{Instant, sleep};
 
-/// A token bucket: `capacity` tokens that refill at a steady rate, protected by
-/// an async mutex so the token accounting is serialized across callers.
+/// A token bucket: `capacity` tokens that refill at a steady rate.
 ///
-/// Tokens are tracked as a float and refilled lazily — on each acquire, the time
-/// since the last refill is converted to tokens at the fill rate and added (up to
-/// `capacity`). A full bucket absorbs a burst; once drained, acquires pace out at
-/// the fill rate.
+/// Tokens are tracked as a float and refilled lazily: on each reservation, the
+/// time since the last refill is converted to tokens at the fill rate and added
+/// (up to `capacity`). A reservation always takes its tokens, driving the count
+/// negative when the bucket cannot cover it; the debt is how long the caller
+/// waits, so callers are admitted in the order they reserved.
 struct Bucket {
-    /// Tokens available now; fractional between whole-token boundaries.
+    /// Tokens available now: fractional between whole-token boundaries, and
+    /// negative while reservations are waiting on a refill.
     tokens: f64,
     /// Maximum tokens the bucket holds — the largest burst it absorbs.
     capacity: f64,
@@ -27,20 +28,18 @@ struct Bucket {
 }
 
 impl Bucket {
-    /// Refill from elapsed time, then take one token, returning how long to wait
-    /// first if none is available yet.
-    fn take(&mut self, now: Instant) -> Option<Duration> {
+    /// Refill from elapsed time, then reserve `count` tokens, returning how long
+    /// to wait until the bucket has earned them.
+    fn reserve(&mut self, now: Instant, count: f64) -> Duration {
         let elapsed = now.duration_since(self.updated).as_secs_f64();
         self.tokens = (self.tokens + elapsed * self.fill_per_sec).min(self.capacity);
         self.updated = now;
+        self.tokens -= count;
 
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
-            None
+        if self.tokens >= 0.0 {
+            Duration::ZERO
         } else {
-            // Wait for the bucket to earn the fraction of a token it still needs.
-            let deficit = 1.0 - self.tokens;
-            Some(Duration::from_secs_f64(deficit / self.fill_per_sec))
+            Duration::from_secs_f64(-self.tokens / self.fill_per_sec)
         }
     }
 }
@@ -135,7 +134,8 @@ impl Rate {
 /// tokens and refills the count of them every interval, so a full bucket lets a
 /// burst through at once and a drained one paces callers out at the steady fill
 /// rate.
-/// Each call takes one token, waiting when the bucket is empty;
+/// Each call takes one token, waiting when the bucket is empty, and waiting
+/// calls are admitted in arrival order;
 /// [`call_batch`](Backend::call_batch) takes one *per request* — a provider
 /// meters a batch against its quota per item, and the default `call_batch` is one
 /// `call` per item anyway.
@@ -144,8 +144,7 @@ impl Rate {
 /// which is different from bounding *simultaneous* calls. For that, wrap with
 /// [`ConcurrencyLimited`]; the two compose, one capping the rate and the other
 /// the open connections. Because it is itself a `Backend` (same request/response,
-/// same provenance), it drops in anywhere the inner backend goes, and composes
-/// with [`Metered`](crate::metrics::Metered).
+/// same provenance), it drops in anywhere the inner backend goes.
 ///
 /// [`ConcurrencyLimited`]: crate::limit::ConcurrencyLimited
 pub struct RateLimited<B> {
@@ -176,21 +175,19 @@ impl<B> RateLimited<B> {
         &self.inner
     }
 
-    /// Acquire one token, sleeping until the bucket can afford it.
+    /// Reserve `count` tokens, then sleep until the bucket has earned them.
     ///
-    /// The bucket mutex is held across the wait so tokens are handed out in
-    /// arrival order; it is released before the provider call runs, so calls run
-    /// concurrently once admitted.
-    async fn acquire(&self) {
-        loop {
-            let wait = {
-                let mut bucket = self.bucket.lock().await;
-                match bucket.take(Instant::now()) {
-                    None => return,
-                    Some(wait) => wait,
-                }
-            };
-            tokio::time::sleep(wait).await;
+    /// The reservation is made at once, under a lock held for no await, so
+    /// callers are admitted in the order they reserved and none re-contends
+    /// after its wait. A call dropped while waiting forfeits its reservation.
+    async fn acquire(&self, count: usize) {
+        let wait = self
+            .bucket
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .reserve(Instant::now(), count as f64);
+        if !wait.is_zero() {
+            sleep(wait).await;
         }
     }
 }
@@ -205,7 +202,7 @@ impl<B: Backend> Backend for RateLimited<B> {
     }
 
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
-        self.acquire().await;
+        self.acquire(1).await;
         self.inner.call(request).await
     }
 
@@ -215,9 +212,7 @@ impl<B: Backend> Backend for RateLimited<B> {
         // the default `call_batch` loops `call` per item. (This differs from
         // `ConcurrencyLimited`, where a batch is a single connection — there the
         // limit is open connections, here it is quota load.)
-        for _ in &requests {
-            self.acquire().await;
-        }
+        self.acquire(requests.len()).await;
         self.inner.call_batch(requests).await
     }
 }
@@ -371,5 +366,36 @@ mod tests {
             3,
             "all three requests reached the backend once the tokens were charged"
         );
+    }
+
+    /// Calls waiting on an empty bucket are admitted one per refill, in the
+    /// order they arrived, not all at once.
+    #[tokio::test(start_paused = true)]
+    async fn admits_waiting_calls_in_turn() {
+        let backend = Arc::new(RateLimited::new(
+            Counting {
+                calls: AtomicUsize::new(0),
+            },
+            Rate::per_second(1).with_burst(1),
+        ));
+        backend.call(Req(PhantomData)).await.unwrap();
+
+        let tasks: Vec<_> = (0..2)
+            .map(|_| {
+                let backend = backend.clone();
+                tokio::spawn(async move { backend.call(Req(PhantomData)).await.unwrap() })
+            })
+            .collect();
+        tokio::task::yield_now().await;
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(backend.inner().calls.load(Ordering::SeqCst), 2);
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(backend.inner().calls.load(Ordering::SeqCst), 3);
     }
 }

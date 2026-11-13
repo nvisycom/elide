@@ -15,10 +15,10 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use elide_core::backend::Backend;
+use elide_core::Result;
+use elide_core::backend::{Backend, BatchSplit};
 use elide_core::entity::audit::ModelId;
 use elide_core::entity::{Label, LabelRef};
-use elide_core::{Error, Result};
 
 use crate::backend::{NerRequest, NerResponse};
 
@@ -116,39 +116,26 @@ where
         // Forward the requests left with a supported label (or with none
         // requested) as one inner batch, keeping its native batching; the rest
         // are answered empty without a model call.
-        let mut responses: Vec<NerResponse> =
-            requests.iter().map(|_| NerResponse::default()).collect();
-        let mut forwarded = Vec::with_capacity(requests.len());
-        let mut positions = Vec::with_capacity(requests.len());
-        for (position, (request, labels)) in requests.into_iter().zip(&narrowed).enumerate() {
-            if labels.as_ref().is_some_and(Vec::is_empty) {
-                continue;
-            }
-            forwarded.push(NerRequest {
+        let requests = requests
+            .into_iter()
+            .zip(&narrowed)
+            .map(|(request, labels)| NerRequest {
                 labels: labels.as_deref(),
                 ..request
-            });
-            positions.push(position);
+            })
+            .collect();
+        let split = BatchSplit::by(requests, |request: &NerRequest<'_>| {
+            !request.labels.is_some_and(<[Label]>::is_empty)
+        });
+        let mut merge = split.merge();
+        for (forwarded, part) in split {
+            if forwarded {
+                merge.call(&self.inner, part).await?;
+            }
         }
-        if forwarded.is_empty() {
-            return Ok(responses);
-        }
-
-        // The inner backend owes one response per forwarded request. A short
-        // batch would leave the tail at its empty default, indistinguishable from
-        // "no entities", so it is an error, as it would be without this decorator.
-        let forwarded_len = forwarded.len();
-        let inner_responses = self.inner.call_batch(forwarded).await?;
-        if inner_responses.len() != forwarded_len {
-            return Err(Error::provider(format!(
-                "NER backend returned {} responses for {} requests",
-                inner_responses.len(),
-                forwarded_len
-            )));
-        }
-        for (position, mut response) in positions.into_iter().zip(inner_responses) {
-            self.filter(&mut response);
-            responses[position] = response;
+        let mut responses = merge.finish_or_else(NerResponse::default);
+        for response in &mut responses {
+            self.filter(response);
         }
         Ok(responses)
     }

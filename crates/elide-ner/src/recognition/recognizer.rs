@@ -18,13 +18,13 @@
 //! [`ScoreScaled`]: crate::backend::ScoreScaled
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
-use elide_core::backend::Backend;
+use elide_core::Result;
+use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
-use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
@@ -44,7 +44,7 @@ pub struct NerRecognizer<B = ()> {
     /// time; set one to tell several NER recognizers apart.
     name: Option<HipStr<'static>>,
     /// Backend that turns `(text, kinds)` into raw spans. May be a
-    /// `Metered` wrapper.
+    /// decorated backend.
     backend: B,
     /// Aggregation policy for backends that emit token-level
     /// predictions. Advisory for backends that aggregate server-side.
@@ -200,17 +200,7 @@ where
         if requests.is_empty() {
             return Ok(per_subject);
         }
-        // One entity list per subject is this method's contract; the backend
-        // must answer one response per request to honor it. A short batch would
-        // otherwise let the zip silently leave the tail subjects unrecognized.
-        let responses = self.backend.call_batch(requests).await?;
-        if responses.len() != targets.len() {
-            return Err(Error::provider(format!(
-                "NER backend returned {} responses for {} requests",
-                responses.len(),
-                targets.len()
-            )));
-        }
+        let responses = self.backend.call_aligned(requests).await?;
         for (&index, response) in targets.iter().zip(responses) {
             per_subject[index] =
                 self.spans_to_entities(&response.spans, &effective_labels, subjects[index]);
