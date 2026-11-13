@@ -1,23 +1,21 @@
 //! [`RateLimited`]: a [`Backend`] decorator that caps requests *over time*.
 
-use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
+use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
 /// A token bucket: `capacity` tokens that refill at a steady rate.
 ///
-/// Tokens are tracked as a float and refilled lazily: on each reservation, the
-/// time since the last refill is converted to tokens at the fill rate and added
-/// (up to `capacity`). A reservation always takes its tokens, driving the count
-/// negative when the bucket cannot cover it; the debt is how long the caller
-/// waits, so callers are admitted in the order they reserved.
+/// Tokens are tracked as a float and refilled lazily: on each take, the time
+/// since the last refill is converted to tokens at the fill rate and added (up
+/// to `capacity`). A full bucket absorbs a burst; once drained, takes pace out
+/// at the fill rate.
 struct Bucket {
-    /// Tokens available now: fractional between whole-token boundaries, and
-    /// negative while reservations are waiting on a refill.
+    /// Tokens available now; fractional between whole-token boundaries.
     tokens: f64,
     /// Maximum tokens the bucket holds — the largest burst it absorbs.
     capacity: f64,
@@ -28,18 +26,20 @@ struct Bucket {
 }
 
 impl Bucket {
-    /// Refill from elapsed time, then reserve `count` tokens, returning how long
-    /// to wait until the bucket has earned them.
-    fn reserve(&mut self, now: Instant, count: f64) -> Duration {
+    /// Refill from elapsed time, then take one token, returning how long to wait
+    /// first if none is available yet.
+    fn take(&mut self, now: Instant) -> Option<Duration> {
         let elapsed = now.duration_since(self.updated).as_secs_f64();
         self.tokens = (self.tokens + elapsed * self.fill_per_sec).min(self.capacity);
         self.updated = now;
-        self.tokens -= count;
 
-        if self.tokens >= 0.0 {
-            Duration::ZERO
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            None
         } else {
-            Duration::from_secs_f64(-self.tokens / self.fill_per_sec)
+            Some(Duration::from_secs_f64(
+                (1.0 - self.tokens) / self.fill_per_sec,
+            ))
         }
     }
 }
@@ -175,19 +175,19 @@ impl<B> RateLimited<B> {
         &self.inner
     }
 
-    /// Reserve `count` tokens, then sleep until the bucket has earned them.
+    /// Take `count` tokens, sleeping until the bucket can afford each.
     ///
-    /// The reservation is made at once, under a lock held for no await, so
-    /// callers are admitted in the order they reserved and none re-contends
-    /// after its wait. A call dropped while waiting forfeits its reservation.
+    /// The bucket lock is held across the waits. Tokio's mutex is fair, so
+    /// callers queue on it and are admitted in arrival order, one at a time,
+    /// each taking its tokens only once they exist: however late a caller
+    /// wakes, it never admits more than the bucket holds. The lock is released
+    /// before the provider call runs, so admitted calls run concurrently.
     async fn acquire(&self, count: usize) {
-        let wait = self
-            .bucket
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .reserve(Instant::now(), count as f64);
-        if !wait.is_zero() {
-            sleep(wait).await;
+        let mut bucket = self.bucket.lock().await;
+        for _ in 0..count {
+            while let Some(wait) = bucket.take(Instant::now()) {
+                sleep(wait).await;
+            }
         }
     }
 }
@@ -390,6 +390,40 @@ mod tests {
 
         tokio::time::advance(Duration::from_secs(1)).await;
         tokio::task::yield_now().await;
+        assert_eq!(backend.inner().calls.load(Ordering::SeqCst), 2);
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(backend.inner().calls.load(Ordering::SeqCst), 3);
+    }
+
+    /// Calls whose waits have all passed by the time they run are still
+    /// admitted one per token, not all at once.
+    #[tokio::test(start_paused = true)]
+    async fn late_waiters_do_not_exceed_the_burst() {
+        let backend = Arc::new(RateLimited::new(
+            Counting {
+                calls: AtomicUsize::new(0),
+            },
+            Rate::per_second(1).with_burst(1),
+        ));
+        backend.call(Req(PhantomData)).await.unwrap();
+
+        let tasks: Vec<_> = (0..2)
+            .map(|_| {
+                let backend = backend.clone();
+                tokio::spawn(async move { backend.call(Req(PhantomData)).await.unwrap() })
+            })
+            .collect();
+        tokio::task::yield_now().await;
+
+        // Past both waiters' deadlines at once: the bucket holds one token.
+        tokio::time::advance(Duration::from_secs(3)).await;
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
         assert_eq!(backend.inner().calls.load(Ordering::SeqCst), 2);
 
         tokio::time::advance(Duration::from_secs(1)).await;
