@@ -59,19 +59,13 @@ fn localize_one(source: &NormalizedText, candidate: &TextCandidate) -> Option<Ra
     let normalized_context = normalize(context);
     let normalized_value = normalize(&candidate.value);
 
-    let context_matches: Vec<usize> = source
-        .text
-        .match_indices(&normalized_context)
-        .map(|(i, _)| i)
-        .collect();
-
-    let context_start = match context_matches[..] {
-        [] => {
+    let context_start = match occurrence(&source.text, &normalized_context) {
+        Occurrence::Absent => {
             warn_dropped(candidate, "context not found");
             return None;
         }
-        [start] => start,
-        _ => {
+        Occurrence::Unique(start) => start,
+        Occurrence::Ambiguous => {
             warn_dropped(candidate, "context ambiguous");
             return None;
         }
@@ -79,17 +73,13 @@ fn localize_one(source: &NormalizedText, candidate: &TextCandidate) -> Option<Ra
 
     let context_end = context_start + normalized_context.len();
     let window = &source.text[context_start..context_end];
-    let value_matches: Vec<usize> = window
-        .match_indices(&normalized_value)
-        .map(|(i, _)| i)
-        .collect();
-    let value_offset = match value_matches[..] {
-        [] => {
+    let value_offset = match occurrence(window, &normalized_value) {
+        Occurrence::Absent => {
             warn_dropped(candidate, "value not found in context");
             return None;
         }
-        [offset] => offset,
-        _ => {
+        Occurrence::Unique(offset) => offset,
+        Occurrence::Ambiguous => {
             warn_dropped(candidate, "value ambiguous within context");
             return None;
         }
@@ -107,6 +97,30 @@ fn localize_one(source: &NormalizedText, candidate: &TextCandidate) -> Option<Ra
     };
 
     Some(start_offset..end_offset)
+}
+
+/// How often a needle occurs in a haystack.
+enum Occurrence {
+    Absent,
+    /// Exactly once, at this byte offset.
+    Unique(usize),
+    /// More than once, overlapping occurrences included.
+    Ambiguous,
+}
+
+/// How often `needle` occurs in `haystack`, counting overlapping occurrences
+/// (`111` occurs three times in `11111`): a second occurrence is searched for
+/// from the character after the first one starts.
+fn occurrence(haystack: &str, needle: &str) -> Occurrence {
+    let Some(first) = haystack.find(needle) else {
+        return Occurrence::Absent;
+    };
+    let next = first + haystack[first..].chars().next().map_or(0, char::len_utf8);
+    if next > first && haystack[next..].contains(needle) {
+        Occurrence::Ambiguous
+    } else {
+        Occurrence::Unique(first)
+    }
 }
 
 /// Warn that `candidate` was dropped for `reason`. Its value and context are
@@ -215,5 +229,20 @@ mod tests {
     fn an_ambiguous_context_is_dropped() {
         let localized = localize_all("Jane and Jane", vec![candidate("Jane", "Jane")]);
         assert!(localized.is_empty());
+    }
+
+    #[test]
+    fn an_overlapping_second_occurrence_is_ambiguous() {
+        // `111` occurs at 0, 1, and 2 in `11111`: no single span to pick.
+        let localized = localize_all("ID 11111", vec![candidate("111", "111")]);
+        assert!(localized.is_empty());
+    }
+
+    #[test]
+    fn counts_overlapping_occurrences() {
+        assert!(matches!(occurrence("11111", "111"), Occurrence::Ambiguous));
+        assert!(matches!(occurrence("aXa", "a"), Occurrence::Ambiguous));
+        assert!(matches!(occurrence("abc", "b"), Occurrence::Unique(1)));
+        assert!(matches!(occurrence("abc", "z"), Occurrence::Absent));
     }
 }
