@@ -9,10 +9,6 @@
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 //! [`Text`]: elide_core::modality::text::Text
 
-mod aggregation;
-mod alignment;
 mod recognizer;
 
-pub use self::aggregation::AggregationStrategy;
-pub use self::alignment::AlignmentMode;
 pub use self::recognizer::NerRecognizer;

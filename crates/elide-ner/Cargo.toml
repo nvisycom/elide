@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-ner"
-description = "NER traits and language detection for the Elide toolkit"
+description = "Named-entity recognition for the Elide toolkit: the NER recognizer, its backend contract, and label and score decorators"
 keywords = ["ner", "nlp", "pii"]
 categories = ["text-processing"]
 
@@ -17,16 +17,11 @@ repository = { workspace = true }
 documentation = { workspace = true }
 
 [features]
-## No features on by default: the NER traits ship bare. Enable `mocks`
-## for the no-op backend.
+## No features on by default. Enable `mocks` for the no-op backend.
 default = []
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 mocks = []
-
-## Derive `schemars::JsonSchema` on the public strategy enums
-## (`AlignmentMode`, `AggregationStrategy`) and the re-exported core types.
-schema = ["elide-core/schema", "dep:schemars"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -34,10 +29,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde"] }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"] }
+elide-core = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
@@ -45,9 +37,6 @@ hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-
-# Templating & schema
-schemars = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism

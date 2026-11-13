@@ -123,7 +123,8 @@ and this project adheres to
 - **elide-detection:** The `Analyzer` and its detection layers
 - **elide-pattern:** Pattern and dictionary recognizers, with keyword-boost
   context enhancement
-- **elide-ner:** NER traits and language detection
+- **elide-ner:** The NER recognizer, its backend contract, and label and
+  score decorators
 - **elide-lingua:** Lingua-backed language detection
 - **elide-llm:** LLM-mediated entity recognizer (text NER and image VLM)
 - **elide-backend:** Backend decorators: batching, rate limiting, routing,

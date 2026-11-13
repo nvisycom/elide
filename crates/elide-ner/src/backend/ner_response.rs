@@ -19,6 +19,7 @@ use std::ops::Range;
 use elide_core::backend::BackendResponse;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
+use hipstr::HipStr;
 
 /// The spans a NER backend predicted for one request.
 ///
@@ -63,9 +64,9 @@ pub struct NerSpan {
 impl NerSpan {
     /// Construct a span from a canonical label name and a raw score,
     /// clamping the score into `[0, 1]`.
-    pub fn new(label: impl Into<String>, score: f32, offset: Range<usize>) -> Self {
+    pub fn new(label: impl Into<HipStr<'static>>, score: f32, offset: Range<usize>) -> Self {
         Self {
-            label: LabelRef::new(label.into()),
+            label: LabelRef::new(label),
             confidence: Confidence::clamped(score),
             offset,
         }

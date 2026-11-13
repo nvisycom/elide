@@ -16,8 +16,8 @@ pub struct NerRequest<'a> {
     /// label set; `Some(slice)` means restrict detection to the listed
     /// labels. Full [`Label`]s (name + optional description) rather than
     /// bare names: zero-shot models such as GLiNER 2.0 use the
-    /// descriptions for better performance. Empty slice short-circuits
-    /// the call to no work in the caller.
+    /// descriptions for better performance. An empty slice asks for no
+    /// labels, so no spans.
     ///
     /// [`Label`]: elide_core::entity::Label
     pub labels: Option<&'a [Label]>,

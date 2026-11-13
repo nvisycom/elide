@@ -3,11 +3,12 @@
 //!
 //! Holds its NER backend `B`. On each `recognize` call it asks the backend for
 //! spans of the call's catalog labels (`None` when the catalog is empty, leaving
-//! the backend to emit what it natively produces), then emits entities from the
-//! canonical spans the backend returns. Which labels a model supports, which it
-//! ignores, and how its scores scale are properties of the model, so they are
-//! backend decorators ([`LabelScoped`], [`LabelExcluded`], [`ScoreScaled`]),
-//! not recognizer settings.
+//! the backend to emit what it natively produces), then emits an entity for
+//! every canonical span the backend returns. Restricting them to the catalog is
+//! the analyzer's job, after reconciliation. Which labels a model supports,
+//! which it ignores, and how its scores scale are properties of the model, so
+//! they are backend decorators ([`LabelScoped`], [`LabelExcluded`],
+//! [`ScoreScaled`]), not recognizer settings.
 //!
 //! Implements [`Recognizer<Text>`] so it composes with the
 //! rest of the platform through the same trait every other text
@@ -21,14 +22,12 @@
 use elide_core::Result;
 use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
+use elide_core::entity::{Entity, Label, LabelCatalog};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use hipstr::HipStr;
 
-use super::aggregation::AggregationStrategy;
-use super::alignment::AlignmentMode;
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
 use crate::backend::{NerRequest, NerResponse, NerSpan};
@@ -36,60 +35,37 @@ use crate::backend::{NerRequest, NerResponse, NerSpan};
 /// A recognizer that runs a NER model over text, through a NER backend.
 ///
 /// Generic over its backend `B`: any [`Backend`] whose request is
-/// [`NerRequest`] and whose response is [`NerResponse`].
+/// [`NerRequest`] and whose response is [`NerResponse`]. Each entity's audit
+/// event names the model the backend reports through
+/// [`provenance`](Backend::provenance).
 #[derive(Clone)]
-pub struct NerRecognizer<B = ()> {
-    /// Optional recognizer name, surfaced in the recognition event on every
-    /// emitted entity. `None` falls back to the crate name at [`id`](Recognizer::id)
-    /// time; set one to tell several NER recognizers apart.
-    name: Option<HipStr<'static>>,
-    /// Backend that turns `(text, kinds)` into raw spans. May be a
+pub struct NerRecognizer<B> {
+    /// Recognizer name, its id; the crate name unless set.
+    name: HipStr<'static>,
+    /// Backend that turns `(text, labels)` into canonical spans. May be a
     /// decorated backend.
     backend: B,
-    /// Aggregation policy for backends that emit token-level
-    /// predictions. Advisory for backends that aggregate server-side.
-    aggregation: AggregationStrategy,
-    /// Alignment policy for sub-word predictions. Same advisory
-    /// status as `aggregation`.
-    alignment: AlignmentMode,
 }
 
 impl<B> NerRecognizer<B>
 where
     B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
 {
-    /// A NER recognizer over `backend`, with default aggregation/alignment.
-    ///
-    /// Unnamed by default (its id falls back to the crate name); refine with the
-    /// `with_*` setters.
+    /// A NER recognizer over `backend`, named after the crate until
+    /// [`with_name`](Self::with_name) sets another.
     #[must_use]
     pub fn new(backend: B) -> Self {
         Self {
-            name: None,
+            name: HipStr::borrowed(env!("CARGO_PKG_NAME")),
             backend,
-            aggregation: AggregationStrategy::default(),
-            alignment: AlignmentMode::default(),
         }
     }
 
-    /// Set the recognizer name, surfaced as its id.
+    /// Set the recognizer name, surfaced as its id; set one to tell several NER
+    /// recognizers apart.
     #[must_use]
     pub fn with_name(mut self, name: impl Into<HipStr<'static>>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Set the aggregation policy for token-level backends.
-    #[must_use]
-    pub fn with_aggregation(mut self, aggregation: AggregationStrategy) -> Self {
-        self.aggregation = aggregation;
-        self
-    }
-
-    /// Set the alignment policy for sub-word backends.
-    #[must_use]
-    pub fn with_alignment(mut self, alignment: AlignmentMode) -> Self {
-        self.alignment = alignment;
+        self.name = name.into();
         self
     }
 }
@@ -107,53 +83,11 @@ impl NerRecognizer<MockBackend> {
 }
 
 impl<B> NerRecognizer<B> {
-    /// Recognizer name — the one set with [`with_name`](Self::with_name), or the
-    /// crate name when unset.
+    /// Recognizer name: the one set with [`with_name`](Self::with_name), or the
+    /// crate name.
     #[must_use]
     pub fn name(&self) -> &str {
-        self.name.as_deref().unwrap_or(env!("CARGO_PKG_NAME"))
-    }
-
-    /// Aggregation policy for token-level backends.
-    #[must_use]
-    pub fn aggregation(&self) -> AggregationStrategy {
-        self.aggregation
-    }
-
-    /// Alignment policy for sub-word backends.
-    #[must_use]
-    pub fn alignment(&self) -> AlignmentMode {
-        self.alignment
-    }
-
-    /// Place a backend [`NerSpan`] into a located [`Entity`] carrying a
-    /// [`Model`] birth event, keeping the span's byte offset as the entity's
-    /// `recognized_range`. Drops the match (`None`) when its range can't be
-    /// placed in the medium (an OCR/transcript range no enrichment covers).
-    ///
-    /// [`Model`]: elide_core::entity::audit::AuditKind::Model
-    fn build_entity<M: TextRecognizable>(
-        &self,
-        span: &NerSpan,
-        label: LabelRef,
-        subject: &Subject<M>,
-    ) -> Option<Entity<M>> {
-        let range = span.offset.clone();
-        let location = M::locate(range.clone(), subject.data(), subject.artifact())?;
-        let event = AuditEvent::model(
-            "ner",
-            span.confidence,
-            location.clone(),
-            ModelId {
-                name: HipStr::from(self.name().to_owned()),
-                ..ModelId::default()
-            },
-        );
-        Some(
-            Entity::new(label, location)
-                .with_recognized_range(range)
-                .with_event(event),
-        )
+        &self.name
     }
 }
 
@@ -164,18 +98,22 @@ where
     B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
 {
     fn id(&self) -> ComponentId {
-        ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
+        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
-        let effective_labels = target_labels(ctx.catalog());
-        let Some(request) = ner_request(subject, ctx, &effective_labels) else {
+        let labels = target_labels(ctx.catalog());
+        let Some(request) = ner_request(subject, ctx, &labels) else {
             return Ok(Vec::new());
         };
         let response = self.backend.call(request).await?;
-        Ok(self.spans_to_entities(&response.spans, &effective_labels, subject))
+        Ok(entities(
+            response.spans,
+            subject,
+            &self.backend.provenance(),
+        ))
     }
 
     async fn recognize_batch(
@@ -186,11 +124,11 @@ where
         // One NER request per subject with recognizable text; no-text subjects are
         // skipped and recognize nothing. `targets` keeps each request aligned with
         // its subject index, so a response scatters back to the right subject.
-        let effective_labels = target_labels(ctx.catalog());
+        let labels = target_labels(ctx.catalog());
         let mut requests = Vec::new();
         let mut targets = Vec::new();
         for (index, subject) in subjects.iter().enumerate() {
-            if let Some(request) = ner_request(subject, ctx, &effective_labels) {
+            if let Some(request) = ner_request(subject, ctx, &labels) {
                 requests.push(request);
                 targets.push(index);
             }
@@ -201,44 +139,45 @@ where
             return Ok(per_subject);
         }
         let responses = self.backend.call_aligned(requests).await?;
+        let model = self.backend.provenance();
         for (&index, response) in targets.iter().zip(responses) {
-            per_subject[index] =
-                self.spans_to_entities(&response.spans, &effective_labels, subjects[index]);
+            per_subject[index] = entities(response.spans, subjects[index], &model);
         }
         Ok(per_subject)
     }
 }
 
-impl<B> NerRecognizer<B> {
-    /// Map a response's `spans` to entities located in `subject`.
-    ///
-    /// Spans already carry canonical labels (the backend did any raw-to-canonical
-    /// mapping; excluded labels are dropped by a `LabelExcluded` decorator). When a
-    /// target set was requested, only those labels survive. Each surviving span is
-    /// placed in the medium; one whose range can't be located is dropped.
-    fn spans_to_entities<M: TextRecognizable>(
-        &self,
-        spans: &[NerSpan],
-        effective_labels: &[Label],
-        subject: &Subject<M>,
-    ) -> Vec<Entity<M>> {
-        spans
-            .iter()
-            .filter(|s| {
-                effective_labels.is_empty()
-                    || effective_labels.iter().any(|l| l.to_ref() == s.label)
-            })
-            .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), subject))
-            .collect()
-    }
+/// The entities for `spans`, located in `subject` and attributed to
+/// `model`. A span whose range can't be placed in the medium (an
+/// OCR/transcript range no enrichment covers) is dropped.
+fn entities<M: TextRecognizable>(
+    spans: Vec<NerSpan>,
+    subject: &Subject<M>,
+    model: &ModelId,
+) -> Vec<Entity<M>> {
+    spans
+        .into_iter()
+        .filter_map(|span| {
+            let location = M::locate(span.offset.clone(), subject.data(), subject.artifact())?;
+            let event = AuditEvent::model("ner", span.confidence, location.clone(), model.clone());
+            Some(
+                Entity::new(span.label, location)
+                    .with_recognized_range(span.offset)
+                    .with_event(event),
+            )
+        })
+        .collect()
 }
 
 /// The target labels for a call: every label in `catalog`, as full [`Label`]s
 /// (localized name + optional description) so a zero-shot backend gets the
-/// localized text in the analysis language. An empty catalog leaves the backend
-/// to emit whatever it natively produces.
+/// localized text in the analysis language, in id order so the model is
+/// prompted the same way on every run. An empty catalog leaves the backend to
+/// emit whatever it natively produces.
 fn target_labels(catalog: &LabelCatalog) -> Vec<Label> {
-    catalog.iter().cloned().collect()
+    let mut labels: Vec<Label> = catalog.iter().cloned().collect();
+    labels.sort_by(|a, b| a.id().cmp(b.id()));
+    labels
 }
 
 /// The per-call NER request for `subject`, or `None` when it carries no
@@ -246,13 +185,12 @@ fn target_labels(catalog: &LabelCatalog) -> Vec<Label> {
 fn ner_request<'a, M: TextRecognizable>(
     subject: &'a Subject<M>,
     ctx: &'a Context<'_>,
-    effective_labels: &'a [Label],
+    labels: &'a [Label],
 ) -> Option<NerRequest<'a>> {
     let text = M::as_text(subject.data(), subject.artifact())?;
-    let labels = (!effective_labels.is_empty()).then_some(effective_labels);
     Some(NerRequest {
         text,
-        labels,
+        labels: (!labels.is_empty()).then_some(labels),
         language: ctx.languages(subject).primary(),
         correlation_id: ctx.correlation_id(),
     })
@@ -260,7 +198,11 @@ fn ner_request<'a, M: TextRecognizable>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use elide_core::ErrorKind;
+    use elide_core::entity::audit::AuditKind;
     use elide_core::entity::{LabelCatalog, LabelLocale};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::primitive::LanguageTag;
@@ -307,8 +249,8 @@ mod tests {
     /// moved into the recognizer.
     #[derive(Clone, Default)]
     struct BatchCounting {
-        batch_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        single_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        batch_calls: Arc<AtomicUsize>,
+        single_calls: Arc<AtomicUsize>,
     }
 
     #[async_trait::async_trait]
@@ -324,14 +266,12 @@ mod tests {
         }
 
         async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
-            self.single_calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.single_calls.fetch_add(1, Ordering::Relaxed);
             Ok(NerResponse::new(vec![NerSpan::new("EMAIL", 0.9, 0..1)]))
         }
 
         async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
-            self.batch_calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.batch_calls.fetch_add(1, Ordering::Relaxed);
             Ok(requests
                 .iter()
                 .map(|_| NerResponse::new(vec![NerSpan::new("EMAIL", 0.9, 0..1)]))
@@ -341,8 +281,6 @@ mod tests {
 
     #[tokio::test]
     async fn recognize_batch_coalesces_across_subjects() {
-        use std::sync::atomic::Ordering;
-
         let backend = BatchCounting::default();
         let counters = backend.clone();
         let recognizer = NerRecognizer::new(backend);
@@ -385,5 +323,36 @@ mod tests {
             .await
             .expect_err("a short batch response is a contract violation");
         assert_eq!(err.kind(), ErrorKind::Provider);
+    }
+
+    #[test]
+    fn target_labels_come_in_id_order() {
+        let mut catalog = LabelCatalog::new();
+        for id in ["phone_number", "email_address", "person_name"] {
+            catalog.insert(Label::new(id, id));
+        }
+        let ids: Vec<String> = target_labels(&catalog)
+            .iter()
+            .map(|label| label.id().to_owned())
+            .collect();
+        assert_eq!(ids, ["email_address", "person_name", "phone_number"]);
+    }
+
+    /// Every span becomes an entity, in the catalog or not, and its audit event
+    /// names the model the backend reports.
+    #[tokio::test]
+    async fn entities_name_the_backend_model_and_keep_out_of_catalog_spans() {
+        let recognizer = NerRecognizer::new(BatchCounting::default()).with_name("named");
+        let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
+        let ctx = Context::new(&scope);
+        let subject = Subject::<Text>::new(TextData::new("a".to_owned()));
+
+        let out = recognizer.recognize(&subject, &ctx).await.unwrap();
+
+        assert_eq!(out.len(), 1, "the out-of-catalog EMAIL span is kept");
+        let AuditKind::Model(event) = &out[0].audit.events()[0].kind else {
+            panic!("a model event");
+        };
+        assert_eq!(event.model.name, "batch-counting");
     }
 }
