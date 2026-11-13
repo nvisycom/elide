@@ -5,25 +5,22 @@ use std::sync::Arc;
 
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::PatternRule;
-use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
+use elide_core::primitive::Confidence;
 use regex::{Match, Regex};
 
 use crate::recognizer::RawMatch;
+use crate::rule::RuleScope;
 use crate::validators::Validator;
 
 /// One compiled regex slot: a single `(pattern, variant)` pair,
 /// keyed in the shared `RegexSet` by its position in
-/// `PatternRecognizer.patterns`. Pattern-level metadata (name,
-/// label, languages) is repeated across the pattern's variants so
+/// `PatternRecognizer.patterns`. Pattern-level metadata (labels,
+/// languages, provenance) is repeated across the pattern's variants so
 /// the dispatch loop has everything it needs without a second
 /// indirection.
-///
 pub(crate) struct CompiledPattern {
-    /// Pattern name (e.g. `"ssn"`). Surfaced in trail provenance.
-    pub name: String,
-    /// Candidate labels, most-specific first. The recognizer resolves one
-    /// against the request catalog before emitting.
-    pub labels: Vec<LabelRef>,
+    /// The parent pattern's labels and locale scope.
+    pub scope: RuleScope,
     pub regex: Regex,
     /// Index of the regex's [`ENTITY_GROUP`] capture group, when it defines
     /// one: that group, not the whole match, is the entity's span.
@@ -32,15 +29,12 @@ pub(crate) struct CompiledPattern {
     pub span_group: Option<usize>,
     pub score: Confidence,
     pub validator: Option<Arc<dyn Validator>>,
-    /// Languages the parent pattern applies to.
-    /// Empty means "any language".
-    pub languages: Vec<LanguageTag>,
-    /// Countries the parent pattern applies to.
-    /// Empty means "any country".
-    pub countries: Vec<CountryCode>,
     /// The parent pattern's context, as an index into the recognizer's
     /// contexts; `None` when it declares none.
     pub context: Option<usize>,
+    /// The provenance recorded on every match: the pattern's name, the
+    /// variant's regex, and its validator's name.
+    pub rule: PatternRule,
 }
 
 impl CompiledPattern {
@@ -77,11 +71,7 @@ impl CompiledPattern {
             confidence: self.score,
             range,
             context: self.context,
-            rule: PatternRule {
-                name: self.name.clone().into(),
-                regex: Some(self.regex.as_str().into()),
-                validator: self.validator.as_ref().map(|_| self.name.clone().into()),
-            },
+            rule: self.rule.clone(),
         }
     }
 }

@@ -38,6 +38,7 @@ use crate::context::RuleContext;
 /// [`ValidatorRegistry`]: crate::validators::ValidatorRegistry
 /// [`ENTITY_GROUP`]: Self::ENTITY_GROUP
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Variant {
     /// Regex source. Compiled to a [`::regex::Regex`] by
     /// [`PatternRecognizer::build`]. An [`ENTITY_GROUP`] capture group, when
@@ -161,6 +162,7 @@ fn default_score() -> Confidence {
     setter(into, strip_option, prefix = "with"),
     build_fn(private, name = "try_build", error = "UninitializedFieldError")
 )]
+#[serde(deny_unknown_fields)]
 pub struct Pattern {
     /// Human-readable identifier surfaced in trail provenance (e.g.
     /// `"ssn"`, `"credit_card"`).
@@ -178,8 +180,9 @@ pub struct Pattern {
     /// the recognizer skips rules with an empty variant list.
     pub variants: Vec<Variant>,
     /// BCP-47 language tags the rule applies to. Empty means "any
-    /// language"; otherwise the recognizer skips the rule when the
-    /// per-call language hint is not in the list.
+    /// language"; otherwise the recognizer skips the rule when the caller
+    /// asserts languages and none is in the list. A detected language never
+    /// skips it.
     #[builder(default)]
     #[serde(default)]
     pub languages: Vec<LanguageTag>,
@@ -222,5 +225,36 @@ impl Pattern {
     /// missing required fields.
     pub fn from_toml(raw: &str) -> Result<Self> {
         toml::from_str(raw).map_err(|e| Error::configuration(format!("pattern rule TOML: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_toml_rejects_an_unknown_field() {
+        let typo = r#"
+name = "ssn"
+labels = ["government_id"]
+langauges = ["en"]
+
+[[variants]]
+regex = '\d{9}'
+"#;
+        assert!(Pattern::from_toml(typo).is_err());
+    }
+
+    #[test]
+    fn from_toml_rejects_an_unknown_variant_field() {
+        let typo = r#"
+name = "ssn"
+labels = ["government_id"]
+
+[[variants]]
+regex = '\d{9}'
+validtor = "us.ssn"
+"#;
+        assert!(Pattern::from_toml(typo).is_err());
     }
 }

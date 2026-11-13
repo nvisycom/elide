@@ -2,23 +2,27 @@
 //!
 //! - [`KeywordMatcher`] is the strategy trait, selected with
 //!   [`PatternRecognizerBuilder::with_keyword_matcher`].
-//! - [`SubstringMatcher`] is the default: ASCII case-insensitive
-//!   substring search over the raw text window.
+//! - [`SubstringMatcher`] is the default: case-insensitive substring
+//!   search over the raw text window.
 //! - [`LemmaMatcher`] reads the lemmas of the tokens a tokenizing
 //!   enricher stored as the subject's artifact. It recognizes
 //!   morphological variants substring matching misses.
+//! - [`KeywordSet`] is the keyword list a matcher searches, compiled once
+//!   when the recognizer is built.
 //!
 //! [`PatternRecognizerBuilder::with_keyword_matcher`]: crate::PatternRecognizerBuilder::with_keyword_matcher
 
+mod keyword_set;
 mod lemma;
 mod substring;
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Range;
 
 use elide_core::modality::text::Token;
-use hipstr::HipStr;
 
+pub use self::keyword_set::KeywordSet;
 pub use self::lemma::LemmaMatcher;
 pub use self::substring::SubstringMatcher;
 
@@ -38,6 +42,12 @@ pub(crate) fn is_whole_word(text: &str, m: &Range<usize>) -> bool {
         .is_none_or(|c| !is_word(c));
     let after_ok = text[m.end..].chars().next().is_none_or(|c| !is_word(c));
     before_ok && after_ok
+}
+
+/// Orders keyword hits by start, the longest first among those that start
+/// together.
+pub(crate) fn by_position(a: &Range<usize>, b: &Range<usize>) -> Ordering {
+    a.start.cmp(&b.start).then(b.end.cmp(&a.end))
 }
 
 /// Finds where a rule's context keywords occur near an entity match.
@@ -64,10 +74,5 @@ pub trait KeywordMatcher: Debug + Send + Sync {
     /// The window-relative byte ranges of every keyword occurrence, in
     /// scan order. Empty when none fire. The recognizer offsets a chosen
     /// range into stream coordinates to resolve a location.
-    fn matches(
-        &self,
-        window: &str,
-        tokens: &[Token],
-        keywords: &[HipStr<'static>],
-    ) -> Vec<Range<usize>>;
+    fn matches(&self, window: &str, tokens: &[Token], keywords: &KeywordSet) -> Vec<Range<usize>>;
 }

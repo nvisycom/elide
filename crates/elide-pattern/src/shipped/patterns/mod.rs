@@ -37,9 +37,7 @@ use crate::Pattern;
 /// The `$path` is resolved with `include_str!` against the path
 /// of the file that *expands* the macro, so callers in sub-modules
 /// (e.g. `world.rs`) pass paths relative to themselves.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __shipped_pattern {
+macro_rules! shipped_pattern {
     ($(#[$meta:meta])* fn $name:ident from $path:literal) => {
         $(#[$meta])*
         #[must_use]
@@ -49,6 +47,8 @@ macro_rules! __shipped_pattern {
         }
     };
 }
+
+use shipped_pattern;
 
 /// Every built-in pattern shipped by this crate, regardless of
 /// region.

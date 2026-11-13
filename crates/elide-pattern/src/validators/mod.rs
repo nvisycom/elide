@@ -7,27 +7,13 @@
 //! out structurally-suspect false positives that a regex alone
 //! can't.
 //!
-//! [`ValidatorRegistry::builtin`] ships universal validators
-//! ([`luhn`](fn@luhn), [`iban`](fn@iban), [`phone`](fn@phone),
-//! [`date`](fn@date), [`btc`](fn@btc)) plus
-//! jurisdiction-scoped sets re-exported from [`us`] (`"us.ssn"`,
-//! `"us.aba_routing"`, `"us.npi"`, `"us.dea_number"`,
-//! `"us.postal_code"`), [`uk`]
-//! (`"uk.nhs"`, `"uk.nino"`, `"uk.driving_licence"`,
-//! `"uk.vehicle_registration"`), [`de`] (`"de.bsnr"`,
-//! `"de.lanr"`, `"de.passport"`, `"de.id_card"`,
-//! `"de.health_insurance"`, `"de.social_security"`,
-//! `"de.tax_id"`, `"de.vat_id"`, `"de.plz"`), [`es`]
-//! (`"es.nif"`, `"es.nie"`, `"es.cif"`), [`it`]
-//! (`"it.fiscal_code"`, `"it.vat_code"`), [`pl`]
-//! (`"pl.pesel"`, `"pl.nip"`, `"pl.regon"`), [`au`]
-//! (`"au.abn"`, `"au.acn"`, `"au.medicare"`, `"au.tfn"`), [`ca`]
-//! (`"ca.sin"`), [`fi`] (`"fi.hetu"`), [`se`]
-//! (`"se.personnummer"`, `"se.organisationsnummer"`), and the
-//! India module (`"in.aadhaar"`, `"in.pan"`, `"in.gstin"`).
-//! Each validator is also re-exported as a free function so
-//! consumers can compose a custom registry without taking the
-//! full set.
+//! [`ValidatorRegistry::builtin`] registers the universal validators
+//! ([`luhn`](fn@luhn), [`iban`](fn@iban), [`swift`](fn@swift),
+//! [`phone`](fn@phone), [`date`](fn@date), [`ipv4`](fn@ipv4),
+//! [`ipv6`](fn@ipv6), [`btc`](fn@btc)) and every jurisdiction module's
+//! validators (from [`us`], [`uk`], [`de`], …), under the keys listed
+//! there. Each validator is also a public function, so a consumer can
+//! compose a custom registry without taking the full set.
 //!
 //! [`Variant`]: crate::Variant
 //! [`Pattern`]: crate::Pattern
@@ -140,8 +126,8 @@ impl ValidatorRegistry {
     /// Construct a registry pre-loaded with the shipped built-in
     /// validators.
     ///
-    /// Universal keys: `"luhn"`, `"iban"`, `"phone"`, `"date"`,
-    /// `"crypto.btc"`.
+    /// Universal keys: `"luhn"`, `"iban"`, `"swift"`, `"phone"`, `"date"`,
+    /// `"ipv4"`, `"ipv6"`, `"crypto.btc"`.
     ///
     /// US-scoped: `"us.ssn"`, `"us.aba_routing"`, `"us.npi"`,
     /// `"us.dea_number"`, `"us.postal_code"`.
@@ -158,7 +144,7 @@ impl ValidatorRegistry {
     ///
     /// IT-scoped: `"it.fiscal_code"`, `"it.vat_code"`.
     ///
-    /// PL-scoped: `"pl.pesel"`, `"pl.nip"`, `"pl.regon"`.
+    /// PL-scoped: `"pl.pesel"`, `"pl.nip"`, `"pl.regon"`, `"pl.nrb"`.
     ///
     /// AU-scoped: `"au.abn"`, `"au.acn"`, `"au.medicare"`,
     /// `"au.tfn"`.

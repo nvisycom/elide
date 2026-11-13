@@ -17,6 +17,7 @@ use serde::Deserialize;
 /// [`Dictionary`]: crate::Dictionary
 /// [`Scoring`]: crate::Scoring
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Term {
     /// The literal scanned for.
     pub term: String,

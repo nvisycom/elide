@@ -1,20 +1,25 @@
 //! [`PatternRecognizerBuilder`]: collects rules and compiles them into a
 //! [`PatternRecognizer`].
 
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::result::Result as StdResult;
 use std::sync::Arc;
 
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_core::entity::LabelCatalog;
+use elide_core::entity::audit::PatternRule;
 use elide_core::{Error, Result};
 use regex::{Error as RegexError, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::PatternRecognizer;
 use crate::context::matching::{KeywordMatcher, SubstringMatcher};
 use crate::context::{CompiledContext, RuleContext};
-use crate::rule::{CompiledDictionary, CompiledPattern, Dictionary, Pattern, Variant};
+use crate::rule::{
+    CompiledDictionary, CompiledPattern, Dictionary, DictionaryTerms, Pattern, RuleScope,
+    TermOwner, Variant,
+};
 use crate::shipped;
 use crate::validators::ValidatorRegistry;
 
@@ -285,19 +290,19 @@ impl PatternRecognizerBuilder {
     /// validator name, when a dictionary's `scoring` is invalid
     /// or under-declared for some term's source column, or when
     /// the shared automata cannot be constructed.
-    pub fn build(self) -> Result<PatternRecognizer> {
+    pub fn build(mut self) -> Result<PatternRecognizer> {
         let validators = self
             .validators
-            .clone()
+            .take()
             .unwrap_or_else(ValidatorRegistry::builtin);
         let mut contexts = Vec::new();
-        let (compiled_patterns, regex_set) = self.compile_patterns(&validators, &mut contexts)?;
-        let (compiled_dicts, aho) = self.compile_dictionaries(&mut contexts)?;
+        let (patterns, regex_set) = self.compile_patterns(&validators, &mut contexts)?;
+        let (dictionaries, terms) = self.compile_dictionaries(&mut contexts)?;
         Ok(PatternRecognizer {
-            patterns: compiled_patterns,
+            patterns,
             regex_set,
-            dictionaries: compiled_dicts,
-            aho,
+            dictionaries,
+            terms,
             contexts,
             keyword_matcher: self
                 .keyword_matcher
@@ -311,11 +316,13 @@ impl PatternRecognizerBuilder {
         &self,
         declared: &RuleContext,
         contexts: &mut Vec<CompiledContext>,
-    ) -> Option<usize> {
+    ) -> Result<Option<usize>> {
         let sources = self.dictionaries.iter().chain(&self.context_sources);
-        let context = CompiledContext::compile(declared, sources)?;
+        let Some(context) = CompiledContext::compile(declared, sources)? else {
+            return Ok(None);
+        };
         contexts.push(context);
-        Some(contexts.len() - 1)
+        Ok(Some(contexts.len() - 1))
     }
 
     /// Compile every `(pattern, variant)` pair into a
@@ -331,7 +338,7 @@ impl PatternRecognizerBuilder {
         let mut regex_sources = Vec::with_capacity(variant_total);
 
         for pattern in &self.patterns {
-            let context = self.compile_context(&pattern.context, contexts);
+            let context = self.compile_context(&pattern.context, contexts)?;
             for variant in &pattern.variants {
                 let regex = self.compile_regex(&variant.regex).map_err(|e| {
                     Error::configuration(format!("pattern `{}`: invalid regex: {e}", pattern.name))
@@ -348,17 +355,24 @@ impl PatternRecognizerBuilder {
                 let span_group = regex
                     .capture_names()
                     .position(|name| name == Some(Variant::ENTITY_GROUP));
+                let rule = PatternRule {
+                    name: pattern.name.clone().into(),
+                    regex: Some(variant.regex.clone().into()),
+                    validator: variant.validator.clone().map(Into::into),
+                };
                 regex_sources.push(variant.regex.clone());
                 compiled.push(CompiledPattern {
-                    name: pattern.name.clone(),
-                    labels: pattern.labels.clone(),
+                    scope: RuleScope {
+                        labels: pattern.labels.clone(),
+                        languages: pattern.languages.clone(),
+                        countries: pattern.countries.clone(),
+                    },
                     regex,
                     span_group,
                     score: variant.score,
                     validator,
-                    languages: pattern.languages.clone(),
-                    countries: pattern.countries.clone(),
                     context,
+                    rule,
                 });
             }
         }
@@ -399,35 +413,35 @@ impl PatternRecognizerBuilder {
         builder.build()
     }
 
-    /// Compile every dictionary into a [`CompiledDictionary`]
-    /// with its term-id range inside the shared Aho-Corasick
-    /// automaton, plus per-term confidences resolved from the
-    /// dictionary's `scoring` policy (with per-term overrides
-    /// taking precedence).
+    /// Compile every dictionary into a [`CompiledDictionary`], and every
+    /// distinct term across them into one shared Aho-Corasick automaton.
+    ///
+    /// Each automaton term maps to every dictionary holding it ([`TermOwner`]),
+    /// with the term's confidence there resolved from that dictionary's
+    /// `scoring` policy (a per-term override taking precedence), so a term two
+    /// dictionaries share matches for both.
     fn compile_dictionaries(
         &self,
         contexts: &mut Vec<CompiledContext>,
-    ) -> Result<(Vec<CompiledDictionary>, Option<AhoCorasick>)> {
+    ) -> Result<(Vec<CompiledDictionary>, Option<DictionaryTerms>)> {
         let mut compiled = Vec::with_capacity(self.dictionaries.len());
-        let mut all_terms: Vec<String> = Vec::new();
+        let mut terms: Vec<&str> = Vec::new();
+        let mut owners: Vec<Vec<TermOwner>> = Vec::new();
+        let mut term_ids: HashMap<&str, usize> = HashMap::new();
+        let mut term_count = 0;
+        let mut term_bytes = 0;
 
-        for dict in &self.dictionaries {
+        for (dictionary, dict) in self.dictionaries.iter().enumerate() {
             if let Err(reason) = dict.scoring.validate() {
                 return Err(Error::configuration(format!(
                     "dictionary `{}`: {reason}",
                     dict.name
                 )));
             }
-            let term_start = all_terms.len();
-            let mut term_scores = Vec::with_capacity(dict.terms.len());
             for entry in &dict.terms {
-                all_terms.push(entry.term.clone());
-                // Per-term `score` wins when set; otherwise ask
-                // the dictionary's `Scoring` to resolve against
-                // the term's source column. `None` means the
-                // column didn't map to a declared score,
-                // surfaced as a hard build error so silent
-                // misconfiguration can't happen.
+                // A per-term `score` wins; otherwise the dictionary's
+                // `Scoring` resolves it from the term's source column, and a
+                // column with no declared score is a build error.
                 let score = entry
                     .score
                     .or_else(|| dict.scoring.get(entry.column))
@@ -441,61 +455,64 @@ impl PatternRecognizerBuilder {
                             dict.name, entry.term,
                         ))
                     })?;
-                term_scores.push(score);
+                term_count += 1;
+                term_bytes += entry.term.len();
+                let id = match term_ids.entry(entry.term.as_str()) {
+                    Entry::Occupied(id) => *id.get(),
+                    Entry::Vacant(slot) => {
+                        terms.push(entry.term.as_str());
+                        owners.push(Vec::new());
+                        *slot.insert(terms.len() - 1)
+                    }
+                };
+                // A term listed twice in one dictionary keeps its first score.
+                // Dictionaries are visited in order, so a repeat is the last owner.
+                if owners[id].last().is_none_or(|o| o.dictionary != dictionary) {
+                    owners[id].push(TermOwner { dictionary, score });
+                }
             }
-            let term_end = all_terms.len();
             compiled.push(CompiledDictionary {
-                name: dict.name.clone(),
-                labels: dict.labels.clone(),
-                term_start,
-                term_end,
-                term_scores,
-                languages: dict.languages.clone(),
-                countries: dict.countries.clone(),
+                scope: RuleScope {
+                    labels: dict.labels.clone(),
+                    languages: dict.languages.clone(),
+                    countries: dict.countries.clone(),
+                },
                 word_boundary: dict.word_boundary,
-                context: self.compile_context(&dict.context, contexts),
+                context: self.compile_context(&dict.context, contexts)?,
+                rule: PatternRule {
+                    name: dict.name.clone().into(),
+                    ..PatternRule::default()
+                },
             });
         }
 
-        // Bound the shared automaton before building it: the count and the
-        // total term bytes are recognizer-wide aggregates across every
-        // dictionary. Unset limits skip the check.
+        // The limits bound every registered term across every dictionary,
+        // counted before shared terms are merged.
         if let Some(max) = self.term_count_limit
-            && all_terms.len() > max
+            && term_count > max
         {
             return Err(Error::configuration(format!(
-                "dictionary term count {} exceeds limit {max}",
-                all_terms.len()
+                "dictionary term count {term_count} exceeds limit {max}"
             )));
         }
-        if let Some(max) = self.term_bytes_limit {
-            let total: usize = all_terms.iter().map(String::len).sum();
-            if total > max {
-                return Err(Error::configuration(format!(
-                    "dictionary term bytes {total} exceeds limit {max}"
-                )));
-            }
+        if let Some(max) = self.term_bytes_limit
+            && term_bytes > max
+        {
+            return Err(Error::configuration(format!(
+                "dictionary term bytes {term_bytes} exceeds limit {max}"
+            )));
         }
 
-        let aho = if all_terms.is_empty() {
-            None
-        } else {
-            Some(
-                AhoCorasick::builder()
-                    .ascii_case_insensitive(false)
-                    // Longest-match-at-position: when both `en`
-                    // and `English` start at the same offset,
-                    // return `English`. Without this, the short
-                    // ISO code would win and word-boundary
-                    // post-filtering would then reject it,
-                    // dropping the legitimate long-form match.
-                    .match_kind(MatchKind::LeftmostLongest)
-                    .build(&all_terms)
-                    .map_err(|e| {
-                        Error::configuration(format!("compiling dictionary automaton: {e}"))
-                    })?,
-            )
-        };
-        Ok((compiled, aho))
+        if terms.is_empty() {
+            return Ok((compiled, None));
+        }
+        // Every occurrence, overlapping ones included: which one a dictionary
+        // keeps depends on its own filters, so the recognizer picks the
+        // longest per dictionary once those have run.
+        let automaton = AhoCorasick::builder()
+            .match_kind(MatchKind::Standard)
+            .build(&terms)
+            .map_err(|e| Error::configuration(format!("compiling dictionary automaton: {e}")))?;
+        Ok((compiled, Some(DictionaryTerms { automaton, owners })))
     }
 }

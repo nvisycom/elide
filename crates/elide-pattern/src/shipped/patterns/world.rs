@@ -1,6 +1,7 @@
 //! Universal patterns, apply regardless of jurisdiction.
 
-use crate::{__shipped_pattern as shipped_pattern, Pattern};
+use super::shipped_pattern;
+use crate::Pattern;
 
 shipped_pattern!(
     /// Email address (RFC-loose).

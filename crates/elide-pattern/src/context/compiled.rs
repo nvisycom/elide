@@ -1,12 +1,11 @@
 //! [`CompiledContext`]: one rule's `[context]`, resolved for matching.
 
-use std::iter;
-
+use elide_core::Result;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, ConfidenceThreshold, LanguageTag};
-use hipstr::HipStr;
 
 use super::declaration::{Matching, RuleContext};
+use super::matching::KeywordSet;
 use crate::Dictionary;
 
 /// Additive lift a keyword or anchor applies when the rule names none.
@@ -25,7 +24,7 @@ pub(crate) struct CompiledContext {
 /// One keyword list and the language it applies to; `None` applies to any.
 pub(super) struct Keywords {
     pub(super) language: Option<LanguageTag>,
-    pub(super) terms: Vec<HipStr<'static>>,
+    pub(super) set: KeywordSet,
 }
 
 /// A resolved [`Anchor`]: the neighbour's label and the confidence it needs.
@@ -39,28 +38,30 @@ pub(super) struct CompiledAnchor {
 impl CompiledContext {
     /// Compile `declared`, drawing dictionary-sourced keywords from
     /// `dictionaries`. `None` when it declares no keywords and no anchor.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error when a keyword list cannot be compiled.
     pub(crate) fn compile<'a>(
         declared: &RuleContext,
         dictionaries: impl IntoIterator<Item = &'a Dictionary>,
-    ) -> Option<Self> {
+    ) -> Result<Option<Self>> {
         let sourced = dictionaries
             .into_iter()
             .filter(|d| declared.dictionaries.contains(&d.name))
-            .flat_map(|d| d.terms.iter().map(|t| t.term.clone()));
-        let global: Vec<String> = declared.keywords.iter().cloned().chain(sourced).collect();
-        let keywords: Vec<Keywords> = iter::once((None, global))
-            .chain(
-                declared
-                    .languages
-                    .iter()
-                    .map(|(language, terms)| (Some(language.clone()), terms.clone())),
-            )
-            .filter(|(_, terms)| !terms.is_empty())
-            .map(|(language, terms)| Keywords {
-                language,
-                terms: terms.into_iter().map(HipStr::from).collect(),
-            })
-            .collect();
+            .flat_map(|d| d.terms.iter().map(|t| t.term.as_str()));
+        let global = KeywordSet::new(declared.keywords.iter().map(String::as_str).chain(sourced))?;
+        let mut keywords = vec![Keywords {
+            language: None,
+            set: global,
+        }];
+        for (language, terms) in &declared.languages {
+            keywords.push(Keywords {
+                language: Some(language.clone()),
+                set: KeywordSet::new(terms.iter().map(String::as_str))?,
+            });
+        }
+        keywords.retain(|k| !k.set.is_empty());
 
         // A bare `{ label = "currency" }` requires a neighbour that cleared the
         // acceptance threshold, so an ambiguous token that never passed its own
@@ -74,14 +75,14 @@ impl CompiledContext {
         });
 
         if keywords.is_empty() && anchor.is_none() {
-            return None;
+            return Ok(None);
         }
-        Some(Self {
+        Ok(Some(Self {
             keywords,
             word_boundary: declared.matching == Matching::Word,
             boost: Confidence::clamped(declared.boost.unwrap_or(DEFAULT_BOOST)),
             anchor,
-        })
+        }))
     }
 
     /// The keyword lists that apply under the call's asserted `languages`: a
@@ -90,13 +91,13 @@ impl CompiledContext {
     pub(super) fn active_keywords<'a>(
         &'a self,
         languages: &'a [&'a LanguageTag],
-    ) -> impl Iterator<Item = &'a [HipStr<'static>]> + 'a {
+    ) -> impl Iterator<Item = &'a KeywordSet> + 'a {
         self.keywords
             .iter()
             .filter(move |k| match &k.language {
                 None => true,
                 Some(scope) => languages.is_empty() || languages.iter().any(|l| scope.matches(l)),
             })
-            .map(|k| k.terms.as_slice())
+            .map(|k| &k.set)
     }
 }
