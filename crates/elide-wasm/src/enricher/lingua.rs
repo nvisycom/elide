@@ -79,5 +79,5 @@ fn enricher_for(tags: &[&str]) -> Result<LinguaEnricher, ElideError> {
                 format!("invalid BCP-47 language tag: {e}"),
             )
         })?;
-    Ok(LinguaEnricher::with_candidates(candidates))
+    Ok(LinguaEnricher::restricted(candidates)?)
 }

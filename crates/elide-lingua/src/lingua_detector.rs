@@ -1,143 +1,87 @@
-//! [`LinguaDetector`]: thin wrapper around the
-//! [`lingua`] crate's
-//! `LanguageDetector`.
-//!
-//! Owns the lingua detector and exposes one method,
-//! [`detect`], that returns a
-//! `Vec<LanguageClaim>` in our ontology shape. Used by
-//! [`LinguaEnricher`].
-//!
-//! Construction takes either a candidate-language set or "all
-//! languages compiled into the lingua feature set"; the latter
-//! is the unrestricted fallback.
+//! [`LinguaDetector`]: a [`lingua`] language detector that reports
+//! [`LanguageClaim`]s.
 //!
 //! [`lingua`]: https://crates.io/crates/lingua
-//! [`detect`]: LinguaDetector::detect
-//! [`LinguaEnricher`]: crate::LinguaEnricher
 
-use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::{Mutex, OnceLock};
 
-use elide_core::Result;
 use elide_core::primitive::{Confidence, LanguageClaim, LanguageTag};
-use lingua::{
-    IsoCode639_1, Language as LinguaLanguage, LanguageDetector as LinguaInner,
-    LanguageDetectorBuilder,
-};
+use lingua::{IsoCode639_1, Language, LanguageDetector, LanguageDetectorBuilder};
 
-/// Lingua-backed language detector.
+/// A `lingua` language detector over a fixed set of candidate languages.
 ///
-/// Detects per-region languages: for mixed-language input,
-/// returns one [`LanguageClaim`] per detected region with a
-/// populated span. Monolingual input returns a single
-/// detection covering the whole text.
-///
-/// Internal helper for [`LinguaEnricher`], which builds a fresh detector
-/// per call; not part of the public API.
-///
-/// [`LinguaEnricher`]: crate::LinguaEnricher
+/// Detects per region: mixed-language input yields one [`LanguageClaim`] per
+/// region, each with its span; monolingual input yields one claim covering
+/// the whole text.
 pub(crate) struct LinguaDetector {
-    inner: LinguaInner,
+    inner: LanguageDetector,
 }
 
 impl LinguaDetector {
-    /// Construct a detector restricted to `tags`. Unrecognised tags (no
-    /// matching ISO 639-1 primary subtag in lingua) are silently skipped.
-    /// Returns `None` when no tag matched; [`LinguaEnricher`] falls back to
-    /// [`for_all_languages`] in that case.
-    ///
-    /// [`LinguaEnricher`]: crate::LinguaEnricher
-    ///
-    /// [`for_all_languages`]: Self::for_all_languages
-    pub(crate) fn for_languages(tags: &[LanguageTag]) -> Option<Self> {
-        let langs = tags_to_languages(tags);
-        if langs.is_empty() {
+    /// A detector over the languages of `tags` that `lingua` was compiled
+    /// with, matched by primary subtag; `None` when none of them is.
+    pub(crate) fn for_languages<'a>(
+        tags: impl IntoIterator<Item = &'a LanguageTag>,
+    ) -> Option<Self> {
+        let languages: Vec<Language> = tags.into_iter().filter_map(compiled_language).collect();
+        if languages.is_empty() {
             return None;
         }
         Some(Self {
-            inner: LanguageDetectorBuilder::from_languages(&langs).build(),
+            inner: LanguageDetectorBuilder::from_languages(&languages).build(),
         })
     }
 
-    /// Construct a detector considering every language compiled
-    /// into the `lingua` crate's feature set.
+    /// A detector over every language `lingua` was compiled with.
     pub(crate) fn for_all_languages() -> Self {
         Self {
             inner: LanguageDetectorBuilder::from_all_languages().build(),
         }
     }
 
-    /// Run detection on `text`.
-    ///
-    /// Empty for ambiguous inputs (lingua refused to commit), one
-    /// or more entries otherwise. Each entry carries its
-    /// [`span`](LanguageClaim::span) so mixed-language input can be
-    /// attributed region-by-region.
-    pub fn detect(&self, text: &str) -> Result<Vec<LanguageClaim>> {
-        let detections = self
-            .inner
+    /// The languages of `text`, one claim per region, each scored on its own
+    /// region. Empty when `lingua` commits to no language.
+    pub(crate) fn detect(&self, text: &str) -> Vec<LanguageClaim> {
+        self.inner
             .detect_multiple_languages_of(text)
             .into_iter()
-            .filter_map(|result| {
-                let language = lingua_to_tag(result.language())?;
-                let raw_confidence = self
+            .map(|region| {
+                let span = region.start_index()..region.end_index();
+                let confidence = self
                     .inner
-                    .compute_language_confidence(text, result.language());
-                let confidence = Confidence::clamped(raw_confidence as f32);
-                Some(
-                    LanguageClaim::detected(language, confidence)
-                        .with_span(result.start_index()..result.end_index()),
+                    .compute_language_confidence(&text[span.clone()], region.language());
+                LanguageClaim::detected(
+                    tag(region.language()),
+                    Confidence::clamped(confidence as f32),
                 )
+                .with_span(span)
             })
-            .collect();
-        Ok(detections)
+            .collect()
     }
 }
 
-fn lingua_to_tag(lang: LinguaLanguage) -> Option<LanguageTag> {
-    let iso = lang.iso_code_639_1().to_string();
-    match iso.parse() {
-        Ok(tag) => Some(tag),
-        Err(e) => {
-            warn_once_unmappable(&iso, &e.to_string());
-            None
-        }
-    }
+/// The `lingua` language of `tag`, matched by primary subtag, when `lingua`
+/// was compiled with it.
+pub(crate) fn compiled_language(tag: &LanguageTag) -> Option<Language> {
+    IsoCode639_1::from_str(tag.primary_subtag())
+        .ok()
+        .map(|iso| Language::from_iso_code_639_1(&iso))
 }
 
-/// Cache of ISO codes we've already logged an "unmappable" warning
-/// for, so a hot detection loop doesn't spam the log with the same
-/// failure once per call. Lingua's code set is finite and fixed;
-/// real failures here are deterministic.
-fn warn_once_unmappable(iso: &str, error: &str) {
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    let mut guard = match seen.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if guard.insert(iso.to_owned()) {
-        tracing::warn!(
-            target: "elide_lingua",
-            iso_code = %iso,
-            error = %error,
-            "lingua ISO 639-1 code did not parse as a BCP-47 LanguageTag (logged once per process)",
-        );
-    }
-}
-
-fn tags_to_languages(tags: &[LanguageTag]) -> Vec<LinguaLanguage> {
-    tags.iter()
-        .filter_map(|t| IsoCode639_1::from_str(t.primary_subtag()).ok())
-        .map(|iso| LinguaLanguage::from_iso_code_639_1(&iso))
-        .collect()
+/// The language tag of a `lingua` language: its ISO 639-1 code, which is
+/// always a valid two-letter primary subtag.
+fn tag(language: Language) -> LanguageTag {
+    language
+        .iso_code_639_1()
+        .to_string()
+        .parse()
+        .expect("every lingua ISO 639-1 code is a valid language tag")
 }
 
 impl fmt::Debug for LinguaDetector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LinguaDetector").finish()
+        f.debug_struct("LinguaDetector").finish_non_exhaustive()
     }
 }
 
@@ -151,26 +95,53 @@ mod tests {
     }
 
     #[test]
+    fn every_compiled_language_has_a_tag() {
+        for language in Language::all() {
+            assert_eq!(
+                tag(language).primary_subtag(),
+                language.iso_code_639_1().to_string()
+            );
+        }
+    }
+
+    #[test]
     fn detects_english_sentence() {
-        let det = english_only();
-        let detections = det
-            .detect("The quick brown fox jumps over the lazy dog.")
-            .unwrap();
+        let detections = english_only().detect("The quick brown fox jumps over the lazy dog.");
         assert!(!detections.is_empty());
-        let first = &detections[0];
-        assert_eq!(first.language.primary_subtag(), "en");
-        assert!(first.span.is_some());
+        assert_eq!(detections[0].language.primary_subtag(), "en");
+        assert!(detections[0].span.is_some());
     }
 
     #[test]
     fn empty_input_returns_empty_vec() {
-        let det = english_only();
-        assert!(det.detect("").unwrap().is_empty());
+        assert!(english_only().detect("").is_empty());
     }
 
     #[test]
-    fn rejects_construction_with_no_recognised_languages() {
+    fn no_compiled_language_builds_no_detector() {
         let tags = ["xx".parse().unwrap()];
         assert!(LinguaDetector::for_languages(&tags).is_none());
+    }
+
+    /// Each region of mixed text is scored on its own text, so every
+    /// language is confident in its own region.
+    #[cfg(any(feature = "common", feature = "all"))]
+    #[test]
+    fn each_region_is_scored_on_its_own_text() {
+        let tags = ["en".parse().unwrap(), "de".parse().unwrap()];
+        let detector = LinguaDetector::for_languages(&tags).unwrap();
+        let text = "The quick brown fox jumps over the lazy dog and runs away. \
+                    Der schnelle braune Fuchs springt über den faulen Hund und läuft weg.";
+        let claims = detector.detect(text);
+        let languages: Vec<&str> = claims.iter().map(|c| c.language.primary_subtag()).collect();
+        assert_eq!(languages, ["en", "de"]);
+        for claim in &claims {
+            assert!(
+                claim.confidence().get() > 0.5,
+                "{} scored {}",
+                claim.language.as_str(),
+                claim.confidence().get()
+            );
+        }
     }
 }

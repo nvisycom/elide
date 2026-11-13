@@ -7,30 +7,42 @@ Lingua-backed language detection for PII/PHI pipelines.
 ## Overview
 
 Some recognition is language-aware: a pattern set scoped to one language, a
-context enhancer whose keywords are German, a recognizer that only fires on
-English text. Those stages need to know the document's language before they
-run. This crate provides `LinguaEnricher`, an [`Enricher`] that detects the
-language(s) of a piece of text — backed by the [`lingua`](https://crates.io/crates/lingua)
-crate — and stamps the result onto the call for the stages that follow.
+context keyword list in German, a recognizer that only fires on English text.
+Those stages need the document's language before they run. This crate
+provides `LinguaEnricher`, an enricher that detects the languages of a piece
+of text with the [`lingua`](https://crates.io/crates/lingua) crate and adds
+them to the subject for the stages that follow.
 
-An enricher runs ahead of the recognizers and the context enhancer: it resolves
-the languages onto the input, and downstream stages read them back. Detection is
-per-region, so mixed-language input is attributed one detection per detected
-span; monolingual input yields a single detection covering the whole text. When
-the caller has already asserted a language on the input, detection is skipped —
-the assertion is authoritative.
+Detection is per region: mixed-language input gets one detected language per
+region, each with its span and a confidence scored on that region alone;
+monolingual input gets one covering the whole text. A caller that asserts
+languages overrides detection: one asserted language skips it, and two or
+more restrict it to the asserted set.
 
-```rust,ignore
+```rust
+use elide_core::enrichment::Enricher;
+use elide_core::modality::text::{Text, TextData};
+use elide_core::recognition::{Context, Scope, Subject};
 use elide_lingua::LinguaEnricher;
 
-// Detect across every language compiled into the lingua feature set,
-// or restrict the candidate set for speed.
-let enricher = LinguaEnricher::unrestricted();
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> elide_core::Result<()> {
+// Every compiled-in language, or `restricted` to a few for speed and precision.
+let enricher = LinguaEnricher::restricted(["en".parse()?])?;
+
+let scope = Scope::new();
+let ctx = Context::new(&scope);
+let mut subject = Subject::<Text>::new(TextData::new("The quick brown fox jumps over the lazy dog."));
+enricher.enrich(&mut subject, &ctx).await?;
+assert_eq!(ctx.languages(&subject).primary().unwrap().primary_subtag(), "en");
+# Ok(())
+# }
 ```
 
-The candidate scope is fixed at construction; a pipeline that needs different
-scopes per call holds multiple enrichers. Each call builds a fresh detector, so
-the enricher itself is stateless and cheap to clone.
+The candidate languages are fixed at construction, and the detector is built
+once and shared by the enricher's clones. Which languages exist at all is a
+compile-time choice: English by default, the major world languages with the
+`common` feature, and every language `lingua` ships with `all`.
 
 ## Documentation
 
@@ -39,5 +51,3 @@ See [`docs/`](../../docs/) for architecture, security, and API documentation.
 ## Changelog
 
 See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
-
-[`Enricher`]: https://docs.rs/elide-core/latest/elide_core/recognition/trait.Enricher.html
