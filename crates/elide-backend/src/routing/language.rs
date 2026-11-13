@@ -1,12 +1,10 @@
 //! [`LanguageRouted`]: a [`Backend`] decorator that dispatches each request to a
 //! backend registered for its language.
 
-use std::collections::BTreeMap;
-
-use elide_core::backend::{Backend, BackendRequest};
+use elide_core::Result;
+use elide_core::backend::{Backend, BackendRequest, BatchSplit};
 use elide_core::entity::audit::ModelId;
 use elide_core::primitive::LanguageTag;
-use elide_core::{Error, Result};
 
 /// Routes each request to the backend registered for its language.
 ///
@@ -39,10 +37,7 @@ use elide_core::{Error, Result};
 /// All routes share one backend type `B`; to route across different backend
 /// implementations, make `B` an enum over them that implements [`Backend`].
 ///
-/// [`provenance`](Backend::provenance) reports the fallback's model. Meter the
-/// routes, not the router: wrap each route and the fallback in
-/// [`Metered`](crate::metrics::Metered), and each call is charged to the model
-/// that served it.
+/// [`provenance`](Backend::provenance) reports the fallback's model.
 pub struct LanguageRouted<B> {
     routes: Vec<(LanguageTag, B)>,
     fallback: B,
@@ -124,44 +119,12 @@ impl<B: Backend> Backend for LanguageRouted<B> {
     }
 
     async fn call_batch(&self, requests: Vec<Self::Request<'_>>) -> Result<Vec<Self::Response>> {
-        let targets: Vec<Option<usize>> = requests
-            .iter()
-            .map(|request| self.target(request.language()))
-            .collect();
-
-        // A batch on one route is one round-trip, unchanged.
-        if let Some(&first) = targets.first()
-            && targets.iter().all(|&target| target == first)
-        {
-            return self.backend(first).call_batch(requests).await;
+        let split = BatchSplit::by(requests, |request| self.target(request.language()));
+        let mut merge = split.merge();
+        for (target, part) in split {
+            merge.call(self.backend(target), part).await?;
         }
-
-        let len = requests.len();
-        let mut groups = BTreeMap::<Option<usize>, (Vec<usize>, Vec<_>)>::new();
-        for (position, (target, request)) in targets.into_iter().zip(requests).enumerate() {
-            let (positions, group) = groups.entry(target).or_default();
-            positions.push(position);
-            group.push(request);
-        }
-
-        let mut slots: Vec<Option<B::Response>> = (0..len).map(|_| None).collect();
-        for (target, (positions, group)) in groups {
-            let responses = self.backend(target).call_batch(group).await?;
-            if responses.len() != positions.len() {
-                return Err(Error::processing(format!(
-                    "routed backend returned {} responses for a batch of {}",
-                    responses.len(),
-                    positions.len(),
-                )));
-            }
-            for (position, response) in positions.into_iter().zip(responses) {
-                slots[position] = Some(response);
-            }
-        }
-        Ok(slots
-            .into_iter()
-            .map(|slot| slot.expect("every request is routed to exactly one group"))
-            .collect())
+        Ok(merge.finish())
     }
 }
 

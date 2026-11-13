@@ -58,9 +58,7 @@ pub mod prelude;
     feature = "codec-png",
     feature = "codec-docx",
     feature = "codec-wav",
-    feature = "metrics-tracing",
     feature = "operator-aes",
-    feature = "metrics",
     feature = "ratelimit",
     feature = "routing",
 ))]
@@ -96,7 +94,6 @@ mod book {
         Images: "images.md",
         Audio: "audio.md",
         Backends: "backends.md",
-        Usage: "usage.md",
         RateLimits: "rate-limits.md",
         Routing: "routing.md",
         Failover: "failover.md",

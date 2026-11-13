@@ -126,8 +126,8 @@ and this project adheres to
 - **elide-ner:** NER traits and language detection
 - **elide-lingua:** Lingua-backed language detection
 - **elide-llm:** LLM-mediated entity recognizer (text NER and image VLM)
-- **elide-backend:** Backend decorators: usage metering, observability sinks,
-  rate limiting, routing, and failover
+- **elide-backend:** Backend decorators: batching, rate limiting, routing,
+  and failover
 - **elide-redaction:** The operators, the `Anonymizer` and `Deanonymizer`
   that select and apply them, the key vault, and pseudonym generators
 - **elide-fake:** Locale-aware fake-data operator

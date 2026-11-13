@@ -35,7 +35,7 @@ pub struct LlmRecognizer<B: LlmBackend> {
     /// crate name; set one to tell several LLM recognizers apart.
     name: Option<String>,
     /// Backend that sends the prompt to the model and returns the structured
-    /// candidate batch. May be a `Metered` wrapper.
+    /// candidate batch. May be a decorated backend.
     backend: B,
     /// Modality-specific prompt wording.
     prompt: Arc<dyn Prompt<B::Modality>>,

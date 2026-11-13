@@ -1,6 +1,6 @@
 //! [`OcrResponse`]: what an OCR backend returns.
 
-use elide_core::backend::{BackendResponse, Meter, Units};
+use elide_core::backend::BackendResponse;
 
 use crate::modality::LayoutRegion;
 
@@ -25,14 +25,4 @@ impl OcrResponse {
     }
 }
 
-impl BackendResponse for OcrResponse {
-    /// OCR bills per image: one request carries one image, so one call is one
-    /// image processed.
-    fn units(&self) -> Units {
-        Units::from(Meter::Images(1))
-    }
-
-    fn output_count(&self) -> Option<u64> {
-        Some(self.regions.len() as u64)
-    }
-}
+impl BackendResponse for OcrResponse {}

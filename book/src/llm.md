@@ -37,9 +37,6 @@ backend parses it.
 ## Cost
 
 A language model is the most capable recognizer and the most expensive.
-Two ways to spend less on it:
-
-- Run it only when cheaper recognizers are unsure, with an
-  `EscalatingRecognizer`; see
-  [Recognizer decorators](recognizer-decorators.md#escalation).
-- Measure its usage per run with `Metered`; see [Usage](usage.md).
+To spend less on it, run it only when cheaper recognizers are unsure, with
+an `EscalatingRecognizer`; see
+[Recognizer decorators](recognizer-decorators.md#escalation).

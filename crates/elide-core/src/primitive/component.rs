@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 /// A pipeline component's name and version: a recognizer, enricher, or
 /// operator.
 ///
-/// Pairs a stable name with a free-form version string so the audit trail and
-/// usage report record not just *which* component ran but *which build* of it:
+/// Pairs a stable name with a free-form version string so the audit trail
+/// records not just *which* component ran but *which build* of it:
 /// a rerun against an updated ruleset or model is then distinguishable from the
 /// original. The version is opaque text (a semver, a checkpoint hash, a ruleset
 /// date); the core attaches no ordering or comparison semantics to it.

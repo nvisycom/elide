@@ -39,14 +39,7 @@ impl NerResponse {
     }
 }
 
-impl BackendResponse for NerResponse {
-    // NER backends report no billing units (default: empty); usage carries the
-    // model identity from the backend's provenance and the span count below.
-
-    fn output_count(&self) -> Option<u64> {
-        Some(self.spans.len() as u64)
-    }
-}
+impl BackendResponse for NerResponse {}
 
 /// One entity span a NER model predicted: its range, label, and score.
 ///

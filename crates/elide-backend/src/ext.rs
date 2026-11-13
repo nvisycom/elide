@@ -6,7 +6,6 @@ use elide_core::backend::Backend;
 use crate::limit::BatchChunked;
 #[cfg(feature = "ratelimit")]
 use crate::limit::{ConcurrencyLimited, Rate, RateLimited};
-use crate::metrics::{Metered, UsageSink};
 use crate::routing::{FallbackRouted, LanguageRouted};
 
 /// Wraps a [`Backend`] in this crate's decorators by method.
@@ -17,18 +16,12 @@ use crate::routing::{FallbackRouted, LanguageRouted};
 ///
 /// ```ignore
 /// let backend = gliner
-///     .metered(usage.clone())
 ///     .rate_limited(Rate::per_minute(600))
 ///     .concurrency_limited(8);
 /// ```
 ///
 /// Implemented for every backend.
 pub trait BackendExt: Backend + Sized {
-    /// Report each call's usage to `sink`; see [`Metered`].
-    fn metered(self, sink: impl UsageSink + 'static) -> Metered<Self> {
-        Metered::new(self, sink)
-    }
-
     /// Send at most `max_batch_size` requests per batch; see [`BatchChunked`].
     ///
     /// # Panics

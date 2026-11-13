@@ -7,11 +7,6 @@
 //! one provider is served by another. Each is itself a
 //! [`Backend`](elide_core::backend::Backend), so they compose with each other and
 //! with the other decorators.
-//!
-//! A router is not a provider, so meter the backends it chooses between, not the
-//! router: wrap each in [`Metered`](crate::metrics::Metered), and every call is
-//! charged to the model that served it, including a failed primary call a
-//! failover recovered from.
 
 mod fallback;
 mod language;

@@ -1,6 +1,6 @@
 //! [`SttResponse`]: what an STT backend returns.
 
-use elide_core::backend::{BackendResponse, Units};
+use elide_core::backend::BackendResponse;
 
 use crate::modality::TranscriptSegment;
 
@@ -26,17 +26,4 @@ impl SttResponse {
     }
 }
 
-impl BackendResponse for SttResponse {
-    /// No billing units: STT bills per second of processed audio, but the
-    /// transcript carries only segment spans, which under-report duration when a
-    /// clip has trailing silence or an empty transcript. Reporting a wrong number
-    /// is worse than none, so this stays empty until a backend surfaces the
-    /// provider's own reported audio duration.
-    fn units(&self) -> Units {
-        Units::none()
-    }
-
-    fn output_count(&self) -> Option<u64> {
-        Some(self.segments.len() as u64)
-    }
-}
+impl BackendResponse for SttResponse {}

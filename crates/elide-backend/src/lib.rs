@@ -3,7 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 pub mod limit;
-pub mod metrics;
 pub mod routing;
 
 mod ext;

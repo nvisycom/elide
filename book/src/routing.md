@@ -67,25 +67,3 @@ let backend = multilingual
 All routes share one backend type. To route between different
 implementations, such as a hosted model for one language and a local one
 for another, wrap them in an enum that implements `Backend`.
-
-## Usage per route
-
-A router is not a provider: meter the backends it routes between, not the
-router, and each call is charged to the model that served it.
-
-```rust
-use elide::backend::BackendExt;
-use elide::backend::metrics::UsageCollector;
-# use elide::recognition::ner::backend::MockBackend;
-
-# fn main() -> elide::Result<()> {
-# let (multilingual, polish) = (MockBackend::new(), MockBackend::new());
-let usage = UsageCollector::new();
-
-let backend = multilingual
-    .metered(usage.clone())
-    .language_routed()
-    .route("pl".parse()?, polish.metered(usage.clone()));
-# Ok(())
-# }
-```

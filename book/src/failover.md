@@ -57,24 +57,3 @@ let backend = primary
 ```
 
 A batch fails over whole, since a batch fails whole.
-
-## Knowing when it happens
-
-A failover is silent to the analysis, so watch for it in usage. Meter the
-primary and the fallback, not the router: each call is then charged to the
-model that served it, and the primary's failed calls are recorded even when
-the fallback recovered from them. See [Usage](usage.md).
-
-```rust
-use elide::backend::BackendExt;
-use elide::backend::metrics::UsageCollector;
-# use elide::recognition::ner::backend::MockBackend;
-
-# fn main() {
-# let (hosted, local) = (MockBackend::new(), MockBackend::new());
-let usage = UsageCollector::new();
-let backend = hosted
-    .metered(usage.clone())
-    .fallback_routed(local.metered(usage.clone()));
-# }
-```

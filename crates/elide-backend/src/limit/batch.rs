@@ -2,7 +2,7 @@
 //! provider-sized sub-batches.
 
 use elide_core::Result;
-use elide_core::backend::Backend;
+use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::entity::audit::ModelId;
 
 /// Wraps a [`Backend`] and caps how many requests one batch sends at once.
@@ -88,7 +88,7 @@ impl<B: Backend> Backend for BatchChunked<B> {
             let mut window = Vec::with_capacity(self.max_batch_size);
             window.push(first);
             window.extend(requests.by_ref().take(self.max_batch_size - 1));
-            responses.extend(self.inner.call_batch(window).await?);
+            responses.extend(self.inner.call_aligned(window).await?);
         }
         Ok(responses)
     }
@@ -192,6 +192,33 @@ mod tests {
         assert!(out.is_empty());
         // len 0 <= limit, so one inner call with an empty vec.
         assert_eq!(chunked.inner().batch_sizes(), vec![0]);
+    }
+
+    /// A backend that answers every batch with one response too few.
+    struct Short;
+
+    #[async_trait::async_trait]
+    impl Backend for Short {
+        type Request<'a> = Req<'a>;
+        type Response = Resp;
+
+        fn provenance(&self) -> ModelId {
+            ModelId::default()
+        }
+
+        async fn call(&self, request: Req<'_>) -> Result<Resp> {
+            Ok(Resp(request.0))
+        }
+
+        async fn call_batch(&self, requests: Vec<Req<'_>>) -> Result<Vec<Resp>> {
+            Ok(requests.into_iter().skip(1).map(|r| Resp(r.0)).collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_short_window_reply_is_an_error() {
+        let chunked = BatchChunked::new(Short, 3);
+        assert!(chunked.call_batch(reqs(5)).await.is_err());
     }
 
     #[tokio::test]

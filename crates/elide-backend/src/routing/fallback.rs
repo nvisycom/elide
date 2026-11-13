@@ -2,14 +2,13 @@
 //! fallback backend.
 
 use std::fmt;
-use std::sync::Arc;
 
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
 use elide_core::{Error, ErrorKind, Result};
 
 /// Which errors fail a call over to the fallback.
-type Condition = Arc<dyn Fn(&Error) -> bool + Send + Sync>;
+type Condition = Box<dyn Fn(&Error) -> bool + Send + Sync>;
 
 /// Calls a primary backend and, when the call fails, retries on a fallback.
 ///
@@ -33,10 +32,7 @@ type Condition = Arc<dyn Fn(&Error) -> bool + Send + Sync>;
 /// `FallbackRouted::new(a, FallbackRouted::new(b, c))`. A batch fails over whole, since a
 /// batch fails whole.
 ///
-/// [`provenance`](Backend::provenance) reports the primary's model. Meter the
-/// primary and the fallback, not the router: each call is then charged to the
-/// model that served it, and the primary's failures stay visible even when the
-/// fallback recovered from them.
+/// [`provenance`](Backend::provenance) reports the primary's model.
 pub struct FallbackRouted<P, F> {
     primary: P,
     fallback: F,
@@ -50,7 +46,7 @@ impl<P, F> FallbackRouted<P, F> {
         Self {
             primary,
             fallback,
-            condition: Arc::new(fails_over_by_default),
+            condition: Box::new(fails_over_by_default),
         }
     }
 
@@ -58,7 +54,7 @@ impl<P, F> FallbackRouted<P, F> {
     /// kinds.
     #[must_use]
     pub fn when(mut self, condition: impl Fn(&Error) -> bool + Send + Sync + 'static) -> Self {
-        self.condition = Arc::new(condition);
+        self.condition = Box::new(condition);
         self
     }
 
