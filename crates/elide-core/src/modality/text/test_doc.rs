@@ -53,11 +53,12 @@ impl TextDoc {
 
 #[async_trait::async_trait]
 impl DataReader<Text> for TextDoc {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(range) = location.range() else {
-            return Ok(None); // a source-only location has no decoded range to read
-        };
-        Ok(self.text.get(range.clone()).map(TextData::new))
+    async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
+        location
+            .range()
+            .and_then(|range| self.text.get(range.clone()))
+            .map(TextData::new)
+            .ok_or_else(|| Error::malformed("the location addresses no text"))
     }
 }
 

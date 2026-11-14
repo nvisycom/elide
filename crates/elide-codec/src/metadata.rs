@@ -1,9 +1,9 @@
 //! The fields a metadata stream surfaces, read and redacted in place.
 
-use elide_core::Result;
 use elide_core::modality::Chunk;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::redaction::Redactions;
+use elide_core::{Error, Result};
 
 use crate::FlaggedItem;
 use crate::string::RedactRange;
@@ -44,19 +44,30 @@ impl MetadataFields {
     }
 
     /// What `location` addresses: the whole field, or for a span, the field
-    /// holding only that part of its value. `None` when no field has the key
-    /// or the span is not on the value's character boundaries.
-    #[must_use]
-    pub fn read_at(&self, location: &MetadataLocation) -> Option<MetadataData> {
+    /// holding only that part of its value.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if no field has the key, or the span is outside the
+    /// value or splits a character.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub fn read_at(&self, location: &MetadataLocation) -> Result<MetadataData> {
         let field = self.field(&location.key)?;
-        match &location.span {
-            Some(span) => Some(MetadataData::new(
-                field.key.clone(),
-                field.as_str().get(span.clone())?.to_owned(),
-                field.label.clone(),
-            )),
-            None => Some(field.clone()),
-        }
+        let Some(span) = &location.span else {
+            return Ok(field.clone());
+        };
+        let value = field.as_str().get(span.clone()).ok_or_else(|| {
+            Error::malformed(format!(
+                "span {}..{} is outside the field's value or splits a character",
+                span.start, span.end
+            ))
+        })?;
+        Ok(MetadataData::new(
+            field.key.clone(),
+            value.to_owned(),
+            field.label.clone(),
+        ))
     }
 
     /// Apply `redactions` to the fields' values, returning each edited field.
@@ -66,12 +77,14 @@ impl MetadataFields {
     /// so a later read matches what the format wrote.
     ///
     /// Applied right to left, so an edit's length delta does not move an
-    /// earlier span in the same value. A redaction for a key no field has is
-    /// skipped.
+    /// earlier span in the same value.
     ///
     /// # Errors
     ///
-    /// A redaction error if a span falls mid-character.
+    /// [`MalformedInput`] if no field has a redaction's key, or its span is
+    /// outside the value or splits a character. Nothing is skipped.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     pub fn redact(
         &mut self,
         mut redactions: Redactions<Metadata>,
@@ -79,13 +92,11 @@ impl MetadataFields {
         redactions.sort_by_position();
         let mut edited: Vec<String> = Vec::new();
         for (location, replacement) in redactions.into_iter().rev() {
-            let Some(field) = self
+            let field = self
                 .fields
                 .iter_mut()
                 .find(|field| field.key == location.key)
-            else {
-                continue;
-            };
+                .ok_or_else(|| unknown_field(&location.key))?;
             let mut value = field.as_str().to_owned();
             let span = location.span.unwrap_or(0..value.len());
             value.redact_range(replacement.value().unwrap_or_default(), span)?;
@@ -114,9 +125,18 @@ impl MetadataFields {
     }
 
     /// The field keyed `key`.
-    fn field(&self, key: &str) -> Option<&MetadataData> {
-        self.fields.iter().find(|field| field.key == key)
+    fn field(&self, key: &str) -> Result<&MetadataData> {
+        self.fields
+            .iter()
+            .find(|field| field.key == key)
+            .ok_or_else(|| unknown_field(key))
     }
+}
+
+/// The error for a location naming a field the stream doesn't have. The key
+/// is a format's field name, not document content.
+fn unknown_field(key: &str) -> Error {
+    Error::malformed(format!("no metadata field `{key}`"))
 }
 
 #[cfg(test)]
@@ -145,11 +165,11 @@ mod tests {
     fn a_span_reads_its_part_of_the_value() {
         let read = fields().read_at(&part(9, 17)).unwrap();
         assert_eq!(read.value, "Jane Roe");
-        assert!(fields().read_at(&part(0, 99)).is_none());
+        assert!(fields().read_at(&part(0, 99)).is_err());
         assert!(
             fields()
                 .read_at(&MetadataLocation::new("keywords"))
-                .is_none()
+                .is_err()
         );
     }
 
@@ -185,15 +205,15 @@ mod tests {
             )]))
             .unwrap();
         assert_eq!(edits, [("title".to_owned(), String::new())]);
-        assert!(fields.read_at(&MetadataLocation::new("title")).is_none());
+        assert!(fields.read_at(&MetadataLocation::new("title")).is_err());
         assert_eq!(fields.chunks().len(), 1);
     }
 
     #[test]
-    fn an_unknown_field_edits_nothing() {
+    fn an_unknown_field_is_an_error() {
         let mut fields = fields();
         let redactions =
             Redactions::from([(MetadataLocation::new("keywords"), TextReplacement::Removed)]);
-        assert!(fields.redact(redactions).unwrap().is_empty());
+        assert!(fields.redact(redactions).is_err());
     }
 }

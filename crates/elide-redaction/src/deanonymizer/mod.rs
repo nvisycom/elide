@@ -90,9 +90,12 @@ where
     ///
     /// For each entity: resolve its reversible operator, read the current
     /// (replaced) value, lift it back to the modality's replacement, and
-    /// recover the original. Entities with no operator, no readable data, or
-    /// an unrecoverable value (wrong key, not produced by this operator) are
-    /// skipped.
+    /// recover the original. Entities with no operator, or an unrecoverable
+    /// value (wrong key, not produced by this operator), are skipped.
+    ///
+    /// # Errors
+    ///
+    /// An entity whose location `reader` cannot read, or an operator's error.
     pub async fn plan(
         &self,
         entities: &[Entity<M>],
@@ -103,9 +106,7 @@ where
             let Some(operator) = self.operators.resolve(entity) else {
                 continue;
             };
-            let Some(data) = reader.read_at(&entity.location).await? else {
-                continue;
-            };
+            let data = reader.read_at(&entity.location).await?;
             // The document holds the replacement text as data; lift it back
             // to the modality's replacement so the operator can reverse it.
             let current = M::Replacement::from(TextReplacement::substituted(data.as_str()));

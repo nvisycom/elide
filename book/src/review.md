@@ -59,9 +59,22 @@ reviewer can:
   contains, and returns which ones. A finding reaching outside the region is
   left alone, so nothing outside it is spared.
 - **Include** one the analysis missed: `include` adds an entity of a label at
-  a location.
+  a location. The location can be a span, or a mark naming text by where it
+  sits: raw bytes in a part (`TextLocation::marked_source`, for office,
+  markup, JSON and plain text) or a region of a rendered PDF page
+  (`marked_rendered`). Source references address a part as decoded, with its
+  hidden content already handled, so take them from the report rather than
+  from the original file.
 - **Amend** an entity: `relabel` gives it another label and `relocate` moves
   it.
+
+When the report is applied, each mark resolves to the span of text it covers,
+keeping the reviewer's anchor, and is redacted like any detection. A mark
+must cover one run of text: pieces with anything but whitespace between them
+(two boxes on a page, a box over a table column) would take that text too, so
+mark each piece on its own. A mark the document cannot place, like any
+location a part cannot read or write, fails the apply rather than leaving
+content unredacted.
 
 Every edit is recorded on the entity's audit trail as a manual event, with
 who made it (`by`) and why (`because`), so a human decision is never mistaken

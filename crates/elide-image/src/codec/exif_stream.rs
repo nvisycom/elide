@@ -53,8 +53,8 @@ impl Stream<Metadata> for ExifStream {
 
 #[async_trait::async_trait]
 impl DataReader<Metadata> for ExifStream {
-    async fn read_at(&self, location: &MetadataLocation) -> Result<Option<MetadataData>> {
-        Ok(self.fields.read_at(location))
+    async fn read_at(&self, location: &MetadataLocation) -> Result<MetadataData> {
+        self.fields.read_at(location)
     }
 }
 

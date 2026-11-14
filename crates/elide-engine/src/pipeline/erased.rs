@@ -162,8 +162,17 @@ where
                     M::NAME
                 )));
             };
+            // A reviewer's mark names content by where it sits, not by span;
+            // resolve every live location to the span the stream reads and
+            // writes, so marks cluster with the detections they overlap and
+            // none is skipped. A suppressed entity is never redacted, so it
+            // is left as it is.
+            let entities = typed::<M>(entities)?;
+            for entity in entities.iter_mut().filter(|entity| !entity.is_suppressed()) {
+                entity.location = stream.resolve(entity.location.clone())?;
+            }
             self.anonymizer
-                .anonymize(&mut stream, typed::<M>(entities)?, scope)
+                .anonymize(&mut stream, entities, scope)
                 .await
         })
     }

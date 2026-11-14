@@ -287,9 +287,8 @@ impl<M: Modality> Anonymizer<M> {
     /// selection event it applied. A reviewer-suppressed entity is left alone.
     ///
     /// Returns whether anything was written: `false` when nothing was left to
-    /// write (no entity given, all suppressed, no location read any data, or
-    /// every operator left its entity as it is), in which case `target` is not
-    /// written at all.
+    /// write (no entity given, all suppressed, or every operator left its
+    /// entity as it is), in which case `target` is not written at all.
     ///
     /// [`Keep`]: crate::operators::Keep
     /// [`pick`]: Self::pick
@@ -329,10 +328,7 @@ impl<M: Modality> Anonymizer<M> {
                         .expect("cluster members coalesce by construction")
                 })
                 .expect("a cluster covers at least one entity");
-            let Some(data) = target.read_at(&location).await? else {
-                tracing::debug!(modality = M::NAME, "location read no data; skipping");
-                continue;
-            };
+            let data = target.read_at(&location).await?;
             // Run the operator against the *winning* entity, the one the
             // operator was resolved from, since operators may read its fields.
             // `None` leaves the span as it is: nothing is hidden, so the

@@ -25,7 +25,7 @@ use crate::support::orchestrator::{TestOrchestrator, default_text_analyzer};
 /// Re-decode a redacted PDF through the public registry and reassemble its
 /// born-digital text. The re-encoded content stream is FlateDecode-compressed,
 /// so the text is only legible through a real decode, not by grepping bytes.
-async fn extracted_text(pdf: &[u8]) -> Result<String> {
+pub(super) async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let registry = FormatRegistry::with_builtin();
     let mut document = registry
         .decode(pdf, "pdf", HiddenContentPolicy::default())
@@ -38,7 +38,7 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
     Ok(text)
 }
 
-const FIXTURE: Fixture = Fixture {
+pub(super) const FIXTURE: Fixture = Fixture {
     path: concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/testdata/pdf/born_digital_text.pdf"

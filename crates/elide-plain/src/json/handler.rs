@@ -18,9 +18,9 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
-use elide_codec::string::RedactRange;
+use elide_codec::string::{ContiguousSpan, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
-use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
+use elide_core::modality::text::{Marked, SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
@@ -28,6 +28,7 @@ use elide_core::{Error, Result};
 use super::JsonLoader;
 use super::escape::{decode_escape, json_escape};
 use super::parser::parse_slots;
+use crate::slice::slice;
 
 /// Stable [`FormatId`] for the JSON codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
@@ -354,10 +355,23 @@ fn is_json_number(s: &str) -> bool {
     i == len
 }
 
-/// Handler for loaded JSON content.
+/// Handler for loaded JSON content: the slots and where each starts in both
+/// coordinate spaces.
 #[derive(Debug)]
 pub(crate) struct JsonHandler {
     slots: Vec<Slot>,
+    /// Each slot's start offsets, then the document's end: `offsets[i]` and
+    /// `offsets[i + 1]` bound slot `i`. Rebuilt after a write, which changes
+    /// leaf lengths.
+    offsets: Vec<SlotOffset>,
+}
+
+/// Where a slot starts in the decoded stream (what [`TextLocation`] ranges
+/// address) and in the serialized source (what a [`SourceRef`] addresses).
+#[derive(Debug, Clone, Copy, Default)]
+struct SlotOffset {
+    decoded: usize,
+    source: usize,
 }
 
 impl Stream<Text> for JsonHandler {
@@ -366,16 +380,18 @@ impl Stream<Text> for JsonHandler {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
-        // A chunk's location addresses the decoded stream, its span matches
-        // `data` (the decoded value), so a recognizer's offsets into `data` map
-        // straight through. `lift` carries the raw span in `.source` for a
-        // source-relative consumer. Only leaf slots yield a chunk.
-        Ok((0..self.slots.len())
-            .filter_map(|idx| {
-                let Slot::Leaf(leaf) = &self.slots[idx] else {
+        // A chunk's location addresses the decoded stream and matches `data`
+        // (the decoded value), so a recognizer's offsets into `data` map
+        // straight through. Only leaf slots yield a chunk.
+        Ok(self
+            .slots
+            .iter()
+            .zip(&self.offsets)
+            .filter_map(|(slot, offset)| {
+                let Slot::Leaf(leaf) = slot else {
                     return None;
                 };
-                let start = self.decoded_offset_of(idx);
+                let start = offset.decoded;
                 Some(Chunk {
                     location: TextLocation::inline(start..start + leaf.value.len()),
                     data: TextData::new(leaf.value.clone()),
@@ -387,28 +403,48 @@ impl Stream<Text> for JsonHandler {
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
         // `local` is a byte range into this leaf's *decoded* value. The lifted
-        // location's `start..end` addresses the decoded stream (so it stays in
-        // step with the recognizer's own coordinates); `.source` carries the raw
-        // span, since a JSON value differs from its source wherever an escape
-        // (`\"`, `\uXXXX`) collapses.
+        // location's span addresses the decoded stream (in step with the
+        // recognizer's own coordinates); its source ref carries the raw span,
+        // since a JSON value differs from its source wherever an escape (`\"`,
+        // `\uXXXX`) collapses.
         let LeafAt {
             index,
             leaf,
             decoded_start: decoded_slot_start,
-        } = self.find_leaf(&chunk.location)?;
+        } = self.find_leaf(chunk.location.range()?)?;
         let local_range = local.range()?;
         let decoded_start = decoded_slot_start + local_range.start;
         let decoded_end = decoded_slot_start + local_range.end;
 
-        // Raw span: map the value-local endpoints through the leaf's escape
-        // table, offset by the leaf's serialized start in the document.
-        let source_slot_start = self.source_offset_of(index);
+        let source_slot_start = self.offsets[index].source;
         let source_start = leaf.value_to_source(source_slot_start, local_range.start)?;
         let source_end = leaf.value_to_source(source_slot_start, local_range.end)?;
 
         Some(TextLocation::source(
             decoded_start..decoded_end,
             [SourceRef::new(source_start..source_end)],
+        ))
+    }
+
+    /// A source-byte mark becomes the decoded span of the value it covers,
+    /// keeping its source references.
+    fn resolve(&self, location: TextLocation) -> Result<TextLocation> {
+        let TextLocation::Marked(mark) = &location else {
+            return Ok(location);
+        };
+        let Marked::Source { refs } = mark else {
+            return Err(Error::malformed(
+                "a rendered-page mark does not address JSON",
+            ));
+        };
+        let (first, rest) = refs
+            .split_first()
+            .expect("a mark has at least one source reference");
+        let edit = self.resolve_source(first, rest)?;
+        let start = self.offsets[edit.slot].decoded;
+        Ok(TextLocation::source(
+            start + edit.value.start..start + edit.value.end,
+            refs.clone(),
         ))
     }
 }
@@ -428,10 +464,18 @@ impl Encode for JsonHandler {
 
 #[async_trait::async_trait]
 impl DataReader<Text> for JsonHandler {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(self
-            .find_leaf(location)
-            .map(|found| TextData::new(found.leaf.value.clone())))
+    async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
+        let range = location
+            .range()
+            .ok_or_else(|| Error::malformed("an unresolved mark has no span"))?;
+        let found = self.find_leaf(range).ok_or_else(|| {
+            Error::malformed(format!(
+                "range {}..{} is not within one JSON value",
+                range.start, range.end
+            ))
+        })?;
+        let local = range.start - found.decoded_start..range.end - found.decoded_start;
+        slice(&found.leaf.value, &local).map(TextData::new)
     }
 }
 
@@ -440,81 +484,84 @@ impl DataWriter<Text> for JsonHandler {
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
         // Resolve every redaction to a `(slot, value range)` plan against the
         // **pre-mutation** slots first: mutating a leaf shifts later slots'
-        // offsets, but a per-leaf value range stays valid regardless. A location
-        // resolves through its raw `source` when present, else its decoded
-        // `range`, `resolve` handles both.
+        // offsets, but a per-leaf value range stays valid regardless. Any
+        // location that resolves to no value is an error.
         let mut plan: Vec<(LeafEdit, String)> = Vec::new();
         for (loc, replacement) in redactions.into_iter() {
-            if let Some(edit) = self.resolve(&loc)? {
-                let value = replacement.value().unwrap_or_default().to_owned();
-                plan.push((edit, value));
-            }
+            let edit = self.edit_for(&loc)?;
+            let value = replacement.value().unwrap_or_default().to_owned();
+            plan.push((edit, value));
         }
         // Apply per-leaf edits right-to-left within each leaf so earlier
         // edits in the same leaf don't shift later ones.
         plan.sort_by(|(a, _), (b, _)| a.slot.cmp(&b.slot).then(b.value.start.cmp(&a.value.start)));
+        let edited = !plan.is_empty();
         for (edit, value) in plan {
             let Slot::Leaf(leaf) = &mut self.slots[edit.slot] else {
                 continue;
             };
             leaf.splice(edit.value, &value)?;
         }
+        if edited {
+            self.offsets = offsets(&self.slots);
+        }
         Ok(())
     }
 }
 
+/// The start offsets of every slot, then the document's end.
+fn offsets(slots: &[Slot]) -> Vec<SlotOffset> {
+    let mut offsets = Vec::with_capacity(slots.len() + 1);
+    let mut at = SlotOffset::default();
+    offsets.push(at);
+    for slot in slots {
+        at.decoded += slot.decoded_len();
+        at.source += slot.source_len();
+        offsets.push(at);
+    }
+    offsets
+}
+
 impl JsonHandler {
-    /// Build a handler directly from JSON source bytes. Used by the
-    /// loader; preserves the source formatting verbatim.
-    pub(super) fn from_source_string(source: String) -> Self {
-        let slots = parse_slots(&source).unwrap_or_else(|_| vec![Slot::Passthrough(source)]);
-        Self { slots }
-    }
-
-    /// The decoded-stream byte offset where the slot at `idx` starts.
+    /// Lex JSON source into a handler, preserving its formatting verbatim.
     ///
-    /// The decoded stream is what [`TextLocation`] offsets address: passthrough
-    /// bytes verbatim (structural JSON carries no escapes) interleaved with each
-    /// leaf's *decoded* [`value`](Leaf::value). It diverges from the serialized
-    /// stream only across leaves whose value differs from its source (escapes).
-    fn decoded_offset_of(&self, idx: usize) -> usize {
-        self.slots[..idx].iter().map(Slot::decoded_len).sum()
-    }
-
-    /// The serialized byte offset where the slot at `idx` starts, what
-    /// [`encode`](Encode::encode) emits and what a raw [`SourceRef`] addresses.
-    fn source_offset_of(&self, idx: usize) -> usize {
-        self.slots[..idx].iter().map(Slot::source_len).sum()
-    }
-
-    /// Locate the leaf slot whose *decoded* range contains `location`, returning
-    /// the [`LeafAt`] it sits in, its index, a borrow, and the leaf's
-    /// decoded-stream start offset (so a caller need not re-sweep with
-    /// [`decoded_offset_of`]). `location` is a decoded-stream range.
+    /// # Errors
     ///
-    /// [`decoded_offset_of`]: Self::decoded_offset_of
-    fn find_leaf(&self, location: &TextLocation) -> Option<LeafAt<'_>> {
-        // A source-only location carries no decoded range to sweep against.
-        let range = location.range()?;
-        let mut offset = 0usize;
-        for (index, slot) in self.slots.iter().enumerate() {
-            let slot_end = offset + slot.decoded_len();
-            if let Slot::Leaf(leaf) = slot
-                && range.start >= offset
-                && range.end <= slot_end
-            {
-                return Some(LeafAt {
-                    index,
-                    leaf,
-                    decoded_start: offset,
-                });
-            }
-            offset = slot_end;
-        }
-        None
+    /// [`MalformedInput`] if the source is not well-formed JSON.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn parse(source: &str) -> Result<Self> {
+        let slots = parse_slots(source)?;
+        let offsets = offsets(&slots);
+        Ok(Self { slots, offsets })
     }
 
-    /// Resolve a redaction `location` to the [`LeafEdit`] it targets.
+    /// The slots that can hold offset `at` in one coordinate space, in order:
+    /// those starting at or before it and ending at or after it. More than
+    /// one only where empty slots (an empty string's value) sit at `at`.
+    fn slots_at(&self, at: usize, coordinate: fn(&SlotOffset) -> usize) -> Range<usize> {
+        let first = self.offsets[1..].partition_point(|end| coordinate(end) < at);
+        let last =
+            self.offsets[..self.slots.len()].partition_point(|start| coordinate(start) <= at);
+        first..last.max(first)
+    }
+
+    /// Locate the leaf whose *decoded* range contains `range`, with its index
+    /// and its decoded-stream start offset.
+    fn find_leaf(&self, range: &Range<usize>) -> Option<LeafAt<'_>> {
+        self.slots_at(range.start, |o| o.decoded).find_map(|index| {
+            let Slot::Leaf(leaf) = &self.slots[index] else {
+                return None;
+            };
+            (range.end <= self.offsets[index + 1].decoded).then(|| LeafAt {
+                index,
+                leaf,
+                decoded_start: self.offsets[index].decoded,
+            })
+        })
+    }
+
+    /// The [`LeafEdit`] a redaction `location` targets.
     ///
     /// A location carrying a raw [`source`](TextLocation::source) reference is
     /// resolved through the serialized bytes (JSON is single-file, so any
@@ -522,33 +569,33 @@ impl JsonHandler {
     /// [`range`](TextLocation::range) locates the leaf. Either way the returned
     /// value range feeds the same splice.
     ///
-    /// A **decoded `range`** that lands in no leaf is `Ok(None)`, the pipeline's
-    /// own coordinate, tolerated as a no-op. An explicit **`source`** that
-    /// resolves to nothing is `Err`, not `Ok(None)`: the caller supplied raw
-    /// bytes to redact, so silently dropping the edit would leave a green audit
-    /// over an unredacted document. `Err` also covers a malformed range
+    /// Every location that resolves to no value is `Err`: dropping the edit
+    /// would leave a green audit over an unredacted document. That covers a
+    /// location with neither a range nor a source ref, and a malformed range
     /// (reversed, structural, past-value, escape-splitting).
     ///
     /// A location's [`source`](TextLocation::source) may hold **several** refs,
     /// one logical span fragmented across escapes or fused from several runs.
-    /// *Every* ref is resolved and *all* must land in the same leaf: the edit
-    /// covers their bounding value range. Resolving only the first would splice
+    /// *Every* ref is resolved, *all* must land in the same leaf, and only
+    /// whitespace may separate them: the edit covers them together. Resolving
+    /// only the first would splice
     /// it and report success while ignoring the rest, leaving the caller's later
     /// coordinates unredacted under a green audit.
-    fn resolve(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
+    fn edit_for(&self, location: &TextLocation) -> Result<LeafEdit> {
         match location.source_refs().split_first() {
             Some((first, rest)) => self.resolve_source(first, rest),
             None => self.resolve_range(location),
         }
     }
 
-    /// Resolve a location's raw [`SourceRef`] list to a single [`LeafEdit`]. JSON
-    /// is single-file: a `part`-tagged reference does not belong to it and is
-    /// rejected. Each raw byte span is mapped to the leaf's value coordinate
-    /// through the escape table; every ref must resolve to the *same* leaf, and
-    /// the resulting edit spans their combined value range.
-    fn resolve_source(&self, first: &SourceRef, rest: &[SourceRef]) -> Result<Option<LeafEdit>> {
-        let mut edit = self.resolve_one_source(first)?;
+    /// Resolve a location's raw [`SourceRef`] list to a single [`LeafEdit`].
+    /// Each raw byte span is mapped to the leaf's value coordinate through the
+    /// escape table; every ref must resolve to the *same* leaf, and the value
+    /// ranges must form one span (see [`ContiguousSpan`]), which the edit
+    /// covers.
+    fn resolve_source(&self, first: &SourceRef, rest: &[SourceRef]) -> Result<LeafEdit> {
+        let edit = self.resolve_one_source(first)?;
+        let mut pieces = vec![edit.value];
         for source in rest {
             let next = self.resolve_one_source(source)?;
             if next.slot != edit.slot {
@@ -557,20 +604,21 @@ impl JsonHandler {
                     edit.slot, next.slot
                 )));
             }
-            edit.value = edit.value.start.min(next.value.start)..edit.value.end.max(next.value.end);
+            pieces.push(next.value);
         }
-        Ok(Some(edit))
+        let Slot::Leaf(leaf) = &self.slots[edit.slot] else {
+            unreachable!("a source reference resolves to a leaf");
+        };
+        Ok(LeafEdit {
+            slot: edit.slot,
+            value: leaf.value.contiguous_span(pieces)?,
+        })
     }
 
-    /// Resolve one raw [`SourceRef`] to the [`LeafEdit`] for its leaf, `Ok` on
-    /// success, `Err` on an unresolvable or malformed ref. Never a silent no-op:
-    /// an unresolvable explicit coordinate is always an error, so it cannot be
-    /// dropped under a green audit.
+    /// Resolve one raw [`SourceRef`] to the [`LeafEdit`] for its leaf. An
+    /// unresolvable or malformed ref is an error, never a silent no-op.
     fn resolve_one_source(&self, source: &SourceRef) -> Result<LeafEdit> {
         if let Some(part) = &source.part {
-            // JSON is single-file: a part-tagged ref does not address it. The
-            // caller supplied a raw coordinate to redact; silently dropping it
-            // would leave a green audit over an unredacted document.
             return Err(Error::malformed(format!(
                 "source reference names container part {part:?}, but JSON has no parts"
             )));
@@ -593,49 +641,44 @@ impl JsonHandler {
                 raw.start, raw.end
             )));
         }
-        let mut slot_start = 0usize;
-        for (idx, slot) in self.slots.iter().enumerate() {
-            let slot_end = slot_start + slot.source_len();
-            if let Slot::Leaf(leaf) = slot
-                && raw.start >= slot_start
-                && raw.end <= slot_end
-            {
-                // A quoted leaf's span may touch its `"` delimiters (the whole
-                // `"…"` token resolves to the whole value), but a span that
-                // covers *only* a quote and no interior byte addresses no
-                // redactable content, its endpoints would both collapse to the
-                // same value boundary, and `splice` would then *insert* the
-                // replacement into the adjacent value rather than redact. Reject
-                // it rather than silently corrupt the value.
-                if leaf.is_quoted() && leaf.escaped_bounds(slot_start).is_delimiter_only(raw) {
-                    return Err(Error::malformed(format!(
-                        "source range {}..{} covers only a JSON string delimiter, no value",
-                        raw.start, raw.end
-                    )));
-                }
-                let split = || {
-                    Error::malformed(format!(
-                        "source range {}..{} splits a JSON escape",
-                        raw.start, raw.end
-                    ))
-                };
-                let value_start = leaf
-                    .source_to_value(slot_start, raw.start)
-                    .ok_or_else(split)?;
-                let value_end = leaf
-                    .source_to_value(slot_start, raw.end)
-                    .ok_or_else(split)?;
-                return Ok(LeafEdit {
-                    slot: idx,
-                    value: value_start..value_end,
-                });
+        for idx in self.slots_at(raw.start, |o| o.source) {
+            let Slot::Leaf(leaf) = &self.slots[idx] else {
+                continue;
+            };
+            if raw.end > self.offsets[idx + 1].source {
+                continue;
             }
-            slot_start = slot_end;
+            let slot_start = self.offsets[idx].source;
+            // A quoted leaf's span may touch its `"` delimiters (the whole
+            // `"…"` token resolves to the whole value), but a span that covers
+            // *only* a quote addresses no redactable content: its endpoints
+            // would both collapse to the same value boundary, and `splice`
+            // would then *insert* the replacement into the adjacent value.
+            if leaf.is_quoted() && leaf.escaped_bounds(slot_start).is_delimiter_only(raw) {
+                return Err(Error::malformed(format!(
+                    "source range {}..{} covers only a JSON string delimiter, no value",
+                    raw.start, raw.end
+                )));
+            }
+            let split = || {
+                Error::malformed(format!(
+                    "source range {}..{} splits a JSON escape",
+                    raw.start, raw.end
+                ))
+            };
+            let value_start = leaf
+                .source_to_value(slot_start, raw.start)
+                .ok_or_else(split)?;
+            let value_end = leaf
+                .source_to_value(slot_start, raw.end)
+                .ok_or_else(split)?;
+            return Ok(LeafEdit {
+                slot: idx,
+                value: value_start..value_end,
+            });
         }
         // The span fell in structural bytes (a `{`, `,`, whitespace) or past the
-        // document, no leaf value to redact. As with a part-tagged ref, an
-        // explicit-but-unresolvable source is a caller mistake, not a no-op:
-        // erroring keeps a green audit off an unredacted document.
+        // document: no leaf value to redact.
         Err(Error::malformed(format!(
             "source range {}..{} resolves to no JSON string value",
             raw.start, raw.end
@@ -644,59 +687,45 @@ impl JsonHandler {
 
     /// Resolve a decoded [`range`] to a [`LeafEdit`]. The decoded stream *is* the
     /// leaf's value within a leaf, so the value offsets are the decoded-local
-    /// ones directly. Errors name every malformed shape: reversed, structural
-    /// start, past-value end, char-splitting, past-document.
+    /// ones directly. Errors name every malformed shape: missing, reversed,
+    /// structural start, past-value end, char-splitting, past-document.
     ///
     /// [`range`]: TextLocation::range
-    fn resolve_range(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
-        // No decoded range and (per `resolve`) no source refs either: nothing to
-        // locate, tolerated as a no-op like a decoded range that lands in no leaf.
-        let Some(range) = location.range() else {
-            return Ok(None);
-        };
+    fn resolve_range(&self, location: &TextLocation) -> Result<LeafEdit> {
+        let range = location.range().ok_or_else(|| {
+            Error::malformed("a JSON redaction needs a byte range or a source reference")
+        })?;
         if range.start > range.end {
             return Err(Error::malformed(format!(
                 "redaction range {}..{} is reversed",
                 range.start, range.end
             )));
         }
-        let mut slot_start = 0usize;
-        for (idx, slot) in self.slots.iter().enumerate() {
-            let slot_end = slot_start + slot.decoded_len();
-            if range.start < slot_end {
-                let Slot::Leaf(leaf) = slot else {
-                    return Err(Error::malformed(format!(
-                        "redaction range {}..{} does not start in a JSON value",
-                        range.start, range.end
-                    )));
-                };
-                let value_start = range.start - slot_start;
-                let value_end = range.end - slot_start;
-                if value_end > leaf.value.len() {
-                    return Err(Error::malformed(format!(
-                        "redaction range {}..{} extends past its JSON value",
-                        range.start, range.end
-                    )));
-                }
-                if !leaf.value.is_char_boundary(value_start)
-                    || !leaf.value.is_char_boundary(value_end)
-                {
-                    return Err(Error::malformed(format!(
-                        "redaction range {}..{} splits a UTF-8 character",
-                        range.start, range.end
-                    )));
-                }
-                return Ok(Some(LeafEdit {
-                    slot: idx,
-                    value: value_start..value_end,
-                }));
-            }
-            slot_start = slot_end;
+        // The first slot ending past `range.start`: an empty slot there holds
+        // nothing to redact.
+        let idx = self.offsets[1..].partition_point(|end| end.decoded <= range.start);
+        let Some(slot) = self.slots.get(idx) else {
+            return Err(Error::malformed(format!(
+                "redaction range {}..{} is past the end of the document",
+                range.start, range.end
+            )));
+        };
+        let Slot::Leaf(leaf) = slot else {
+            return Err(Error::malformed(format!(
+                "redaction range {}..{} does not start in a JSON value",
+                range.start, range.end
+            )));
+        };
+        let slot_start = self.offsets[idx].decoded;
+        let value = range.start - slot_start..range.end - slot_start;
+        if value.end > leaf.value.len() {
+            return Err(Error::malformed(format!(
+                "redaction range {}..{} extends past its JSON value",
+                range.start, range.end
+            )));
         }
-        Err(Error::malformed(format!(
-            "redaction range {}..{} is past the end of the document",
-            range.start, range.end
-        )))
+        slice(&leaf.value, &value)?;
+        Ok(LeafEdit { slot: idx, value })
     }
 }
 
@@ -728,7 +757,7 @@ mod tests {
     use super::*;
 
     fn handler(src: &str) -> JsonHandler {
-        JsonHandler::from_source_string(src.to_string())
+        JsonHandler::parse(src).expect("valid JSON")
     }
 
     /// The first chunk whose decoded value equals `value`.
@@ -787,16 +816,40 @@ mod tests {
         Ok(())
     }
 
+    /// A range inside a value reads that span, not the whole value: the
+    /// anonymizer computes the replacement from what it reads.
+    #[tokio::test]
+    async fn read_returns_the_span_within_a_value() -> Result<()> {
+        let h = handler(r#"{"note":"Contact: a@b.test"}"#);
+        let chunk = find_chunk(&h, "Contact: a@b.test");
+        let start = chunk.location.range().unwrap().start + "Contact: ".len();
+        let email = TextLocation::inline(start..start + "a@b.test".len());
+        assert_eq!(h.read_at(&email).await?.as_str(), "a@b.test");
+        Ok(())
+    }
+
+    /// Offsets are rebuilt after a write that changes a value's length.
+    #[tokio::test]
+    async fn a_write_moves_the_later_chunks() -> Result<()> {
+        let mut h = handler(r#"{"a":"long value","b":"next"}"#);
+        let first = find_chunk(&h, "long value");
+        h.write_at(Redactions::from([(
+            first.location.clone(),
+            TextReplacement::substituted("x"),
+        )]))
+        .await?;
+        let next = find_chunk(&h, "next");
+        assert_eq!(h.read_at(&next.location).await?.as_str(), "next");
+        assert_eq!(encoded(&h), r#"{"a":"x","b":"next"}"#);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn read_returns_string() -> Result<()> {
         let h = handler(r#"{"name":"Alice"}"#);
         let mut found = false;
         for chunk in h.chunks()? {
-            if h.read_at(&chunk.location)
-                .await?
-                .map(|d| d.as_str().to_owned())
-                == Some("Alice".to_owned())
-            {
+            if h.read_at(&chunk.location).await?.as_str() == "Alice" {
                 found = true;
             }
         }
@@ -940,6 +993,23 @@ mod tests {
         Ok(())
     }
 
+    /// A source-byte mark resolves to the decoded span of what it covers, so
+    /// it reads like a detected entity.
+    #[tokio::test]
+    async fn a_mark_resolves_to_its_decoded_span() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
+        let h = handler(&src);
+        let raw_at = src.find("bar").unwrap();
+        let mark = TextLocation::marked_source(SourceRef::new(raw_at..raw_at + 3));
+        let resolved = h.resolve(mark)?;
+        assert_eq!(h.read_at(&resolved).await?.as_str(), "bar");
+        let structural = TextLocation::marked_source(SourceRef::new(0..1));
+        assert!(h.resolve(structural).is_err());
+        Ok(())
+    }
+
     #[tokio::test]
     async fn source_span_covering_the_whole_quoted_token_redacts_the_value() -> Result<()> {
         use elide_core::modality::text::SourceRef;
@@ -1078,10 +1148,8 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let b = src.find("bcd").unwrap();
-        // Two non-adjacent single-byte refs (`b` and `d`) within the one value;
-        // their bounding value range is the whole `bcd`.
         let location =
-            TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)])
+            TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(b + 1..b + 3)])
                 .unwrap();
         h.write_at(Redactions::from([(
             location,
@@ -1089,6 +1157,30 @@ mod tests {
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
+        Ok(())
+    }
+
+    /// Refs with text between them are refused: one edit over both would
+    /// take that text too.
+    #[tokio::test]
+    async fn source_refs_with_text_between_them_are_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let b = src.find("bcd").unwrap();
+        let location =
+            TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)])
+                .unwrap();
+        let err = h
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
+            .await
+            .expect_err("`c` lies between the refs");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src);
         Ok(())
     }
 

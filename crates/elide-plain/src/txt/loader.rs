@@ -27,6 +27,7 @@ impl Loader for TxtLoader {
 mod tests {
     use bytes::Bytes;
     use elide_codec::Stream;
+    use elide_core::ErrorKind;
 
     use super::*;
 
@@ -54,6 +55,6 @@ mod tests {
     async fn load_invalid_utf8() {
         let content = ContentData::new(Bytes::from_static(&[0xFF, 0xFE, 0x00]));
         let err = TxtLoader.decode(content).await.unwrap_err();
-        assert!(err.to_string().contains("UTF-8"));
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
 }

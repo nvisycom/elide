@@ -1072,6 +1072,37 @@ mod tests {
         assert!(r.width > 0.0 && r.height > 0.0, "extent {r:?}");
     }
 
+    /// A region selects exactly the glyphs whose centers it holds: boxes over
+    /// two words select those words' characters and nothing between them.
+    #[test]
+    fn a_region_selects_the_glyphs_it_covers() {
+        let block = extract_block_with_widths(
+            vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 10.into()]),
+                Operation::new("Td", vec![10.into(), 150.into()]),
+                show("Jane and Roe"),
+                Operation::new("ET", vec![]),
+            ],
+            true,
+        );
+        let geometry = super::super::PageGeometry {
+            page: block.page,
+            rects: block.rects.clone(),
+            frame: block.frame,
+        };
+        let regions: Vec<_> = [0..4, 9..12]
+            .into_iter()
+            .flat_map(|chars| geometry.rects_for(chars))
+            .collect();
+        let mut chars: Vec<usize> = geometry
+            .glyphs_in(&regions)
+            .flat_map(|range| range.collect::<Vec<_>>())
+            .collect();
+        chars.sort_unstable();
+        assert_eq!(chars, [0, 1, 2, 3, 9, 10, 11]);
+    }
+
     /// Two words positioned by a `Td` jump, with no space character between them
     /// (the Chrome/Skia "print to PDF" shape), extract with a space between.
     #[test]

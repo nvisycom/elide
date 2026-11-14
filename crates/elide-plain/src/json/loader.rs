@@ -1,12 +1,10 @@
-//! JSON loader: decode source bytes and hand them to [`JsonHandler`]
-//! verbatim. Formatting (indentation, key order, trailing whitespace) is
-//! preserved by the handler's slot model; the loader only does encoding +
-//! well-formedness checks.
+//! JSON loader: decode the source bytes and lex them into a [`JsonHandler`],
+//! which keeps the formatting (indentation, key order, whitespace) verbatim.
 
 use elide_codec::Loader;
 use elide_codec::content::ContentData;
+use elide_core::Result;
 use elide_core::modality::text::Text;
-use elide_core::{Error, Result};
 
 use super::JsonHandler;
 
@@ -20,19 +18,14 @@ impl Loader for JsonLoader {
     type Stream = JsonHandler;
 
     async fn decode(&self, content: ContentData) -> Result<JsonHandler> {
-        let text = content.decode()?;
-        // Validate well-formedness eagerly; the handler's lexer re-parses
-        // but with a friendlier error path. Reject here so callers get a
-        // single decode-time validation point.
-        serde_json::from_str::<serde_json::Value>(&text)
-            .map_err(|e| Error::malformed(format!("invalid JSON: {e}")))?;
-        Ok(JsonHandler::from_source_string(text))
+        JsonHandler::parse(&content.decode()?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use elide_codec::Stream;
+    use elide_core::ErrorKind;
 
     use super::*;
 
@@ -51,6 +44,6 @@ mod tests {
             .decode(ContentData::from_text(r#"{"a":}"#))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("JSON"));
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
 }
