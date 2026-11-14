@@ -149,7 +149,8 @@ and this project adheres to
 - **elide-fake:** Locale-aware fake-data operator
 - **elide-engine:** Document orchestration across multi-part containers
 - **elide-codec:** Codec traits and the shared extract engine
-- **elide-format:** Format registry and the built-in handlers
+- **elide-format:** Format registry over the built-in formats, with
+  magic-byte sniffing
 - **elide-plain:** TXT, JSON, and CSV handlers
 - **elide-markup:** HTML and XML handlers, the markup sanitizer, and character
   reference decoding
