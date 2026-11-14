@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-format"
-description = "Format registry and built-in handlers assembling the elide codecs"
+description = "Format registry assembling the elide codecs"
 keywords = ["elide", "codec", "format", "registry"]
 categories = ["encoding", "text-processing"]
 
@@ -96,7 +96,6 @@ infer = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Internal crates
-elide-audio = { workspace = true, features = ["fixtures"] }
 elide-codec = { workspace = true, features = ["mocks"] }
 elide-image = { workspace = true, features = ["fixtures"] }
 elide-plain = { workspace = true, features = ["txt"] }

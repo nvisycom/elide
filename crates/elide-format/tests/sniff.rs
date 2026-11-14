@@ -1,70 +1,66 @@
 //! Magic-byte sniffing: [`FormatRegistry::decode_content`] infers a binary
 //! format from the leading bytes when the content asserts no extension or
-//! content type, and a caller-asserted hint always wins over the sniff.
+//! content type, and an asserted one always wins over the sniff.
 
-#![cfg(all(feature = "sniff", feature = "png"))]
+#![cfg(all(feature = "sniff", feature = "png", feature = "jpeg"))]
 
 use elide_codec::content::ContentData;
 use elide_core::redaction::HiddenContentPolicy;
+use elide_core::{ErrorKind, Result};
 use elide_format::FormatRegistry;
+use elide_image::fixtures::{jpeg_with_tags, png};
 
-/// Raw PNG bytes with no filename and no content type resolve by their magic
-/// number.
-#[tokio::test]
-async fn sniffs_a_png_from_raw_bytes() {
-    let reg = FormatRegistry::with_builtin();
-    let content = ContentData::new(elide_image::fixtures::png(2, 2));
-    let handle = reg
-        .decode_content(content, HiddenContentPolicy::default())
-        .await
-        .expect("sniffed png");
-    assert_eq!(handle.format_id().as_str(), "elide.image.png");
+/// The format id `bytes` resolve to with no filename or content type.
+async fn sniffed(bytes: impl Into<ContentData>) -> Result<&'static str> {
+    let document = FormatRegistry::with_builtin()
+        .decode_content(bytes.into(), HiddenContentPolicy::default())
+        .await?;
+    Ok(document.format_id().as_str())
 }
 
-/// A caller-asserted extension wins over the sniff: PNG bytes labelled `.txt`
-/// route to the text handler, not the image handler. The text handler then
-/// rejects the non-UTF-8 bytes — proving the routing went to text (an image
-/// route would have decoded the PNG cleanly).
+#[tokio::test]
+async fn sniffs_a_png() {
+    assert_eq!(sniffed(png(2, 2)).await.unwrap(), "elide.image.png");
+}
+
+/// `infer` names JPEG `jpg`, one of the JPEG format's two extensions.
+#[tokio::test]
+async fn sniffs_a_jpeg() {
+    let jpeg = jpeg_with_tags(false, &[]);
+    assert_eq!(sniffed(jpeg).await.unwrap(), "elide.image.jpeg");
+}
+
+/// Plain text has no magic bytes, so without a filename or content type it
+/// stays unresolvable.
+#[tokio::test]
+async fn plain_text_does_not_sniff() {
+    let error = sniffed(ContentData::from_text("just some words"))
+        .await
+        .expect_err("text carries no magic bytes");
+    assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+}
+
+/// PNG bytes named `.txt` route to the text handler, which rejects them; an
+/// image route would have decoded them.
 #[tokio::test]
 #[cfg(feature = "txt")]
 async fn an_asserted_extension_beats_the_sniff() {
-    use elide_core::ErrorKind;
-
-    let reg = FormatRegistry::with_builtin();
-    let content = ContentData::new(elide_image::fixtures::png(2, 2)).with_filename("note.txt");
-    let err = reg
+    let content = ContentData::new(png(2, 2)).with_filename("note.txt");
+    let error = FormatRegistry::with_builtin()
         .decode_content(content, HiddenContentPolicy::default())
         .await
         .expect_err("png bytes are not valid text");
-    // The text handler's decode error, not a successful image decode: the `.txt`
-    // extension beat the PNG magic bytes.
-    assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    assert_eq!(error.kind(), ErrorKind::MalformedInput);
 }
 
-/// Plain text has no magic bytes, so a sniff cannot resolve it: without a
-/// filename or content type, it stays unresolvable.
-#[tokio::test]
-async fn plain_text_does_not_sniff() {
-    let reg = FormatRegistry::with_builtin();
-    let content = ContentData::from_text("just some words");
-    assert!(
-        reg.decode_content(content, HiddenContentPolicy::default())
-            .await
-            .is_err()
-    );
-}
-
-/// An unregistered but *present* hint suppresses the sniff: the caller asserted
-/// a format (an extension we do not handle), so PNG bytes named `.unknown` fail
-/// rather than being silently sniffed as an image.
+/// A present but unregistered extension is a claim about the format, so PNG
+/// bytes named `.unknown` fail rather than sniff as an image.
 #[tokio::test]
 async fn an_unregistered_extension_suppresses_the_sniff() {
-    let reg = FormatRegistry::with_builtin();
-    let content = ContentData::new(elide_image::fixtures::png(2, 2)).with_filename("data.unknown");
-    assert!(
-        reg.decode_content(content, HiddenContentPolicy::default())
-            .await
-            .is_err(),
-        "a present-but-unregistered extension must not fall through to a sniff"
-    );
+    let content = ContentData::new(png(2, 2)).with_filename("data.unknown");
+    let error = FormatRegistry::with_builtin()
+        .decode_content(content, HiddenContentPolicy::default())
+        .await
+        .expect_err("no fall-through to the sniff");
+    assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
 }

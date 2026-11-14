@@ -1,8 +1,5 @@
-//! [`FormatRegistry`]: resolves an extension or content type to a
-//! registered [`Format`] and decodes content through its loader.
-//!
-//! Downstream crates register their own formats with
-//! [`FormatRegistry::add_format`]; there is no central enum to extend.
+//! [`FormatRegistry`]: resolves an extension or content type to a registered
+//! [`Format`] and decodes content through its loader.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -13,26 +10,8 @@ use elide_codec::{Document, Format, FormatId};
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
-/// Lowercase `s` for ASCII case-insensitive extension / content-type keys,
-/// **borrowing** when it is already lowercase (the conventional case) so no
-/// allocation happens. Only a key that actually carries an uppercase ASCII
-/// letter is allocated. Used for both map keys and lookup queries, so a
-/// case-insensitive hit never allocates on either side unless the input is
-/// mixed-case.
-fn ascii_lower_cow(s: &str) -> Cow<'_, str> {
-    if s.bytes().any(|b| b.is_ascii_uppercase()) {
-        Cow::Owned(s.to_ascii_lowercase())
-    } else {
-        Cow::Borrowed(s)
-    }
-}
-
-/// Lowercase a `Format`'s extension / content-type into a lookup key while
-/// **preserving its `'static` borrow** when it is already lowercase: a builtin
-/// format's `Cow::Borrowed(&'static str)` becomes a borrowed key with no
-/// allocation, and only a mixed-case (or already-owned mixed-case) value
-/// allocates. This is the store-side counterpart to [`ascii_lower_cow`].
-fn ascii_lower_key(s: Cow<'static, str>) -> Cow<'static, str> {
+/// `s` lowercased for a case-insensitive key, borrowed when it already is.
+fn ascii_lower(s: Cow<'_, str>) -> Cow<'_, str> {
     if s.bytes().any(|b| b.is_ascii_uppercase()) {
         Cow::Owned(s.to_ascii_lowercase())
     } else {
@@ -44,27 +23,18 @@ fn ascii_lower_key(s: Cow<'static, str>) -> Cow<'static, str> {
 ///
 /// Resolves by file extension, MIME content type, or [`FormatId`], then
 /// decodes through the matched format's loader under the caller's
-/// [`HiddenContentPolicy`].
+/// [`HiddenContentPolicy`]. Downstream crates register their own formats with
+/// [`with_format`]; there is no central enum to extend.
 ///
-/// A registry is a cheap-to-`Clone` handle over immutable shared state: the
-/// registered formats and their lookup maps live behind an [`Arc`], so cloning
-/// is a single atomic bump rather than re-allocating the (dozens of) map keys.
-/// A registry is built up once, [`with_builtin`] / [`with_format`], then
-/// shared; the mutating builders use copy-on-write, so they only ever pay for a
-/// deep clone if the registry is mutated *after* it has been shared, which the
-/// build-then-share flow never does.
+/// Cloning is cheap: the formats and lookup maps are shared behind an [`Arc`].
+/// The builders copy them only if the registry was already cloned.
 ///
-/// [`with_builtin`]: Self::with_builtin
 /// [`with_format`]: Self::with_format
 #[derive(Debug, Default, Clone)]
 pub struct FormatRegistry(Arc<FormatRegistryInner>);
 
-/// The shared, immutable body of a [`FormatRegistry`]. Held behind an [`Arc`]
-/// so the public handle clones cheaply; all resolution logic lives here.
-///
-/// `Clone` exists only for [`Arc::make_mut`]'s copy-on-write in the mutating
-/// builders, a live registry is never actually deep-cloned in the
-/// build-then-share flow.
+/// The shared body of a [`FormatRegistry`]: the formats in registration order
+/// and the lookup maps indexing into them.
 #[derive(Debug, Default, Clone)]
 struct FormatRegistryInner {
     formats: Vec<Format>,
@@ -74,80 +44,66 @@ struct FormatRegistryInner {
 }
 
 impl FormatRegistry {
-    /// Empty registry. Use [`with_format`] / [`add_format`] to add custom
-    /// formats, or [`with_builtin`] to start from a pre-populated set of
-    /// every built-in format the active feature set enables.
+    /// An empty registry. Add formats with [`with_format`], or start from
+    /// [`with_builtin`].
     ///
     /// [`with_format`]: Self::with_format
-    /// [`add_format`]: Self::add_format
     /// [`with_builtin`]: Self::with_builtin
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// A registry of every built-in format the enabled features compile in.
     ///
-    /// TXT, JSON, CSV, HTML, and so on.
-    ///
-    /// Add custom formats afterward with [`with_format`] (chainable) or
-    /// [`add_format`] (in-place); they take precedence on extension /
-    /// content-type collisions (last registration wins).
-    ///
-    /// [`with_format`]: Self::with_format
-    /// [`add_format`]: Self::add_format
+    /// Formats added afterward take precedence on an extension or content type
+    /// they share with a built-in (the last registration wins).
+    #[must_use]
     pub fn with_builtin() -> Self {
         let mut registry = Self::new();
-        // Plain-text leaf formats: handlers live in the `elide-plain` crate.
         #[cfg(feature = "txt")]
         registry.add_format(elide_plain::txt_format());
         #[cfg(feature = "json")]
         registry.add_format(elide_plain::json_format());
-        // Markup formats: handlers live in the `elide-markup` engine.
+        #[cfg(feature = "csv")]
+        registry.add_format(elide_plain::csv_format());
         #[cfg(feature = "html")]
         registry.add_format(elide_markup::html_format());
         #[cfg(feature = "xml")]
         registry.add_format(elide_markup::xml_format());
-        #[cfg(feature = "csv")]
-        registry.add_format(elide_plain::csv_format());
-        // Audio formats: handlers live in the `elide-audio` engine.
         #[cfg(feature = "wav")]
         registry.add_format(elide_audio::codec::wav_format());
         #[cfg(feature = "mp3")]
         registry.add_format(elide_audio::codec::mp3_format());
-        // Image formats: handlers live in the `elide-image` engine.
         #[cfg(feature = "png")]
         registry.add_format(elide_image::codec::png_format());
         #[cfg(feature = "jpeg")]
         registry.add_format(elide_image::codec::jpeg_format());
         #[cfg(feature = "tiff")]
         registry.add_format(elide_image::codec::tiff_format());
-        // OOXML formats: handlers live in the `elide-office` engine.
         #[cfg(feature = "xlsx")]
         registry.add_format(elide_office::codec::xlsx_format());
         #[cfg(feature = "docx")]
         registry.add_format(elide_office::codec::docx_format());
         #[cfg(feature = "pptx")]
         registry.add_format(elide_office::codec::pptx_format());
-        // PDF: handler lives in the `elide-pdf` engine.
         #[cfg(feature = "pdf")]
         registry.add_format(elide_pdf::codec::pdf_format());
         registry
     }
 
-    /// Register a [`Format`] and return `self` for chained builder
-    /// calls.
+    /// Register a [`Format`].
+    ///
+    /// An extension or content type another format already claims now
+    /// resolves to this one (the last registration wins).
     ///
     /// # Panics
     ///
-    /// Panics if the format's id is already registered, registering a new
-    /// format must not silently shadow an existing one. To deliberately
-    /// override a built-in (e.g. swap in the OCR-enabled PDF format), use
-    /// [`with_replaced_format`]. Extensions and content types that conflict
-    /// with an existing format are overwritten (last registration wins);
-    /// register custom formats *after* [`with_builtin`] for precedence.
+    /// If the format's id is already registered: a new format must not
+    /// silently shadow an existing one. Override one deliberately with
+    /// [`with_replaced_format`].
     ///
     /// [`with_replaced_format`]: Self::with_replaced_format
-    /// [`with_builtin`]: Self::with_builtin
     #[must_use]
     pub fn with_format(mut self, format: Format) -> Self {
         self.add_format(format);
@@ -162,33 +118,38 @@ impl FormatRegistry {
     ///
     /// [`with_format`]: Self::with_format
     pub fn add_format(&mut self, format: Format) -> &mut Self {
-        let inner = Arc::make_mut(&mut self.0);
         assert!(
-            !inner.by_id.contains_key(&format.id()),
+            !self.0.by_id.contains_key(&format.id()),
             "format id already registered: {} (use replace_format to override)",
             format.id()
         );
-        inner.insert_format(format);
+        Arc::make_mut(&mut self.0).insert_format(format);
         self
     }
 
-    /// Register a [`Format`], **replacing** any with the same [`FormatId`].
+    /// Register a [`Format`], replacing any with the same [`FormatId`], or
+    /// adding it if there is none.
     ///
-    /// Returns `self` for chained builder calls.
+    /// The replaced format's extensions and content types stop resolving
+    /// unless the replacement declares them too. Use it to customize a
+    /// built-in while keeping the rest, such as swapping in
+    /// `elide_pdf::codec::pdf_format_with` to flatten PDF pages:
     ///
-    /// This is the explicit override path: where [`with_format`] panics on a
-    /// duplicate id, this swaps the existing format out in place. Use it to
-    /// customize a built-in while keeping the rest:
-    ///
-    /// ```ignore
-    /// let registry = FormatRegistry::with_builtin()
-    ///     .with_replaced_format(elide_pdf::codec::pdf_format_with(RasterMode::Always { dpi: Dpi::OCR }));
     /// ```
+    /// use elide_codec::Format;
+    /// use elide_codec::mocks::{MOCK_FORMAT_ID, MockLoader, mock_format};
+    /// use elide_format::FormatRegistry;
     ///
-    /// Registering a format whose id is *not* present behaves like
-    /// [`with_format`] (it is simply added).
+    /// let custom = Format::with_document_loader(MOCK_FORMAT_ID, MockLoader)
+    ///     .with_extensions(["custom"]);
+    /// let registry = FormatRegistry::new()
+    ///     .with_format(mock_format())
+    ///     .with_replaced_format(custom);
     ///
-    /// [`with_format`]: Self::with_format
+    /// assert_eq!(registry.iter().count(), 1);
+    /// assert!(registry.by_extension("mock").is_none());
+    /// assert_eq!(registry.by_extension("custom").map(Format::id), Some(MOCK_FORMAT_ID));
+    /// ```
     #[must_use]
     pub fn with_replaced_format(mut self, format: Format) -> Self {
         self.replace_format(format);
@@ -203,44 +164,42 @@ impl FormatRegistry {
         self
     }
 
-    /// Look up a registered format by id.
+    /// The format registered under `id`.
     pub fn by_id(&self, id: &FormatId) -> Option<&Format> {
         self.0.by_id.get(id).map(|&i| &self.0.formats[i])
     }
 
-    /// Look up a registered format by file extension (case-insensitive,
-    /// no leading dot).
+    /// The format registered for a file extension (case-insensitive, no
+    /// leading dot).
     pub fn by_extension(&self, ext: &str) -> Option<&Format> {
         self.0
             .by_extension
-            .get(ascii_lower_cow(ext).as_ref())
+            .get(ascii_lower(Cow::Borrowed(ext)).as_ref())
             .map(|&i| &self.0.formats[i])
     }
 
-    /// Look up a registered format by MIME content type
-    /// (case-insensitive).
+    /// The format registered for a MIME content type (case-insensitive).
     pub fn by_content_type(&self, mime: &str) -> Option<&Format> {
         self.0
             .by_content_type
-            .get(ascii_lower_cow(mime).as_ref())
+            .get(ascii_lower(Cow::Borrowed(mime)).as_ref())
             .map(|&i| &self.0.formats[i])
     }
 
-    /// Iterate over every registered format in registration order.
+    /// Every registered format, in registration order.
     pub fn iter(&self) -> impl Iterator<Item = &Format> {
         self.0.formats.iter()
     }
 
-    /// Decode raw content using the format resolved from the extension
-    /// hint, handling its hidden content under `policy`. Accepts anything
-    /// convertible into [`ContentData`]: `&str`, `&[u8]`, `Vec<u8>`, `Bytes`,
-    /// `String`.
+    /// Decode `content` with the format registered for `extension`, handling
+    /// its hidden content under `policy`.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) when no format is
-    /// registered for `extension`; otherwise propagates the loader's decode
-    /// error.
+    /// [`CapabilityUnavailable`] if no format is registered for `extension`;
+    /// otherwise the loader's decode error.
+    ///
+    /// [`CapabilityUnavailable`]: elide_core::ErrorKind::CapabilityUnavailable
     pub async fn decode(
         &self,
         content: impl Into<ContentData>,
@@ -255,62 +214,46 @@ impl FormatRegistry {
         format.decode(content.into(), policy).await
     }
 
-    /// Decode [`ContentData`] with its hidden content handled under `policy`,
-    /// resolving the format from the metadata it carries: its [`extension`]
-    /// first, then its declared [`content_type`].
+    /// Decode `content`, resolving the format from what it carries: its
+    /// [`extension`] first, then its [`content_type`]. Its hidden content is
+    /// handled under `policy`.
     ///
-    /// With the `sniff` feature, a last resort infers the format from the
-    /// leading bytes when the content asserts neither — so a caller who holds
-    /// only raw bytes can still decode a binary format (the text-shaped formats
-    /// carry no magic bytes). A caller-asserted extension or content type always
-    /// wins over a sniff.
+    /// With the `sniff` feature, content that asserts neither resolves from
+    /// its leading bytes, which only the binary formats carry. An extension or
+    /// content type that is present but unregistered is still a claim about
+    /// the format, so it fails rather than falling through to the sniff.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) when the format cannot be
-    /// resolved from the content's extension, content type, or (with `sniff`)
-    /// its bytes; otherwise propagates the loader's decode error.
+    /// [`CapabilityUnavailable`] if no format resolves; otherwise the loader's
+    /// decode error.
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
+    /// [`CapabilityUnavailable`]: elide_core::ErrorKind::CapabilityUnavailable
     pub async fn decode_content(
         &self,
         content: ContentData,
         policy: HiddenContentPolicy,
     ) -> Result<Document> {
-        let by_ext = content
-            .extension()
-            .and_then(|ext| self.by_extension(&ext))
-            .map(|f| f.id());
-        let format_id = by_ext.or_else(|| {
-            content
-                .content_type()
-                .and_then(|ct| self.by_content_type(ct))
-                .map(|f| f.id())
-        });
-        // Sniff the bytes only when the caller asserted nothing at all. An
-        // extension or content type that is present but unregistered is still a
-        // claim about the format, so honor the caller's intent by failing rather
-        // than second-guessing it — the sniff is for the "no hints" case.
-        let format_id = format_id.or_else(|| {
-            (content.extension().is_none() && content.content_type().is_none())
-                .then(|| self.sniff(content.as_bytes()).map(|f| f.id()))
-                .flatten()
-        });
-        let Some(format_id) = format_id else {
+        let extension = content.extension();
+        let content_type = content.content_type();
+        let format = match (&extension, content_type) {
+            (None, None) => self.sniff(content.as_bytes()),
+            _ => extension
+                .as_deref()
+                .and_then(|ext| self.by_extension(ext))
+                .or_else(|| content_type.and_then(|ct| self.by_content_type(ct))),
+        };
+        let Some(format) = format else {
             return Err(Error::capability_unavailable(
                 "content carries no resolvable filename extension or content type",
             ));
         };
-        // `format_id` came from a lookup above, so this is present.
-        let format = self.by_id(&format_id).expect("resolved format present");
         format.decode(content, policy).await
     }
 
-    /// The format inferred from the leading bytes' magic number, when the
-    /// `sniff` feature is enabled and a registered format matches the inferred
-    /// extension. Only the binary formats carry magic bytes; the text-shaped
-    /// formats never match. Always `None` without the feature.
+    /// The format whose extension the leading bytes' magic number implies.
     #[cfg(feature = "sniff")]
     fn sniff(&self, bytes: &[u8]) -> Option<&Format> {
         let kind = infer::get(bytes)?;
@@ -324,58 +267,54 @@ impl FormatRegistry {
 }
 
 impl FormatRegistryInner {
-    /// Insert `format`, reusing the existing slot when its id is already
-    /// registered (so the `usize` indices the lookup maps hold stay valid,
-    /// removing the old entry would shift every later index), and re-point
-    /// its extensions / content types to that slot.
+    /// Insert `format`, reusing its id's slot if registered so the indices
+    /// the maps hold stay valid.
     ///
-    /// When replacing, the outgoing format's extension / content-type keys are
-    /// first dropped, so a key the replacement no longer declares stops
-    /// resolving to this slot rather than lingering as a stale mapping.
+    /// On a replace, the outgoing format's keys still pointing at the slot are
+    /// dropped first (one a later format claimed is left alone), so a key the
+    /// replacement doesn't declare stops resolving.
     fn insert_format(&mut self, format: Format) {
         let id = format.id();
         let index = match self.by_id.get(&id) {
             Some(&existing) => {
-                // Drop the outgoing format's keys that point here; the
-                // replacement re-inserts whatever it still declares below.
-                // Guard on the value so a key another format later claimed
-                // (last-registration-wins) is left alone.
                 self.by_extension.retain(|_, &mut i| i != existing);
                 self.by_content_type.retain(|_, &mut i| i != existing);
                 self.formats[existing] = format;
                 existing
             }
             None => {
-                let index = self.formats.len();
                 self.formats.push(format);
-                index
+                self.formats.len() - 1
             }
         };
-        let extensions = self.formats[index].extensions().to_vec();
-        let content_types = self.formats[index].content_types().to_vec();
-        for ext in extensions {
-            self.by_extension.insert(ascii_lower_key(ext), index);
+        let format = &self.formats[index];
+        for ext in format.extensions() {
+            self.by_extension.insert(ascii_lower(ext.clone()), index);
         }
-        for ct in content_types {
-            self.by_content_type.insert(ascii_lower_key(ct), index);
+        for ct in format.content_types() {
+            self.by_content_type.insert(ascii_lower(ct.clone()), index);
         }
         self.by_id.insert(id, index);
     }
 }
 
-#[cfg(all(test, feature = "txt"))]
+#[cfg(test)]
 mod tests {
     use elide_codec::Format;
-    use elide_codec::mocks::MockLoader;
-    use elide_plain::txt_format;
+    use elide_codec::mocks::{MOCK_FORMAT_ID, MockLoader};
 
     use super::*;
 
-    /// A format reusing the txt id but claiming a different extension, to
-    /// stand in for a customized built-in. The registry bookkeeping under test
-    /// never decodes through it, so any loader with the right id serves.
-    fn txt_variant() -> Format {
-        Format::with_document_loader(txt_format().id(), MockLoader)
+    /// The mock format, with an extension and a content type to replace.
+    fn original() -> Format {
+        Format::with_document_loader(MOCK_FORMAT_ID, MockLoader)
+            .with_extensions(["mock", "MOCK2"])
+            .with_content_types(["application/x-mock"])
+    }
+
+    /// A format with the mock id declaring none of `original`'s keys.
+    fn variant() -> Format {
+        Format::with_document_loader(MOCK_FORMAT_ID, MockLoader)
             .with_extensions(["variant"])
             .with_content_types(["text/variant"])
     }
@@ -384,62 +323,40 @@ mod tests {
     #[should_panic(expected = "format id already registered")]
     fn add_format_panics_on_duplicate_id() {
         let mut reg = FormatRegistry::new();
-        reg.add_format(txt_format());
-        reg.add_format(txt_variant()); // same id -> panic
+        reg.add_format(original());
+        reg.add_format(variant());
     }
 
     #[test]
-    fn replace_format_swaps_in_place() {
-        let id = txt_format().id();
-        let mut reg = FormatRegistry::new();
-        reg.add_format(txt_format());
-        let before = reg.iter().count();
-
-        reg.replace_format(txt_variant());
-
-        // Same slot reused: no duplicate format.
-        assert_eq!(reg.iter().count(), before);
-        // The replacement's lookups now resolve to the (single) txt id.
-        assert_eq!(reg.by_extension("variant").map(|f| f.id()), Some(id));
-        assert_eq!(
-            reg.by_content_type("text/variant").map(|f| f.id()),
-            Some(id)
-        );
-        // The original still resolves by id to the same single entry.
-        assert!(reg.by_id(&id).is_some());
+    fn lookups_are_case_insensitive() {
+        let reg = FormatRegistry::new().with_format(original());
+        assert!(reg.by_extension("MOCK").is_some());
+        assert!(reg.by_extension("mock2").is_some());
+        assert!(reg.by_content_type("Application/X-Mock").is_some());
     }
 
-    /// Replacing a format drops the outgoing format's extension /
-    /// content-type keys that the replacement no longer declares, rather than
-    /// leaving them mapped to the reused slot. `txt` declares `txt`/`log` +
-    /// `text/plain`; the variant declares neither, so none of them may resolve
-    /// after the swap.
     #[test]
-    fn replace_format_drops_stale_keys() {
+    fn replace_format_swaps_in_place_and_drops_stale_keys() {
         let mut reg = FormatRegistry::new();
-        reg.add_format(txt_format());
-        // Present before the swap.
-        assert!(reg.by_extension("txt").is_some());
-        assert!(reg.by_extension("log").is_some());
-        assert!(reg.by_content_type("text/plain").is_some());
+        reg.add_format(original());
 
-        reg.replace_format(txt_variant());
+        reg.replace_format(variant());
 
-        // The keys the replacement no longer declares stop resolving...
-        assert!(reg.by_extension("txt").is_none());
-        assert!(reg.by_extension("log").is_none());
-        assert!(reg.by_content_type("text/plain").is_none());
-        // ...and only the replacement's own keys resolve.
-        assert!(reg.by_extension("variant").is_some());
-        assert!(reg.by_content_type("text/variant").is_some());
+        assert_eq!(reg.iter().count(), 1);
+        assert!(reg.by_extension("mock").is_none());
+        assert!(reg.by_extension("mock2").is_none());
+        assert!(reg.by_content_type("application/x-mock").is_none());
+        let id = Some(MOCK_FORMAT_ID);
+        assert_eq!(reg.by_extension("variant").map(Format::id), id);
+        assert_eq!(reg.by_content_type("text/variant").map(Format::id), id);
+        assert_eq!(reg.by_id(&MOCK_FORMAT_ID).map(Format::id), id);
     }
 
     #[test]
     fn replace_format_adds_when_id_absent() {
-        // With no prior registration, replace behaves like add.
         let mut reg = FormatRegistry::new();
-        reg.replace_format(txt_format());
+        reg.replace_format(original());
         assert_eq!(reg.iter().count(), 1);
-        assert!(reg.by_extension("txt").is_some());
+        assert!(reg.by_extension("mock").is_some());
     }
 }

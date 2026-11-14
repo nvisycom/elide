@@ -7,24 +7,43 @@ and decode it.
 
 ## Overview
 
-`elide-codec` defines the codec *contracts* — the `Handler` and `Loader` traits,
-the `Format` descriptor, and the format-neutral decode machinery. The concrete
-handlers live with their engines, each behind that engine's `codec` feature: the
-plain-text formats (TXT, JSON, CSV) in `elide-plain`, HTML and XML in
-`elide-markup`, and the rich-media formats in `elide-image`, `elide-pdf`,
-`elide-audio`, and `elide-office`. This crate is the *assembly* layer that ties
-them together.
+`elide-codec` defines the codec contracts: the `Loader` and `DocumentLoader`
+traits, the `Stream` a decoded part is read and redacted through, and the
+`Format` descriptor that names a loader. The concrete formats live with their
+engines: TXT, JSON and CSV in `elide-plain`, HTML and XML in `elide-markup`,
+and the rich-media formats in `elide-image`, `elide-audio`, `elide-office` and
+`elide-pdf`. This crate assembles them.
 
-It owns the `FormatRegistry`, which indexes every enabled format by its
-identifier, file extension, and content type, and decodes raw bytes through the
-matching loader. `FormatRegistry::with_builtin` wires up exactly the formats the
-active feature set enables, so a caller resolves a document from a filename or a
-MIME type without hardcoding which crate handles it.
+`FormatRegistry` indexes formats by id, file extension and content type, and
+decodes raw bytes through the matching loader. `FormatRegistry::with_builtin`
+registers exactly the formats the enabled features compile in, so a caller
+resolves a document from a filename or MIME type without naming the crate that
+handles it. With the `sniff` feature, content that carries neither resolves
+from its magic bytes. Custom formats register at runtime, and cloning a
+registry is cheap, so build it once and share it.
 
-Formats are opt-in: enable only the ones a build needs, and register custom
-formats on the registry at runtime without changing the core. The registry is a
-cheap-to-clone handle over immutable shared state, built once and shared across
-an analysis.
+```rust
+use elide_codec::content::ContentData;
+use elide_core::modality::text::Text;
+use elide_core::redaction::HiddenContentPolicy;
+use elide_format::FormatRegistry;
+
+# #[cfg(not(feature = "txt"))]
+# fn main() {}
+# #[cfg(feature = "txt")]
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> elide_core::Result<()> {
+let registry = FormatRegistry::with_builtin();
+let content = ContentData::from_text("Contact alice@example.com").with_filename("notes.txt");
+let mut document = registry
+    .decode_content(content, HiddenContentPolicy::default())
+    .await?;
+
+assert_eq!(document.format_id().as_str(), "elide.text.txt");
+assert!(document.stream_mut::<Text>("body").is_some());
+# Ok(())
+# }
+```
 
 ## Documentation
 
