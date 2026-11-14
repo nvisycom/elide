@@ -3,10 +3,10 @@
 //! blobs. These are crate-internal, not the cross-crate mock surface (see
 //! `crate::mocks`).
 
-use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
+use elide_core::{Error, Result};
 
 use super::{Blob, Encode, FormatId, LocalId, Native, Stream, StreamMut};
 use crate::content::ContentData;
@@ -28,8 +28,8 @@ impl Stream<Text> for StrStream {
 
 #[async_trait::async_trait]
 impl DataReader<Text> for StrStream {
-    async fn read_at(&self, _location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(None)
+    async fn read_at(&self, _location: &TextLocation) -> Result<TextData> {
+        Err(Error::malformed("a test stream holds no text"))
     }
 }
 

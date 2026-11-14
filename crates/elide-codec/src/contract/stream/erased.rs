@@ -104,11 +104,23 @@ impl<M: Modality> TypedStream<'_, M> {
     pub fn flagged(&self) -> Result<Vec<FlaggedItem<M>>> {
         self.stream.flagged()
     }
+
+    /// `location` in the form the stream reads and writes; see
+    /// [`Stream::resolve`].
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if `location` is a mark the stream cannot resolve.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub fn resolve(&self, location: M::Location) -> Result<M::Location> {
+        self.stream.resolve(location)
+    }
 }
 
 #[async_trait::async_trait]
 impl<M: Modality> DataReader<M> for TypedStream<'_, M> {
-    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>> {
+    async fn read_at(&self, location: &M::Location) -> Result<M::Data> {
         self.stream.read_at(location).await
     }
 }

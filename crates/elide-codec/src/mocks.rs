@@ -19,10 +19,10 @@
 //! [`Text`]: elide_core::modality::text::Text
 
 use bytes::Bytes;
-use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::{HiddenContentPolicy, Redactions};
+use elide_core::{Error, Result};
 
 use crate::content::ContentData;
 use crate::string::RedactRange;
@@ -120,11 +120,12 @@ impl Stream<Text> for MockStream {
 
 #[async_trait::async_trait]
 impl DataReader<Text> for MockStream {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(range) = location.range() else {
-            return Ok(None);
-        };
-        Ok(self.body.get(range.start..range.end).map(TextData::new))
+    async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
+        location
+            .range()
+            .and_then(|range| self.body.get(range.clone()))
+            .map(TextData::new)
+            .ok_or_else(|| Error::malformed("the location addresses no mock text"))
     }
 }
 

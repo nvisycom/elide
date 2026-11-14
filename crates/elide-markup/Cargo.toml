@@ -41,9 +41,6 @@ async-trait = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [] }
 
 [dev-dependencies]
-# Internal crates
-elide-core = { workspace = true, features = ["fixtures"] }
-
 # Markup parsing
 html5ever = { workspace = true, features = [] }
 

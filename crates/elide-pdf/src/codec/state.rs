@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use bytes::Bytes;
-use elide_core::Result;
+use elide_core::{Error, Result};
 
 use super::{PdfPage, RedactMode};
 use crate::document::{Pdf, Redaction};
@@ -25,14 +25,26 @@ pub(super) struct PdfInner {
 impl PdfInner {
     /// Record a redaction at page-local byte `range` on the page numbered
     /// `number`, as a per-page character-span [`Detection`] routed to the
-    /// glyph-delete or raster accumulator per `mode`. A range on no such page, or
-    /// off a char boundary, is skipped.
-    fn record(&mut self, number: u32, range: &Range<usize>) {
-        let Some(page) = self.pages.iter().find(|p| p.number == number) else {
-            return;
-        };
+    /// glyph-delete or raster accumulator per `mode`.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a page the document doesn't have, or a range
+    /// outside its text or off a character boundary: a redaction is never
+    /// dropped.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn record(&mut self, number: u32, range: &Range<usize>) -> Result<()> {
+        let page = self
+            .pages
+            .iter()
+            .find(|p| p.number == number)
+            .ok_or_else(|| Error::malformed(format!("no page {number}")))?;
         if page.text.get(range.clone()).is_none() {
-            return; // range out of bounds or not on a char boundary
+            return Err(Error::malformed(format!(
+                "range {}..{} is outside page {number}'s text or splits a character",
+                range.start, range.end
+            )));
         }
         // Both paths address glyphs by a character span into the page text, so
         // the byte range is measured as character offsets.
@@ -44,6 +56,7 @@ impl PdfInner {
             RedactMode::Raster { detections, .. } => detections.push(detection),
             _ => self.deletions.push(detection),
         }
+        Ok(())
     }
 }
 
@@ -77,8 +90,14 @@ impl PdfState {
 
     /// Record a redaction at page-local `range` on page `number` (see
     /// [`PdfInner::record`]).
-    pub(super) fn record(&mut self, number: u32, range: &Range<usize>) {
-        self.0.record(number, range);
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a page or range the document doesn't have.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn record(&mut self, number: u32, range: &Range<usize>) -> Result<()> {
+        self.0.record(number, range)
     }
 
     /// Apply the recorded redactions to `document` per the [`RedactMode`]; on

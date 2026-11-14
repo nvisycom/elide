@@ -80,9 +80,7 @@ mod tests {
     use elide_codec::TypedStream;
     use elide_core::modality::metadata::{Metadata, MetadataLocation};
     use elide_core::modality::text::TextReplacement;
-    use elide_core::modality::{
-        ChunkReader as _, DataReader as _, DataReaderExt as _, DataWriter as _,
-    };
+    use elide_core::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
 
@@ -188,17 +186,11 @@ mod tests {
     async fn read_at_crops_region() {
         let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
         let stream = pixels(&mut doc);
-        let data = stream.expect_at(&bbox(1.0, 1.0, 2.0, 2.0)).await;
+        let data = stream.read_at(&bbox(1.0, 1.0, 2.0, 2.0)).await.unwrap();
         let dims = data.dimensions();
         assert_eq!((dims.width, dims.height), (2, 2));
-        // An off-image region reads nothing.
-        assert!(
-            stream
-                .read_at(&bbox(99.0, 99.0, 2.0, 2.0))
-                .await
-                .unwrap()
-                .is_none()
-        );
+        // An off-image region is an error, not an empty read.
+        assert!(stream.read_at(&bbox(99.0, 99.0, 2.0, 2.0)).await.is_err());
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@
 
 mod collaboration;
 mod docprops;
+mod marked;
 mod rebuilt_report;
 mod redaction;
 mod split_runs;

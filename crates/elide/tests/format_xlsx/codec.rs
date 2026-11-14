@@ -7,9 +7,8 @@ use elide::codec::office::xlsx_format;
 use elide::codec::{ContentData, Document, LocalId, TypedStream};
 use elide::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide::modality::text::{Text, TextReplacement};
-use elide::modality::{ChunkReader as _, DataWriter as _};
+use elide::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
 use elide::redaction::{Disposition, HiddenContent, HiddenContentPolicy, Redactions};
-use elide_core::modality::DataReaderExt as _;
 use elide_office::fixtures::part_names;
 
 /// The two-sheet workbook whose shared string is reused across sheets, for
@@ -119,7 +118,7 @@ async fn read_at_slices_intra_cell_range() {
     let loc = TabularLocation::new(1, 0)
         .with_sheet_name("Customers")
         .with_span(0..5);
-    assert_eq!(stream.expect_at(&loc).await.as_str(), "alice");
+    assert_eq!(stream.read_at(&loc).await.unwrap().as_str(), "alice");
 }
 
 #[tokio::test]

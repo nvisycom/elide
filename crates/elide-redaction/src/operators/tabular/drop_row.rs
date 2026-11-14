@@ -13,9 +13,8 @@ use serde::{Deserialize, Serialize};
 /// A structural treatment, not a cell edit: where [`Erase`] blanks one
 /// cell's text, [`DropRow`] removes the whole record. Useful for "this row
 /// names a sanctioned individual, drop it entirely". Any match in a row
-/// drops that row, so the table shrinks by one record per matched row.
-///
-/// The header row is never dropped, that would strip the table's schema.
+/// drops that row, so the table shrinks by one record per matched row; a
+/// match in the header row drops the header.
 ///
 /// [`Erase`]: crate::operators::Erase
 #[derive(Debug, Clone, Copy, Default, Component)]

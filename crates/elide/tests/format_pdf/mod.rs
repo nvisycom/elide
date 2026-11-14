@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 mod images;
+mod marked;
 mod raster;
 mod sanitize;
 mod text;

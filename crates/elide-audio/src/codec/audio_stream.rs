@@ -35,13 +35,10 @@ impl Stream<Audio> for AudioStream {
 
 #[async_trait::async_trait]
 impl DataReader<Audio> for AudioStream {
-    async fn read_at(&self, _location: &AudioLocation) -> Result<Option<AudioData>> {
+    async fn read_at(&self, _location: &AudioLocation) -> Result<AudioData> {
         // The whole clip is the addressable unit; a partial time range still
         // resolves to the full audio for downstream extraction.
-        Ok(Some(AudioData::new(
-            self.clip.encode()?,
-            self.clip.format(),
-        )))
+        Ok(AudioData::new(self.clip.encode()?, self.clip.format()))
     }
 }
 

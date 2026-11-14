@@ -48,6 +48,9 @@ impl Loader for CsvLoader {
     async fn decode(&self, content: ContentData) -> Result<CsvHandler> {
         let text = content.decode()?;
         let trailing_newline = text.ends_with('\n');
+        let crlf = text
+            .find('\n')
+            .is_some_and(|end| text[..end].ends_with('\r'));
         let delimiter = self.delimiter.unwrap_or_else(|| detect_delimiter(&text));
 
         let mut reader = csv::ReaderBuilder::new()
@@ -76,6 +79,7 @@ impl Loader for CsvLoader {
             rows,
             delimiter,
             trailing_newline,
+            crlf,
         }))
     }
 }

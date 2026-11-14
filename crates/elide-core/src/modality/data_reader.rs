@@ -14,12 +14,11 @@ use crate::error::Result;
 /// modality-parametric: they never see the whole source, only the slice
 /// the reader produces.
 ///
-/// Returns `Ok(None)` when the location addresses nothing in this source
-/// (out of range, a location that crosses a structural boundary); the
-/// anonymizer treats that as "skip this entity". Returns `Err` when the
-/// read itself fails: a malformed offset that lands mid-character, a
-/// decode error. A codec-backed reader surfaces those loudly rather than
-/// silently collapsing them to a miss.
+/// A reader accepts every location its [`DataWriter`] does, so whatever can
+/// be redacted can be read first. A location that addresses nothing in this
+/// source (out of range, splitting a character, a reviewer's mark the source
+/// cannot resolve) is an error, never a miss: the anonymizer would otherwise
+/// skip the entity and leave it unredacted.
 ///
 /// The read counterpart to [`DataWriter`], which applies a batch of
 /// replacements back into the source.
@@ -30,9 +29,15 @@ use crate::error::Result;
 /// [`DataWriter`]: super::DataWriter
 #[async_trait::async_trait]
 pub trait DataReader<M: Modality>: Send + Sync {
-    /// Data at `location`: `Ok(Some(data))` on a hit, `Ok(None)` when the
-    /// location addresses nothing, `Err` when the read fails.
-    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>>;
+    /// The data at `location`.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if `location` addresses nothing in this source;
+    /// otherwise the source's own read error.
+    ///
+    /// [`MalformedInput`]: crate::ErrorKind::MalformedInput
+    async fn read_at(&self, location: &M::Location) -> Result<M::Data>;
 }
 
 /// Decodes a source into [`Chunk`]s and lifts locations to source coordinates.

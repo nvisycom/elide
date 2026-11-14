@@ -17,14 +17,15 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
-use elide_codec::string::RedactRange;
+use elide_codec::string::{ContiguousSpan, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
-use elide_core::Result;
-use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
+use elide_core::modality::text::{Marked, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
+use elide_core::{Error, Result};
 
 use super::TxtLoader;
+use crate::slice::slice;
 
 /// Stable [`FormatId`] for the plain-text codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
@@ -64,6 +65,28 @@ impl Stream<Text> for TxtHandler {
             .collect())
     }
 
+    /// A source-byte mark is its own span, the source being the text: its
+    /// references joined (see [`ContiguousSpan`]).
+    fn resolve(&self, location: TextLocation) -> Result<TextLocation> {
+        let TextLocation::Marked(mark) = &location else {
+            return Ok(location);
+        };
+        let Marked::Source { refs } = mark else {
+            return Err(Error::malformed(
+                "a rendered-page mark does not address plain text",
+            ));
+        };
+        if refs.iter().any(|source| source.part.is_some()) {
+            return Err(Error::malformed(
+                "a source reference names a container part, but plain text has none",
+            ));
+        }
+        let span = self
+            .text
+            .contiguous_span(refs.iter().map(|source| source.range.clone()))?;
+        Ok(TextLocation::source(span, refs.clone()))
+    }
+
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
         // A block chunk's bytes are a verbatim source slice, so lifting is an
         // identity offset add of the chunk-local range against the chunk's
@@ -88,11 +111,8 @@ impl Encode for TxtHandler {
 
 #[async_trait::async_trait]
 impl DataReader<Text> for TxtHandler {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(range) = location.range() else {
-            return Ok(None); // source-only location has no decoded range to read
-        };
-        Ok(self.text.get(range.clone()).map(TextData::new))
+    async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
+        slice(&self.text, span(location)?).map(TextData::new)
     }
 }
 
@@ -110,40 +130,37 @@ impl DataWriter<Text> for TxtHandler {
 }
 
 impl TxtHandler {
-    /// Create a new handler over the document's raw text.
-    pub fn new(text: String) -> Self {
+    /// A handler over the document's raw text.
+    pub(crate) fn new(text: String) -> Self {
         let blocks = paragraph_blocks(&text);
         Self { text, blocks }
     }
 
     /// The document text. Test-only inspection helper.
     #[cfg(test)]
-    pub fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         &self.text
     }
 
+    /// Splice `replacement` over `location`. A location outside the text is
+    /// an error: skipping it would leave the content unredacted.
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        // Redaction here writes by decoded byte range; a source-only location has
-        // none, so it is skipped (as an unaligned range is below).
-        let Some(range) = location.range() else {
-            return Ok(());
-        };
-        let range = range.clone();
-        // An inverted, out-of-bounds, or non-UTF-8-boundary range is skipped
-        // rather than panicking: a detector may report a range that no longer
-        // aligns after an earlier splice, and a redaction must never corrupt
-        // bytes. `replace_range` panics on an inverted range, so guard it here.
-        if range.start > range.end
-            || range.end > self.text.len()
-            || !self.text.is_char_boundary(range.start)
-            || !self.text.is_char_boundary(range.end)
-        {
-            return Ok(());
-        }
         let value = replacement.value().unwrap_or_default();
-        self.text.redact_range(value, range)?;
-        Ok(())
+        self.text.redact_range(value, span(location)?.clone())
     }
+}
+
+/// The span a location addresses.
+///
+/// # Errors
+///
+/// [`MalformedInput`] for an unresolved mark, which has none.
+///
+/// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+fn span(location: &TextLocation) -> Result<&Range<usize>> {
+    location
+        .range()
+        .ok_or_else(|| Error::malformed("an unresolved mark has no span"))
 }
 
 /// Byte ranges of the paragraph blocks in `text`: each is a maximal run of
@@ -186,6 +203,8 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
+    use elide_core::modality::text::SourceRef;
     use elide_core::redaction::HiddenContentPolicy;
 
     use super::*;
@@ -254,8 +273,8 @@ mod tests {
         assert_eq!(cs, vec![(0, 10, "no newline".to_string())]);
     }
 
-    #[tokio::test]
-    async fn lift_is_identity_across_a_line_break() {
+    #[test]
+    fn lift_is_identity_across_a_line_break() {
         let h = handler("hello\nworld\n");
         let chunk = h.chunks().unwrap().into_iter().next().unwrap();
         // A span crossing the internal line break lifts unchanged, this is
@@ -272,7 +291,7 @@ mod tests {
     async fn read_returns_a_cross_line_span() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation::inline(3..8);
-        assert_eq!(h.read_at(&loc).await?.unwrap().as_str(), "lo\nwo");
+        assert_eq!(h.read_at(&loc).await?.as_str(), "lo\nwo");
         Ok(())
     }
 
@@ -309,15 +328,52 @@ mod tests {
         Ok(())
     }
 
+    /// Each location the text can't take fails the batch rather than being
+    /// skipped, which would leave the content unredacted.
     #[tokio::test]
-    async fn redact_unknown_location_skipped() -> Result<()> {
-        let mut h = handler("one line");
-        h.write_at(Redactions::from([(
+    async fn a_location_outside_the_text_is_an_error() {
+        let locations = [
             TextLocation::inline(999..1000),
-            TextReplacement::substituted("nope"),
-        )]))
-        .await?;
-        assert_eq!(h.text(), "one line");
+            TextLocation::inline(Range { start: 4, end: 2 }),
+            TextLocation::marked_source(SourceRef::new(0..3)),
+        ];
+        for location in locations {
+            let mut h = handler("one line");
+            let error = h
+                .write_at(Redactions::from([(
+                    location.clone(),
+                    TextReplacement::substituted("nope"),
+                )]))
+                .await
+                .expect_err("an unwritable location must fail");
+            assert_eq!(error.kind(), ErrorKind::MalformedInput, "{location:?}");
+            assert_eq!(h.text(), "one line");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_the_text_cannot_take_is_an_error() {
+        let h = handler("café");
+        assert!(h.read_at(&TextLocation::inline(0..4)).await.is_err());
+        assert!(h.read_at(&TextLocation::inline(0..99)).await.is_err());
+        let mark = TextLocation::marked_source(SourceRef::new(0..3));
+        assert!(h.read_at(&mark).await.is_err());
+    }
+
+    /// A source-byte mark resolves to its own span, keeping its reference.
+    #[tokio::test]
+    async fn a_mark_resolves_to_its_span() -> Result<()> {
+        let h = handler("call 555-0100 now");
+        let mark = TextLocation::marked_source(SourceRef::new(5..13));
+        let resolved = h.resolve(mark)?;
+        assert_eq!(resolved.range(), Some(&(5..13)));
+        assert_eq!(resolved.source_refs(), [SourceRef::new(5..13)]);
+        assert_eq!(h.read_at(&resolved).await?.as_str(), "555-0100");
+        let past = TextLocation::marked_source(SourceRef::new(5..99));
+        assert!(h.resolve(past).is_err());
+        let apart = TextLocation::marked_sources([SourceRef::new(0..4), SourceRef::new(14..17)])
+            .expect("refs are non-empty");
+        assert!(h.resolve(apart).is_err(), "the number lies between them");
         Ok(())
     }
 

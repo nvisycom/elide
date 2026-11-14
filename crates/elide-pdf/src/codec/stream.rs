@@ -1,12 +1,15 @@
 //! The PDF body [`Stream<Text>`]: yields each page's text as a chunk and records
 //! per-page redactions onto the shared [`PdfState`].
 
+use std::ops::Range;
+
+use elide_codec::string::ContiguousSpan;
 use elide_codec::{FormatId, Stream};
-use elide_core::Result;
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::text::{Marked, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::primitive::UnitBoundingBox;
 use elide_core::redaction::Redactions;
+use elide_core::{Error, Result};
 
 use super::FORMAT_ID;
 use super::state::PdfState;
@@ -77,22 +80,71 @@ impl Stream<Text> for PdfStream {
         // the rendered rectangles.
         Some(TextLocation::rendered(local_range.clone(), number, rects))
     }
+
+    /// A rendered-page mark becomes the page-local span of the glyphs it
+    /// covers, keeping the reviewer's rectangles. The glyphs must form one
+    /// span of the page text (see [`ContiguousSpan`]): a box over a table
+    /// column covers glyphs with other text between them, and is refused
+    /// rather than deleting that text too.
+    fn resolve(&self, location: TextLocation) -> Result<TextLocation> {
+        let TextLocation::Marked(mark) = &location else {
+            return Ok(location);
+        };
+        let Marked::Rendered { page, rects } = mark else {
+            return Err(Error::malformed(
+                "a source-byte mark does not address a PDF page",
+            ));
+        };
+        let number = *page;
+        let text = &self
+            .state
+            .page_by_number(number)
+            .ok_or_else(|| Error::malformed(format!("no page {number}")))?
+            .text;
+        let geometry = self.state.geometry_for(number).ok_or_else(|| {
+            Error::malformed(format!(
+                "page {number} has no glyph geometry to place a mark on"
+            ))
+        })?;
+        // Glyphs address characters; the span addresses bytes.
+        let bytes: Vec<usize> = text
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain([text.len()])
+            .collect();
+        let pieces = geometry
+            .glyphs_in(rects)
+            .map(
+                |chars| match (bytes.get(chars.start), bytes.get(chars.end)) {
+                    (Some(&start), Some(&end)) => Ok(start..end),
+                    _ => Err(Error::malformed(format!(
+                        "a glyph on page {number} is outside its text"
+                    ))),
+                },
+            )
+            .collect::<Result<Vec<_>>>()?;
+        let span = text.contiguous_span(pieces)?;
+        Ok(TextLocation::rendered(span, number, rects.clone()))
+    }
 }
 
 #[async_trait::async_trait]
 impl DataReader<Text> for PdfStream {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(range) = location.range() else {
-            return Ok(None); // source-only location has no decoded range to read
-        };
-        // The range is page-local, addressed by the location's page number.
-        let Some(number) = location.page() else {
-            return Ok(None);
-        };
-        let Some(page) = self.state.page_by_number(number) else {
-            return Ok(None);
-        };
-        Ok(page.text.get(range.clone()).map(TextData::new))
+    async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
+        let (range, number) = page_span(location)?;
+        let page = self
+            .state
+            .page_by_number(number)
+            .ok_or_else(|| Error::malformed(format!("no page {number}")))?;
+        page.text
+            .get(range.clone())
+            .map(TextData::new)
+            .ok_or_else(|| {
+                Error::malformed(format!(
+                    "range {}..{} is outside page {number}'s text or splits a character",
+                    range.start, range.end
+                ))
+            })
     }
 }
 
@@ -100,14 +152,27 @@ impl DataReader<Text> for PdfStream {
 impl DataWriter<Text> for PdfStream {
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
         for (location, _replacement) in redactions.into_iter() {
-            // PDF text is addressed by a page-local decoded range plus its page;
-            // a source-only location (no range) or a location with no page is
-            // skipped.
-            let (Some(range), Some(page)) = (location.range(), location.page()) else {
-                continue;
-            };
-            self.state.record(page, range);
+            let (range, page) = page_span(&location)?;
+            self.state.record(page, range)?;
         }
         Ok(())
+    }
+}
+
+/// The page-local span and page a location addresses: PDF text is read and
+/// written by both.
+///
+/// # Errors
+///
+/// [`MalformedInput`] for a location with no span (an unresolved mark) or no
+/// page.
+///
+/// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
+    match (location.range(), location.page()) {
+        (Some(range), Some(page)) => Ok((range, page)),
+        _ => Err(Error::malformed(
+            "a PDF location needs a page-local span and its page",
+        )),
     }
 }
