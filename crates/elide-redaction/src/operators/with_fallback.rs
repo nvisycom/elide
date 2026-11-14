@@ -14,7 +14,7 @@
 //! So the two are kept distinct:
 //!
 //! - [`TryOperator`] refines [`Operator`] with [`try_anonymize`], which
-//!   returns `Ok(None)` for "not applicable", separate from `Err`.
+//!   returns [`Attempt::Declined`] for "not applicable", separate from `Err`.
 //! - [`WithFallback`] wraps a [`TryOperator`] and any [`Operator`],
 //!   including a caller's own, running the fallback exactly when the
 //!   primary declines. A genuine `Err` from either side still propagates.
@@ -29,13 +29,22 @@ use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Component, Result};
 
+/// What a [`TryOperator`] did with a value: applied, or declined it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Attempt<R> {
+    /// The value was the operator's shape; this is its replacement.
+    Applied(R),
+    /// The value was not the operator's shape: a fallback decides.
+    Declined,
+}
+
 /// An [`Operator`] that may decline to apply to a given value.
 ///
 /// The refinement for operators like [`Clamp`] and [`GeneralizeDate`] that
 /// only reshape values of a particular shape. [`try_anonymize`] returns
-/// `Ok(Some(replacement))` when it applied, `Ok(None)` when the value
-/// wasn't its shape, a distinct, first-class outcome, and `Err` only for
-/// a genuine failure.
+/// [`Attempt::Applied`] when it applied, [`Attempt::Declined`] when the
+/// value wasn't its shape, a distinct, first-class outcome, and `Err` only
+/// for a genuine failure.
 ///
 /// It is a supertrait of [`Operator`]: a `TryOperator` *is* an operator.
 /// Its [`Operator::anonymize`] is the "used on its own" behaviour (these
@@ -47,22 +56,23 @@ use elide_core::{Component, Result};
 /// [`GeneralizeDate`]: super::GeneralizeDate
 #[async_trait::async_trait]
 pub trait TryOperator<M: Modality>: Operator<M> {
-    /// Compute the replacement for `entity`, or `Ok(None)` if this operator
+    /// Compute the replacement for `entity`, or decline when this operator
     /// doesn't apply to `data`.
     ///
-    /// `Ok(None)` means "not my shape", defer to a fallback. It is never
-    /// used for a real failure; that is an `Err`, which aborts the batch.
+    /// [`Attempt::Declined`] means "not my shape", defer to a fallback. It is
+    /// never used for a real failure; that is an `Err`, which aborts the
+    /// batch.
     async fn try_anonymize(
         &self,
         entity: &Entity<M>,
         data: &M::Data,
-    ) -> Result<Option<M::Replacement>>;
+    ) -> Result<Attempt<M::Replacement>>;
 }
 
 /// Runs a [`TryOperator`], falling back to another [`Operator`] if it declines.
 ///
 /// Runs `primary` first. When it produces a replacement, that is the
-/// result. When it *declines* (`try_anonymize` returns `Ok(None)`, the
+/// result. When it *declines* (`try_anonymize` returns [`Attempt::Declined`], the
 /// value wasn't the primary's shape), `fallback` runs instead. The
 /// fallback is any [`Operator`], so a caller composes their own treatment
 /// for the leftover values:
@@ -114,10 +124,14 @@ where
             .min(self.fallback.leak_profile())
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         match self.primary.try_anonymize(entity, data).await? {
-            Some(replacement) => Ok(replacement),
-            None => self.fallback.anonymize(entity, data).await,
+            Attempt::Applied(replacement) => Ok(Some(replacement)),
+            Attempt::Declined => self.fallback.anonymize(entity, data).await,
         }
     }
 }
@@ -158,18 +172,18 @@ mod tests {
         let out = Operator::<Text>::anonymize(&op, &entity(), &TextData::new("94"))
             .await
             .unwrap();
-        assert_eq!(out, TextReplacement::substituted("90 or older"));
+        assert_eq!(out, Some(TextReplacement::substituted("90 or older")));
     }
 
     #[tokio::test]
     async fn fallback_runs_when_the_primary_declines() {
         // A non-number: Clamp declines, so the custom fallback (Keep) runs
-        // instead of the safe default (erase).
+        // instead of the safe default (erase), and leaves the value as it is.
         let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "x"), Keep);
         let out = Operator::<Text>::anonymize(&op, &entity(), &TextData::new("N/A"))
             .await
             .unwrap();
-        assert_eq!(out, TextReplacement::substituted("N/A"));
+        assert_eq!(out, None);
     }
 
     #[tokio::test]

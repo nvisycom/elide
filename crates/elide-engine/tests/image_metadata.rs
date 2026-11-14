@@ -9,6 +9,7 @@
 
 #![cfg(feature = "image")]
 
+use bytes::Bytes;
 use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
@@ -19,68 +20,31 @@ use elide_core::{Component, Result};
 use elide_detection::Analyzer;
 use elide_engine::{Document, Orchestrator};
 use elide_format::FormatRegistry;
+use elide_image::fixtures::{has_gps, is_valid_image, jpeg_with_tags, pixel, text_tag};
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
 use elide_redaction::operators::{Erase, Keep, Replace};
 use elide_redaction::{Anonymizer, Rule};
-use little_exif::exif_tag::ExifTag;
-use little_exif::filetype::FileExtension;
-use little_exif::metadata::Metadata as ExifMetadata;
 
 /// A small JPEG carrying a GPS latitude and an artist.
-fn jpeg_with_exif() -> bytes::Bytes {
-    let mut bytes = Vec::new();
-    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
-        .write_to(
-            &mut std::io::Cursor::new(&mut bytes),
-            image::ImageFormat::Jpeg,
-        )
-        .unwrap();
-    let mut exif = ExifMetadata::new();
-    exif.set_tag(ExifTag::GPSLatitude(vec![little_exif::rational::uR64 {
-        nominator: 51,
-        denominator: 1,
-    }]));
-    exif.set_tag(ExifTag::Artist("Jane Roe".to_owned()));
-    exif.write_to_vec(&mut bytes, FileExtension::JPEG).unwrap();
-    bytes::Bytes::from(bytes)
-}
-
-/// The EXIF tag `tag` in `jpeg`, if present.
-fn tag(jpeg: &[u8], tag: &ExifTag) -> Option<ExifTag> {
-    ExifMetadata::new_from_vec(&jpeg.to_vec(), FileExtension::JPEG)
-        .ok()?
-        .get_tag(tag)
-        .next()
-        .cloned()
-}
-
-/// Whether `jpeg` still carries a GPS latitude tag.
-fn has_gps(jpeg: &[u8]) -> bool {
-    tag(jpeg, &ExifTag::GPSLatitude(Vec::new())).is_some()
+fn jpeg_with_exif() -> Bytes {
+    jpeg_with_tags(true, &[("Artist", "Jane Roe")])
 }
 
 /// The artist `jpeg` carries, if any.
 fn artist(jpeg: &[u8]) -> Option<String> {
-    match tag(jpeg, &ExifTag::Artist(String::new()))? {
-        ExifTag::Artist(value) => Some(value.trim_end_matches('\0').to_owned()),
-        _ => None,
-    }
+    text_tag(jpeg, "Artist")
 }
 
 /// Decode `bytes` with metadata treated as content, run `orchestrator` over it,
 /// and return the redacted bytes.
-async fn redact(orchestrator: &Orchestrator, bytes: bytes::Bytes) -> bytes::Bytes {
+async fn redact(orchestrator: &Orchestrator, bytes: Bytes) -> Bytes {
     redact_under(orchestrator, bytes, Disposition::ScanAsContent).await
 }
 
 /// Decode `bytes` under the metadata disposition `metadata`, run
 /// `orchestrator` over it, and return the redacted bytes.
-async fn redact_under(
-    orchestrator: &Orchestrator,
-    bytes: bytes::Bytes,
-    metadata: Disposition,
-) -> bytes::Bytes {
+async fn redact_under(orchestrator: &Orchestrator, bytes: Bytes, metadata: Disposition) -> Bytes {
     let registry = FormatRegistry::with_builtin();
     let policy = HiddenContentPolicy::default().with_metadata(metadata);
     let handle = registry
@@ -131,10 +95,7 @@ async fn labelled_fields_are_detected_and_erased_with_nothing_configured() {
     let out = documents[0].document.encode().expect("encode").to_bytes();
     assert!(!has_gps(&out), "GPS survived");
     assert_eq!(artist(&out), None, "artist survived");
-    assert!(
-        image::load_from_memory(&out).is_ok(),
-        "output not a valid image"
-    );
+    assert!(is_valid_image(&out), "output not a valid image");
 }
 
 #[tokio::test]
@@ -196,18 +157,10 @@ async fn a_metadata_anonymizer_treats_flagged_fields() {
 /// field goes with its group, and a field outside the group stays.
 #[tokio::test]
 async fn a_kept_field_goes_with_its_group() {
-    let mut bytes = Vec::new();
-    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
-        .write_to(
-            &mut std::io::Cursor::new(&mut bytes),
-            image::ImageFormat::Jpeg,
-        )
-        .unwrap();
-    let mut exif = ExifMetadata::new();
-    exif.set_tag(ExifTag::Make("Acme".to_owned()));
-    exif.set_tag(ExifTag::Model("X1".to_owned()));
-    exif.set_tag(ExifTag::Artist("Jane Roe".to_owned()));
-    exif.write_to_vec(&mut bytes, FileExtension::JPEG).unwrap();
+    let bytes = jpeg_with_tags(
+        false,
+        &[("Make", "Acme"), ("Model", "X1"), ("Artist", "Jane Roe")],
+    );
 
     let registry = FormatRegistry::with_builtin();
     let orchestrator = Orchestrator::new()
@@ -222,7 +175,7 @@ async fn a_kept_field_goes_with_its_group() {
         .with_registry(registry.clone());
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
     let handle = registry
-        .decode(bytes::Bytes::from(bytes), "jpg", policy)
+        .decode(bytes, "jpg", policy)
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
@@ -232,8 +185,8 @@ async fn a_kept_field_goes_with_its_group() {
         .expect("anonymize");
     let out = documents[0].document.encode().expect("encode").to_bytes();
 
-    assert!(tag(&out, &ExifTag::Make(String::new())).is_none());
-    assert!(tag(&out, &ExifTag::Model(String::new())).is_none());
+    assert_eq!(text_tag(&out, "Make"), None);
+    assert_eq!(text_tag(&out, "Model"), None);
     assert_eq!(artist(&out).as_deref(), Some("Jane Roe"));
 }
 
@@ -310,7 +263,7 @@ impl Recognizer<Image> for WholeFrame {
 #[tokio::test]
 async fn pixel_redaction_and_gps_erasure_compose_end_to_end() {
     let original = jpeg_with_exif();
-    let before = image::load_from_memory(&original).expect("decode fixture");
+    let before = pixel(&original, 0, 0).expect("decode fixture");
 
     let orchestrator = orchestrator().with_modality::<Image>(
         Analyzer::new().with_recognizer(WholeFrame),
@@ -322,8 +275,6 @@ async fn pixel_redaction_and_gps_erasure_compose_end_to_end() {
     assert!(!has_gps(&out), "GPS survived the both-track redaction");
     // Pixel track: the frame was erased (blacked out), so the top-left pixel is
     // no longer the fixture's red.
-    let after = image::load_from_memory(&out).expect("decode output");
-    use image::GenericImageView;
-    let (before_px, after_px) = (before.get_pixel(0, 0), after.get_pixel(0, 0));
-    assert_ne!(before_px, after_px, "pixels were not redacted");
+    let after = pixel(&out, 0, 0).expect("decode output");
+    assert_ne!(before, after, "pixels were not redacted");
 }

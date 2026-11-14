@@ -48,7 +48,11 @@ impl TryFrom<TabularReplacement> for TextReplacement {
     }
 }
 
-impl ModalityReplacement for TabularReplacement {}
+impl ModalityReplacement for TabularReplacement {
+    fn removed() -> Self {
+        Self::Cell(TextReplacement::Removed)
+    }
+}
 
 #[cfg(test)]
 mod tests {

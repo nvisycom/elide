@@ -13,7 +13,7 @@ mod phase;
 mod walk;
 
 use bytes::Bytes;
-use elide_codec::{Document as CodecDocument, LocalId, StreamMut};
+use elide_codec::{Document as CodecDocument, StreamMut};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
@@ -79,8 +79,7 @@ pub(crate) enum Child<'a> {
         changed: bool,
     },
     /// The blob cannot be redacted: no codec can read it (none is registered
-    /// for it, or the one that is rejected its bytes), or it carries content
-    /// surfaced for detection that no pipeline scans.
+    /// for it, or the one that is rejected its bytes).
     Unredactable,
 }
 
@@ -93,15 +92,4 @@ pub(crate) enum Fold {
     /// Remove the blob from the parent: content no codec can read cannot be
     /// redacted, so it is dropped rather than shipped as-is.
     Remove,
-}
-
-/// The [`PartId`] for a stream: the first stream of a document is its body,
-/// keyed under the document's own prefix; each later stream keys under a child id.
-pub(crate) fn body_part_id(prefix: &PartId, id: &LocalId, body_seen: &mut bool) -> PartId {
-    if *body_seen {
-        prefix.child(id.clone())
-    } else {
-        *body_seen = true;
-        prefix.clone()
-    }
 }

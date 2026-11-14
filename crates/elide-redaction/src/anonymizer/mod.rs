@@ -269,7 +269,9 @@ impl<M: Modality> Anonymizer<M> {
     /// record that decision as a [`Selection`] when it differs from the
     /// entity's latest one, read the union span from `target`, run the
     /// operator, and hand the batch to [`DataWriter::write_at`], then record a
-    /// [`Redaction`] on every covered entity.
+    /// [`Redaction`] on every covered entity. An operator that leaves its
+    /// entity as it is (as [`Keep`] does) writes nothing, so its cluster gets
+    /// no redaction: the selection alone records the decision.
     ///
     /// `target` is both the reader and the writer, typically a decoded codec
     /// document, and owns the *how* and *ordering* of applying the batch.
@@ -284,6 +286,12 @@ impl<M: Modality> Anonymizer<M> {
     /// recorded anew before it is applied, and each redaction names the
     /// selection event it applied. A reviewer-suppressed entity is left alone.
     ///
+    /// Returns whether anything was written: `false` when nothing was left to
+    /// write (no entity given, all suppressed, no location read any data, or
+    /// every operator left its entity as it is), in which case `target` is not
+    /// written at all.
+    ///
+    /// [`Keep`]: crate::operators::Keep
     /// [`pick`]: Self::pick
     /// [`Redaction`]: elide_core::entity::audit::AuditKind::Redaction
     /// [`Selection`]: elide_core::entity::audit::AuditKind::Selection
@@ -292,7 +300,7 @@ impl<M: Modality> Anonymizer<M> {
         target: &mut T,
         entities: &mut [Entity<M>],
         scope: &Scope,
-    ) -> Result<()>
+    ) -> Result<bool>
     where
         T: DataReader<M> + DataWriter<M> + ?Sized,
     {
@@ -327,10 +335,15 @@ impl<M: Modality> Anonymizer<M> {
             };
             // Run the operator against the *winning* entity, the one the
             // operator was resolved from, since operators may read its fields.
-            let replacement = cluster
+            // `None` leaves the span as it is: nothing is hidden, so the
+            // members keep only their selection, and no redaction is recorded.
+            let Some(replacement) = cluster
                 .operator
                 .anonymize(&entities[cluster.winner], &data)
-                .await?;
+                .await?
+            else {
+                continue;
+            };
 
             // Stage a redaction event for every member, naming the selection
             // event it applies, so each entity's provenance reflects that this
@@ -352,11 +365,14 @@ impl<M: Modality> Anonymizer<M> {
         }
         // The write is the point of no return: only once it lands do the audit
         // events become true, so record them here rather than in the loop.
-        target.write_at(redactions).await?;
+        let wrote = !redactions.is_empty();
+        if wrote {
+            target.write_at(redactions).await?;
+        }
         for (i, event) in pending {
             entities[i].record(event);
         }
-        Ok(())
+        Ok(wrote)
     }
 }
 
@@ -644,6 +660,55 @@ mod tests {
                 "the audit chain still verifies"
             );
         }
+    }
+
+    /// `anonymize` reports whether it wrote: nothing to hide (no entity, or only
+    /// a suppressed one) leaves the target untouched and reports `false`.
+    #[tokio::test]
+    async fn anonymize_reports_whether_it_wrote() {
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let scope = Scope::default();
+        let mut target = TextDoc::new("alice and bob");
+
+        let wrote = anonymizer.anonymize(&mut target, &mut [], &scope).await;
+        assert!(!wrote.unwrap(), "no entity, no write");
+
+        let mut suppressed = entity("NAME", 0, 5);
+        suppressed.record_manual(
+            Manual::new(ManualIntent::Suppress, suppressed.location.clone()),
+            None,
+        );
+        let wrote = anonymizer
+            .anonymize(&mut target, &mut [suppressed], &scope)
+            .await;
+        assert!(!wrote.unwrap(), "a suppressed entity is not written");
+        assert_eq!(target.text(), "alice and bob");
+
+        let wrote = anonymizer
+            .anonymize(&mut target, &mut [entity("NAME", 0, 5)], &scope)
+            .await;
+        assert!(wrote.unwrap(), "a live entity is written");
+        assert_ne!(target.text(), "alice and bob");
+    }
+
+    /// An entity `Keep` covers is left as it is: nothing is written, nothing
+    /// is redacted, and the selection of `Keep` is on its audit trail.
+    #[tokio::test]
+    async fn a_kept_entity_writes_nothing_and_is_audited() {
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Keep));
+        let mut target = TextDoc::new("alice and bob");
+        let mut entities = vec![entity("NAME", 0, 5)];
+
+        let wrote = anonymizer
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        assert!(!wrote, "keep writes nothing");
+        assert_eq!(target.text(), "alice and bob");
+        let selection = entities[0].audit.selection().expect("keep was picked");
+        assert_eq!(selection.operator.name, "keep");
+        assert!(!entities[0].is_redacted(), "nothing was hidden");
     }
 
     /// A reviewer-suppressed entity is left alone: `pick` records no pick for

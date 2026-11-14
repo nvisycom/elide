@@ -78,9 +78,11 @@ impl DocumentLoader for ImageDocumentLoader {
 mod tests {
     use bytes::Bytes;
     use elide_codec::TypedStream;
-    use elide_core::modality::metadata::{Metadata, MetadataLocation, MetadataReplacement};
+    use elide_core::modality::metadata::{Metadata, MetadataLocation};
     use elide_core::modality::text::TextReplacement;
-    use elide_core::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
+    use elide_core::modality::{
+        ChunkReader as _, DataReader as _, DataReaderExt as _, DataWriter as _,
+    };
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
 
@@ -128,21 +130,26 @@ mod tests {
 
     /// Redact the top-left 2x2 block of the pixel stream to black.
     async fn redact_top_left(doc: &mut Document) {
-        let mut batch: Redactions<Image> = Redactions::new();
-        batch.push(
-            bbox(0.0, 0.0, 2.0, 2.0),
-            ImageReplacement::Block {
-                color: Color::BLACK,
-            },
-        );
-        pixels(doc).write_at(batch).await.unwrap();
+        pixels(doc)
+            .write_at(Redactions::from([(
+                bbox(0.0, 0.0, 2.0, 2.0),
+                ImageReplacement::Block {
+                    color: Color::BLACK,
+                },
+            )]))
+            .await
+            .unwrap();
     }
 
     /// Apply `replacement` to the field `key` of the document's `#exif` stream.
-    async fn edit_field(doc: &mut Document, key: &str, replacement: MetadataReplacement) {
-        let mut batch: Redactions<Metadata> = Redactions::new();
-        batch.push(MetadataLocation::new(key.to_owned()), replacement);
-        exif(doc).write_at(batch).await.unwrap();
+    async fn edit_field(doc: &mut Document, key: &str, replacement: TextReplacement) {
+        exif(doc)
+            .write_at(Redactions::from([(
+                MetadataLocation::new(key.to_owned()),
+                replacement,
+            )]))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -181,11 +188,7 @@ mod tests {
     async fn read_at_crops_region() {
         let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
         let stream = pixels(&mut doc);
-        let data = stream
-            .read_at(&bbox(1.0, 1.0, 2.0, 2.0))
-            .await
-            .unwrap()
-            .expect("crop");
+        let data = stream.expect_at(&bbox(1.0, 1.0, 2.0, 2.0)).await;
         let dims = data.dimensions();
         assert_eq!((dims.width, dims.height), (2, 2));
         // An off-image region reads nothing.
@@ -235,7 +238,7 @@ mod tests {
         let mut doc = decode(JPEG, Disposition::ScanAsContent, fixtures::jpeg_with_gps()).await;
 
         redact_top_left(&mut doc).await;
-        edit_field(&mut doc, "GPSLatitude", TextReplacement::Removed.into()).await;
+        edit_field(&mut doc, "GPSLatitude", TextReplacement::Removed).await;
         let out = doc.encode().unwrap();
 
         // Both edits landed: the corner is dark and the GPS tag is gone.

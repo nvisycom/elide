@@ -1,9 +1,10 @@
 //! The analysis of a document: the two views its detection produces, and the
 //! [`AnalyzedDocument`] that pairs them.
 //!
-//! Detection yields two parallel structures, keyed the same way (the body, plus
-//! each container part by id) but carrying opposite things. The [`Report`] holds
-//! *references*, each entity is a location into the body plus its audit trail,
+//! Detection yields two parallel structures, keyed the same way (by each part's
+//! [`PartId`](crate::PartId) path) but carrying opposite things. The [`Report`]
+//! holds *references*, each entity is a location into its part plus its audit
+//! trail,
 //! editable before [`anonymize_with`](crate::Orchestrator::anonymize_with). The
 //! [`ArtifactSet`] holds *content*, the enrichment those locations point into
 //! (an image's OCR `Layout`, an audio clip's STT `Transcription`), kept out
@@ -60,16 +61,15 @@ mod test_support {
 
     /// A one-segment [`PartId`] naming the sole document under test.
     pub(crate) fn doc() -> PartId {
-        PartId::new("document")
+        PartId::leaf("document")
     }
 }
 
 pub use self::artifacts::ArtifactSet;
 pub(crate) use self::group::{ArtifactGroup, EntityGroup};
 pub use self::part::{Part, PartMut};
-pub(crate) use self::registry::ModalityRegistry;
 pub use self::registry::ReportDeserializer;
-pub(crate) use self::report::{PartReport, StrippedRecord};
+pub(crate) use self::report::StrippedRecord;
 pub use self::report::{Report, StrippedItem};
 
 /// The result of an analysis: its findings and the enrichment behind them.
@@ -82,7 +82,7 @@ pub use self::report::{Report, StrippedItem};
 /// re-enriching.
 #[derive(Default)]
 pub struct AnalyzedDocument {
-    /// The detected entities, grouped by body and container part.
+    /// The detected entities, grouped by part.
     pub report: Report,
     /// The enrichment artifact each group was detected in.
     pub artifacts: ArtifactSet,

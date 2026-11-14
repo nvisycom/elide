@@ -96,7 +96,7 @@ mod tests {
     use elide_codec::{Document, TypedStream};
     use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextReplacement};
-    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
+    use elide_core::modality::{ChunkReader, DataReaderExt, DataWriter};
     use elide_core::redaction::{Disposition, HiddenContentKind, Redactions};
 
     use super::*;
@@ -161,9 +161,13 @@ mod tests {
             .into_iter()
             .find(|chunk| chunk.data.as_str() == "jane@example.com")
             .expect("chunk");
-        let mut redactions = Redactions::new();
-        redactions.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
-        body(&mut doc).write_at(redactions).await.unwrap();
+        body(&mut doc)
+            .write_at(Redactions::from([(
+                chunk.location,
+                TextReplacement::substituted("[EMAIL]"),
+            )]))
+            .await
+            .unwrap();
         assert!(encoded(&doc).contains("<input value=[EMAIL] disabled>"));
     }
 
@@ -193,7 +197,7 @@ mod tests {
         let stream = body(&mut doc);
         let flagged = stream.flagged().unwrap();
         assert_eq!(flagged.len(), 1, "{flagged:?}");
-        let text = stream.read_at(&flagged[0].location).await.unwrap().unwrap();
+        let text = stream.expect_at(&flagged[0].location).await;
         assert_eq!(text.as_str(), " ask Jane ");
         assert_eq!(flagged[0].kind, HiddenContentKind::Collaboration);
     }
@@ -208,7 +212,7 @@ mod tests {
         let mut fields = Vec::new();
         for item in &flagged {
             assert_eq!(item.kind, HiddenContentKind::Metadata);
-            let text = stream.read_at(&item.location).await.unwrap().unwrap();
+            let text = stream.expect_at(&item.location).await;
             fields.push((text.as_str().to_owned(), item.label.clone()));
         }
         assert_eq!(
@@ -229,7 +233,7 @@ mod tests {
         let flagged = stream.flagged().unwrap();
         assert_eq!(flagged.len(), 1, "{flagged:?}");
         assert_eq!(flagged[0].label, builtins::PERSON_NAME.to_ref());
-        let text = stream.read_at(&flagged[0].location).await.unwrap().unwrap();
+        let text = stream.expect_at(&flagged[0].location).await;
         assert_eq!(text.as_str(), "Jane Roe");
     }
 
@@ -243,9 +247,13 @@ mod tests {
             .into_iter()
             .find(|c| c.data.as_str() == "alice@example.com")
             .expect("chunk");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location, TextReplacement::substituted("[email]"));
-        body(&mut doc).write_at(rs).await.unwrap();
+        body(&mut doc)
+            .write_at(Redactions::from([(
+                chunk.location,
+                TextReplacement::substituted("[email]"),
+            )]))
+            .await
+            .unwrap();
         assert!(
             encoded(&doc).contains(r#"alt="[email]""#),
             "alt not rewritten: {}",

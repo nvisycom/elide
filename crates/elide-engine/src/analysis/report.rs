@@ -11,7 +11,7 @@
 //! There is no distinct "body", a document's own content is simply its
 //! depth-1 part, keyed by the document's name.
 //!
-//! With the `serde` feature the report serializes to a part-list view,
+//! The report serializes to a part-list view,
 //! `{ parts: [ { "id": ["scan-A.docx", "word/media/image1.png"], .. } ] }`,
 //! so an external consumer (a review UI) can identify which part each entity
 //! belongs to. The path is a segment array (never string-joined); each entity
@@ -25,7 +25,6 @@
 //! [`AuditLog`]: elide_core::entity::audit::AuditLog
 //! [`anonymize_with`]: crate::Orchestrator::anonymize_with
 
-use std::any::TypeId;
 use std::collections::{BTreeMap, HashMap};
 
 use elide_core::entity::Entity;
@@ -39,28 +38,13 @@ use super::part::{Part, PartMut};
 use super::registry::ReportDeserializer;
 use crate::PartId;
 
-/// One part captured during analysis, a named document's own content (a
-/// depth-1 part) or a container part nested within one: its detected entities
-/// and the modality they belong to.
-pub(crate) struct PartReport {
-    /// The part's modality, the routing key for [`anonymize_with`]: it re-walks
-    /// the document's part tree to this part and applies through the pipeline
-    /// registered for this modality.
-    ///
-    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
-    pub(crate) modality: TypeId,
-    /// The part's detected entities (a `Vec<Entity<P>>`).
-    pub(crate) entities: Box<dyn EntityGroup>,
-}
-
 /// The detected entities of a document set, editable before apply.
 ///
 /// Returned by [`analyze`] and consumed by [`anonymize_with`]. Every part,
-/// each named document's own content, and every container part within one, is
-/// keyed by its [`PartId`] path. Read a part as modality `M` with [`part`], or
-/// edit it with [`part_mut`]: the views resolve the part and check its modality
-/// once. [`document`] and [`document_mut`] reach the report's single top-level
-/// document. A reviewer's edits through a [`PartMut`] (including a missed
+/// each named document's own content (keyed by [`Document::id`]), and every
+/// container part within one, is keyed by its [`PartId`] path. Read a part as
+/// modality `M` with [`part`], or edit it with [`part_mut`]: the views resolve
+/// the part and check its modality once. A reviewer's edits through a [`PartMut`] (including a missed
 /// entity, suppressing a false positive, suppressing everything a region
 /// contains) are recorded on the entities' own audit trails, so the report
 /// carries them to [`anonymize_with`] and to whoever audits it after. To reach
@@ -68,8 +52,8 @@ pub(crate) struct PartReport {
 /// [`entity_anywhere_mut`].
 ///
 /// A report is **pure entity data**: it carries no live document state, so
-/// it can be built from scratch ([`new`] + [`insert_part`]) and, with the
-/// `serde` feature, serialized to a part-list `{ parts: [..] }` view, shipped
+/// it can be built from scratch ([`new`] + [`insert_part`]) and serialized to
+/// a part-list `{ parts: [..] }` view, shipped
 /// elsewhere, and reconstructed there. [`anonymize_with`] re-decodes each part
 /// from the container it is applied to, so a rebuilt report redacts just as a
 /// freshly-analyzed one does.
@@ -78,8 +62,7 @@ pub(crate) struct PartReport {
 /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
 /// [`part`]: Report::part
 /// [`part_mut`]: Report::part_mut
-/// [`document`]: Report::document
-/// [`document_mut`]: Report::document_mut
+/// [`Document::id`]: crate::Document::id
 /// [`id`]: elide_core::entity::Entity::id
 /// [`entity_anywhere`]: Report::entity_anywhere
 /// [`entity_anywhere_mut`]: Report::entity_anywhere_mut
@@ -87,9 +70,10 @@ pub(crate) struct PartReport {
 /// [`insert_part`]: Report::insert_part
 #[derive(Default)]
 pub struct Report {
-    /// Every part's entry, keyed by its [`PartId`] path, a named document's own
-    /// content is its depth-1 part, container parts nest below.
-    pub(crate) parts: HashMap<PartId, PartReport>,
+    /// Every part's entities (a `Vec<Entity<M>>` of the part's modality), keyed
+    /// by its [`PartId`] path. A named document's own content is its depth-1
+    /// part; container parts nest below.
+    pub(crate) parts: HashMap<PartId, Box<dyn EntityGroup>>,
     /// The hidden content the last walk over the documents saw stripped.
     pub(crate) stripped: StrippedRecord,
 }
@@ -105,6 +89,13 @@ impl StrippedRecord {
         if count > 0 {
             *self.0.entry((part, content)).or_default() += count;
         }
+    }
+
+    /// Every record, ordered by part then item.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&PartId, &HiddenContent, usize)> {
+        self.0
+            .iter()
+            .map(|((part, content), &count)| (part, content, count))
     }
 }
 
@@ -132,10 +123,7 @@ impl Report {
     /// [`insert_part`]: Self::insert_part
     /// [`analyze`]: crate::Orchestrator::analyze
     pub fn new() -> Self {
-        Self {
-            parts: HashMap::new(),
-            stripped: StrippedRecord::default(),
-        }
+        Self::default()
     }
 
     /// A [`ReportDeserializer`] that rebuilds a report without an
@@ -145,10 +133,16 @@ impl Report {
     /// [`Orchestrator`] needs to *run* one. Register the modalities the report
     /// may contain, then [`deserialize`] it:
     ///
-    /// ```ignore
+    /// ```
+    /// use elide_core::modality::text::Text;
+    /// use elide_engine::Report;
+    ///
+    /// let json = serde_json::to_string(&Report::new())?;
     /// let report = Report::deserializer()
     ///     .with_modality::<Text>()
-    ///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
+    ///     .deserialize(&mut serde_json::Deserializer::from_str(&json))?;
+    /// assert_eq!(report.part_ids().count(), 0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// [`Orchestrator`]: crate::Orchestrator
@@ -172,9 +166,8 @@ impl Report {
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     pub fn stripped(&self) -> impl Iterator<Item = StrippedItem> + '_ {
         self.stripped
-            .0
             .iter()
-            .map(|((part, content), &count)| StrippedItem {
+            .map(|(part, content, count)| StrippedItem {
                 part: part.clone(),
                 content: *content,
                 count,
@@ -191,8 +184,7 @@ impl Report {
         self.stripped = record;
     }
 
-    /// Set the entities of the container part `id` as modality `P`, replacing
-    /// any.
+    /// Set the entities of the part `id` as modality `P`, replacing any.
     ///
     /// For rebuilding a report from out-of-band entities. [`anonymize_with`]
     /// re-decodes the part `id` from the container and applies these through
@@ -204,13 +196,7 @@ impl Report {
     where
         Vec<Entity<P>>: serde::Serialize,
     {
-        self.parts.insert(
-            id,
-            PartReport {
-                modality: TypeId::of::<P>(),
-                entities: Box::new(entities),
-            },
-        );
+        self.parts.insert(id, Box::new(entities));
         self
     }
 
@@ -225,7 +211,7 @@ impl Report {
             .parts
             .get(id)
             .ok_or_else(|| Error::not_found(format!("the report holds no part `{id}`")))?;
-        Ok(Part::new(typed::<M>(id, part)?))
+        Ok(Part::new(typed::<M>(id, part.as_ref())?))
     }
 
     /// The part `id`, as modality `M`, to edit.
@@ -239,29 +225,7 @@ impl Report {
             .parts
             .get_mut(id)
             .ok_or_else(|| Error::not_found(format!("the report holds no part `{id}`")))?;
-        Ok(PartMut::new(typed_mut::<M>(id, part)?))
-    }
-
-    /// The report's single top-level document, as modality `M`, to read.
-    ///
-    /// # Errors
-    ///
-    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
-    /// top-level document or more than one, or holds it as another modality.
-    pub fn document<M: Modality>(&self) -> Result<Part<'_, M>> {
-        let id = self.sole_document_id()?;
-        self.part::<M>(&id)
-    }
-
-    /// The report's single top-level document, as modality `M`, to edit.
-    ///
-    /// # Errors
-    ///
-    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
-    /// top-level document or more than one, or holds it as another modality.
-    pub fn document_mut<M: Modality>(&mut self) -> Result<PartMut<'_, M>> {
-        let id = self.sole_document_id()?;
-        self.part_mut::<M>(&id)
+        Ok(PartMut::new(typed_mut::<M>(id, part.as_mut())?))
     }
 
     /// Find an entity of modality `M` by its [`id`] in any part, read-only.
@@ -273,7 +237,7 @@ impl Report {
     pub fn entity_anywhere<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
         self.parts
             .iter()
-            .filter_map(|(part_id, part)| typed::<M>(part_id, part).ok())
+            .filter_map(|(part_id, part)| typed::<M>(part_id, part.as_ref()).ok())
             .find_map(|entities| entities.iter().find(|entity| entity.id == id))
     }
 
@@ -287,38 +251,24 @@ impl Report {
     pub fn entity_anywhere_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
         self.parts
             .iter_mut()
-            .filter_map(|(part_id, part)| typed_mut::<M>(part_id, part).ok())
+            .filter_map(|(part_id, part)| typed_mut::<M>(part_id, part.as_mut()).ok())
             .find_map(|entities| entities.iter_mut().find(|entity| entity.id == id))
     }
 
     /// The [`PartId`]s of the parts the report carries, paired with each part's
-    /// modality [`TypeId`], for a caller enumerating what's editable. Includes
-    /// every named document's own depth-1 part as well as any nested container
-    /// parts.
-    pub fn part_ids(&self) -> impl Iterator<Item = (&PartId, TypeId)> {
-        self.parts.iter().map(|(id, p)| (id, p.modality))
-    }
-
-    /// The [`PartId`] of the single top-level (depth-1) document.
-    fn sole_document_id(&self) -> Result<PartId> {
-        let mut tops = self.parts.keys().filter(|id| id.depth() == 1);
-        match (tops.next(), tops.next()) {
-            (Some(id), None) => Ok(id.clone()),
-            (None, _) => Err(Error::not_found("the report holds no document")),
-            (Some(_), Some(_)) => Err(Error::not_found(
-                "the report holds more than one document; address one with `part`",
-            )),
-        }
+    /// modality name ([`Modality::NAME`], the tag the wire form carries), for a
+    /// caller enumerating what's editable. Includes every named document's own
+    /// depth-1 part as well as any nested container parts.
+    pub fn part_ids(&self) -> impl Iterator<Item = (&PartId, &'static str)> {
+        self.parts
+            .iter()
+            .map(|(id, part)| (id, part.modality_name()))
     }
 }
 
 /// The entities of `part` (keyed `id`), as modality `M`.
-fn typed<'p, M: Modality>(id: &PartId, part: &'p PartReport) -> Result<&'p [Entity<M>]> {
-    if part.modality != TypeId::of::<M>() {
-        return Err(mismatch::<M>(id));
-    }
-    part.entities
-        .as_any()
+fn typed<'p, M: Modality>(id: &PartId, part: &'p dyn EntityGroup) -> Result<&'p [Entity<M>]> {
+    part.as_any()
         .downcast_ref::<Vec<Entity<M>>>()
         .map(Vec::as_slice)
         .ok_or_else(|| mismatch::<M>(id))
@@ -327,13 +277,9 @@ fn typed<'p, M: Modality>(id: &PartId, part: &'p PartReport) -> Result<&'p [Enti
 /// The entities of `part` (keyed `id`), as modality `M`, to edit.
 fn typed_mut<'p, M: Modality>(
     id: &PartId,
-    part: &'p mut PartReport,
+    part: &'p mut dyn EntityGroup,
 ) -> Result<&'p mut Vec<Entity<M>>> {
-    if part.modality != TypeId::of::<M>() {
-        return Err(mismatch::<M>(id));
-    }
-    part.entities
-        .as_any_mut()
+    part.as_any_mut()
         .downcast_mut::<Vec<Entity<M>>>()
         .ok_or_else(|| mismatch::<M>(id))
 }
@@ -345,9 +291,12 @@ fn mismatch<M: Modality>(id: &PartId) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use elide_core::ErrorKind;
     use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{Attribution, AuditKind, ManualIntent};
+    use elide_core::modality::NoArtifact;
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
 
@@ -355,7 +304,7 @@ mod tests {
     use super::*;
 
     /// A [`Text`] entity labelled `label` at `range`.
-    fn at(label: &str, range: std::ops::Range<usize>) -> Entity<Text> {
+    fn at(label: &str, range: Range<usize>) -> Entity<Text> {
         let mut entity = text_entity(label);
         entity.location = TextLocation::inline(range);
         entity
@@ -389,13 +338,13 @@ mod tests {
     #[test]
     fn an_unknown_part_or_another_modality_is_not_found() {
         let mut report = Report::new().insert_part::<Text>(doc(), vec![text_entity("X")]);
-        let missing = report.part::<Text>(&PartId::new("missing")).unwrap_err();
+        let missing = report.part::<Text>(&PartId::leaf("missing")).unwrap_err();
         assert_eq!(missing.kind(), ErrorKind::NotFound);
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         struct Other;
         impl Modality for Other {
-            type Artifact = elide_core::modality::NoArtifact;
+            type Artifact = NoArtifact;
             type Data = <Text as Modality>::Data;
             type Location = <Text as Modality>::Location;
             type Replacement = <Text as Modality>::Replacement;
@@ -409,45 +358,16 @@ mod tests {
     }
 
     #[test]
-    fn the_document_is_the_sole_top_level_part() {
-        // One top-level document with a nested part: the document is its own.
-        let report = Report::new()
-            .insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")])
-            .insert_part::<Text>(doc().child("word/media/image1.png"), vec![text_entity("X")]);
-        assert_eq!(report.document::<Text>().unwrap().entities().len(), 1);
-
-        // None, or more than one, is not found.
-        assert_eq!(
-            Report::new().document::<Text>().unwrap_err().kind(),
-            ErrorKind::NotFound
-        );
-        let two = Report::new()
-            .insert_part::<Text>(PartId::new("a.txt"), vec![text_entity("A")])
-            .insert_part::<Text>(PartId::new("b.txt"), vec![text_entity("B")]);
-        assert_eq!(
-            two.document::<Text>().unwrap_err().kind(),
-            ErrorKind::NotFound
-        );
-        assert_eq!(
-            two.part::<Text>(&PartId::new("a.txt"))
-                .unwrap()
-                .entities()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
     fn an_included_entity_is_a_reviewers_assertion() {
         let mut report = Report::new().insert_part::<Text>(doc(), Vec::new());
         let id = report
-            .document_mut::<Text>()
+            .part_mut::<Text>(&doc())
             .unwrap()
             .by("reviewer-7")
             .because(Attribution::freeform("missed by detection"))
             .include("PERSON_NAME", TextLocation::inline(4..12));
 
-        let part = report.document::<Text>().unwrap();
+        let part = report.part::<Text>(&doc()).unwrap();
         let entity = part.entity(id).expect("included");
         assert_eq!(entity.confidence, Confidence::MAX);
         let [event] = entity.audit.events() else {
@@ -472,7 +392,7 @@ mod tests {
         let id = entity.id;
         let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
 
-        let mut part = report.document_mut::<Text>().unwrap().by("reviewer-7");
+        let mut part = report.part_mut::<Text>(&doc()).unwrap().by("reviewer-7");
         assert!(part.suppress(id), "suppressed");
         assert!(!part.suppress(id), "suppressing again records nothing");
         assert!(
@@ -480,7 +400,7 @@ mod tests {
             "an unknown id is not suppressed"
         );
 
-        let part = report.document::<Text>().unwrap();
+        let part = report.part::<Text>(&doc()).unwrap();
         assert_eq!(part.suppressed().count(), 1);
         assert_eq!(part.unsuppressed().count(), 0);
         let entity = part.entity(id).unwrap();
@@ -498,7 +418,7 @@ mod tests {
         let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
 
         let mut part = report
-            .document_mut::<Text>()
+            .part_mut::<Text>(&doc())
             .unwrap()
             .by("reviewer-7")
             .because(Attribution::freeform("misread"));
@@ -509,7 +429,7 @@ mod tests {
             "an unknown id is not amended"
         );
 
-        let part = report.document::<Text>().unwrap();
+        let part = report.part::<Text>(&doc()).unwrap();
         let entity = part.entity(id).unwrap();
         assert_eq!(entity.label, LabelRef::new("PHONE_NUMBER"));
         assert_eq!(entity.location, TextLocation::inline(1..3));
@@ -545,12 +465,12 @@ mod tests {
 
         let region = TextLocation::inline(0..20);
         let spared = report
-            .document_mut::<Text>()
+            .part_mut::<Text>(&doc())
             .unwrap()
             .suppress_within(&region);
         assert_eq!(spared, [inside_id]);
 
-        let part = report.document::<Text>().unwrap();
+        let part = report.part::<Text>(&doc()).unwrap();
         assert!(part.entity(inside_id).unwrap().is_suppressed());
         // A finding reaching outside the region is not spared.
         assert!(!part.entity(crossing_id).unwrap().is_suppressed());
@@ -571,7 +491,7 @@ mod tests {
         // A second pass over the same region spares nothing new.
         assert!(
             report
-                .document_mut::<Text>()
+                .part_mut::<Text>(&doc())
                 .unwrap()
                 .suppress_within(&region)
                 .is_empty()
@@ -582,7 +502,7 @@ mod tests {
     fn entity_anywhere_reaches_a_nested_part_by_id_alone() {
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id;
-        let nested = PartId::new("report.docx").child("word/media/image1.png");
+        let nested = PartId::leaf("report.docx").child("word/media/image1.png");
         let mut report = Report::new().insert_part::<Text>(nested.clone(), vec![entity]);
 
         assert_eq!(

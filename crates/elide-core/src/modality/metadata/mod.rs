@@ -10,7 +10,8 @@
 //! so they are one modality, [`Metadata`]. A value is text and is recognized
 //! like text: the location is the field's key, optionally narrowed to a byte
 //! range of its value ([`MetadataLocation`]), and redaction is a text treatment
-//! of the value ([`MetadataReplacement`]). The *source* of a field (an image's EXIF, a file's inode, a
+//! of the value ([`TextReplacement`]): a removal of the whole value drops the
+//! field. The *source* of a field (an image's EXIF, a file's inode, a
 //! document's properties) is not a modality distinction: an artifact exposes
 //! metadata as one of its aspects, and the engine tells two artifacts' metadata
 //! apart by their `PartId`, not by the modality type. Each format's handler
@@ -18,13 +19,12 @@
 
 mod data;
 mod location;
-mod replacement;
 
 use std::ops::Range;
 
 pub use self::data::MetadataData;
 pub use self::location::MetadataLocation;
-pub use self::replacement::MetadataReplacement;
+use super::text::TextReplacement;
 use super::{Modality, NoArtifact, TextRecognizable};
 
 /// The metadata modality: a document's out-of-band named fields, as subjects.
@@ -34,7 +34,7 @@ use super::{Modality, NoArtifact, TextRecognizable};
 ///
 /// One modality for every metadata source: a field is a keyed
 /// [`MetadataLocation`] holding [`MetadataData`], hidden by a
-/// [`MetadataReplacement`]. Which artifact a field belongs to is a matter of the
+/// [`TextReplacement`] of its value. Which artifact a field belongs to is a matter of the
 /// entity's `PartId`, not the modality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -44,7 +44,7 @@ impl Modality for Metadata {
     type Artifact = NoArtifact;
     type Data = MetadataData;
     type Location = MetadataLocation;
-    type Replacement = MetadataReplacement;
+    type Replacement = TextReplacement;
 
     const NAME: &'static str = "metadata";
 }

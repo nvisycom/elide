@@ -113,8 +113,14 @@ impl<M: TextRedactable> Operator<M> for Replace {
         }
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
-        Ok(M::Replacement::from(self.render(entity, data.as_ref())))
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
+        Ok(Some(M::Replacement::from(
+            self.render(entity, data.as_ref()),
+        )))
     }
 }
 

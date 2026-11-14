@@ -42,7 +42,7 @@ fn orchestrator(registry: FormatRegistry, backend: MockBackend) -> Result<Orches
 fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {
     analyzed
         .report
-        .document::<Image>()
+        .part::<Image>(&PartId::leaf(DOC))
         .ok()
         .map(|part| part.entities())
         .map(<[_]>::to_vec)
@@ -119,7 +119,7 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
 }
 
 /// The persist path: serialize `analyze`'s artifacts, ship them across a review
-/// gap, then `Orchestrator::deserialize_artifacts` them back and feed the
+/// gap, then `Orchestrator::deserializer` them back and feed the
 /// rebuilt set to `re_analyze`, the OCR text survives the wire, so the re-run
 /// reuses it against an empty OCR backend rather than re-OCR'ing.
 #[tokio::test]
@@ -143,7 +143,7 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     // Layout carried the text through deserialize.
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
     let mut de = serde_json::Deserializer::from_str(&json);
-    let restored = second.deserialize_artifacts(&mut de)?;
+    let restored = second.deserializer().deserialize_artifacts(&mut de)?;
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;

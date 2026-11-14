@@ -822,9 +822,11 @@ mod tests {
     async fn redact_whole_string_value() -> Result<()> {
         let mut h = handler(r#"{"name":"Alice"}"#);
         let chunk = find_chunk(&h, "Alice");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location.clone(), TextReplacement::substituted("Bob"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            chunk.location.clone(),
+            TextReplacement::substituted("Bob"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"name":"Bob"}"#);
         Ok(())
     }
@@ -838,15 +840,14 @@ mod tests {
         // range of "alice" (offset 0 in the value here).
         let value = chunk.data.as_str();
         let at = value.find("alice").unwrap();
-        let mut rs = Redactions::new();
-        rs.push(
+        h.write_at(Redactions::from([(
             TextLocation::inline(
                 chunk.location.range().unwrap().start + at
                     ..chunk.location.range().unwrap().start + at + "alice".len(),
             ),
             TextReplacement::substituted("[USER]"),
-        );
-        h.write_at(rs).await?;
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"email":"[USER]@example.com"}"#);
         Ok(())
     }
@@ -860,15 +861,14 @@ mod tests {
         let chunk = find_chunk(&h, r#"foo"bar"#);
         let value = chunk.data.as_str();
         let at = value.find("bar").unwrap();
-        let mut rs = Redactions::new();
-        rs.push(
+        h.write_at(Redactions::from([(
             TextLocation::inline(
                 chunk.location.range().unwrap().start + at
                     ..chunk.location.range().unwrap().start + at + "bar".len(),
             ),
             TextReplacement::substituted("XXX"),
-        );
-        h.write_at(rs).await?;
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"msg":"foo\"XXX"}"#);
         Ok(())
     }
@@ -905,15 +905,14 @@ mod tests {
         // across the 6-byte `é` source escape when it splices.
         let value = chunk.data.as_str();
         let at = value.find("bar").unwrap();
-        let mut rs = Redactions::new();
-        rs.push(
+        h.write_at(Redactions::from([(
             TextLocation::inline(
                 chunk.location.range().unwrap().start + at
                     ..chunk.location.range().unwrap().start + at + "bar".len(),
             ),
             TextReplacement::substituted("XXX"),
-        );
-        h.write_at(rs).await?;
+        )]))
+        .await?;
         // Only `bar` is replaced; the `é` escape before it is spliced through
         // verbatim (the redaction edits `serialized` in place, not a re-render of
         // the decoded value).
@@ -932,9 +931,11 @@ mod tests {
         let mut h = handler(&src);
         let raw_at = src.find("bar").unwrap();
         let location = TextLocation::marked_source(SourceRef::new(raw_at..raw_at + "bar".len()));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("XXX"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            location,
+            TextReplacement::substituted("XXX"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
         Ok(())
     }
@@ -951,9 +952,11 @@ mod tests {
         let open = src.find(r#""bcd""#).unwrap();
         let close = open + r#""bcd""#.len();
         let location = TextLocation::marked_source(SourceRef::new(open..close));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            location,
+            TextReplacement::substituted("X"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
         Ok(())
     }
@@ -1013,10 +1016,11 @@ mod tests {
         let at = src.find("bcd").unwrap();
         let location =
             TextLocation::marked_source(SourceRef::in_part(at..at + 3, "some/part.json"));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("part-tagged ref must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1032,10 +1036,11 @@ mod tests {
         // drop the edit.
         let mut h = handler(r#"{"a":"b"}"#);
         let location = TextLocation::marked_source(SourceRef::new(0..1));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("structural source must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1052,10 +1057,11 @@ mod tests {
         let mut h = handler(src);
         let past = src.len() + 4;
         let location = TextLocation::marked_source(SourceRef::new(past..past + 2));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("out-of-range source must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1077,9 +1083,11 @@ mod tests {
         let location =
             TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)])
                 .unwrap();
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            location,
+            TextReplacement::substituted("X"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
         Ok(())
     }
@@ -1101,10 +1109,11 @@ mod tests {
             SourceRef::new(past..past + 2),
         ])
         .unwrap();
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("an invalid trailing ref must reject the whole location");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1127,10 +1136,11 @@ mod tests {
         let location =
             TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(f..f + 1)])
                 .unwrap();
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("refs across two values must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1149,10 +1159,11 @@ mod tests {
         let mut h = handler(src);
         let open = src.find(r#""bcd""#).unwrap();
         let location = TextLocation::marked_source(SourceRef::new(open..open + 1));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("a delimiter-only span must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1170,10 +1181,11 @@ mod tests {
         let mut h = handler(src);
         let close = src.find(r#""bcd""#).unwrap() + r#""bcd""#.len() - 1;
         let location = TextLocation::marked_source(SourceRef::new(close..close + 1));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("a delimiter-only span must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1192,10 +1204,11 @@ mod tests {
         let mut h = handler(src);
         let c = src.find("bcd").unwrap() + 1;
         let location = TextLocation::marked_source(SourceRef::new(c..c));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("an empty interior span must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1213,10 +1226,11 @@ mod tests {
         let mut h = handler(src);
         let mid = src.find("12345").unwrap() + 2;
         let location = TextLocation::marked_source(SourceRef::new(mid..mid));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("X"));
         let err = h
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("X"),
+            )]))
             .await
             .expect_err("an empty scalar span must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -1228,12 +1242,13 @@ mod tests {
     async fn write_at_rejects_a_range_starting_in_structural_json() -> Result<()> {
         // Offset 0 is the opening `{`, structural, not an addressable value.
         let mut h = handler(r#"{"a":"b"}"#);
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation::inline(0..1),
-            TextReplacement::substituted("X"),
-        );
-        let err = h.write_at(rs).await.expect_err("must reject");
+        let err = h
+            .write_at(Redactions::from([(
+                TextLocation::inline(0..1),
+                TextReplacement::substituted("X"),
+            )]))
+            .await
+            .expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
     }
@@ -1246,12 +1261,13 @@ mod tests {
         let mut h = handler(r#"{"a":"b"}"#);
         let chunk = find_chunk(&h, "b");
         let start = chunk.location.range().unwrap().start;
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation::inline(start..start + 5),
-            TextReplacement::substituted("X"),
-        );
-        let err = h.write_at(rs).await.expect_err("must reject");
+        let err = h
+            .write_at(Redactions::from([(
+                TextLocation::inline(start..start + 5),
+                TextReplacement::substituted("X"),
+            )]))
+            .await
+            .expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
     }
@@ -1265,12 +1281,13 @@ mod tests {
         let mut h = handler(&src);
         let chunk = find_chunk(&h, "caf\u{e9}");
         let start = chunk.location.range().unwrap().start;
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation::inline(start + 3..start + 4),
-            TextReplacement::substituted("X"),
-        );
-        let err = h.write_at(rs).await.expect_err("must reject");
+        let err = h
+            .write_at(Redactions::from([(
+                TextLocation::inline(start + 3..start + 4),
+                TextReplacement::substituted("X"),
+            )]))
+            .await
+            .expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         // No partial mutation: the source is untouched after the rejected batch.
         assert_eq!(encoded(&h), src);
@@ -1284,12 +1301,13 @@ mod tests {
         let mut h = handler(r#"{"a":"bcd"}"#);
         let chunk = find_chunk(&h, "bcd");
         let start = chunk.location.range().unwrap().start;
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation::inline(start + 2..start),
-            TextReplacement::substituted("X"),
-        );
-        let err = h.write_at(rs).await.expect_err("must reject");
+        let err = h
+            .write_at(Redactions::from([(
+                TextLocation::inline(start + 2..start),
+                TextReplacement::substituted("X"),
+            )]))
+            .await
+            .expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
     }
@@ -1300,12 +1318,13 @@ mod tests {
         // sweep must reject it rather than exhaust silently and return Ok.
         let mut h = handler(r#"{"a":"b"}"#);
         let decoded_len: usize = h.slots.iter().map(Slot::decoded_len).sum();
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation::inline(decoded_len..decoded_len + 1),
-            TextReplacement::substituted("X"),
-        );
-        let err = h.write_at(rs).await.expect_err("must reject");
+        let err = h
+            .write_at(Redactions::from([(
+                TextLocation::inline(decoded_len..decoded_len + 1),
+                TextReplacement::substituted("X"),
+            )]))
+            .await
+            .expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
     }
@@ -1314,12 +1333,11 @@ mod tests {
     async fn redact_key() -> Result<()> {
         let mut h = handler(r#"{"email":"a@b.c"}"#);
         let chunk = find_chunk(&h, "email");
-        let mut rs = Redactions::new();
-        rs.push(
+        h.write_at(Redactions::from([(
             chunk.location.clone(),
             TextReplacement::substituted("contact"),
-        );
-        h.write_at(rs).await?;
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"contact":"a@b.c"}"#);
         Ok(())
     }
@@ -1328,9 +1346,11 @@ mod tests {
     async fn redact_scalar() -> Result<()> {
         let mut h = handler(r#"{"n":42}"#);
         let chunk = find_chunk(&h, "42");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location.clone(), TextReplacement::substituted("0"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            chunk.location.clone(),
+            TextReplacement::substituted("0"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"n":0}"#);
         Ok(())
     }
@@ -1341,9 +1361,11 @@ mod tests {
         // invalid JSON, so the leaf is promoted to a quoted string value.
         let mut h = handler(r#"{"n":42}"#);
         let chunk = find_chunk(&h, "42");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location.clone(), TextReplacement::substituted("XXX"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            chunk.location.clone(),
+            TextReplacement::substituted("XXX"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"n":"XXX"}"#);
         Ok(())
     }
@@ -1363,10 +1385,10 @@ mod tests {
             }
         }
         assert_eq!(locs.len(), 3, "expected three string values");
-        let mut rs = Redactions::new();
-        for loc in locs {
-            rs.push(loc, TextReplacement::substituted("X"));
-        }
+        let rs = locs
+            .into_iter()
+            .map(|loc| (loc, TextReplacement::substituted("X")))
+            .collect();
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), r#"{"a":"X","b":"X","c":"X"}"#);
         Ok(())
@@ -1438,9 +1460,11 @@ mod tests {
         let source_loc = h
             .lift(&chunk, TextLocation::inline(value_start..value_end))
             .expect("range is in bounds");
-        let mut rs = Redactions::new();
-        rs.push(source_loc, TextReplacement::substituted("XXX"));
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([(
+            source_loc,
+            TextReplacement::substituted("XXX"),
+        )]))
+        .await?;
         assert_eq!(encoded(&h), r#"{"msg":"foo\"XXX"}"#);
         Ok(())
     }

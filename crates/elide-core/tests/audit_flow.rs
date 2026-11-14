@@ -282,12 +282,12 @@ fn operator_trait_shape() {
             &self,
             entity: &Entity<Text>,
             _data: &TextData,
-        ) -> Result<TextReplacement> {
+        ) -> Result<Option<TextReplacement>> {
             // Pure: computes the replacement, mutates nothing.
-            Ok(TextReplacement::Substituted(format!(
+            Ok(Some(TextReplacement::Substituted(format!(
                 "[{}]",
                 entity.label.as_str()
-            )))
+            ))))
         }
     }
 

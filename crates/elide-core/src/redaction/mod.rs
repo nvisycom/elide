@@ -42,15 +42,15 @@ use crate::modality::Modality;
 /// redaction operator implements this trait.
 ///
 /// An operator is **pure**: it reads the entity and the [`Data`] under
-/// it and returns a [`Replacement`] (the instruction for what to write)
-/// *without* mutating anything. Applying the replacement back into the
+/// it and returns a [`Replacement`] (the instruction for what to write), or
+/// `None` to leave the entity as it is, *without* mutating anything. Applying the replacement back into the
 /// document is the codec's job. This keeps operators free of format
 /// knowledge (a mask works the same whether the text lives in a PDF or a
 /// CSV), trivially testable, and cacheable. A reversible operator
 /// (encrypt) additionally implements [`ReversibleOperator`]; an
 /// irreversible one (mask, redact, hash) does not.
 ///
-/// Generic over the [`Modality`] `M`: reads `M::Data`, returns
+/// Generic over the [`Modality`] `M`: reads `M::Data`, returns an
 /// `M::Replacement`.
 ///
 /// [`Data`]: Modality::Data
@@ -61,9 +61,11 @@ pub trait Operator<M: Modality>: Component + Send + Sync {
     /// for policy authoring and audit reporting.
     fn leak_profile(&self) -> LeakProfile;
 
-    /// Compute the replacement for `entity`, reading its underlying `data`.
-    /// Pure: produces the instruction, does not apply it.
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement>;
+    /// Compute the replacement for `entity`, reading its underlying `data`,
+    /// or `None` to leave it as it is, so nothing is written for it. Pure:
+    /// produces the instruction, does not apply it.
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data)
+    -> Result<Option<M::Replacement>>;
 }
 
 #[async_trait::async_trait]
@@ -76,7 +78,11 @@ where
         (**self).leak_profile()
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         (**self).anonymize(entity, data).await
     }
 }
@@ -91,7 +97,11 @@ where
         (**self).leak_profile()
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         (**self).anonymize(entity, data).await
     }
 }

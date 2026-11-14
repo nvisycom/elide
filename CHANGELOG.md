@@ -36,6 +36,7 @@ and this project adheres to
 - Embedded documents (an image in a DOCX, a file in a PDF) are decoded as
   parts of their container, under their parent's policy, and analyzed and
   redacted through the pipeline registered for their modality; an embedded
+  document nothing was redacted in keeps its original bytes, and an embedded
   file no codec can read is removed
 - Optional PDF page rendering to images via the native PDFium library
   (`pdf-render` feature)
@@ -59,21 +60,28 @@ and this project adheres to
 
 #### Review
 
-- A `Report` is read and edited through typed part views: `part` and
-  `document` return a `Part` (`entities`, `entity`, `suppressed`,
-  `unsuppressed`), `part_mut` and `document_mut` a `PartMut` whose edits
-  (`include`, `relabel`, `relocate`, `suppress`, `suppress_within`) are
-  recorded as `Manual` audit events attributed to its `by` and `because`
+- A `Report` is read and edited through typed part views, keyed by `PartId`
+  (a document's own content by `Document::id`): `part` returns a `Part`
+  (`entities`, `entity`, `suppressed`, `unsuppressed`), `part_mut` a `PartMut`
+  whose edits (`include`, `relabel`, `relocate`, `suppress`,
+  `suppress_within`) are recorded as `Manual` audit events attributed to its
+  `by` and `because`
 - `Orchestrator::pick` records on every entity the operator `anonymize_with`
   will apply, as a `Selection` event, so a review can show the plan before
   anything is applied
+- Applying a report fails closed: a part with entities that no registered
+  pipeline can apply, or that names no part of the documents, is an error
+  rather than a part left unredacted
 
 #### Redaction
 
 - Redaction operators for text (replace, mask, erase, hash, HMAC, encrypt,
   truncate, clamp, date generalization, pseudonymize, keep), tabular cells
   (drop row, drop column), images (blackbox, blur, pixelate), and audio
-  (silence, beep), selected per entity by an `Anonymizer`'s ordered rules
+  (silence, beep), selected per entity by an `Anonymizer`'s ordered rules;
+  `Erase` and `Keep` serve every modality, and `Keep` writes nothing, so a kept
+  entity is left exactly as it was in every format and is recorded as
+  selected, not redacted
 - Coreference-aware pseudonymization with a vault for stable replacements, and
   a `Deanonymizer` for reversible operators
 - Every pipeline's anonymizer erases a flagged entity no rule covers, so

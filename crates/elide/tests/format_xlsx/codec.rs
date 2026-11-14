@@ -7,8 +7,9 @@ use elide::codec::office::xlsx_format;
 use elide::codec::{ContentData, Document, LocalId, TypedStream};
 use elide::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide::modality::text::{Text, TextReplacement};
-use elide::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
+use elide::modality::{ChunkReader as _, DataWriter as _};
 use elide::redaction::{Disposition, HiddenContent, HiddenContentPolicy, Redactions};
+use elide_core::modality::DataReaderExt as _;
 use elide_office::fixtures::part_names;
 
 /// The two-sheet workbook whose shared string is reused across sheets, for
@@ -118,21 +119,17 @@ async fn read_at_slices_intra_cell_range() {
     let loc = TabularLocation::new(1, 0)
         .with_sheet_name("Customers")
         .with_span(0..5);
-    assert_eq!(
-        stream.read_at(&loc).await.unwrap().unwrap().as_str(),
-        "alice"
-    );
+    assert_eq!(stream.expect_at(&loc).await.as_str(), "alice");
 }
 
 #[tokio::test]
 async fn redact_and_encode_removes_pii_and_de_shares() {
     let mut doc = decode(SAMPLE).await;
-    let mut batch: Redactions<Tabular> = Redactions::new();
     // Redact only Customers!A2 (alice). Notes!A1 shares the pool entry.
-    batch.push(
+    let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(1, 0).with_sheet_name("Customers"),
         TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-    );
+    )]);
     body(&mut doc).write_at(batch).await.unwrap();
     let out = doc.encode().unwrap();
 
@@ -158,11 +155,10 @@ async fn redact_and_encode_removes_pii_and_de_shares() {
 #[tokio::test]
 async fn structural_drops_are_refused() {
     let mut doc = decode(SAMPLE).await;
-    let mut batch: Redactions<Tabular> = Redactions::new();
-    batch.push(
+    let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(1, 0).with_sheet_name("Customers"),
         TabularReplacement::DropRow,
-    );
+    )]);
     assert!(body(&mut doc).write_at(batch).await.is_err());
 }
 
@@ -172,15 +168,16 @@ async fn a_batch_with_an_unsupported_edit_leaves_the_workbook_unchanged() {
     // must fail the whole batch atomically — the valid edit must NOT survive
     // into the encoded workbook (a partial redaction is worse than none).
     let mut doc = decode(SAMPLE).await;
-    let mut batch: Redactions<Tabular> = Redactions::new();
-    batch.push(
-        TabularLocation::new(1, 0).with_sheet_name("Customers"),
-        TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-    );
-    batch.push(
-        TabularLocation::new(1, 1).with_sheet_name("Customers"),
-        TabularReplacement::DropRow,
-    );
+    let batch: Redactions<Tabular> = Redactions::from([
+        (
+            TabularLocation::new(1, 0).with_sheet_name("Customers"),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        ),
+        (
+            TabularLocation::new(1, 1).with_sheet_name("Customers"),
+            TabularReplacement::DropRow,
+        ),
+    ]);
     assert!(body(&mut doc).write_at(batch).await.is_err());
 
     // The encode carries none of the batch: Customers!A2 still reads alice.
@@ -204,13 +201,12 @@ async fn a_batch_with_an_unsupported_edit_leaves_the_workbook_unchanged() {
 #[tokio::test]
 async fn encode_only_de_shares_redacted_cells() {
     let mut doc = decode(SAMPLE).await;
-    let mut batch: Redactions<Tabular> = Redactions::new();
     // Redact only Customers!A2 (alice). The `Email` header at A1 is a
     // different, unredacted shared string.
-    batch.push(
+    let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(1, 0).with_sheet_name("Customers"),
         TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-    );
+    )]);
     body(&mut doc).write_at(batch).await.unwrap();
     let out = doc.encode().unwrap();
 
@@ -236,11 +232,10 @@ async fn a_sheetless_ambiguous_redaction_fails_closed() {
     // (0,0) exists on both Customers (Email) and Notes (alice), so a sheetless
     // request at (0,0) must fail rather than edit an arbitrary sheet.
     let mut doc = decode(SAMPLE).await;
-    let mut batch: Redactions<Tabular> = Redactions::new();
-    batch.push(
+    let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(0, 0), // no sheet name
         TabularReplacement::Cell(TextReplacement::substituted("[X]")),
-    );
+    )]);
     assert!(body(&mut doc).write_at(batch).await.is_err());
 }
 
@@ -290,9 +285,13 @@ async fn a_text_redaction_splices_into_its_comment() {
         .into_iter()
         .find(|chunk| chunk.data.as_str().contains("carol@example.com"))
         .expect("comment chunk");
-    let mut batch: Redactions<Text> = Redactions::new();
-    batch.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
-    text(&mut doc).write_at(batch).await.unwrap();
+    text(&mut doc)
+        .write_at(Redactions::from([(
+            chunk.location,
+            TextReplacement::substituted("[EMAIL]"),
+        )]))
+        .await
+        .unwrap();
     let out = doc.encode().unwrap();
     let comment = String::from_utf8(read_part(out.as_bytes(), "xl/comments1.xml")).unwrap();
     assert!(comment.contains("[EMAIL]"), "{comment}");

@@ -86,9 +86,9 @@ impl Operator<Image> for Pixelate {
         &self,
         _entity: &Entity<Image>,
         _data: &ImageData,
-    ) -> Result<ImageReplacement> {
-        Ok(ImageReplacement::Pixelate {
+    ) -> Result<Option<ImageReplacement>> {
+        Ok(Some(ImageReplacement::Pixelate {
             block_size: self.block_size,
-        })
+        }))
     }
 }

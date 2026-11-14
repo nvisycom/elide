@@ -574,7 +574,7 @@ fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::xml_edit::edit;
+    use crate::opc::xml_edit::{edit, expect_edit};
 
     /// The `(key, value)` of each field `xml` surfaces.
     fn pairs(xml: &[u8]) -> Vec<(String, String)> {
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn redacting_keeps_only_the_surfaced_fields() {
         let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jane Roe</dc:creator><dc:title>Plan</dc:title><cp:keywords>acquisition</cp:keywords><cp:revision>7</cp:revision><cp:contentStatus>Draft</cp:contentStatus></cp:coreProperties>"#;
-        let edited = edit(core, &UnsurfacedProperties).unwrap().unwrap();
+        let edited = expect_edit(core, &UnsurfacedProperties);
         assert_eq!(edited.count, 2);
         for kept in ["Jane Roe", "Plan", "acquisition"] {
             assert!(edited.text.contains(kept), "{kept} was stripped");
@@ -612,7 +612,7 @@ mod tests {
         assert!(!edited.text.contains("revision") && !edited.text.contains("Draft"));
 
         let app = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>C:\Users\jroe\Normal.dotm</Template><Company>Acme</Company><HyperlinkBase>https://intranet</HyperlinkBase><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Secret sheet</vt:lpstr></vt:vector></TitlesOfParts><Application>Microsoft Excel</Application></Properties>"#;
-        let edited = edit(app, &UnsurfacedProperties).unwrap().unwrap();
+        let edited = expect_edit(app, &UnsurfacedProperties);
         assert_eq!(edited.count, 1);
         for kept in ["jroe", "Acme", "intranet", "Worksheets", "Secret sheet"] {
             assert!(edited.text.contains(kept), "{kept} was stripped");
@@ -625,7 +625,7 @@ mod tests {
         // A custom property with no name cannot be surfaced, so it goes.
         let unnamed = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
         assert!(fields(unnamed.as_bytes()).is_empty());
-        let edited = edit(unnamed, &UnsurfacedProperties).unwrap().unwrap();
+        let edited = expect_edit(unnamed, &UnsurfacedProperties);
         assert_eq!(edited.count, 1);
         assert!(!edited.text.contains("Jane Roe"));
     }

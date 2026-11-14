@@ -259,6 +259,18 @@ pub(crate) struct Edited {
     pub(crate) count: usize,
 }
 
+/// `raw` as `edit` changes it, for a test whose edit changes something.
+///
+/// # Panics
+///
+/// When the edit fails or changes nothing.
+#[cfg(test)]
+pub(crate) fn expect_edit(raw: &str, edit: &(impl Edit + ?Sized)) -> Edited {
+    edit.apply(raw)
+        .unwrap()
+        .expect("the edit changes the document")
+}
+
 /// `raw` edited by `rules`, or `None` when the rules change nothing.
 ///
 /// # Errors
@@ -501,7 +513,7 @@ mod tests {
     #[test]
     fn removes_unwraps_and_strips_attributes_byte_faithfully() {
         let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:rsidR="00AB"><w:ins w:author="Jane"><w:r><w:t>kept</w:t></w:r></w:ins><w:del w:author="Jane"><w:r><w:delText>gone</w:delText></w:r></w:del><w:r w:rsidRPr="1"><w:t xml:space="preserve"> tail</w:t></w:r></w:p>"#;
-        let edited = edit(raw, &Revisions).unwrap().unwrap();
+        let edited = expect_edit(raw, &Revisions);
         // The paragraph's rsid, the insertion, the deletion, the run's rsid.
         assert_eq!(edited.count, 4);
         assert_eq!(
@@ -513,10 +525,7 @@ mod tests {
     #[test]
     fn matches_by_namespace_not_prefix() {
         let raw = r#"<x:del xmlns:x="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><x:r/></x:del><del>kept</del>"#;
-        assert_eq!(
-            edit(raw, &Revisions).unwrap().unwrap().text,
-            "<del>kept</del>"
-        );
+        assert_eq!(expect_edit(raw, &Revisions).text, "<del>kept</del>");
     }
 
     #[test]

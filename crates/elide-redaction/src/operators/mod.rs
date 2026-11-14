@@ -103,4 +103,4 @@ pub use self::text::{
 #[cfg(feature = "datetime")]
 #[cfg_attr(docsrs, doc(cfg(feature = "datetime")))]
 pub use self::text::{DateGranularity, DateStyle, GeneralizeDate};
-pub use self::with_fallback::{TryOperator, WithFallback};
+pub use self::with_fallback::{Attempt, TryOperator, WithFallback};

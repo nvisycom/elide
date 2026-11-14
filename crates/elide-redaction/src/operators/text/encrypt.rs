@@ -150,11 +150,15 @@ impl<M: TextRedactable> Operator<M> for AesEncrypt {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         let ciphertext = self.encrypt_str(&entity.label, data.as_ref())?;
-        Ok(M::Replacement::from(TextReplacement::substituted(
+        Ok(Some(M::Replacement::from(TextReplacement::substituted(
             ciphertext,
-        )))
+        ))))
     }
 }
 
@@ -202,15 +206,20 @@ mod tests {
         AesEncrypt::with_key([7u8; 32].to_vec())
     }
 
+    /// The ciphertext `op` writes for `value` under `entity`.
+    async fn encrypt(op: &AesEncrypt, entity: &Entity<Text>, value: &str) -> TextReplacement {
+        op.anonymize(entity, &TextData::new(value))
+            .await
+            .unwrap()
+            .expect("encrypt writes a replacement")
+    }
+
     #[tokio::test]
     async fn round_trips_through_encrypt_then_decrypt() {
         let op = encryptor();
         let e = entity();
 
-        let replacement = op
-            .anonymize(&e, &TextData::new("alice@example.com"))
-            .await
-            .unwrap();
+        let replacement = encrypt(&op, &e, "alice@example.com").await;
         let recovered = op.deanonymize(&e, &replacement).await.unwrap();
         assert_eq!(recovered, Some(TextData::new("alice@example.com")));
     }
@@ -220,18 +229,15 @@ mod tests {
         let op = encryptor();
         let e = entity();
 
-        let a = op.anonymize(&e, &TextData::new("secret")).await.unwrap();
-        let b = op.anonymize(&e, &TextData::new("secret")).await.unwrap();
+        let a = encrypt(&op, &e, "secret").await;
+        let b = encrypt(&op, &e, "secret").await;
         assert_ne!(a, b, "fresh nonce per call should differ");
     }
 
     #[tokio::test]
     async fn wrong_key_does_not_recover() {
         let e = entity();
-        let replacement = encryptor()
-            .anonymize(&e, &TextData::new("secret"))
-            .await
-            .unwrap();
+        let replacement = encrypt(&encryptor(), &e, "secret").await;
 
         let other = AesEncrypt::with_key([9u8; 32].to_vec());
         assert_eq!(other.deanonymize(&e, &replacement).await.unwrap(), None);
@@ -279,7 +285,7 @@ mod tests {
             Entity::<Text>::new(LabelRef::new("ssn"), loc).with_event(event)
         };
 
-        let replacement = op.anonymize(&card, &TextData::new("secret")).await.unwrap();
+        let replacement = encrypt(&op, &card, "secret").await;
         // Same ciphertext, decrypted under the wrong label's key: not recovered.
         assert_eq!(op.deanonymize(&ssn, &replacement).await.unwrap(), None);
         // Under the right label: recovered.

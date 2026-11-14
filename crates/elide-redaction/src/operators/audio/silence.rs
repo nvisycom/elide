@@ -33,7 +33,7 @@ impl Operator<Audio> for Silence {
         &self,
         _entity: &Entity<Audio>,
         _data: &AudioData,
-    ) -> Result<AudioReplacement> {
-        Ok(AudioReplacement::Silenced)
+    ) -> Result<Option<AudioReplacement>> {
+        Ok(Some(AudioReplacement::Silenced))
     }
 }

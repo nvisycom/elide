@@ -93,9 +93,15 @@ where
         LeakProfile::Partial.min(self.fallback.leak_profile())
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         match self.try_generate(entity, data.as_ref()) {
-            Some(value) => Ok(M::Replacement::from(TextReplacement::substituted(value))),
+            Some(value) => Ok(Some(M::Replacement::from(TextReplacement::substituted(
+                value,
+            )))),
             None => self.fallback.anonymize(entity, data).await,
         }
     }
@@ -147,7 +153,7 @@ mod tests {
         let source = TextData::new("hypertension");
         let entity = entity_over(diagnosis(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        assert_eq!(out, TextReplacement::substituted("[redacted]"));
+        assert_eq!(out, Some(TextReplacement::substituted("[redacted]")));
     }
 
     /// A label `Fake` cannot fake takes the fallback, so a leakier fallback
@@ -172,7 +178,7 @@ mod tests {
         let source = TextData::new("hypertension");
         let entity = entity_over(diagnosis(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        assert_eq!(out, TextReplacement::substituted("************"));
+        assert_eq!(out, Some(TextReplacement::substituted("************")));
     }
 
     #[tokio::test]
@@ -195,7 +201,7 @@ mod tests {
         )
         .with_language("ja".parse().unwrap());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        let TextReplacement::Substituted(value) = out else {
+        let Some(TextReplacement::Substituted(value)) = out else {
             panic!("expected Substituted variant");
         };
         assert!(!value.is_empty(), "ja name should not be empty");
@@ -207,7 +213,7 @@ mod tests {
         let source = TextData::new("name");
         let entity = entity_over(person_name(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        let TextReplacement::Substituted(value) = out else {
+        let Some(TextReplacement::Substituted(value)) = out else {
             panic!("expected Substituted variant");
         };
         assert!(!value.is_empty());
@@ -238,7 +244,7 @@ mod tests {
         for _ in 0..32 {
             let entity = entity_over(person_name(), source.as_str());
             let out = op.anonymize(&entity, &source).await.unwrap();
-            let TextReplacement::Substituted(value) = out else {
+            let Some(TextReplacement::Substituted(value)) = out else {
                 panic!("expected Substituted");
             };
             outputs.insert(value);
@@ -267,7 +273,7 @@ mod tests {
             <Fake<Mask> as Operator<Tabular>>::anonymize(&op, &entity, &TextData::new("alice"))
                 .await
                 .unwrap();
-        let TabularReplacement::Cell(TextReplacement::Substituted(value)) = out else {
+        let Some(TabularReplacement::Cell(TextReplacement::Substituted(value))) = out else {
             panic!("expected Cell(Substituted)");
         };
         assert!(!value.is_empty());

@@ -11,10 +11,9 @@ use uuid::Uuid;
 
 /// One part of a report, typed to its modality, for reading its entities.
 ///
-/// Returned by [`Report::part`] and [`Report::document`].
+/// Returned by [`Report::part`].
 ///
 /// [`Report::part`]: super::Report::part
-/// [`Report::document`]: super::Report::document
 #[derive(Debug, Clone, Copy)]
 pub struct Part<'r, M: Modality> {
     entities: &'r [Entity<M>],
@@ -53,13 +52,12 @@ impl<'r, M: Modality> Part<'r, M> {
 
 /// One part of a report, typed to its modality, for editing its entities.
 ///
-/// Returned by [`Report::part_mut`] and [`Report::document_mut`]. Every edit
+/// Returned by [`Report::part_mut`]. Every edit
 /// made through it is recorded on the entities it touches as a `Manual` audit
 /// event, attributed to [`by`](Self::by) and [`because`](Self::because) when
 /// set, so a reviewer's decision is never mistaken for a detection.
 ///
 /// [`Report::part_mut`]: super::Report::part_mut
-/// [`Report::document_mut`]: super::Report::document_mut
 #[derive(Debug)]
 pub struct PartMut<'r, M: Modality> {
     entities: &'r mut Vec<Entity<M>>,

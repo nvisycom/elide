@@ -36,9 +36,10 @@ for (part, id) in rejected {
         .suppress(id);
 }
 
-// Clear a whole region, such as a public letterhead, in one call.
+// Clear a whole region of the document's own text, such as a public
+// letterhead, in one call.
 report
-    .document_mut::<Text>()?
+    .part_mut::<Text>(&document.id())?
     .by("reviewer-7")
     .suppress_within(&TextLocation::inline(0..120));
 
@@ -48,8 +49,9 @@ orchestrator.anonymize_with(&mut document, report).await?;
 ```
 
 A report keeps each part's entities apart, keyed by `PartId`. `part` reads
-one as a modality and `part_mut` edits it; `document` and `document_mut` reach
-a report's single top-level document. Through `part_mut`, a reviewer can:
+one as a modality and `part_mut` edits it; a document's own content is keyed
+by `document.id()`, and its container parts beneath it. Through `part_mut`, a
+reviewer can:
 
 - **Suppress** an entity: `suppress` keeps it in the report, marked
   suppressed, so it is not redacted.

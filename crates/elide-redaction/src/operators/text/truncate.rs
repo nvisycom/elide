@@ -4,14 +4,14 @@
 //! [`Mask`]: crate::operators::Mask
 
 use elide_core::entity::Entity;
-use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
+use elide_core::modality::{ModalityReplacement, TextRedactable};
 use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Component, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::operators::TryOperator;
+use crate::operators::{Attempt, TryOperator};
 
 /// Physically truncate the value, keeping a leading and/or trailing run.
 ///
@@ -86,12 +86,16 @@ impl<M: TextRedactable> Operator<M> for Truncate {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         // Used on its own, a declined value erases, the safe default.
-        Ok(self
-            .try_anonymize(entity, data)
-            .await?
-            .unwrap_or_else(|| M::Replacement::from(TextReplacement::Removed)))
+        Ok(Some(match self.try_anonymize(entity, data).await? {
+            Attempt::Applied(replacement) => replacement,
+            Attempt::Declined => M::Replacement::removed(),
+        }))
     }
 }
 
@@ -101,10 +105,13 @@ impl<M: TextRedactable> TryOperator<M> for Truncate {
         &self,
         _entity: &Entity<M>,
         data: &M::Data,
-    ) -> Result<Option<M::Replacement>> {
-        Ok(self
-            .render(data.as_ref())
-            .map(|text| M::Replacement::from(TextReplacement::substituted(text))))
+    ) -> Result<Attempt<M::Replacement>> {
+        Ok(match self.render(data.as_ref()) {
+            Some(text) => {
+                Attempt::Applied(M::Replacement::from(TextReplacement::substituted(text)))
+            }
+            None => Attempt::Declined,
+        })
     }
 }
 
@@ -147,13 +154,13 @@ mod tests {
         let alone = Operator::<Text>::anonymize(&Truncate::suffix(4), &entity, &data)
             .await
             .unwrap();
-        assert_eq!(alone, TextReplacement::Removed);
+        assert_eq!(alone, Some(TextReplacement::Removed));
 
         let masked = WithFallback::new(Truncate::suffix(4), Mask::stars());
         let out = Operator::<Text>::anonymize(&masked, &entity, &data)
             .await
             .unwrap();
-        assert_eq!(out, TextReplacement::substituted("****"));
+        assert_eq!(out, Some(TextReplacement::substituted("****")));
     }
 
     #[test]

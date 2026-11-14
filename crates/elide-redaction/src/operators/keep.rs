@@ -1,17 +1,9 @@
 //! [`Keep`]: pass the matched entity through unchanged.
 
-#[cfg(feature = "audio")]
-use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::entity::Entity;
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
-#[cfg(feature = "tabular")]
-use elide_core::modality::tabular::{Tabular, TabularReplacement};
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::Modality;
 use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Component, Result};
-#[cfg(feature = "image")]
-use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,12 +11,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Useful in mixed policies: redact everything by default but keep, say,
 /// currency amounts readable, or every face except the ones tagged to
-/// retain. The replacement records "leave this as-is" so the entity still
-/// shows up in the audit trail.
-///
-/// Works across modalities: a text or tabular span stays verbatim, an image
-/// region or audio range is left untouched, and a metadata field keeps its
-/// value.
+/// retain. It writes nothing, in any modality, so the document is left as it
+/// is there. The entity's audit trail records that `Keep` was selected, and no
+/// redaction, since nothing was hidden.
 ///
 /// A field that stands for a group with others (an EXIF device or GPS field)
 /// goes with the group when another of its fields is redacted: removal wins,
@@ -36,83 +25,19 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Keep;
 
-/// The original value is unchanged: strictly the most leaky profile.
-const KEEP_LEAK: LeakProfile = LeakProfile::Recoverable;
-
 #[async_trait::async_trait]
-impl Operator<Text> for Keep {
+impl<M: Modality> Operator<M> for Keep {
+    /// The original value is unchanged: strictly the most leaky profile.
     fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(data.as_str()))
-    }
-}
-
-#[cfg(feature = "tabular")]
-#[async_trait::async_trait]
-impl Operator<Tabular> for Keep {
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
+        LeakProfile::Recoverable
     }
 
     async fn anonymize(
         &self,
-        _entity: &Entity<Tabular>,
-        data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TabularReplacement::Cell(TextReplacement::substituted(
-            data.as_str(),
-        )))
-    }
-}
-
-#[cfg(feature = "metadata")]
-#[async_trait::async_trait]
-impl Operator<Metadata> for Keep {
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Metadata>,
-        _data: &MetadataData,
-    ) -> Result<MetadataReplacement> {
-        Ok(MetadataReplacement::Unchanged)
-    }
-}
-
-#[cfg(feature = "image")]
-#[async_trait::async_trait]
-impl Operator<Image> for Keep {
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Image>,
-        _data: &ImageData,
-    ) -> Result<ImageReplacement> {
-        Ok(ImageReplacement::Unchanged)
-    }
-}
-
-#[cfg(feature = "audio")]
-#[async_trait::async_trait]
-impl Operator<Audio> for Keep {
-    fn leak_profile(&self) -> LeakProfile {
-        KEEP_LEAK
-    }
-
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Audio>,
-        _data: &AudioData,
-    ) -> Result<AudioReplacement> {
-        Ok(AudioReplacement::Unchanged)
+        _entity: &Entity<M>,
+        _data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
+        Ok(None)
     }
 }
 
@@ -120,50 +45,26 @@ impl Operator<Audio> for Keep {
 mod tests {
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
+    use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::redaction::Operator;
 
     use super::Keep;
 
-    fn text_entity() -> Entity<Text> {
-        let location = TextLocation::inline(0..5);
+    #[tokio::test]
+    async fn keep_writes_nothing() {
+        let location = TextLocation::inline(0..6);
         let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
             PatternRule::default(),
         );
-        Entity::new(LabelRef::new("AMOUNT"), location).with_event(event)
-    }
-
-    #[tokio::test]
-    async fn text_keep_returns_the_original_verbatim() {
+        let entity: Entity<Text> = Entity::new(LabelRef::new("AMOUNT"), location).with_event(event);
         let out = Keep
-            .anonymize(&text_entity(), &TextData::new("$1,000"))
+            .anonymize(&entity, &TextData::new("$1,000"))
             .await
             .unwrap();
-        assert_eq!(out, TextReplacement::substituted("$1,000"));
-    }
-
-    #[cfg(feature = "image")]
-    #[tokio::test]
-    async fn image_keep_leaves_the_region_unchanged() {
-        use elide_image::modality::{Image, ImageLocation, ImageReplacement};
-        use elide_image::primitive::{BoundingBox, Dimensions, Point};
-
-        let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(2.0, 2.0));
-        let location = ImageLocation::new(bbox);
-        let event = AuditEvent::pattern(
-            "t",
-            Confidence::MAX,
-            location.clone(),
-            PatternRule::default(),
-        );
-        let entity: Entity<Image> = Entity::new(LabelRef::new("FACE"), location).with_event(event);
-        let data = elide_image::fixtures::blank_image_data();
-
-        let out = Keep.anonymize(&entity, &data).await.unwrap();
-        assert_eq!(out, ImageReplacement::Unchanged);
+        assert_eq!(out, None);
     }
 }

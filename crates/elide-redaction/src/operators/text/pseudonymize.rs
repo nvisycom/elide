@@ -125,7 +125,11 @@ where
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         let key = PseudonymizeKey {
             label: entity.label.clone(),
             seed: PseudonymizeSeed::of(entity, data.as_ref()),
@@ -143,7 +147,7 @@ where
                     })
             })
             .await?;
-        Ok(M::Replacement::from(surrogate))
+        Ok(Some(M::Replacement::from(surrogate)))
     }
 }
 

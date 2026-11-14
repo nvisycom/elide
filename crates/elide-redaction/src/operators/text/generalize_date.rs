@@ -3,15 +3,15 @@
 //! removing identifier-level precision.
 
 use elide_core::entity::Entity;
-use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
+use elide_core::modality::{ModalityReplacement, TextRedactable};
 use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Component, Result};
 use jiff::civil::{Date, DateTime, Time};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::operators::TryOperator;
+use crate::operators::{Attempt, TryOperator};
 
 /// The coarseness a [`GeneralizeDate`] reduces a date/timestamp to.
 ///
@@ -211,12 +211,16 @@ impl<M: TextRedactable> Operator<M> for GeneralizeDate {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         // Used on its own, a declined value erases, the safe default.
-        Ok(self
-            .try_anonymize(entity, data)
-            .await?
-            .unwrap_or_else(|| M::Replacement::from(TextReplacement::Removed)))
+        Ok(Some(match self.try_anonymize(entity, data).await? {
+            Attempt::Applied(replacement) => replacement,
+            Attempt::Declined => M::Replacement::removed(),
+        }))
     }
 }
 
@@ -226,10 +230,13 @@ impl<M: TextRedactable> TryOperator<M> for GeneralizeDate {
         &self,
         _entity: &Entity<M>,
         data: &M::Data,
-    ) -> Result<Option<M::Replacement>> {
-        Ok(self
-            .render(data.as_ref())
-            .map(|text| M::Replacement::from(TextReplacement::substituted(text))))
+    ) -> Result<Attempt<M::Replacement>> {
+        Ok(match self.render(data.as_ref()) {
+            Some(text) => {
+                Attempt::Applied(M::Replacement::from(TextReplacement::substituted(text)))
+            }
+            None => Attempt::Declined,
+        })
     }
 }
 
@@ -373,7 +380,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out, TextReplacement::Removed);
+        assert_eq!(out, Some(TextReplacement::Removed));
     }
 
     #[test]

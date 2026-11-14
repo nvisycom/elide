@@ -46,8 +46,9 @@ serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde"]
 ## the serde representation, and the derive reads serde attributes.
 schema = ["serde", "dep:schemars"]
 
-## In-memory test fixtures (the `TextDoc`, `Entity::fixture` builders),
-## colocated with the types they build. For downstream `[dev-dependencies]`.
+## In-memory test fixtures (the `TextDoc`, `Entity::fixture` builders) and
+## test helpers (`DataReaderExt`), colocated with the types they serve. For
+## downstream `[dev-dependencies]`.
 fixtures = []
 ## Test doubles (`MockRecognizer`, `MockOperator`) for driving a pipeline
 ## without a real recognizer or operator. For downstream `[dev-dependencies]`.

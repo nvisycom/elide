@@ -26,11 +26,17 @@
 
 use std::borrow::Cow;
 
+#[cfg(feature = "audio")]
+use elide_audio::modality::Audio;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::modality::metadata::Metadata;
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::Tabular;
 use elide_core::modality::text::Text;
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
+#[cfg(feature = "image")]
+use elide_image::modality::Image;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
 use super::artifacts::ArtifactSet;
@@ -72,11 +78,11 @@ impl JsonSchema for Report {
             group_arm::<Text>(generator),
             group_arm::<Metadata>(generator),
             #[cfg(feature = "image")]
-            group_arm::<elide_image::modality::Image>(generator),
+            group_arm::<Image>(generator),
             #[cfg(feature = "audio")]
-            group_arm::<elide_audio::modality::Audio>(generator),
+            group_arm::<Audio>(generator),
             #[cfg(feature = "tabular")]
-            group_arm::<elide_core::modality::tabular::Tabular>(generator),
+            group_arm::<Tabular>(generator),
         ];
         let group = json_schema!({
             "oneOf": arms,
@@ -148,11 +154,11 @@ impl JsonSchema for ArtifactSet {
             artifact_arm::<Text>(generator),
             artifact_arm::<Metadata>(generator),
             #[cfg(feature = "image")]
-            artifact_arm::<elide_image::modality::Image>(generator),
+            artifact_arm::<Image>(generator),
             #[cfg(feature = "audio")]
-            artifact_arm::<elide_audio::modality::Audio>(generator),
+            artifact_arm::<Audio>(generator),
             #[cfg(feature = "tabular")]
-            artifact_arm::<elide_core::modality::tabular::Tabular>(generator),
+            artifact_arm::<Tabular>(generator),
         ];
         let group = json_schema!({
             "oneOf": arms,

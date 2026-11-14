@@ -2,9 +2,7 @@
 
 use elide_core::Result;
 use elide_core::modality::Chunk;
-use elide_core::modality::metadata::{
-    Metadata, MetadataData, MetadataLocation, MetadataReplacement,
-};
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::redaction::Redactions;
 
 use crate::FlaggedItem;
@@ -81,9 +79,6 @@ impl MetadataFields {
         redactions.sort_by_position();
         let mut edited: Vec<String> = Vec::new();
         for (location, replacement) in redactions.into_iter().rev() {
-            let MetadataReplacement::Value(replacement) = replacement else {
-                continue;
-            };
             let Some(field) = self
                 .fields
                 .iter_mut()
@@ -142,14 +137,6 @@ mod tests {
         ])
     }
 
-    fn batch(pairs: Vec<(MetadataLocation, TextReplacement)>) -> Redactions<Metadata> {
-        let mut redactions = Redactions::new();
-        for (location, replacement) in pairs {
-            redactions.push(location, replacement.into());
-        }
-        redactions
-    }
-
     fn part(start: usize, end: usize) -> MetadataLocation {
         MetadataLocation::new("description").with_span(start..end)
     }
@@ -170,7 +157,7 @@ mod tests {
     fn spans_of_a_value_are_redacted_in_place() {
         let mut fields = fields();
         let edits = fields
-            .redact(batch(vec![
+            .redact(Redactions::from([
                 (part(9, 17), TextReplacement::substituted("[NAME]")),
                 (part(21, 25), TextReplacement::Removed),
             ]))
@@ -192,7 +179,7 @@ mod tests {
     fn a_field_left_blank_is_removed() {
         let mut fields = fields();
         let edits = fields
-            .redact(batch(vec![(
+            .redact(Redactions::from([(
                 MetadataLocation::new("title"),
                 TextReplacement::Removed,
             )]))
@@ -203,17 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_and_unknown_fields_edit_nothing() {
+    fn an_unknown_field_edits_nothing() {
         let mut fields = fields();
-        let mut redactions = Redactions::new();
-        redactions.push(
-            MetadataLocation::new("title"),
-            MetadataReplacement::Unchanged,
-        );
-        redactions.push(
-            MetadataLocation::new("keywords"),
-            TextReplacement::Removed.into(),
-        );
+        let redactions =
+            Redactions::from([(MetadataLocation::new("keywords"), TextReplacement::Removed)]);
         assert!(fields.redact(redactions).unwrap().is_empty());
     }
 }

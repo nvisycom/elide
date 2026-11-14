@@ -1,8 +1,8 @@
 //! The review round trip: analyze → serialize the report → ship it out for
-//! editing → [`deserialize_report`] it back → [`anonymize_with`]. The
+//! editing → [`deserializer`] it back → [`anonymize_with`]. The
 //! reconstructed report redacts exactly as the original would have.
 //!
-//! [`deserialize_report`]: elide::Orchestrator::deserialize_report
+//! [`deserializer`]: elide::Orchestrator::deserializer
 //! [`anonymize_with`]: elide::Orchestrator::anonymize_with
 
 #![cfg(all(feature = "engine", feature = "mocks", feature = "llm"))]
@@ -44,7 +44,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         .await?;
     let report = orchestrator.analyze(&mut doc).await?.report;
     let detected = report
-        .document::<Text>()
+        .part::<Text>(&doc.id())
         .ok()
         .map(|part| part.entities())
         .expect("text content")
@@ -54,11 +54,11 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Rebuild it from the wire through the same orchestrator.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let rebuilt = orchestrator.deserialize_report(&mut de)?;
+    let rebuilt = orchestrator.deserializer().deserialize(&mut de)?;
 
     // Same entities, same modality, audit trail intact.
     let body = rebuilt
-        .document::<Text>()
+        .part::<Text>(&doc.id())
         .ok()
         .map(|part| part.entities())
         .expect("content reconstructed as Text");
@@ -75,7 +75,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         .await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
     for entity in applied
-        .document::<Text>()
+        .part::<Text>(&doc2.id())
         .ok()
         .map(|part| part.entities())
         .expect("applied content")
@@ -102,7 +102,7 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
     // A non-empty text group against a registry with no text pipeline.
     let json = r#"{"parts":[{"id":["document"],"modality":"text","entities":[{}]}]}"#;
     let mut de = serde_json::Deserializer::from_str(json);
-    let err = match orchestrator.deserialize_report(&mut de) {
+    let err = match orchestrator.deserializer().deserialize(&mut de) {
         Ok(_) => panic!("no text pipeline registered — should have failed"),
         Err(e) => e,
     };
@@ -124,7 +124,7 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
         .await?;
     let report = orchestrator.analyze(&mut doc).await?.report;
     let detected = report
-        .document::<Text>()
+        .part::<Text>(&doc.id())
         .ok()
         .map(|part| part.entities())
         .expect("text content")
@@ -140,7 +140,7 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
 
     assert_eq!(
         rebuilt
-            .document::<Text>()
+            .part::<Text>(&doc.id())
             .ok()
             .map(|part| part.entities())
             .expect("content reconstructed")
@@ -176,7 +176,7 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
     let applied = orchestrator.anonymize(&mut doc).await?;
 
     let body = applied
-        .document::<Text>()
+        .part::<Text>(&doc.id())
         .ok()
         .map(|part| part.entities())
         .expect("text content");

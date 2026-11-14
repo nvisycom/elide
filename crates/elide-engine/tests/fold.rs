@@ -1,18 +1,12 @@
-//! Regression test: the fold re-decodes a nested container from its *own*
-//! staged redacted bytes using the container's real [`Part::hint`], not a hint
-//! guessed from its id's extension.
+//! How a nested container folds back into its parent on redaction.
 //!
-//! A container whose `Part.id` has no extension (a PDF-style object ref, an OLE
-//! object) but a real `hint` used to lose its own redaction: the fold guessed an
-//! empty hint from the id, `registry.decode` failed, and the container's redacted
-//! body was dropped while its descendants folded on the *original* bytes, a
-//! silent PII leak. This drives that exact shape through a mock container codec
-//! whose nested part is keyed by an extensionless id, and asserts every level's
-//! body PII is gone from the re-encoded output.
+//! - A nested container is re-decoded by its blob's own hint, not one guessed
+//!   from its id, so a container under an extensionless id (a PDF object ref,
+//!   an OLE object) keeps its own redaction.
+//! - An embedded document nothing was written to keeps its original bytes.
 //!
-//! No shipping codec produces this shape (DOCX derives its hint *from* the id
-//! extension; PDF's extensionless-id parts are leaf images, not containers), so
-//! the trigger only exists behind a mock format.
+//! Both run through the mock container codec: no shipping codec nests a
+//! container under an extensionless id.
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
 use elide_core::entity::audit::{AuditEvent, PatternRule};
@@ -157,5 +151,38 @@ async fn nested_container_keeps_its_own_redaction_with_an_extensionless_id() -> 
     let (leaf_body, _) = decode_mock(&leaf.bytes);
     assert!(!leaf_body.contains(PII), "leaf body leaked: {leaf_body}");
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_embedded_document_nothing_was_redacted_in_keeps_its_bytes() -> Result<()> {
+    // Not valid UTF-8, so a decode and re-encode would replace the byte and
+    // show up as changed bytes.
+    let mut clean = b"clean body ".to_vec();
+    clean.push(0xFF);
+    let outer_bytes = encode_mock(
+        &body_for("outer"),
+        &[MockPart {
+            id: "clean.mock".to_owned(),
+            hint: MOCK_EXT.to_owned(),
+            bytes: clean.clone().into(),
+        }],
+    );
+
+    let registry = FormatRegistry::new().with_format(mock_format());
+    let orchestrator = orchestrator(registry.clone());
+    let handle = registry
+        .decode(outer_bytes, MOCK_EXT, HiddenContentPolicy::default())
+        .await?;
+    let mut documents = [Document::new("outer.mock", handle)];
+    orchestrator.anonymize(&mut documents).await?;
+
+    let (outer_body, outer_parts) = decode_mock(&documents[0].document.encode()?.to_bytes());
+    assert!(!outer_body.contains(PII), "outer body leaked: {outer_body}");
+    let embedded = outer_parts
+        .iter()
+        .find(|p| p.id == "clean.mock")
+        .expect("embedded part present");
+    assert_eq!(embedded.bytes.as_ref(), clean.as_slice());
     Ok(())
 }

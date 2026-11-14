@@ -349,11 +349,10 @@ mod tests {
     #[test]
     fn silence_zeroes_a_span_and_preserves_length() {
         let mut clip = AudioBuffer::open(&ramp_wav(), AudioFormat::Wav).expect("open");
-        let mut batch: Redactions<Audio> = Redactions::new();
-        batch.push(
+        let batch: Redactions<Audio> = Redactions::from([(
             AudioLocation::from_millis(100, 200),
             AudioReplacement::Silenced,
-        );
+        )]);
         clip.redact_batch(batch);
 
         let out = clip.encode().expect("encode");
@@ -405,11 +404,10 @@ mod mp3_tests {
     #[test]
     fn silence_redaction_reencodes_to_valid_mp3() {
         let mut clip = AudioBuffer::open(&tone_mp3(), AudioFormat::Mp3).expect("open");
-        let mut batch: Redactions<Audio> = Redactions::new();
-        batch.push(
+        let batch: Redactions<Audio> = Redactions::from([(
             AudioLocation::from_millis(100, 200),
             AudioReplacement::Silenced,
-        );
+        )]);
         clip.redact_batch(batch);
 
         // The re-encoded clip still decodes, and the silenced span reads as

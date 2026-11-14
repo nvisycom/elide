@@ -34,6 +34,9 @@ pub struct Entity {
     /// Stable identity for this entity (a UUIDv7 string), minted when it was
     /// assembled.
     pub id: String,
+    /// The path of the part the entity was found in, outermost segment first:
+    /// the document's own content, or a part embedded in it.
+    pub part: Vec<String>,
     /// The modality the entity was detected in.
     pub modality: Modality,
     /// The entity's label id (e.g. `email_address`).
@@ -110,8 +113,8 @@ pub enum Location {
 #[derive(Serialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub struct Stripped {
-    /// The part's path, outermost segment first.
-    pub id: Vec<String>,
+    /// The path of the part it was stripped from, outermost segment first.
+    pub part: Vec<String>,
     /// The kind of hidden content.
     #[tsify(type = "string")]
     pub kind: HiddenContentKind,

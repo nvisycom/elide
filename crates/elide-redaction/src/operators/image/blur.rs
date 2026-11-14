@@ -85,8 +85,8 @@ impl Operator<Image> for Blur {
         &self,
         _entity: &Entity<Image>,
         _data: &ImageData,
-    ) -> Result<ImageReplacement> {
-        Ok(ImageReplacement::Blur { sigma: self.sigma })
+    ) -> Result<Option<ImageReplacement>> {
+        Ok(Some(ImageReplacement::Blur { sigma: self.sigma }))
     }
 }
 
@@ -127,17 +127,17 @@ mod tests {
             .anonymize(&entity, &data)
             .await
             .unwrap();
-        assert_eq!(blur, ImageReplacement::Blur { sigma: 8.0 });
+        assert_eq!(blur, Some(ImageReplacement::Blur { sigma: 8.0 }));
 
         let pix = Pixelate::new(10)
             .unwrap()
             .anonymize(&entity, &data)
             .await
             .unwrap();
-        assert_eq!(pix, ImageReplacement::Pixelate { block_size: 10 });
+        assert_eq!(pix, Some(ImageReplacement::Pixelate { block_size: 10 }));
 
         let box_ = Blackbox::default().anonymize(&entity, &data).await.unwrap();
-        assert_matches!(box_, ImageReplacement::Block { .. });
+        assert_matches!(box_, Some(ImageReplacement::Block { .. }));
     }
 
     /// A blur or mosaic too fine to hide anything is rejected.

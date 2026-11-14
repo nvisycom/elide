@@ -5,6 +5,8 @@
 //! [`Orchestrator`]: crate::Orchestrator
 
 use std::any::Any;
+use std::future::Future;
+use std::pin::Pin;
 
 use elide_codec::StreamMut;
 use elide_core::entity::Entity;
@@ -13,9 +15,18 @@ use elide_core::recognition::Scope;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
-use super::outcome::{BoxFuture, PartAnalysis};
 use super::{ModalityPipeline, flagged};
 use crate::analysis::{ArtifactGroup, EntityGroup};
+
+/// A boxed, pinned, `Send` future, the erased async return shape.
+pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// What analyzing one stream produced: its entities, and its enrichment
+/// artifact when it was enriched.
+pub(crate) struct PartAnalysis {
+    pub(crate) entities: Box<dyn EntityGroup>,
+    pub(crate) artifact: Option<Box<dyn ArtifactGroup>>,
+}
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
@@ -26,16 +37,15 @@ use crate::analysis::{ArtifactGroup, EntityGroup};
 /// phases:
 /// - [`analyze_streams`] analyzes the matched parts together, coalescing
 ///   enrichment into one provider round-trip, and returns one result per handle.
-/// - [`apply_stream`] re-drives a matched stream with its (possibly edited)
-///   boxed entities, redacting it in place; the document re-encodes itself.
+/// - [`apply_stream`] redacts a matched stream in place with its (possibly
+///   edited) boxed entities; the document re-encodes itself.
 ///
 /// [`matches`]: ErasedPipeline::matches
 /// [`analyze_streams`]: ErasedPipeline::analyze_streams
 /// [`apply_stream`]: ErasedPipeline::apply_stream
 pub(crate) trait ErasedPipeline: Send + Sync {
-    /// Whether `handle` carries this pipeline's modality — a non-mutating probe
-    /// the orchestrator uses to bucket parts by modality before dispatching a
-    /// batch, without a destructive try-each-pipeline downcast.
+    /// Whether `handle` carries this pipeline's modality, so the orchestrator
+    /// can bucket parts by modality before dispatching a batch.
     fn matches(&self, handle: &StreamMut<'_>) -> bool;
 
     /// Analyze several streams of this pipeline's modality together,
@@ -55,12 +65,13 @@ pub(crate) trait ErasedPipeline: Send + Sync {
 
     /// Redact a matched stream in place with its (possibly edited) boxed
     /// entities; the document re-encodes the stream itself on `encode`.
+    /// Returns whether anything was written to the stream.
     fn apply_stream<'a>(
         &'a self,
         handle: &'a mut StreamMut<'_>,
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
-    ) -> BoxFuture<'a, Result<()>>;
+    ) -> BoxFuture<'a, Result<bool>>;
 
     /// Record on each of `entities` the operator this pipeline's anonymizer
     /// will apply, as a `Selection` event, without touching the document.
@@ -107,9 +118,9 @@ where
                 .iter()
                 .map(|stream| flagged::entities(stream, scope, policy))
                 .collect::<Result<Vec<_>>>()?;
-            // Each seed downcasts as in `analyze_stream`: a matching prior artifact
-            // restores, anything else (first-pass `NoArtifact`, other modality) is
-            // `None` so the group enriches from scratch.
+            // A matching prior artifact restores; anything else (first-pass
+            // `NoArtifact`, another modality) is `None`, so the group enriches
+            // from scratch.
             let seeds = seeds
                 .iter()
                 .map(|seed| seed.as_any().downcast_ref::<M::Artifact>().cloned())
@@ -123,12 +134,11 @@ where
             }
             Ok(analyses
                 .into_iter()
-                .map(|analysis| {
-                    let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
-                    let artifact = analysis
+                .map(|analysis| PartAnalysis {
+                    entities: Box::new(analysis.entities),
+                    artifact: analysis
                         .artifact
-                        .map(|a| Box::new(a) as Box<dyn ArtifactGroup>);
-                    (entities, artifact)
+                        .map(|artifact| Box::new(artifact) as Box<dyn ArtifactGroup>),
                 })
                 .collect())
         })
@@ -139,9 +149,9 @@ where
         handle: &'a mut StreamMut<'_>,
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
-    ) -> BoxFuture<'a, Result<()>> {
+    ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
-            // `apply_parts` picks this pipeline from the report's stored modality,
+            // The redaction walk picks this pipeline from the report's modality,
             // not from the stream, and `anonymize_with` accepts a hand-built or
             // deserialized report. Such a report can key a part under one modality
             // while the stream there is another, so a mismatch is malformed input,
@@ -152,30 +162,33 @@ where
                     M::NAME
                 )));
             };
-            let Some(entities) = entities.as_any_mut().downcast_mut::<Vec<Entity<M>>>() else {
-                return Err(Error::malformed(format!(
-                    "report entities for this part are not {}",
-                    M::NAME
-                )));
-            };
             self.anonymizer
-                .anonymize(&mut stream, entities, scope)
+                .anonymize(&mut stream, typed::<M>(entities)?, scope)
                 .await
         })
     }
 
     fn pick(&self, entities: &mut dyn EntityGroup, scope: &Scope) -> Result<()> {
-        let Some(entities) = entities.as_any_mut().downcast_mut::<Vec<Entity<M>>>() else {
-            return Err(Error::malformed(format!(
-                "report entities for this part are not {}",
-                M::NAME
-            )));
-        };
-        self.anonymizer.pick(entities, scope);
+        self.anonymizer.pick(typed::<M>(entities)?, scope);
         Ok(())
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+/// A report part's entities as modality `M`.
+///
+/// # Errors
+///
+/// [`MalformedInput`](elide_core::ErrorKind::MalformedInput) when they are of
+/// another modality.
+fn typed<M: Modality>(entities: &mut dyn EntityGroup) -> Result<&mut Vec<Entity<M>>> {
+    entities
+        .as_any_mut()
+        .downcast_mut::<Vec<Entity<M>>>()
+        .ok_or_else(|| {
+            Error::malformed(format!("report entities for this part are not {}", M::NAME))
+        })
 }

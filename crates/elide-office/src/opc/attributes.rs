@@ -194,7 +194,7 @@ const OFFICE: &str = "urn:schemas-microsoft-com:office:office";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::xml_edit::edit;
+    use crate::opc::xml_edit::{edit, expect_edit};
 
     const DESCRIPTION: &[TextAttribute] = &[TextAttribute::new(
         (Ns::Any, Local::Exact("cNvPr")),
@@ -209,7 +209,7 @@ mod tests {
             content: HiddenContent::AlternativeText,
             attributes: DESCRIPTION,
         };
-        let edited = edit(raw, &rules).unwrap().unwrap();
+        let edited = expect_edit(raw, &rules);
         assert_eq!(edited.count, 1);
         assert_eq!(
             edited.text,
@@ -229,7 +229,7 @@ mod tests {
             value: NEUTRAL_DATE,
         };
         let raw = r#"<cm id="1" created="2024-05-06T07:08:09.123"/>"#;
-        let edited = edit(raw, &rules).unwrap().unwrap();
+        let edited = expect_edit(raw, &rules);
         assert_eq!(
             edited.text,
             format!(r#"<cm id="1" created="{NEUTRAL_DATE}"/>"#)

@@ -34,7 +34,7 @@ impl Operator<Tabular> for DropColumn {
         &self,
         _entity: &Entity<Tabular>,
         _data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TabularReplacement::DropColumn)
+    ) -> Result<Option<TabularReplacement>> {
+        Ok(Some(TabularReplacement::DropColumn))
     }
 }

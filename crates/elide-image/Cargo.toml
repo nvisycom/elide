@@ -116,6 +116,9 @@ rayon = { workspace = true, features = [], optional = true }
 futures = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["fixtures"] }
+
 # (De)serialization
 serde_json = { workspace = true, features = [] }
 
