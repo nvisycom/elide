@@ -5,6 +5,7 @@ use elide_codec::mocks::{MOCK_EXT, encode_mock, mock_format};
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{AuditEvent, PatternRule};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
+use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::modality::{Modality, NoArtifact};
 use elide_core::primitive::Confidence;
@@ -79,9 +80,13 @@ async fn a_part_the_documents_do_not_have_is_an_error() -> Result<()> {
 #[tokio::test]
 async fn an_empty_part_that_cannot_be_applied_loses_nothing() -> Result<()> {
     let (orchestrator, mut documents) = setup().await?;
+    // No pipeline, no such part, and a registered modality the stream is not:
+    // none has an entity to apply, so none is an error.
     let report = Report::new()
         .insert_part::<Unregistered>(PartId::leaf("doc.mock"), Vec::new())
         .insert_part::<Text>(PartId::leaf("doc.mock").child("missing.txt"), Vec::new());
+    orchestrator.anonymize_with(&mut documents, report).await?;
+    let report = Report::new().insert_part::<Metadata>(PartId::leaf("doc.mock"), Vec::new());
     orchestrator.anonymize_with(&mut documents, report).await?;
     Ok(())
 }

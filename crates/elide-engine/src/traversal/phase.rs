@@ -117,12 +117,13 @@ impl PartVisitor for Redact<'_> {
                 let Some(entities) = self.report.parts.get_mut(&part_id) else {
                     continue;
                 };
+                // Nothing to apply is nothing lost, whatever the group's modality.
+                if entities.is_empty() {
+                    continue;
+                }
                 let Some(pipeline) = orchestrator.pipeline_for(entities.modality()) else {
-                    // Nothing to apply is nothing lost; entities with no pipeline
-                    // to apply them would ship the part unredacted.
-                    if entities.is_empty() {
-                        continue;
-                    }
+                    // Entities with no pipeline to apply them would ship the part
+                    // unredacted.
                     return Err(Error::malformed(format!(
                         "no pipeline is registered for the {} entities of part `{part_id}`",
                         entities.modality_name()
