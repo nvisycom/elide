@@ -6,12 +6,11 @@
 use std::fmt;
 use std::sync::Arc;
 
-use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 use hmac::{Hmac, KeyInit, Mac};
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -40,7 +39,8 @@ use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
 /// provider has no default to deserialize back into.
 ///
 /// [`Sha2Hash`]: crate::operators::Sha2Hash
-#[derive(Clone)]
+#[derive(Clone, Component)]
+#[component(name = "hmac", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HmacHash {
@@ -99,10 +99,6 @@ impl fmt::Debug for HmacHash {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for HmacHash {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("hmac", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // Recoverable when the candidate plaintext space is small enough to
         // brute-force *and* the attacker has the key; the key secrecy

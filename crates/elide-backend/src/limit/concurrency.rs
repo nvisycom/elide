@@ -3,7 +3,6 @@
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelId;
 use tokio::sync::Semaphore;
 
 /// Wraps a [`Backend`] and admits at most a fixed number of calls *at once*.
@@ -20,8 +19,8 @@ use tokio::sync::Semaphore;
 ///
 /// This caps *simultaneity*, not requests over time: it bounds open connections,
 /// not a requests-per-interval quota. For the latter, wrap with [`RateLimited`]
-/// — the two compose. Because it is itself a `Backend` (same request/response,
-/// same provenance), it drops in anywhere the inner backend goes.
+/// — the two compose. Because it is itself a `Backend` (same request and
+/// response), it drops in anywhere the inner backend goes.
 ///
 /// [`RateLimited`]: crate::limit::RateLimited
 pub struct ConcurrencyLimited<B> {
@@ -56,10 +55,6 @@ impl<B: Backend> Backend for ConcurrencyLimited<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelId {
-        self.inner.provenance()
-    }
-
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
         // The semaphore is never closed, so acquiring cannot fail. The permit is
         // held for the duration of the call and released when it drops.
@@ -85,20 +80,27 @@ impl<B: Backend> Backend for ConcurrencyLimited<B> {
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, LazyLock};
     use std::time::Duration;
 
-    use elide_core::backend::{BackendRequest, BackendResponse};
+    use elide_core::backend::{Request, Response};
+    use elide_core::entity::audit::ModelId;
 
     use super::*;
 
     struct Req<'a>(PhantomData<&'a ()>);
-    impl BackendRequest for Req<'_> {}
+    impl Request for Req<'_> {}
+
+    static MODEL: LazyLock<ModelId> = LazyLock::new(|| ModelId::new("inner"));
 
     #[derive(PartialEq, Eq, Debug)]
     struct Resp(usize);
-    impl BackendResponse for Resp {}
+    impl Response for Resp {
+        fn model(&self) -> &ModelId {
+            &MODEL
+        }
+    }
 
     /// A backend that records how many calls are in flight at once, so a test can
     /// assert the limiter's cap. Each call holds for a beat, then returns the
@@ -112,13 +114,6 @@ mod tests {
     impl Backend for Tracking {
         type Request<'a> = Req<'a>;
         type Response = Resp;
-
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "tracking".into(),
-                ..ModelId::default()
-            }
-        }
 
         async fn call(&self, _request: Req<'_>) -> Result<Resp> {
             let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;

@@ -54,7 +54,7 @@ mod tests {
                 entities: candidates,
             },
             &TextData::new(text),
-            &ModelId::default(),
+            &ModelId::new("model"),
         )
     }
 

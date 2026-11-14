@@ -57,21 +57,20 @@ impl Backend for MockBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "mock-ocr".into(),
-            ..ModelId::default()
-        }
-    }
-
     async fn call(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
-        Ok(OcrResponse::new(self.regions.clone()))
+        Ok(self.answer())
     }
 
     async fn call_batch(&self, requests: Vec<OcrRequest<'_>>) -> Result<Vec<OcrResponse>> {
         let kept = requests.len().saturating_sub(self.dropped);
-        Ok((0..kept)
-            .map(|_| OcrResponse::new(self.regions.clone()))
-            .collect())
+        Ok((0..kept).map(|_| self.answer()).collect())
+    }
+}
+
+impl MockBackend {
+    /// The mock's answer to any request: its canned regions, from the model
+    /// `mock-ocr`.
+    fn answer(&self) -> OcrResponse {
+        OcrResponse::new(ModelId::new("mock-ocr"), self.regions.clone())
     }
 }

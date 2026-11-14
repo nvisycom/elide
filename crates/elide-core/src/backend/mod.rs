@@ -1,8 +1,8 @@
 //! The unified model-[`Backend`] contract.
 //!
 //! A model-backed component — LLM/VLM extraction, NER, speech-to-text, OCR —
-//! is a [`Backend`]: it takes a [`BackendRequest`], calls a model, and returns
-//! a [`BackendResponse`]. One contract, so the decorators in the
+//! is a [`Backend`]: it takes a [`Request`], calls a model, and returns
+//! a [`Response`]. One contract, so the decorators in the
 //! `elide-backend` crate wrap any of them without per-backend code.
 //!
 //! Request and response are associated types: [`Request`](Backend::Request) is
@@ -11,6 +11,8 @@
 //! consumer is generic over `B: Backend` rather than holding a `dyn Backend`.
 
 mod batch;
+
+pub use elide_macros::{Request, Response};
 
 pub use self::batch::{BackendBatchExt, BatchMerge, BatchPart, BatchSplit};
 use crate::Result;
@@ -23,7 +25,10 @@ use crate::primitive::LanguageTag;
 /// self-documenting and a backend cannot be built over an unrelated type, and
 /// exposes what a decorator may need to read off any request without
 /// per-backend code.
-pub trait BackendRequest: Send + Sync {
+///
+/// Derive it: `#[derive(Request)]`, with the request's
+/// `Option<&LanguageTag>` field marked `#[backend(language)]` when it has one.
+pub trait Request: Send + Sync {
     /// The language of the request's content, if known: the call's primary
     /// language, asserted by the caller or detected.
     ///
@@ -35,18 +40,29 @@ pub trait BackendRequest: Send + Sync {
     }
 }
 
-/// A response returned by a [`Backend`].
+/// A response returned by a [`Backend`], naming the model that produced it.
 ///
 /// Names the output half of a backend's call contract, so the associated type
 /// is self-documenting and a backend cannot be built over an unrelated type.
-pub trait BackendResponse: Send + Sync {}
+///
+/// The model travels with the response, not the backend: a router learns which
+/// of its backends answers only once it has, so the concrete backend that
+/// called the model names it, and decorators and routers pass it through.
+///
+/// Derive it: `#[derive(Response)]`, with the [`ModelId`] field marked
+/// `#[backend(model)]`.
+pub trait Response: Send + Sync {
+    /// The model that produced this response, for the audit trail of every
+    /// entity built from it.
+    fn model(&self) -> &ModelId;
+}
 
 /// A model-backed component: request in, model call, response out.
 ///
 /// The one contract behind every hosted model in the toolkit. A concrete backend
 /// names its [`Request`](Self::Request) and [`Response`](Self::Response) via
-/// associated types and identifies the model it calls through
-/// [`provenance`](Self::provenance). Because the contract is uniform, the
+/// associated types, and each response names the model that produced it
+/// ([`Response::model`]). Because the contract is uniform, the
 /// decorators in `elide-backend` wrap any backend generically.
 ///
 /// Not object-safe (the GAT `Request`): a consumer is generic over `B: Backend`
@@ -56,12 +72,9 @@ pub trait BackendResponse: Send + Sync {}
 pub trait Backend: Send + Sync {
     /// The request this backend accepts. A GAT, so the request may borrow its
     /// payload for the duration of the call.
-    type Request<'a>: BackendRequest;
+    type Request<'a>: Request;
     /// The response this backend returns.
-    type Response: BackendResponse;
-
-    /// The model this backend calls, for entity-trail provenance.
-    fn provenance(&self) -> ModelId;
+    type Response: Response;
 
     /// Call the model with `request` and return its response.
     ///

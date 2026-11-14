@@ -2,9 +2,9 @@
 
 use futures::future;
 
+use crate::Component;
 use crate::error::Result;
 use crate::modality::Modality;
-use crate::primitive::ComponentId;
 use crate::recognition::{Context, Subject};
 
 /// Computes context for a [`Subject`] before the recognizers run over it.
@@ -20,14 +20,10 @@ use crate::recognition::{Context, Subject};
 /// earlier one wrote. An analyzer runs its enrichers in order, then hands
 /// the payload and enriched context to its recognizers.
 #[async_trait::async_trait]
-pub trait Enricher<M>: Send + Sync
+pub trait Enricher<M>: Component + Send + Sync
 where
     M: Modality,
 {
-    /// This enricher's identity (name + version), labelled the way a
-    /// recognizer's is.
-    fn id(&self) -> ComponentId;
-
     /// Inspect the [`Subject`] and enrich it in place: an enricher writes its
     /// context (asserted languages, a produced artifact, shared NLP tokens) onto
     /// the subject and produces no return value. The analysis-wide

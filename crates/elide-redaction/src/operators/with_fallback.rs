@@ -23,11 +23,11 @@
 //! [`Clamp`]: super::Clamp
 //! [`GeneralizeDate`]: super::GeneralizeDate
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 
 /// An [`Operator`] that may decline to apply to a given value.
 ///
@@ -89,13 +89,7 @@ impl<P, F> WithFallback<P, F> {
     }
 }
 
-#[async_trait::async_trait]
-impl<M, P, F> Operator<M> for WithFallback<P, F>
-where
-    M: Modality,
-    P: TryOperator<M>,
-    F: Operator<M>,
-{
+impl<P: Component, F: Component> Component for WithFallback<P, F> {
     fn id(&self) -> ComponentId {
         // One composite identity naming both paths a value might take, e.g.
         // `generalize_date@1.0.0-or-else-erase@1.0.0`. The audit records this
@@ -103,7 +97,15 @@ where
         // erased when it was reshaped, nor the reverse.
         composite_id(&self.primary.id(), &self.fallback.id())
     }
+}
 
+#[async_trait::async_trait]
+impl<M, P, F> Operator<M> for WithFallback<P, F>
+where
+    M: Modality,
+    P: TryOperator<M>,
+    F: Operator<M>,
+{
     fn leak_profile(&self) -> LeakProfile {
         // A value could take either path, so the profile a caller can
         // *rely on* is the leakier (smaller) of the two.
@@ -175,10 +177,7 @@ mod tests {
         let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "x"), Erase);
         // Each operand contributes name@version, so the audit records which
         // build of both paths a value could have taken.
-        assert_eq!(
-            Operator::<Text>::id(&op).name,
-            "clamp@1.0.0-or-else-erase@1.0.0"
-        );
+        assert_eq!(op.id().name, "clamp@1.0.0-or-else-erase@1.0.0");
     }
 
     #[tokio::test]

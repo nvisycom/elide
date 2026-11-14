@@ -1,6 +1,6 @@
 //! [`OcrRequest`]: one per-call OCR request handed to an OCR backend.
 
-use elide_core::backend::BackendRequest;
+use elide_core::backend::Request;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
@@ -14,7 +14,7 @@ use crate::primitive::Dimensions;
 /// Borrowed (`OcrRequest<'a>`) so call sites that already own the underlying
 /// values hand them through without cloning. Constructed as a struct literal —
 /// the required fields are always known by the time OCR runs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Request)]
 pub struct OcrRequest<'a> {
     /// Raw image bytes (PNG, JPEG, TIFF, …). The backend honours whatever
     /// formats it accepts; returned word boxes refer back into this image.
@@ -30,13 +30,8 @@ pub struct OcrRequest<'a> {
     pub dimensions: Dimensions<u32>,
     /// Caller-asserted language. Backends that support per-call language
     /// hinting use this to pick a model variant; others ignore it.
+    #[backend(language)]
     pub language: Option<&'a LanguageTag>,
     /// Per-call correlation id propagated to remote backends for tracing.
     pub correlation_id: Option<Uuid>,
-}
-
-impl BackendRequest for OcrRequest<'_> {
-    fn language(&self) -> Option<&LanguageTag> {
-        self.language
-    }
 }

@@ -54,6 +54,9 @@ fixtures = []
 mocks = []
 
 [dependencies]
+# Internal crates
+elide-macros = { workspace = true, features = [] }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 

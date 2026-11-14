@@ -7,7 +7,8 @@ use elide_core::entity::audit::ModelId;
 
 use super::{NerRequest, NerResponse};
 
-/// Mock NER backend: every call returns an empty response.
+/// Mock NER backend: every call returns an empty response, from the model
+/// `mock-ner`.
 ///
 /// Useful as a test stub, in examples that must run without a model, and
 /// as the default NER backend when the operator wants the recognizer
@@ -45,19 +46,17 @@ impl Backend for MockBackend {
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "mock-ner".into(),
-            ..ModelId::default()
-        }
-    }
-
     async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
-        Ok(NerResponse::default())
+        Ok(empty())
     }
 
     async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
         let kept = requests.len().saturating_sub(self.dropped);
-        Ok((0..kept).map(|_| NerResponse::default()).collect())
+        Ok((0..kept).map(|_| empty()).collect())
     }
+}
+
+/// The mock's answer to any request: no spans.
+fn empty() -> NerResponse {
+    NerResponse::new(ModelId::new("mock-ner"), Vec::new())
 }

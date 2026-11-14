@@ -15,15 +15,15 @@
 //! the trigger only exists behind a mock format.
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
-use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, PatternRule};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
-use elide_core::primitive::{ComponentId, Confidence};
+use elide_core::primitive::Confidence;
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::redaction::HiddenContentPolicy;
+use elide_core::{Component, Result};
 use elide_detection::Analyzer;
 use elide_engine::{Document, Orchestrator};
 use elide_format::FormatRegistry;
@@ -36,14 +36,12 @@ const REDACTED: &str = "[REDACTED]";
 // ---- a trivial recognizer + operator that redact PII -------------------------
 
 /// Flags every occurrence of [`PII`] in the chunk text.
+#[derive(Component)]
+#[component(name = "mock-pii", version = "1")]
 struct PiiRecognizer;
 
 #[async_trait::async_trait]
 impl Recognizer<Text> for PiiRecognizer {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("mock-pii", "1")
-    }
-
     async fn recognize(
         &self,
         subject: &Subject<Text>,

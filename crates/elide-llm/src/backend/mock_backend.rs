@@ -8,10 +8,11 @@ use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelId;
 
 use super::{LlmRequest, LlmResponse};
+use crate::candidates::Candidates;
 use crate::modality::LlmModality;
 
-/// An LLM backend that calls no model and returns an empty batch, for modality
-/// `M`.
+/// An LLM backend that calls no model and returns an empty batch from the
+/// model `mock`, for modality `M`.
 ///
 /// Every recognizer driven by this backend produces zero entities: the
 /// candidate batch is empty. Useful for wiring a pipeline together before a
@@ -38,14 +39,10 @@ impl<M: LlmModality> Backend for MockBackend<M> {
     type Request<'a> = LlmRequest<'a, M>;
     type Response = LlmResponse<M>;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "mock".into(),
-            ..ModelId::default()
-        }
-    }
-
     async fn call(&self, _request: LlmRequest<'_, M>) -> Result<LlmResponse<M>> {
-        Ok(LlmResponse::default())
+        Ok(LlmResponse::new(
+            ModelId::new("mock"),
+            Candidates::default(),
+        ))
     }
 }

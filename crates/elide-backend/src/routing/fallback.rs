@@ -4,7 +4,6 @@
 use std::fmt;
 
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelId;
 use elide_core::{Error, ErrorKind, Result};
 
 /// Which errors fail a call over to the fallback.
@@ -32,7 +31,8 @@ type Condition = Box<dyn Fn(&Error) -> bool + Send + Sync>;
 /// `FallbackRouted::new(a, FallbackRouted::new(b, c))`. A batch fails over whole, since a
 /// batch fails whole.
 ///
-/// [`provenance`](Backend::provenance) reports the primary's model.
+/// Each response names the model that produced it, so a failed-over call is
+/// attributed to the fallback's model.
 pub struct FallbackRouted<P, F> {
     primary: P,
     fallback: F,
@@ -96,10 +96,6 @@ where
     type Request<'a> = P::Request<'a>;
     type Response = P::Response;
 
-    fn provenance(&self) -> ModelId {
-        self.primary.provenance()
-    }
-
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
         // A request borrows its payload, so the clone kept for the fallback is
         // cheap.
@@ -122,20 +118,34 @@ mod tests {
     use std::marker::PhantomData;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::backend::{BackendRequest, BackendResponse};
+    use elide_core::backend::{Request, Response};
+    use elide_core::entity::audit::ModelId;
 
     use super::*;
 
     #[derive(Clone, Copy)]
     struct Req<'a>(usize, PhantomData<&'a ()>);
-    impl BackendRequest for Req<'_> {}
+    impl Request for Req<'_> {}
 
-    #[derive(PartialEq, Eq, Debug)]
-    struct Resp(usize, &'static str);
-    impl BackendResponse for Resp {}
+    /// The id of the request it answers, and the model that answered it.
+    #[derive(Debug)]
+    struct Resp {
+        id: usize,
+        model: ModelId,
+    }
+    impl Response for Resp {
+        fn model(&self) -> &ModelId {
+            &self.model
+        }
+    }
 
-    /// A backend that answers as `name`, or fails every call with `fails`, and
-    /// counts its calls.
+    /// The response's request id and the name of the model that answered it.
+    fn answered(response: &Resp) -> (usize, &str) {
+        (response.id, response.model().name.as_str())
+    }
+
+    /// A backend over the model `name` that answers, or fails every call with
+    /// `fails`, and counts its calls.
     struct Named {
         name: &'static str,
         fails: Option<ErrorKind>,
@@ -148,6 +158,13 @@ mod tests {
                 name,
                 fails: None,
                 calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn answer(&self, id: usize) -> Resp {
+            Resp {
+                id,
+                model: ModelId::new(self.name),
             }
         }
 
@@ -168,15 +185,11 @@ mod tests {
         type Request<'a> = Req<'a>;
         type Response = Resp;
 
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
-
         async fn call(&self, request: Req<'_>) -> Result<Resp> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             match self.fails {
                 Some(kind) => Err(Error::new(kind, self.name)),
-                None => Ok(Resp(request.0, self.name)),
+                None => Ok(self.answer(request.0)),
             }
         }
 
@@ -184,7 +197,7 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             match self.fails {
                 Some(kind) => Err(Error::new(kind, self.name)),
-                None => Ok(requests.into_iter().map(|r| Resp(r.0, self.name)).collect()),
+                None => Ok(requests.iter().map(|r| self.answer(r.0)).collect()),
             }
         }
     }
@@ -196,7 +209,10 @@ mod tests {
     #[tokio::test]
     async fn a_healthy_primary_serves_alone() {
         let failover = FallbackRouted::new(Named::ok("primary"), Named::ok("fallback"));
-        assert_eq!(failover.call(req(1)).await.unwrap(), Resp(1, "primary"));
+        assert_eq!(
+            answered(&failover.call(req(1)).await.unwrap()),
+            (1, "primary")
+        );
         assert_eq!(failover.fallback().calls(), 0);
     }
 
@@ -209,7 +225,10 @@ mod tests {
         ] {
             let failover =
                 FallbackRouted::new(Named::failing("primary", kind), Named::ok("fallback"));
-            assert_eq!(failover.call(req(1)).await.unwrap(), Resp(1, "fallback"));
+            assert_eq!(
+                answered(&failover.call(req(1)).await.unwrap()),
+                (1, "fallback")
+            );
         }
     }
 
@@ -247,7 +266,10 @@ mod tests {
                 Named::ok("third"),
             ),
         );
-        assert_eq!(failover.call(req(1)).await.unwrap(), Resp(1, "third"));
+        assert_eq!(
+            answered(&failover.call(req(1)).await.unwrap()),
+            (1, "third")
+        );
     }
 
     #[tokio::test]
@@ -257,7 +279,10 @@ mod tests {
             Named::ok("fallback"),
         );
         let out = failover.call_batch(vec![req(1), req(2)]).await.unwrap();
-        assert_eq!(out, vec![Resp(1, "fallback"), Resp(2, "fallback")]);
+        assert_eq!(
+            out.iter().map(answered).collect::<Vec<_>>(),
+            [(1, "fallback"), (2, "fallback")]
+        );
         assert_eq!(failover.fallback().calls(), 1);
     }
 
@@ -268,7 +293,10 @@ mod tests {
             Named::ok("fallback"),
         )
         .when(|error| error.kind() == ErrorKind::ResourceLimit);
-        assert_eq!(failover.call(req(1)).await.unwrap(), Resp(1, "fallback"));
+        assert_eq!(
+            answered(&failover.call(req(1)).await.unwrap()),
+            (1, "fallback")
+        );
 
         let failover = FallbackRouted::new(
             Named::failing("primary", ErrorKind::Transport),

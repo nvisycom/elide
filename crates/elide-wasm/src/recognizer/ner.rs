@@ -69,14 +69,12 @@ impl Backend for JsCallbackBackend {
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "js-callback-ner".into(),
-            ..Default::default()
-        }
-    }
-
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
+        // The callback gets an empty label list for `None` (its own label
+        // set) too, so a request for no labels is answered here.
+        if request.wants_nothing() {
+            return Ok(NerResponse::new(model(), Vec::new()));
+        }
         let labels = Array::new();
         if let Some(requested) = request.labels {
             for label in requested {
@@ -112,7 +110,7 @@ impl Backend for JsCallbackBackend {
                 Ok(NerSpan::new(s.label, s.score, s.start..s.end))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(NerResponse::new(spans))
+        Ok(NerResponse::new(model(), spans))
     }
 }
 
@@ -130,4 +128,9 @@ fn js_to_error(value: JsValue) -> Error {
 /// Build a NER recognizer whose inference is the JavaScript `callback`.
 pub(super) fn build_ner(callback: Function) -> NerRecognizer<JsCallbackBackend> {
     NerRecognizer::new(JsCallbackBackend::new(callback)).with_name("js-callback-ner")
+}
+
+/// The model every response of the JavaScript callback names.
+fn model() -> ModelId {
+    ModelId::new("js-callback-ner")
 }

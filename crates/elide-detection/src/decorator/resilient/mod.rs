@@ -3,11 +3,10 @@
 //! [`ResilientRecognizer`] keeps one failing recognizer from failing the whole
 //! analysis.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::{Component, Result};
 use futures::future;
 
 /// Wraps a [`Recognizer`] so that its errors are logged, not propagated.
@@ -23,7 +22,7 @@ use futures::future;
 /// rather than stop the pipeline. Recognizers left unwrapped stay fail-fast.
 ///
 /// On failure it emits a `warn` log naming the wrapped recognizer (via its
-/// [`id`](Recognizer::id)) and the error, so a dropped recognizer is never
+/// [`id`](Component::id)) and the error, so a dropped recognizer is never
 /// silent, then returns empty results. A failed batch is retried subject by
 /// subject, so one subject's failure costs only that subject its findings, and
 /// the result keeps the one-list-per-subject contract the analyzer enforces.
@@ -33,7 +32,9 @@ use futures::future;
 /// anywhere the inner recognizer goes and composes with the other decorators
 /// (e.g. wrap an [`EscalatingRecognizer`](crate::decorator::escalation::EscalatingRecognizer)
 /// to make its whole escalation best-effort).
+#[derive(Component)]
 pub struct ResilientRecognizer<R> {
+    #[component(delegate)]
     inner: R,
 }
 
@@ -52,10 +53,6 @@ impl<R> ResilientRecognizer<R> {
 
 #[async_trait::async_trait]
 impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
-    fn id(&self) -> ComponentId {
-        self.inner.id()
-    }
-
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         match self.inner.recognize(subject, ctx).await {
             Ok(entities) => Ok(entities),
@@ -110,24 +107,22 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::Error;
     use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::recognition::{Scope, Subject};
+    use elide_core::{Component, Error};
 
     use super::*;
 
     /// A recognizer that always errors, to exercise the resilient fallback.
+    #[derive(Component)]
+    #[component(name = "always-fails", version = "0")]
     struct AlwaysFails;
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for AlwaysFails {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("always-fails", "0")
-        }
-
         async fn recognize(
             &self,
             _subject: &Subject<Text>,
@@ -170,14 +165,12 @@ mod tests {
 
     /// Fails on the subject `"bad"`, alone or inside a batch, and reports one
     /// finding on any other subject.
+    #[derive(Component)]
+    #[component(name = "fails-on-bad", version = "0")]
     struct FailsOnBad;
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for FailsOnBad {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("fails-on-bad", "0")
-        }
-
         async fn recognize(
             &self,
             subject: &Subject<Text>,
@@ -225,14 +218,12 @@ mod tests {
     }
 
     /// Rejects every batch, even an empty one.
+    #[derive(Component)]
+    #[component(name = "rejects-every-batch", version = "0")]
     struct RejectsEveryBatch;
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for RejectsEveryBatch {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("rejects-every-batch", "0")
-        }
-
         async fn recognize(
             &self,
             _subject: &Subject<Text>,

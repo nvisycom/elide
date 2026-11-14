@@ -81,7 +81,7 @@ mod tests {
         let batch = Candidates {
             entities: vec![candidate(0.0, 0.0, 0.5, 1.0)],
         };
-        let entities = Image::lift(batch, &data, &ModelId::default());
+        let entities = Image::lift(batch, &data, &ModelId::new("model"));
         assert_eq!(entities.len(), 1);
         let bbox = entities[0].location.bounding_box;
         assert_eq!(bbox.min.x, 0.0);
@@ -100,7 +100,7 @@ mod tests {
         let batch = Candidates {
             entities: vec![candidate(0.5, 1.2, -0.1, 0.0)],
         };
-        let bbox = Image::lift(batch, &data, &ModelId::default())[0]
+        let bbox = Image::lift(batch, &data, &ModelId::new("model"))[0]
             .location
             .bounding_box;
         assert_eq!((bbox.min.x, bbox.min.y), (0.0, 0.0));
@@ -121,6 +121,6 @@ mod tests {
                 candidate(f64::NAN, 0.0, 0.5, 0.5),
             ],
         };
-        assert!(Image::lift(batch, &data, &ModelId::default()).is_empty());
+        assert!(Image::lift(batch, &data, &ModelId::new("model")).is_empty());
     }
 }

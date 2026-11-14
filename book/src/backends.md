@@ -19,8 +19,9 @@ A request borrows its payload, so a large image or recording is not copied
 to make a call. `call_batch` sends many requests together; a backend whose
 provider accepts batches overrides it to make one round trip instead of
 many. A caller makes the call through `call_aligned`, which checks the
-backend answered every request. `provenance` names the model, for the audit trail of every entity it
-finds.
+backend answered every request. Every response names the model that
+produced it, for the audit trail of every entity found in it; behind a
+router, that is the model that answered, not the router's.
 
 ## Decorators
 

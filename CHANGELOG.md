@@ -18,8 +18,13 @@ and this project adheres to
   that found it, how overlapping findings were reconciled, confidence
   adjustments, reviewer decisions, the operator picked to hide it, and the
   redaction applied, verifiable as a hash-linked DAG
-- Recognizers, enrichers, and redaction operators share one name-and-version
-  identity (`ComponentId`), recorded in the audit trail
+- Recognizers, enrichers, and redaction operators are each a `Component`
+  with one name-and-version identity (`ComponentId`), recorded in the audit
+  trail; `#[derive(Component)]` takes it from the crate, fixed attributes, a
+  name field, or a wrapped component
+- Every backend response names the model that produced it, so an entity
+  found by a model is attributed to the model that answered its request,
+  through language routing and failover alike
 - WebAssembly bindings (`elide-wasm`) that run the detect-and-redact pipeline
   in a browser
 
@@ -120,6 +125,8 @@ and this project adheres to
 - **elide:** Facade re-exporting the toolkit: recognizers, dedup layers,
   redaction operators, and codecs
 - **elide-core:** Domain types, traits, and errors
+- **elide-macros:** Derives for `Component`, `Request`, and
+  `Response`, re-exported by `elide-core`
 - **elide-detection:** The `Analyzer` and its detection layers
 - **elide-pattern:** Pattern and dictionary recognizers, with keyword-boost
   context enhancement

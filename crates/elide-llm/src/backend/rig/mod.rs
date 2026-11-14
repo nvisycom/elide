@@ -39,7 +39,8 @@ const TARGET: &str = "elide_llm::backend::rig";
 pub struct RigBackend<M> {
     model: DynModel<Completion>,
     config: RigConfig,
-    model_name: String,
+    /// The model each response names.
+    model_id: ModelId,
     _modality: PhantomData<fn() -> M>,
 }
 
@@ -75,11 +76,11 @@ impl<M> RigBackend<M> {
                 .into(),
         };
 
-        let model_name = provider.model().to_owned();
+        let model_id = ModelId::new(provider.model().to_owned());
         Ok(RigBackend {
             model,
             config,
-            model_name,
+            model_id,
             _modality: PhantomData,
         })
     }
@@ -114,17 +115,10 @@ impl Backend for RigBackend<Text> {
     type Request<'a> = LlmRequest<'a, Text>;
     type Response = LlmResponse<Text>;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: self.model_name.clone().into(),
-            ..ModelId::default()
-        }
-    }
-
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name, modality = "text"))]
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_id.name, modality = "text"))]
     async fn call(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
         let candidates = self.extract_batch(Message::user(request.prompt)).await?;
-        Ok(LlmResponse::new(candidates))
+        Ok(LlmResponse::new(self.model_id.clone(), candidates))
     }
 }
 
@@ -133,18 +127,11 @@ impl Backend for RigBackend<Image> {
     type Request<'a> = LlmRequest<'a, Image>;
     type Response = LlmResponse<Image>;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: self.model_name.clone().into(),
-            ..ModelId::default()
-        }
-    }
-
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name, modality = "image"))]
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_id.name, modality = "image"))]
     async fn call(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
         let message = image_message(request.prompt, request.data)?;
         let candidates = self.extract_batch(message).await?;
-        Ok(LlmResponse::new(candidates))
+        Ok(LlmResponse::new(self.model_id.clone(), candidates))
     }
 }
 

@@ -88,13 +88,6 @@ impl Backend for JsCallbackBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
 
-    fn provenance(&self) -> ModelId {
-        ModelId {
-            name: "js-callback-ocr".into(),
-            ..Default::default()
-        }
-    }
-
     async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
         let value = self
             .call_js(request.image.to_vec())
@@ -107,11 +100,16 @@ impl Backend for JsCallbackBackend {
             .into_iter()
             .map(OcrRegion::into_layout_region)
             .collect();
-        Ok(OcrResponse::new(regions))
+        Ok(OcrResponse::new(model(), regions))
     }
 }
 
 /// Build an OCR enricher whose recognition is the JavaScript `callback`.
 pub(super) fn build_ocr(callback: Function) -> OcrEnricher<JsCallbackBackend> {
     OcrEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-ocr")
+}
+
+/// The model every response of the JavaScript callback names.
+fn model() -> ModelId {
+    ModelId::new("js-callback-ocr")
 }

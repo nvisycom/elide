@@ -3,7 +3,6 @@
 
 use elide_core::Result;
 use elide_core::backend::{Backend, BackendBatchExt};
-use elide_core::entity::audit::ModelId;
 
 /// Wraps a [`Backend`] and caps how many requests one batch sends at once.
 ///
@@ -27,7 +26,7 @@ use elide_core::entity::audit::ModelId;
 /// not run one batch's windows concurrently — it bounds concurrency across
 /// *separate* calls; compose with
 /// [`RateLimited`](crate::limit::RateLimited) to bound the request rate.
-/// Because it is itself a `Backend` (same request/response, same provenance), it
+/// Because it is itself a `Backend` (same request and response), it
 /// drops in anywhere the inner backend goes.
 ///
 /// A single [`call`](Backend::call) passes straight through — it is already one
@@ -64,10 +63,6 @@ impl<B: Backend> Backend for BatchChunked<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelId {
-        self.inner.provenance()
-    }
-
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
         self.inner.call(request).await
     }
@@ -97,9 +92,10 @@ impl<B: Backend> Backend for BatchChunked<B> {
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
-    use std::sync::Mutex;
+    use std::sync::{LazyLock, Mutex};
 
-    use elide_core::backend::{BackendRequest, BackendResponse};
+    use elide_core::backend::{Request, Response};
+    use elide_core::entity::audit::ModelId;
 
     use super::*;
 
@@ -108,7 +104,7 @@ mod tests {
     /// borrowed.
     #[derive(Clone, Copy)]
     struct Req<'a>(usize, PhantomData<&'a ()>);
-    impl BackendRequest for Req<'_> {}
+    impl Request for Req<'_> {}
 
     impl Req<'_> {
         fn new(id: usize) -> Self {
@@ -116,9 +112,15 @@ mod tests {
         }
     }
 
+    static MODEL: LazyLock<ModelId> = LazyLock::new(|| ModelId::new("inner"));
+
     #[derive(PartialEq, Eq, Debug)]
     struct Resp(usize);
-    impl BackendResponse for Resp {}
+    impl Response for Resp {
+        fn model(&self) -> &ModelId {
+            &MODEL
+        }
+    }
 
     /// A backend that records the size of every `call_batch` it receives and
     /// echoes each request's id back, so a test can assert both the split
@@ -143,10 +145,6 @@ mod tests {
     impl Backend for Recording {
         type Request<'a> = Req<'a>;
         type Response = Resp;
-
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
 
         async fn call(&self, request: Req<'_>) -> Result<Resp> {
             Ok(Resp(request.0))
@@ -201,10 +199,6 @@ mod tests {
     impl Backend for Short {
         type Request<'a> = Req<'a>;
         type Response = Resp;
-
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
 
         async fn call(&self, request: Req<'_>) -> Result<Resp> {
             Ok(Resp(request.0))

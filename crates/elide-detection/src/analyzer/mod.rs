@@ -338,13 +338,13 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::ErrorKind;
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::{ComponentId, Confidence};
+    use elide_core::primitive::Confidence;
+    use elide_core::{Component, ErrorKind};
 
     use super::*;
 
@@ -379,7 +379,8 @@ mod tests {
     /// subjects it saw in total, to prove the engine coalesces across sources.
     /// Counters are `Arc`-shared so the test can read them after the enricher is
     /// moved into the analyzer.
-    #[derive(Clone, Default)]
+    #[derive(Clone, Default, Component)]
+    #[component(name = "spy", version = "1")]
     struct SpyEnricher {
         batches: Arc<AtomicUsize>,
         subjects: Arc<AtomicUsize>,
@@ -387,10 +388,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Enricher<Text> for SpyEnricher {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("spy", "1")
-        }
-
         async fn enrich(&self, _subject: &mut Subject<Text>, _ctx: &Context<'_>) -> Result<()> {
             Ok(())
         }
@@ -511,14 +508,12 @@ mod tests {
 
     /// A recognizer whose `recognize_batch` returns the wrong number of entity
     /// lists, violating the one-list-per-subject contract.
+    #[derive(Component)]
+    #[component(name = "miscounting", version = "1")]
     struct Miscounting;
 
     #[async_trait::async_trait]
     impl Recognizer<Text> for Miscounting {
-        fn id(&self) -> ComponentId {
-            ComponentId::new("miscounting", "1")
-        }
-
         async fn recognize(
             &self,
             _subject: &Subject<Text>,

@@ -151,12 +151,13 @@ pub struct PatternRule {
 /// Identifies the model behind a [`Model`] match, by name and, when known,
 /// version.
 ///
-/// What a backend reports as its [`provenance`](crate::backend::Backend::provenance).
+/// What a backend's response names as its [`model`].
 /// Distinct from a [`ComponentId`]: it names the model, not the recognizer
 /// that ran it (the event's `source`), and a model's version is often unknown.
 ///
+/// [`model`]: crate::backend::Response::model
 /// [`ComponentId`]: crate::primitive::ComponentId
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ModelId {
@@ -166,4 +167,22 @@ pub struct ModelId {
     /// Model version string, when known.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub version: Option<HipStr<'static>>,
+}
+
+impl ModelId {
+    /// The model named `name`, of unknown version.
+    #[must_use]
+    pub fn new(name: impl Into<HipStr<'static>>) -> Self {
+        Self {
+            name: name.into(),
+            version: None,
+        }
+    }
+
+    /// Set the model's version.
+    #[must_use]
+    pub fn with_version(mut self, version: impl Into<HipStr<'static>>) -> Self {
+        self.version = Some(version.into());
+        self
+    }
 }

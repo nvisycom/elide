@@ -2,8 +2,7 @@
 //! backend registered for its language.
 
 use elide_core::Result;
-use elide_core::backend::{Backend, BackendRequest, BatchSplit};
-use elide_core::entity::audit::ModelId;
+use elide_core::backend::{Backend, BatchSplit, Request};
 use elide_core::primitive::LanguageTag;
 
 /// Routes each request to the backend registered for its language.
@@ -15,7 +14,7 @@ use elide_core::primitive::LanguageTag;
 /// Polish NER model on Polish text, an English-only Whisper on English audio),
 /// but a recognizer or enricher holds a single backend. This decorator is that
 /// single backend: it reads each request's
-/// [`language`](elide_core::backend::BackendRequest::language) and dispatches to
+/// [`language`](elide_core::backend::Request::language) and dispatches to
 /// the matching route, so the component above is unchanged.
 ///
 /// A request's route is chosen by, in order:
@@ -37,7 +36,8 @@ use elide_core::primitive::LanguageTag;
 /// All routes share one backend type `B`; to route across different backend
 /// implementations, make `B` an enum over them that implements [`Backend`].
 ///
-/// [`provenance`](Backend::provenance) reports the fallback's model.
+/// Each response names the model that produced it, so every request is
+/// attributed to the model of the route that served it.
 pub struct LanguageRouted<B> {
     routes: Vec<(LanguageTag, B)>,
     fallback: B,
@@ -110,10 +110,6 @@ impl<B: Backend> Backend for LanguageRouted<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelId {
-        self.fallback.provenance()
-    }
-
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
         self.select(request.language()).call(request).await
     }
@@ -132,7 +128,8 @@ impl<B: Backend> Backend for LanguageRouted<B> {
 mod tests {
     use std::sync::Mutex;
 
-    use elide_core::backend::BackendResponse;
+    use elide_core::backend::Response;
+    use elide_core::entity::audit::ModelId;
 
     use super::*;
 
@@ -141,29 +138,52 @@ mod tests {
         id: usize,
         language: Option<&'a LanguageTag>,
     }
-    impl BackendRequest for Req<'_> {
+    impl Request for Req<'_> {
         fn language(&self) -> Option<&LanguageTag> {
             self.language
         }
     }
 
-    /// The id of the request it answers, and the name of the backend that
+    /// The id of the request it answers, and the model of the backend that
     /// served it.
-    #[derive(PartialEq, Eq, Debug)]
-    struct Resp(usize, &'static str);
-    impl BackendResponse for Resp {}
+    #[derive(Debug)]
+    struct Resp {
+        id: usize,
+        model: ModelId,
+    }
+    impl Response for Resp {
+        fn model(&self) -> &ModelId {
+            &self.model
+        }
+    }
 
-    /// A named backend that records the size of every `call_batch` it receives.
+    /// Each response's request id and the name of the model that answered it.
+    fn answered(responses: &[Resp]) -> Vec<(usize, &str)> {
+        responses
+            .iter()
+            .map(|response| (response.id, response.model().name.as_str()))
+            .collect()
+    }
+
+    /// A backend over a named model that records the size of every
+    /// `call_batch` it receives.
     struct Named {
-        name: &'static str,
+        model: ModelId,
         batch_sizes: Mutex<Vec<usize>>,
     }
 
     impl Named {
         fn new(name: &'static str) -> Self {
             Self {
-                name,
+                model: ModelId::new(name),
                 batch_sizes: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn answer(&self, id: usize) -> Resp {
+            Resp {
+                id,
+                model: self.model.clone(),
             }
         }
 
@@ -177,20 +197,13 @@ mod tests {
         type Request<'a> = Req<'a>;
         type Response = Resp;
 
-        fn provenance(&self) -> ModelId {
-            ModelId::default()
-        }
-
         async fn call(&self, request: Req<'_>) -> Result<Resp> {
-            Ok(Resp(request.id, self.name))
+            Ok(self.answer(request.id))
         }
 
         async fn call_batch(&self, requests: Vec<Req<'_>>) -> Result<Vec<Resp>> {
             self.batch_sizes.lock().unwrap().push(requests.len());
-            Ok(requests
-                .into_iter()
-                .map(|r| Resp(r.id, self.name))
-                .collect())
+            Ok(requests.iter().map(|r| self.answer(r.id)).collect())
         }
     }
 
@@ -205,13 +218,14 @@ mod tests {
             .route(tag("pl"), Named::new("pl"))
     }
 
-    async fn served_by(router: &LanguageRouted<Named>, language: Option<&str>) -> &'static str {
+    /// The name of the model that answered a request in `language`.
+    async fn served_by(router: &LanguageRouted<Named>, language: Option<&str>) -> String {
         let language = language.map(tag);
         let request = Req {
             id: 0,
             language: language.as_ref(),
         };
-        router.call(request).await.unwrap().1
+        router.call(request).await.unwrap().model.name.to_string()
     }
 
     #[tokio::test]
@@ -256,14 +270,14 @@ mod tests {
         let out = router.call_batch(requests).await.unwrap();
 
         assert_eq!(
-            out,
-            vec![
-                Resp(0, "en"),
-                Resp(1, "pl"),
-                Resp(2, "default"),
-                Resp(3, "en"),
-                Resp(4, "default"),
-                Resp(5, "pl"),
+            answered(&out),
+            [
+                (0, "en"),
+                (1, "pl"),
+                (2, "default"),
+                (3, "en"),
+                (4, "default"),
+                (5, "pl"),
             ]
         );
         // One call_batch per route, each carrying only its own requests.
@@ -286,7 +300,7 @@ mod tests {
 
         let out = router.call_batch(requests).await.unwrap();
 
-        assert_eq!(out, vec![Resp(0, "pl"), Resp(1, "pl"), Resp(2, "pl")]);
+        assert_eq!(answered(&out), [(0, "pl"), (1, "pl"), (2, "pl")]);
         assert_eq!(router.routes[2].1.batch_sizes(), vec![3]);
     }
 

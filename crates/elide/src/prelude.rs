@@ -53,7 +53,7 @@ pub use elide_core::recognition::{Recognizer, Scope};
 #[doc(no_inline)]
 pub use elide_core::redaction::{Disposition, HiddenContentPolicy, Operator};
 #[doc(no_inline)]
-pub use elide_core::{Error, ErrorKind, Result};
+pub use elide_core::{Component, Error, ErrorKind, Result};
 #[doc(no_inline)]
 pub use elide_detection::{
     Analyzer, Layer,

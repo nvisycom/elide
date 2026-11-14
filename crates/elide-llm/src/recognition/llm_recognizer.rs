@@ -6,15 +6,14 @@
 //! `Arc<dyn Prompt<B::Modality>>` for the swappable prompt wording. The
 //! recognizer renders the prompt, asks the backend to extract the candidate
 //! batch, then lifts each candidate into an entity via [`LlmModality::lift`],
-//! attributed to the model the backend reports.
+//! attributed to the model its response names.
 
 use std::sync::Arc;
 
-use elide_core::Result;
 use elide_core::backend::BackendBatchExt;
 use elide_core::entity::Entity;
-use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::{Component, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -31,9 +30,10 @@ const TARGET: &str = "elide_llm::recognition";
 /// the recognizer recognizes for, so there is no separate modality type
 /// parameter. Built with [`new`](Self::new) (an explicit [`Prompt`]) or
 /// [`with_default`](Self::with_default) (the built-in [`DefaultPrompt`]).
-#[derive(Clone)]
+#[derive(Clone, Component)]
 pub struct LlmRecognizer<B: LlmBackend> {
     /// Recognizer name, its id; the crate name unless set.
+    #[component(name)]
     name: HipStr<'static>,
     /// Backend that sends the prompt to the model and returns the structured
     /// candidate batch. May be a decorated backend.
@@ -117,10 +117,6 @@ where
 
 #[async_trait::async_trait]
 impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
-    fn id(&self) -> ComponentId {
-        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
-    }
-
     async fn recognize(
         &self,
         subject: &Subject<B::Modality>,
@@ -128,13 +124,12 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
     ) -> Result<Vec<Entity<B::Modality>>> {
         let prompt = self.prompt.build(subject, ctx)?;
         let response = self.backend.call(request(&prompt, subject, ctx)).await?;
-        let model = self.backend.provenance();
         let candidates = response.candidates.entities.len();
-        let entities = B::Modality::lift(response.candidates, subject.data(), &model);
+        let entities = B::Modality::lift(response.candidates, subject.data(), &response.model);
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
-            model = %model.name,
+            model = %response.model.name,
             candidates,
             entities = entities.len(),
             "llm candidates lifted",
@@ -159,19 +154,17 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
             .map(|(prompt, subject)| request(prompt, subject, ctx))
             .collect();
         let responses = self.backend.call_aligned(requests).await?;
-        let model = self.backend.provenance();
         let candidates: usize = responses.iter().map(|r| r.candidates.entities.len()).sum();
         let lifted: Vec<_> = responses
             .into_iter()
             .zip(subjects)
             .map(|(response, subject)| {
-                B::Modality::lift(response.candidates, subject.data(), &model)
+                B::Modality::lift(response.candidates, subject.data(), &response.model)
             })
             .collect();
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
-            model = %model.name,
             subjects = subjects.len(),
             candidates,
             entities = lifted.iter().map(Vec::len).sum::<usize>(),
@@ -217,29 +210,25 @@ mod tests {
     }
 
     fn jane() -> LlmResponse<Text> {
-        LlmResponse::new(Candidates {
-            entities: vec![TextCandidate {
-                value: "Jane".to_owned(),
-                description: None,
-                label: "person_name".to_owned(),
-                confidence: Some(0.9),
-                context: Some("Jane".to_owned()),
-                coreference: None,
-            }],
-        })
+        LlmResponse::new(
+            ModelId::new("jane-finder"),
+            Candidates {
+                entities: vec![TextCandidate {
+                    value: "Jane".to_owned(),
+                    description: None,
+                    label: "person_name".to_owned(),
+                    confidence: Some(0.9),
+                    context: Some("Jane".to_owned()),
+                    coreference: None,
+                }],
+            },
+        )
     }
 
     #[async_trait::async_trait]
     impl Backend for Jane {
         type Request<'a> = LlmRequest<'a, Text>;
         type Response = LlmResponse<Text>;
-
-        fn provenance(&self) -> ModelId {
-            ModelId {
-                name: "jane-finder".into(),
-                ..ModelId::default()
-            }
-        }
 
         async fn call(&self, _request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
             self.calls.fetch_add(1, Ordering::Relaxed);

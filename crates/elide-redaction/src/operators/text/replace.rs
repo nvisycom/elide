@@ -1,11 +1,10 @@
 //! [`Replace`]: substitute the matched span with a template string.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::TextReplacement;
 use elide_core::modality::{Modality, TextRedactable};
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +33,8 @@ use serde::{Deserialize, Serialize};
 /// The default template is `[{label}]`.
 ///
 /// [`EntityCoRef`]: elide_core::entity::EntityCoRef
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Component)]
+#[component(name = "replace", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Replace {
@@ -101,10 +101,6 @@ impl Replace {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for Replace {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("replace", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         if self.template.contains(VALUE) || self.template.contains(COREF) {
             // `{value}` writes the original back, and a coreference id can

@@ -37,12 +37,13 @@ use elide_ner::backend::NerBackendExt;
 #     type Request<'a> = NerRequest<'a>;
 #     type Response = NerResponse;
 #
-#     fn provenance(&self) -> ModelId {
-#         ModelId { name: "my-model".into(), ..ModelId::default() }
-#     }
-#
-#     async fn call(&self, _request: NerRequest<'_>) -> elide_core::Result<NerResponse> {
-#         Ok(NerResponse::new(vec![NerSpan::new("person_name", 0.8, 0..8)]))
+#     async fn call(&self, request: NerRequest<'_>) -> elide_core::Result<NerResponse> {
+#         let spans = if request.wants_nothing() {
+#             Vec::new()
+#         } else {
+#             vec![NerSpan::new("person_name", 0.8, 0..8)]
+#         };
+#         Ok(NerResponse::new(ModelId::new("my-model"), spans))
 #     }
 # }
 
@@ -66,7 +67,7 @@ The crate holds:
 
 - **`NerRecognizer`** — the recognizer. Per call it asks its backend for the
   catalog's labels, sorted by id, and turns every span into an entity whose
-  audit event names the backend's model. `recognize_batch` sends one batch
+  audit event names the model its response came from. `recognize_batch` sends one batch
   for many subjects.
 - **`backend::NerRequest`** and **`backend::NerResponse`** — the contract a
   NER backend speaks: text, the labels to look for (`None` for a fixed-label

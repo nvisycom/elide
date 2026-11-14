@@ -1,9 +1,8 @@
 //! [`Blur`]: Gaussian-blur the matched image region.
 
 use elide_core::entity::Entity;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,8 @@ use serde::{Deserialize, Serialize};
 /// [`Blackbox`], which hides the region behind a solid fill.
 ///
 /// [`Blackbox`]: crate::operators::Blackbox
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(name = "blur", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "BlurConfig"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -75,10 +75,6 @@ impl Default for Blur {
 
 #[async_trait::async_trait]
 impl Operator<Image> for Blur {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("blur", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // The region's position and bounding box stay observable, and a
         // light blur can leak coarse structure.

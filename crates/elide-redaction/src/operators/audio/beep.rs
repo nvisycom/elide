@@ -2,9 +2,8 @@
 
 use elide_audio::modality::{Audio, AudioData, AudioReplacement, Waveform};
 use elide_core::entity::Entity;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +20,8 @@ const DEFAULT_AMPLITUDE: f32 = 0.5;
 /// Defaults to a 1 kHz sine at half amplitude, the broadcast convention.
 ///
 /// [`Silence`]: crate::operators::Silence
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(name = "beep", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "BeepConfig"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -114,10 +114,6 @@ impl Default for Beep {
 
 #[async_trait::async_trait]
 impl Operator<Audio> for Beep {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("beep", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // Like silence, the duration of the redacted span stays observable;
         // its content does not.

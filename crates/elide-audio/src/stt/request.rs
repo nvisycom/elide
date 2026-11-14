@@ -1,6 +1,6 @@
 //! [`SttRequest`]: one per-call speech-to-text request handed to an STT backend.
 
-use elide_core::backend::BackendRequest;
+use elide_core::backend::Request;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ use crate::modality::AudioFormat;
 /// call sites that already own the underlying values hand them through without
 /// cloning. Constructed as a struct literal — the format is always known by the
 /// time STT runs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Request)]
 pub struct SttRequest<'a> {
     /// Raw audio bytes (WAV, MP3, FLAC, …). The backend honours whatever
     /// container and codec it accepts; returned segment timings refer back
@@ -25,13 +25,8 @@ pub struct SttRequest<'a> {
     pub format: AudioFormat,
     /// Caller-asserted language. Backends that support per-call language
     /// hinting use this to pick a model variant; others ignore it.
+    #[backend(language)]
     pub language: Option<&'a LanguageTag>,
     /// Per-call correlation id propagated to remote backends for tracing.
     pub correlation_id: Option<Uuid>,
-}
-
-impl BackendRequest for SttRequest<'_> {
-    fn language(&self) -> Option<&LanguageTag> {
-        self.language
-    }
 }

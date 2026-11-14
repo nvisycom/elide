@@ -1,11 +1,10 @@
 //! [`DropRow`]: drop the entire row a matched tabular entity sits in.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::TextData;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,17 +18,14 @@ use serde::{Deserialize, Serialize};
 /// The header row is never dropped, that would strip the table's schema.
 ///
 /// [`Erase`]: crate::operators::Erase
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
+#[component(name = "drop_row", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DropRow;
 
 #[async_trait::async_trait]
 impl Operator<Tabular> for DropRow {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("drop_row", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // The record is gone entirely; no value or shape remains for it.
         LeakProfile::Irrecoverable

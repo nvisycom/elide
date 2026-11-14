@@ -2,12 +2,11 @@
 //! (year, year-month, or hour), preserving analytical utility while
 //! removing identifier-level precision.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
-use elide_core::primitive::ComponentId;
 use elide_core::redaction::{LeakProfile, Operator};
+use elide_core::{Component, Result};
 use jiff::civil::{Date, DateTime, Time};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -86,7 +85,8 @@ pub enum DateStyle {
 /// assert_eq!(g.render("1987-03-14"), Some("1987".to_owned()));
 /// assert_eq!(g.render("not a date"), None); // declined
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Component)]
+#[component(name = "generalize_date", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GeneralizeDate {
@@ -205,10 +205,6 @@ impl GeneralizeDate {
 
 #[async_trait::async_trait]
 impl<M: TextRedactable> Operator<M> for GeneralizeDate {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("generalize_date", "1.0.0")
-    }
-
     fn leak_profile(&self) -> LeakProfile {
         // The retained granularity (the year, say) survives; the finer
         // elements are gone. Some shape leaks: partial.
