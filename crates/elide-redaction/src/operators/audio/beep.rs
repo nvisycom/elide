@@ -124,12 +124,12 @@ impl Operator<Audio> for Beep {
         &self,
         _entity: &Entity<Audio>,
         _data: &AudioData,
-    ) -> Result<AudioReplacement> {
-        Ok(AudioReplacement::Tone {
+    ) -> Result<Option<AudioReplacement>> {
+        Ok(Some(AudioReplacement::Tone {
             hz: self.hz,
             amplitude: self.amplitude,
             waveform: self.waveform,
-        })
+        }))
     }
 }
 
@@ -162,11 +162,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            AudioReplacement::Tone {
+            Some(AudioReplacement::Tone {
                 hz: 1000.0,
                 amplitude: 0.5,
                 waveform: Waveform::Sine,
-            }
+            })
         );
     }
 
@@ -181,11 +181,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            AudioReplacement::Tone {
+            Some(AudioReplacement::Tone {
                 hz: 440.0,
                 amplitude: 0.25,
                 waveform: Waveform::Square,
-            }
+            })
         );
     }
 

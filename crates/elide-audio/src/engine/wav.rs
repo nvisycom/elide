@@ -141,15 +141,14 @@ mod tests {
     /// what `hound` can write as 24-bit and corrupts the clip.
     #[test]
     fn tone_stays_within_24_bit_range() {
-        let mut batch: Redactions<Audio> = Redactions::new();
-        batch.push(
+        let batch: Redactions<Audio> = Redactions::from([(
             AudioLocation::from_millis(0, 100),
             AudioReplacement::Tone {
                 hz: 440.0,
                 amplitude: 1.0,
                 waveform: Waveform::Sine,
             },
-        );
+        )]);
 
         let out = redact_all(&silent_wav(24, 1), &batch).expect("24-bit tone re-encodes");
 

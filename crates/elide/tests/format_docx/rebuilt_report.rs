@@ -34,7 +34,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .await?;
     let report = orchestrator.analyze(&mut doc).await?.report;
     let body = report
-        .document::<Text>()
+        .part::<Text>(&doc.id())
         .ok()
         .map(|part| part.entities())
         .map(|v| v.to_vec())
@@ -65,7 +65,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // report had no cached handles): the applied body entities each end with
     // a redaction event.
     let audited = applied
-        .document::<Text>()
+        .part::<Text>(&doc2.id())
         .ok()
         .map(|part| part.entities())
         .map(|v| v.to_vec())

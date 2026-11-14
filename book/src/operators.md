@@ -10,7 +10,7 @@ For `dana.reed@example.com`:
 
 | Operator | Result |
 |---|---|
-| `Keep` | Unchanged, but recorded as reviewed |
+| `Keep` | Left as it is: nothing is written; the selection is audited |
 | `Erase` | Removed |
 | `Replace::new("[EMAIL]")` | `[EMAIL]` |
 | `Mask::stars()` | `*********************` |
@@ -40,7 +40,7 @@ such as `GeneralizeDate` on text that is not a date, the second runs.
 | `Audio` | `Silence`, `Beep::new(hz)` |
 | `Tabular` | `DropRow`, `DropColumn`, and the text operators on a cell |
 
-`Erase` and `Keep` work in every modality.
+`Erase` and `Keep` work in every modality, a custom one included.
 
 ## Leak profiles
 
@@ -54,13 +54,14 @@ still exposes:
 - **Recoverable**: the output stays linked to the original. `AesEncrypt`
   decrypts with its key; `Pseudonymize`'s vault keeps the mapping from each
   original (or coreference cluster) to its surrogate; a hash can be
-  brute-forced over a small input space; `Keep`, and a `Replace` template
-  with `{value}`, write the original back.
+  brute-forced over a small input space; `Keep` leaves the original in place,
+  and a `Replace` template with `{value}` writes it back.
 
 Check profiles before you ship a policy: for example, reject a recoverable
 operator on a label your policy says must be destroyed.
 
 ## Your own operators
 
-An operator implements `Operator<M>`; one that can be undone also implements
-`ReversibleOperator<M>`. Both are in `elide::redaction`.
+An operator implements `Operator<M>`: its `anonymize` returns the replacement
+to write, or `None` to leave the entity as it is. One that can be undone also
+implements `ReversibleOperator<M>`. Both are in `elide::redaction`.

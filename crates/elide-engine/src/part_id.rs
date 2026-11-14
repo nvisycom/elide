@@ -13,36 +13,24 @@ use std::fmt;
 use elide_codec::LocalId;
 use smallvec::{SmallVec, smallvec};
 
-/// A path from the top-level document to one part, a segment per container.
+/// A path from a named document to one part, a segment per level.
 ///
-/// A single-container document (a plain DOCX/PDF) yields one-segment paths;
-/// nesting appends segments.
+/// The first segment is the document's name, which alone addresses the
+/// document's own content; each container part appends its [`LocalId`], and
+/// nesting appends more.
 ///
 /// Keyed on by [`Report`](crate::Report) / [`ArtifactSet`](crate::ArtifactSet),
-/// so it is `Hash + Eq`. Each segment is a container's own [`LocalId`], opaque
-/// to the orchestrator, joined only structurally (never string-concatenated, a
-/// segment can itself contain any delimiter). Backed by a `SmallVec` sized for
-/// one inline segment: the depth-1 case (an un-nested container, every part
-/// today) allocates nothing, and only genuine nesting spills to the heap.
+/// so it is `Hash + Eq`. Each segment is opaque to the orchestrator, joined
+/// only structurally (never string-concatenated, a segment can itself contain
+/// any delimiter). Backed by a `SmallVec` sized for two inline segments: a
+/// document's own content and its direct parts allocate nothing, and only
+/// genuine nesting spills to the heap.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PartId(SmallVec<[LocalId; 1]>);
+pub struct PartId(SmallVec<[LocalId; 2]>);
 
 impl PartId {
-    /// A one-segment path from a `&'static str`, the depth-1 case (a part in a
-    /// single, un-nested container).
-    #[must_use]
-    pub fn new(id: &'static str) -> Self {
-        Self::leaf(id)
-    }
-
-    /// The empty path, the top-level document itself, not any part within it.
-    /// The flatten walk starts here; each container level appends a segment.
-    #[must_use]
-    pub fn top() -> Self {
-        Self(SmallVec::new())
-    }
-
-    /// A one-segment path from `segment` (this container's [`LocalId`]).
+    /// A one-segment path from `segment`: a document's name, addressing the
+    /// document's own content.
     #[must_use]
     pub fn leaf(segment: impl Into<LocalId>) -> Self {
         Self(smallvec![segment.into()])
@@ -71,31 +59,22 @@ impl PartId {
         self.0.iter().map(LocalId::as_str)
     }
 
-    /// This path's last segment as a string slice, the part's local id in its
-    /// *immediate* container. See [`last_segment_id`](Self::last_segment_id) for
-    /// the typed form.
+    /// This path's last segment: the part's local id in its immediate
+    /// container, or the document's name for its own content. Empty for an
+    /// empty path.
     #[must_use]
     pub fn last_segment(&self) -> &str {
         self.0.last().map_or("", LocalId::as_str)
     }
 
-    /// This path's last segment, as a [`LocalId`] in its *immediate* container.
-    ///
-    /// It is the value passed to that container's `replace_blob`. `None` for
-    /// the empty (top-level) path.
-    #[must_use]
-    pub fn last_segment_id(&self) -> Option<&LocalId> {
-        self.0.last()
-    }
-
-    /// The number of container levels this path crosses (its depth).
+    /// The number of segments in the path: 1 for a document's own content.
     #[must_use]
     pub fn depth(&self) -> usize {
         self.0.len()
     }
 
-    /// Whether this path has no segments, the empty path that names the
-    /// top-level document rather than any part within it.
+    /// Whether this path has no segments. A path built by the orchestrator
+    /// never is.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

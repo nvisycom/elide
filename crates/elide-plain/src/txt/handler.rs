@@ -282,12 +282,11 @@ mod tests {
         let mut h = handler(src);
         let begin = src.find("-----BEGIN").unwrap();
         let end = src.find("-----END KEY-----").unwrap() + "-----END KEY-----".len();
-        let mut rs = Redactions::new();
-        rs.push(
+        h.write_at(Redactions::from([(
             TextLocation::inline(begin..end),
             TextReplacement::substituted("[KEY]"),
-        );
-        h.write_at(rs).await?;
+        )]))
+        .await?;
         assert_eq!(h.text(), "before\n[KEY]\nafter\n");
         Ok(())
     }
@@ -295,16 +294,17 @@ mod tests {
     #[tokio::test]
     async fn redact_multiple_spans_any_input_order() -> Result<()> {
         let mut h = handler("alpha\nbravo\ncharlie\n");
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation::inline(12..19),
-            TextReplacement::substituted("[C]"),
-        );
-        rs.push(
-            TextLocation::inline(0..5),
-            TextReplacement::substituted("[A]"),
-        );
-        h.write_at(rs).await?;
+        h.write_at(Redactions::from([
+            (
+                TextLocation::inline(12..19),
+                TextReplacement::substituted("[C]"),
+            ),
+            (
+                TextLocation::inline(0..5),
+                TextReplacement::substituted("[A]"),
+            ),
+        ]))
+        .await?;
         assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
         Ok(())
     }
@@ -312,12 +312,11 @@ mod tests {
     #[tokio::test]
     async fn redact_unknown_location_skipped() -> Result<()> {
         let mut h = handler("one line");
-        let mut rs = Redactions::new();
-        rs.push(
+        h.write_at(Redactions::from([(
             TextLocation::inline(999..1000),
             TextReplacement::substituted("nope"),
-        );
-        h.write_at(rs).await?;
+        )]))
+        .await?;
         assert_eq!(h.text(), "one line");
         Ok(())
     }
@@ -358,12 +357,11 @@ mod tests {
 
         // Redact the one stream in place.
         let mut stream = doc.stream_mut::<Text>("body").expect("text stream");
-        let mut batch = Redactions::new();
         // "contact " = 8 bytes; the email is 18 → 8..26.
-        batch.push(
+        let batch = Redactions::from([(
             TextLocation::inline(8..26),
             TextReplacement::substituted("[EMAIL]"),
-        );
+        )]);
         DataWriter::write_at(&mut stream, batch).await?;
 
         assert_eq!(doc.encode()?.as_bytes(), b"contact [EMAIL]");

@@ -84,7 +84,7 @@ async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
     assert!(tops.contains(&"scan-A.png".to_string()), "got: {tops:?}");
     assert!(tops.contains(&"scan-B.png".to_string()), "got: {tops:?}");
     for name in ["scan-A.png", "scan-B.png"] {
-        let id = PartId::new(name);
+        let id = PartId::leaf(name);
         assert!(
             analyzed.artifacts.part::<Image>(&id).is_some(),
             "the OCR layout for {name} was surfaced",
@@ -134,7 +134,7 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
     let analyzed = orchestrator.analyze(&mut documents).await?;
 
     for name in ["first.docx", "second.docx"] {
-        let id = PartId::new(name);
+        let id = PartId::leaf(name);
         let entities = analyzed
             .report
             .part::<Text>(&id)

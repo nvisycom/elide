@@ -7,17 +7,20 @@
 
 use std::assert_matches;
 
-use elide::Result;
 use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
-use elide::entity::builtins;
+use elide::entity::{LabelCatalog, builtins};
 use elide::modality::ChunkReader;
 use elide::modality::text::Text;
-use elide::redaction::HiddenContentPolicy;
+use elide::recognition::Scope;
+use elide::redaction::operators::{Erase, Keep};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
+use elide::{RegistryDocumentExt, Result};
 use elide_core::assert_label_present;
 
 use crate::support::asserts::assert_pii_removed;
 use crate::support::fixture::Fixture;
+use crate::support::orchestrator::{TestOrchestrator, default_text_analyzer};
 
 /// Re-decode a redacted PDF through the public registry and reassemble its
 /// born-digital text. The re-encoded content stream is FlateDecode-compressed,
@@ -114,5 +117,34 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
             last.kind
         );
     }
+    Ok(())
+}
+
+/// A `Keep` rule leaves its entity's text in the PDF while the rest is
+/// removed: keeping writes nothing, so no glyph is deleted for it.
+#[tokio::test]
+async fn kept_text_stays_in_the_pdf() -> Result<()> {
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = TestOrchestrator::bare()
+        .with_registry(registry.clone())
+        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+        .with_text(
+            default_text_analyzer()?,
+            Anonymizer::new()
+                .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Keep))
+                .with(Rule::fallback(Erase)),
+        )
+        .build();
+    let mut document = registry
+        .document("doc.pdf", FIXTURE.source, HiddenContentPolicy::default())
+        .await?;
+    orchestrator.anonymize(&mut document).await?;
+
+    let redacted = extracted_text(document.document.encode()?.as_bytes()).await?;
+    assert!(
+        redacted.contains("alice.johnson@example.com"),
+        "the kept email was removed: {redacted}"
+    );
+    assert!(!redacted.contains("555-0142"), "the phone number survived");
     Ok(())
 }

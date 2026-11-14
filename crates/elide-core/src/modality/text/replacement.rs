@@ -32,4 +32,8 @@ impl TextReplacement {
     }
 }
 
-impl ModalityReplacement for TextReplacement {}
+impl ModalityReplacement for TextReplacement {
+    fn removed() -> Self {
+        Self::Removed
+    }
+}

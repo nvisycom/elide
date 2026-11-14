@@ -118,7 +118,6 @@ impl RasterImage {
             ImageReplacement::Pixelate { block_size } => self.pixelate(region, *block_size),
             ImageReplacement::Block { color } => self.block(region, *color),
             ImageReplacement::Removed => self.block(region, Color::BLACK),
-            ImageReplacement::Unchanged => return false,
         }
         true
     }

@@ -244,13 +244,13 @@ impl Fixture {
 
         let report = orchestrator.analyze(&mut document).await?.report;
         let entities: Vec<Entity<Audio>> = report
-            .document::<Audio>()
+            .part::<Audio>(&document.id())
             .map(|part| part.entities().to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
         let applied = orchestrator.anonymize_with(&mut document, report).await?;
         let audited: Vec<Entity<Audio>> = applied
-            .document::<Audio>()
+            .part::<Audio>(&document.id())
             .map(|part| part.entities().to_vec())
             .unwrap_or_default();
 
@@ -300,13 +300,13 @@ impl Fixture {
 
         let report = orchestrator.analyze(&mut document).await?.report;
         let entities: Vec<Entity<Image>> = report
-            .document::<Image>()
+            .part::<Image>(&document.id())
             .map(|part| part.entities().to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
         let applied = orchestrator.anonymize_with(&mut document, report).await?;
         let audited: Vec<Entity<Image>> = applied
-            .document::<Image>()
+            .part::<Image>(&document.id())
             .map(|part| part.entities().to_vec())
             .unwrap_or_default();
 
@@ -340,7 +340,6 @@ impl Fixture {
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         Replace: Operator<M>,
         Mask: Operator<M>,
-        Erase: Operator<M>,
     {
         // No asserted language: the analyzer's `LinguaEnricher` detects each
         // document's languages, so a multilingual fixture activates every one
@@ -368,7 +367,6 @@ impl Fixture {
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         Replace: Operator<M>,
         Mask: Operator<M>,
-        Erase: Operator<M>,
     {
         let mut document = self.decode_document::<M>(&registry, policy).await?;
 
@@ -393,7 +391,7 @@ impl Fixture {
         // the document's own entities out, then apply with no editing.
         let report = orchestrator.analyze(&mut document).await?.report;
         let entities: Vec<Entity<M>> = report
-            .document::<M>()
+            .part::<M>(&document.id())
             .map(|part| part.entities().to_vec())
             .unwrap_or_default();
         // Write the detected entities as JSON for inspection before the
@@ -403,7 +401,7 @@ impl Fixture {
         // The returned report's entities now carry the redaction event ,
         // the post-redaction audit trail.
         let audited: Vec<Entity<M>> = applied
-            .document::<M>()
+            .part::<M>(&document.id())
             .map(|part| part.entities().to_vec())
             .unwrap_or_default();
 

@@ -54,7 +54,7 @@ impl Operator<Image> for Blackbox {
         &self,
         _entity: &Entity<Image>,
         _data: &ImageData,
-    ) -> Result<ImageReplacement> {
-        Ok(ImageReplacement::Block { color: self.color })
+    ) -> Result<Option<ImageReplacement>> {
+        Ok(Some(ImageReplacement::Block { color: self.color }))
     }
 }

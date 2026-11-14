@@ -35,8 +35,8 @@ impl Operator<Tabular> for DropRow {
         &self,
         _entity: &Entity<Tabular>,
         _data: &TextData,
-    ) -> Result<TabularReplacement> {
-        Ok(TabularReplacement::DropRow)
+    ) -> Result<Option<TabularReplacement>> {
+        Ok(Some(TabularReplacement::DropRow))
     }
 }
 
@@ -66,11 +66,11 @@ mod tests {
         let data = TextData::new("Bob");
         assert_eq!(
             DropRow.anonymize(&entity(), &data).await.unwrap(),
-            TabularReplacement::DropRow
+            Some(TabularReplacement::DropRow)
         );
         assert_eq!(
             DropColumn.anonymize(&entity(), &data).await.unwrap(),
-            TabularReplacement::DropColumn
+            Some(TabularReplacement::DropColumn)
         );
     }
 }

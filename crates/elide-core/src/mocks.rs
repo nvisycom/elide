@@ -94,7 +94,7 @@ impl Operator<Text> for MockOperator {
         &self,
         _entity: &Entity<Text>,
         _data: &TextData,
-    ) -> Result<TextReplacement, Error> {
-        Ok(TextReplacement::substituted(self.replacement.clone()))
+    ) -> Result<Option<TextReplacement>, Error> {
+        Ok(Some(TextReplacement::substituted(self.replacement.clone())))
     }
 }

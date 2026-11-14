@@ -111,10 +111,7 @@ where
 
 /// An erase-everything [`Anonymizer`] for a modality `M`, the image default, and
 /// what OCR image tests use.
-pub fn erase_anonymizer<M: Modality>() -> Anonymizer<M>
-where
-    Erase: Operator<M>,
-{
+pub fn erase_anonymizer<M: Modality>() -> Anonymizer<M> {
     Anonymizer::new().with(Rule::fallback(Erase))
 }
 
@@ -218,7 +215,6 @@ impl TestOrchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        Erase: Operator<M>,
     {
         self.inner = self.inner.with_modality::<M>(analyzer, anonymizer);
         self

@@ -29,10 +29,8 @@ pub(crate) fn audio() -> Anonymizer<Audio> {
 fn common_text<M>(anonymizer: Anonymizer<M>) -> Anonymizer<M>
 where
     M: Modality,
-    Keep: Operator<M>,
     Replace: Operator<M>,
     Mask: Operator<M>,
-    Erase: Operator<M>,
 {
     anonymizer
         .with(Rule::predicate(

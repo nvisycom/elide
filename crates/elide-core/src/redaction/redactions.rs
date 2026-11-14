@@ -78,6 +78,24 @@ impl<M: Modality> Default for Redactions<M> {
     }
 }
 
+impl<M: Modality> FromIterator<(M::Location, M::Replacement)> for Redactions<M> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (M::Location, M::Replacement)>,
+    {
+        Self {
+            items: iter.into_iter().collect(),
+        }
+    }
+}
+
+/// A batch of the given pairs, in order.
+impl<M: Modality, const N: usize> From<[(M::Location, M::Replacement); N]> for Redactions<M> {
+    fn from(items: [(M::Location, M::Replacement); N]) -> Self {
+        items.into_iter().collect()
+    }
+}
+
 impl<M: Modality> IntoIterator for Redactions<M> {
     type IntoIter = vec::IntoIter<Self::Item>;
     type Item = (M::Location, M::Replacement);

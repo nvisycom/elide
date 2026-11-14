@@ -199,7 +199,7 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Re
     let stripped = report
         .stripped()
         .map(|item| Stripped {
-            id: item.part.segments().map(str::to_owned).collect(),
+            part: item.part.segments().map(str::to_owned).collect(),
             kind: item.content.kind(),
             item: item.content,
             count: item.count,
@@ -214,26 +214,36 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Re
     })
 }
 
-/// Append modality `M`'s entities, mapping each one's location to a [`Location`]
-/// with `locate`.
+/// Append modality `M`'s entities from every part of that modality, in part
+/// order, mapping each one's location to a [`Location`] with `locate`.
 fn collect<M: elide::modality::Modality>(
     report: &CoreReport,
     out: &mut Vec<Entity>,
     modality: Modality,
     locate: impl Fn(&elide::entity::Entity<M>) -> Location,
 ) {
-    let Ok(part) = report.document::<M>() else {
-        return;
-    };
-    for entity in part.entities() {
-        out.push(Entity {
-            id: entity.id.to_string(),
-            modality,
-            label: entity.label.as_str().to_owned(),
-            location: locate(entity),
-            confidence: f32::from(entity.confidence),
-            language: entity.language.as_ref().map(|l| l.to_string()),
-            coref: entity.coref.as_ref().map(|c| c.as_str().to_owned()),
-        });
+    let mut ids: Vec<_> = report
+        .part_ids()
+        .filter(|(_, name)| *name == M::NAME)
+        .map(|(id, _)| id)
+        .collect();
+    ids.sort_unstable();
+    for id in ids {
+        let Ok(part) = report.part::<M>(id) else {
+            continue;
+        };
+        let path: Vec<String> = id.segments().map(str::to_owned).collect();
+        for entity in part.entities() {
+            out.push(Entity {
+                id: entity.id.to_string(),
+                part: path.clone(),
+                modality,
+                label: entity.label.as_str().to_owned(),
+                location: locate(entity),
+                confidence: f32::from(entity.confidence),
+                language: entity.language.as_ref().map(|l| l.to_string()),
+                coref: entity.coref.as_ref().map(|c| c.as_str().to_owned()),
+            });
+        }
     }
 }

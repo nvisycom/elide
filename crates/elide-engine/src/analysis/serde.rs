@@ -1,6 +1,6 @@
-//! The serde wire form for the analysis views: the [`Report`]'s
-//! `serde::Serialize` and the seed visitors that reconstruct both a [`Report`]
-//! and an [`ArtifactSet`] from their `{ parts: [..] }` wire shape.
+//! The serde wire form for the analysis views: the `Serialize` impls of
+//! [`Report`] and [`ArtifactSet`], and the seed visitors that reconstruct both
+//! from their `{ parts: [..] }` wire shape.
 //!
 //! The serialized report is the part-list `{ parts: [ { id, modality, X } ] }`
 //! view a review layer consumes: every part, a named document's own content
@@ -9,7 +9,7 @@
 //! never collide with a same-named part in another document). Each entry is
 //! tagged with its [`modality`](elide_core::modality::Modality::NAME) so the
 //! orchestrator can route it back on deserialization. Reconstruction is driven
-//! by the [`ModalityRegistry`]: the wire form
+//! by the [`ReportDeserializer`]: the wire form
 //! drops the concrete modality type, deserialization is not object-safe, so each
 //! group is buffered and replayed through the per-modality parser resolved from
 //! the registry.
@@ -30,29 +30,61 @@
 //! [`Report`]: super::report::Report
 //! [`ArtifactSet`]: super::artifacts::ArtifactSet
 
-use std::any::TypeId;
+use std::collections::HashSet;
+use std::fmt;
 use std::marker::PhantomData;
 
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
 use serde::de::{
-    DeserializeSeed, Deserializer, Error as DeError, IntoDeserializer, MapAccess, Visitor,
+    DeserializeSeed, Deserializer, Error as DeError, IgnoredAny, IntoDeserializer, MapAccess,
+    SeqAccess, Visitor,
 };
+use serde::ser::{Serialize, Serializer};
 use serde_value::Value;
 
 use super::artifacts::ArtifactSet;
 use super::group::{ArtifactGroup, EntityGroup};
-use super::registry::{ModalityEntry, ModalityRegistry};
-use super::report::{PartReport, Report};
+use super::registry::{ModalityEntry, ReportDeserializer};
+use super::report::Report;
 use crate::PartId;
 
 /// A part's [`PartId`] path serialized as a segment array, the wire key. A
 /// path is never string-joined (a segment can contain any delimiter), so it
 /// rides as a list of strings.
 struct PathField<'a>(&'a PartId);
-impl serde::Serialize for PathField<'_> {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+
+impl Serialize for PathField<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.collect_seq(self.0.segments())
     }
+}
+
+/// A type-erased value (a part's entities or artifact) serialized through
+/// erasure.
+struct Erased<'a, T: ?Sized>(&'a T);
+
+impl<T: erased_serde::Serialize + ?Sized> Serialize for Erased<'_, T> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        erased_serde::serialize(self.0, s)
+    }
+}
+
+/// One part of a report on the wire. `modality` tags which `Vec<Entity<M>>`
+/// the entities parse back as.
+#[derive(serde::Serialize)]
+struct PartEntry<'a> {
+    id: PathField<'a>,
+    modality: &'static str,
+    entities: Erased<'a, dyn EntityGroup>,
+}
+
+/// One part of an artifact set on the wire. `modality` tags which
+/// `M::Artifact` the artifact parses back as.
+#[derive(serde::Serialize)]
+struct ArtifactEntry<'a> {
+    id: PathField<'a>,
+    modality: &'static str,
+    artifact: Erased<'a, dyn ArtifactGroup>,
 }
 
 /// One entry of a report's `stripped` section on the wire: the part's path, the
@@ -60,64 +92,75 @@ impl serde::Serialize for PathField<'_> {
 /// rides along so a consumer can group entries without its own table. The
 /// section is output only, so it is never read back.
 #[derive(serde::Serialize)]
-struct StrippedEntry {
-    id: Vec<String>,
+struct StrippedEntry<'a> {
+    id: PathField<'a>,
     kind: HiddenContentKind,
     item: HiddenContent,
     count: usize,
 }
 
-impl serde::Serialize for Report {
-    /// Serialize to `{ parts: [ { id: [seg..], modality, entities } ] }`. Every
-    /// part, a document's own content and every nested container part, is one
-    /// entry, keyed by its full path so no two collide. Each carries its modality
-    /// name so it can be parsed back into the right `Vec<Entity<M>>`.
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
+/// The whole report on the wire.
+#[derive(serde::Serialize)]
+#[serde(rename = "Report")]
+struct ReportWire<'a> {
+    parts: Vec<PartEntry<'a>>,
+    stripped: Vec<StrippedEntry<'a>>,
+}
 
-        // One part entry: `{ id: [seg..], modality, entities }`. The entities
-        // serialize through erasure; `modality` tags which `M` to parse back as.
-        struct Entry<'a>(&'a PartId, &'a dyn EntityGroup);
-        impl serde::Serialize for Entry<'_> {
-            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                struct Entities<'a>(&'a dyn EntityGroup);
-                impl serde::Serialize for Entities<'_> {
-                    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                        erased_serde::serialize(self.0, s)
-                    }
-                }
-                let mut state = s.serialize_struct("PartEntry", 3)?;
-                state.serialize_field("id", &PathField(self.0))?;
-                state.serialize_field("modality", self.1.modality_name())?;
-                state.serialize_field("entities", &Entities(self.1))?;
-                state.end()
-            }
-        }
+/// The whole artifact set on the wire.
+#[derive(serde::Serialize)]
+#[serde(rename = "ArtifactSet")]
+struct ArtifactSetWire<'a> {
+    parts: Vec<ArtifactEntry<'a>>,
+}
 
-        let mut parts: Vec<Entry<'_>> = self
+impl Serialize for Report {
+    /// Serialize to `{ parts: [ { id: [seg..], modality, entities } ], stripped }`.
+    /// Every part, a document's own content and every nested container part,
+    /// is one entry, keyed by its full path so no two collide, and sorted by
+    /// path so identical reports serialize identically.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut parts: Vec<PartEntry<'_>> = self
             .parts
             .iter()
-            .map(|(id, p)| Entry(id, p.entities.as_ref()))
-            .collect();
-        // Deterministic wire output: `parts` is a `HashMap` (random iteration
-        // order), and the array position is observable. Sort by path so identical
-        // reports serialize identically and the order follows the `PartId` tree.
-        parts.sort_unstable_by(|a, b| a.0.segments().cmp(b.0.segments()));
-
-        let stripped: Vec<StrippedEntry> = self
-            .stripped()
-            .map(|item| StrippedEntry {
-                id: item.part.segments().map(str::to_owned).collect(),
-                kind: item.content.kind(),
-                item: item.content,
-                count: item.count,
+            .map(|(id, entities)| PartEntry {
+                id: PathField(id),
+                modality: entities.modality_name(),
+                entities: Erased(entities.as_ref()),
             })
             .collect();
+        parts.sort_unstable_by(|a, b| a.id.0.cmp(b.id.0));
+        let stripped = self
+            .stripped
+            .iter()
+            .map(|(part, content, count)| StrippedEntry {
+                id: PathField(part),
+                kind: content.kind(),
+                item: *content,
+                count,
+            })
+            .collect();
+        ReportWire { parts, stripped }.serialize(serializer)
+    }
+}
 
-        let mut state = serializer.serialize_struct("Report", 2)?;
-        state.serialize_field("parts", &parts)?;
-        state.serialize_field("stripped", &stripped)?;
-        state.end()
+impl Serialize for ArtifactSet {
+    /// Serialize to `{ parts: [ { id: [seg..], modality, artifact } ] }`,
+    /// mirroring the [`Report`]'s shape and order. The set holds only enriched
+    /// parts, so even an empty artifact (an image OCR'd to no text) is
+    /// persisted, and a restored re-run reuses it rather than re-enriching.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut parts: Vec<ArtifactEntry<'_>> = self
+            .parts
+            .iter()
+            .map(|(id, entry)| ArtifactEntry {
+                id: PathField(id),
+                modality: entry.modality_name,
+                artifact: Erased(entry.artifact.as_ref()),
+            })
+            .collect();
+        parts.sort_unstable_by(|a, b| a.id.0.cmp(b.id.0));
+        ArtifactSetWire { parts }.serialize(serializer)
     }
 }
 
@@ -133,11 +176,10 @@ impl serde::Serialize for Report {
 /// differ by. Everything else, the buffered, order-independent `{ id, modality,
 /// X }` traversal and the `{ parts: [..] }` assembly, is shared.
 pub(super) trait Leaf {
-    /// One reconstructed group of this leaf: the concrete boxed value plus the
-    /// routing metadata the set entry keys on.
+    /// One reconstructed group of this leaf.
     type Parsed;
     /// The set this leaf reconstructs: [`Report`] or [`ArtifactSet`].
-    type Set;
+    type Set: Default;
 
     /// The wire field carrying this leaf's payload inside a part entry:
     /// `"entities"` for a report, `"artifact"` for an artifact set.
@@ -152,17 +194,15 @@ pub(super) trait Leaf {
     const SET_EXPECTING: &'static str;
 
     /// Reconstruct one entry's payload, applying this leaf's unregistered-modality
-    /// policy. `name` is the entry's modality tag and `value` its buffered
-    /// payload (already read from the `FIELD` field). Returns `None` when the
-    /// entry is skipped.
+    /// policy. `entry` is the registered name and entry for the entry's modality
+    /// tag `name`, and `value` its buffered payload (already read from the
+    /// `FIELD` field). Returns `None` when the entry is skipped.
     fn parse<E: DeError>(
-        entry: Option<ModalityEntry>,
+        entry: Option<(&'static str, ModalityEntry)>,
         name: &str,
         value: Value,
     ) -> Result<Option<Self::Parsed>, E>;
 
-    /// An empty set to fill in.
-    fn empty() -> Self::Set;
     /// Store a reconstructed part group, keyed by `id`, into the set.
     fn set_part(set: &mut Self::Set, id: PartId, parsed: Self::Parsed);
 }
@@ -172,15 +212,8 @@ pub(super) trait Leaf {
 /// non-empty one is a hard error, since its entities may carry reviewer edits.
 pub(super) struct EntityLeaf;
 
-/// One reconstructed entity group: the entities and the routing [`TypeId`] the
-/// report entry keys on (matching [`PartReport::modality`]).
-pub(super) struct ParsedGroup {
-    modality: TypeId,
-    entities: Box<dyn EntityGroup>,
-}
-
 impl Leaf for EntityLeaf {
-    type Parsed = ParsedGroup;
+    type Parsed = Box<dyn EntityGroup>;
     type Set = Report;
 
     const FIELD: &'static str = "entities";
@@ -190,66 +223,37 @@ impl Leaf for EntityLeaf {
     const SET_NAME: &'static str = "Report";
 
     fn parse<E: DeError>(
-        entry: Option<ModalityEntry>,
+        entry: Option<(&'static str, ModalityEntry)>,
         name: &str,
         value: Value,
-    ) -> Result<Option<ParsedGroup>, E> {
-        // Entities are required, an absent/null `entities` field (`Value::Unit`)
-        // is malformed, not "no entities": unlike an artifact, a missing entity
-        // group could be silently dropping a reviewer's edits.
-        if matches!(value, Value::Unit) {
-            return Err(E::missing_field("entities"));
-        }
-        let Some(entry) = entry else {
+    ) -> Result<Option<Box<dyn EntityGroup>>, E> {
+        // Entities are required: an absent/null `entities` field (`Value::Unit`)
+        // is malformed, not "no entities", since unlike an artifact, a missing
+        // entity group could be silently dropping a reviewer's edits.
+        let count = match &value {
+            Value::Unit => return Err(E::missing_field("entities")),
+            Value::Seq(items) => items.len(),
+            _ => return Err(E::custom("`entities` must be an array")),
+        };
+        let Some((_, entry)) = entry else {
             // Unregistered modality: skip only an empty group (nothing to lose,
             // as in `analyze`); reject a non-empty one, whose entities a reviewer
             // may have edited.
-            if is_empty_entities(&value) {
+            if count == 0 {
                 return Ok(None);
             }
             return Err(E::custom(format!(
-                "no registered modality for `{name}` (its {} entities would be dropped)",
-                entity_count(&value),
+                "no registered modality for `{name}` (its {count} entities would be dropped)"
             )));
         };
 
         // Replay the buffered entities through the modality's parser.
         let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(value.into_deserializer());
-        let group = (entry.parse)(&mut erased).map_err(E::custom)?;
-        Ok(Some(ParsedGroup {
-            modality: entry.type_id,
-            entities: group,
-        }))
+        (entry.parse)(&mut erased).map(Some).map_err(E::custom)
     }
 
-    fn empty() -> Report {
-        Report::new()
-    }
-
-    fn set_part(report: &mut Report, id: PartId, parsed: ParsedGroup) {
-        report.parts.insert(
-            id,
-            PartReport {
-                modality: parsed.modality,
-                entities: parsed.entities,
-            },
-        );
-    }
-}
-
-/// Whether a buffered `entities` value is an empty list, the group carries no
-/// entities, so skipping it (for an unregistered modality) loses nothing.
-fn is_empty_entities(entities: &Value) -> bool {
-    entity_count(entities) == 0
-}
-
-/// The number of entities a buffered `entities` value carries. The serializer
-/// emits an array; anything else counts as non-empty so it is never silently
-/// dropped.
-fn entity_count(entities: &Value) -> usize {
-    match entities {
-        Value::Seq(items) => items.len(),
-        _ => usize::MAX,
+    fn set_part(report: &mut Report, id: PartId, entities: Box<dyn EntityGroup>) {
+        report.parts.insert(id, entities);
     }
 }
 
@@ -259,11 +263,10 @@ fn entity_count(entities: &Value) -> usize {
 /// (a re-run re-enriches).
 pub(super) struct ArtifactLeaf;
 
-/// One reconstructed artifact group: the erased artifact plus its routing
-/// [`TypeId`] and modality name.
+/// One reconstructed artifact group: the erased artifact plus its modality.
 pub(super) struct ParsedArtifact {
-    modality: TypeId,
-    modality_name: &'static str,
+    entry: ModalityEntry,
+    name: &'static str,
     artifact: Box<dyn ArtifactGroup>,
 }
 
@@ -278,7 +281,7 @@ impl Leaf for ArtifactLeaf {
     const SET_NAME: &'static str = "ArtifactSet";
 
     fn parse<E: DeError>(
-        entry: Option<ModalityEntry>,
+        entry: Option<(&'static str, ModalityEntry)>,
         _name: &str,
         value: Value,
     ) -> Result<Option<ParsedArtifact>, E> {
@@ -289,24 +292,20 @@ impl Leaf for ArtifactLeaf {
         if matches!(value, Value::Unit) {
             return Ok(None);
         }
-        let Some(entry) = entry else {
+        let Some((name, entry)) = entry else {
             return Ok(None);
         };
         let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(value.into_deserializer());
-        let parsed = (entry.parse_artifact)(&mut erased).map_err(E::custom)?;
+        let artifact = (entry.parse_artifact)(&mut erased).map_err(E::custom)?;
         Ok(Some(ParsedArtifact {
-            modality: entry.type_id,
-            modality_name: entry.modality_name,
-            artifact: parsed,
+            entry,
+            name,
+            artifact,
         }))
     }
 
-    fn empty() -> ArtifactSet {
-        ArtifactSet::new()
-    }
-
     fn set_part(set: &mut ArtifactSet, id: PartId, parsed: ParsedArtifact) {
-        set.set_part(id, parsed.modality, parsed.modality_name, parsed.artifact);
+        set.set_part(id, parsed.entry.type_id, parsed.name, parsed.artifact);
     }
 }
 
@@ -318,12 +317,12 @@ impl Leaf for ArtifactLeaf {
 /// unregistered-modality policy skips the group, the id is still returned so a
 /// later duplicate is caught).
 struct PartEntrySeed<'a, L> {
-    registry: &'a ModalityRegistry,
+    registry: &'a ReportDeserializer,
     _leaf: PhantomData<L>,
 }
 
 impl<'a, L> PartEntrySeed<'a, L> {
-    fn new(registry: &'a ModalityRegistry) -> Self {
+    fn new(registry: &'a ReportDeserializer) -> Self {
         Self {
             registry,
             _leaf: PhantomData,
@@ -342,7 +341,7 @@ impl<'de, L: Leaf> DeserializeSeed<'de> for PartEntrySeed<'_, L> {
 impl<'de, L: Leaf> Visitor<'de> for PartEntrySeed<'_, L> {
     type Value = (PartId, Option<L::Parsed>);
 
-    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(L::GROUP_EXPECTING)
     }
 
@@ -374,7 +373,7 @@ impl<'de, L: Leaf> Visitor<'de> for PartEntrySeed<'_, L> {
                 // in `Leaf::parse`.
                 payload = Some(map.next_value()?);
             } else {
-                map.next_value::<serde::de::IgnoredAny>()?;
+                map.next_value::<IgnoredAny>()?;
             }
         }
         let segments = id.ok_or_else(|| DeError::missing_field("id"))?;
@@ -395,8 +394,17 @@ impl<'de, L: Leaf> Visitor<'de> for PartEntrySeed<'_, L> {
 /// `parts` is an array of `{ id, modality, X }` entries, each keyed by its full
 /// [`PartId`] path.
 struct PartsSeed<'a, L> {
-    registry: &'a ModalityRegistry,
+    registry: &'a ReportDeserializer,
     _leaf: PhantomData<L>,
+}
+
+impl<'a, L> PartsSeed<'a, L> {
+    fn new(registry: &'a ReportDeserializer) -> Self {
+        Self {
+            registry,
+            _leaf: PhantomData,
+        }
+    }
 }
 
 impl<'de, L: Leaf> DeserializeSeed<'de> for PartsSeed<'_, L> {
@@ -410,17 +418,17 @@ impl<'de, L: Leaf> DeserializeSeed<'de> for PartsSeed<'_, L> {
 impl<'de, L: Leaf> Visitor<'de> for PartsSeed<'_, L> {
     type Value = L::Set;
 
-    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("an array of part entries")
     }
 
-    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let mut set = L::empty();
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut set = L::Set::default();
         // Full paths already seen, a repeated path would silently overwrite the
         // earlier group (and its entity edits), so reject it. A skipped
         // (unregistered-and-empty) entry still records its path so a later
         // duplicate is caught.
-        let mut seen: std::collections::HashSet<PartId> = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         while let Some((id, parsed)) =
             seq.next_element_seed(PartEntrySeed::<L>::new(self.registry))?
         {
@@ -437,18 +445,15 @@ impl<'de, L: Leaf> Visitor<'de> for PartsSeed<'_, L> {
 
 /// The whole-set seed: `{ parts: [..] }`, each entry parsed through the registry.
 /// Generic over the [`Leaf`]; the [`ReportSeed`] / [`ArtifactSetSeed`] aliases
-/// pin it to the two views. Drives [`Orchestrator::deserialize_report`] and
-/// [`Orchestrator::deserialize_artifacts`].
-///
-/// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
-/// [`Orchestrator::deserialize_artifacts`]: crate::Orchestrator::deserialize_artifacts
+/// pin it to the two views. Drives [`ReportDeserializer::deserialize`] and
+/// [`ReportDeserializer::deserialize_artifacts`].
 pub(super) struct SetSeed<'a, L> {
-    pub(super) registry: &'a ModalityRegistry,
-    pub(super) _leaf: PhantomData<L>,
+    registry: &'a ReportDeserializer,
+    _leaf: PhantomData<L>,
 }
 
 impl<'a, L> SetSeed<'a, L> {
-    pub(super) fn new(registry: &'a ModalityRegistry) -> Self {
+    pub(super) fn new(registry: &'a ReportDeserializer) -> Self {
         Self {
             registry,
             _leaf: PhantomData,
@@ -461,7 +466,7 @@ pub(super) type ReportSeed<'a> = SetSeed<'a, EntityLeaf>;
 /// Reconstructs an [`ArtifactSet`] from its `{ parts: [..] }` wire form.
 pub(super) type ArtifactSetSeed<'a> = SetSeed<'a, ArtifactLeaf>;
 
-impl<'de, L: Leaf> serde::de::DeserializeSeed<'de> for SetSeed<'_, L> {
+impl<'de, L: Leaf> DeserializeSeed<'de> for SetSeed<'_, L> {
     type Value = L::Set;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<L::Set, D::Error> {
@@ -472,7 +477,7 @@ impl<'de, L: Leaf> serde::de::DeserializeSeed<'de> for SetSeed<'_, L> {
 impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
     type Value = L::Set;
 
-    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(L::SET_EXPECTING)
     }
 
@@ -484,21 +489,18 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
                     if set.is_some() {
                         return Err(DeError::duplicate_field("parts"));
                     }
-                    set = Some(map.next_value_seed(PartsSeed::<L> {
-                        registry: self.registry,
-                        _leaf: PhantomData,
-                    })?);
+                    set = Some(map.next_value_seed(PartsSeed::<L>::new(self.registry))?);
                 }
                 // Any field other than `parts` is ignored, so a wire form
                 // carrying derived output (a report's `stripped` section) still
                 // deserializes. `parts` is optional: a set with no parts is
                 // valid.
                 _ => {
-                    map.next_value::<serde::de::IgnoredAny>()?;
+                    map.next_value::<IgnoredAny>()?;
                 }
             }
         }
-        Ok(set.unwrap_or_else(L::empty))
+        Ok(set.unwrap_or_default())
     }
 }
 
@@ -506,7 +508,10 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
 mod tests {
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::Text;
-    use serde::de::DeserializeSeed;
+    #[cfg(feature = "image")]
+    use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
+    #[cfg(feature = "image")]
+    use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
     #[cfg(feature = "schema")]
     use super::super::test_support::source_only_entity;
@@ -517,13 +522,11 @@ mod tests {
 
     /// A registry with `Text` registered, the unit under test needs only the
     /// group parsers, not a full orchestrator.
-    fn text_registry() -> ModalityRegistry {
-        let mut r = ModalityRegistry::default();
-        r.register::<Text>();
-        r
+    fn text_registry() -> ReportDeserializer {
+        ReportDeserializer::new().with_modality::<Text>()
     }
 
-    fn round_trip(report: &Report, registry: &ModalityRegistry) -> Report {
+    fn round_trip(report: &Report, registry: &ReportDeserializer) -> Report {
         let json = serde_json::to_string(report).expect("serialize");
         let mut de = serde_json::Deserializer::from_str(&json);
         match ReportSeed::new(registry).deserialize(&mut de) {
@@ -556,7 +559,7 @@ mod tests {
     fn the_stripped_section_is_written_but_never_read_back() {
         let mut record = StrippedRecord::default();
         record.record(
-            PartId::new("report.docx").child("word/comments.xml"),
+            PartId::leaf("report.docx").child("word/comments.xml"),
             HiddenContent::Comment,
             3,
         );
@@ -581,7 +584,7 @@ mod tests {
     /// another, the collision the old `last_segment` wire form could hit.
     #[test]
     fn serializes_a_nested_path_as_a_segment_array() {
-        let nested = PartId::new("scan-A.docx").child("word/media/image1.png");
+        let nested = PartId::leaf("scan-A.docx").child("word/media/image1.png");
         let report = Report::new().insert_part::<Text>(nested, vec![text_entity("EMAIL_ADDRESS")]);
 
         let value = serde_json::to_value(&report).unwrap();
@@ -636,9 +639,6 @@ mod tests {
     #[cfg(all(feature = "schema", feature = "image"))]
     #[test]
     fn serialized_artifact_sets_validate_against_the_schema() {
-        use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
-        use elide_image::primitive::{BoundingBox, Dimensions, Point};
-
         let schema = serde_json::to_value(schemars::schema_for!(ArtifactSet)).unwrap();
 
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(100.0, 20.0));
@@ -647,12 +647,12 @@ mod tests {
             "hi Alice",
         )]);
         let with_part = ArtifactSet::new()
-            .insert_body::<Image>(doc(), layout)
+            .insert_part::<Image>(doc(), layout)
             .insert_part::<Image>(doc().child("blank"), Layout::default());
 
         for set in [
             with_part,
-            ArtifactSet::new().insert_body::<Image>(doc(), Layout::default()),
+            ArtifactSet::new().insert_part::<Image>(doc(), Layout::default()),
             ArtifactSet::new(),
         ] {
             let json = serde_json::to_value(&set).unwrap();
@@ -668,7 +668,7 @@ mod tests {
         let back = round_trip(&report, &text_registry());
 
         let entities = back
-            .document::<Text>()
+            .part::<Text>(&doc())
             .expect("sole document reconstructed")
             .entities();
         assert_eq!(entities.len(), 1);
@@ -692,7 +692,7 @@ mod tests {
             .deserialize(&mut de)
             .expect("rebuilt");
         let entities = back
-            .document::<Text>()
+            .part::<Text>(&doc())
             .expect("sole document reconstructed")
             .entities();
         assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
@@ -707,7 +707,7 @@ mod tests {
             .insert_part::<Text>(nested.clone(), vec![text_entity("B")]);
         let back = round_trip(&report, &text_registry());
 
-        assert!(back.document::<Text>().is_ok(), "sole document present");
+        assert!(back.part::<Text>(&doc()).is_ok(), "the document present");
         let p = back
             .part::<Text>(&nested)
             .expect("nested part reconstructed by its full path")
@@ -721,8 +721,8 @@ mod tests {
     /// prevents.
     #[test]
     fn round_trips_same_named_nested_parts_in_two_documents() {
-        let a = PartId::new("scan-A.docx").child("word/media/image1.png");
-        let b = PartId::new("scan-B.docx").child("word/media/image1.png");
+        let a = PartId::leaf("scan-A.docx").child("word/media/image1.png");
+        let b = PartId::leaf("scan-B.docx").child("word/media/image1.png");
         let report = Report::new()
             .insert_part::<Text>(a.clone(), vec![text_entity("A")])
             .insert_part::<Text>(b.clone(), vec![text_entity("B")]);
@@ -801,7 +801,7 @@ mod tests {
             Err(e) => panic!("key order must not matter: {e}"),
         };
         let entities = report
-            .document::<Text>()
+            .part::<Text>(&doc())
             .expect("entry reconstructed")
             .entities();
         assert_eq!(entities.len(), 1, "the buffered entity survived reordering");
@@ -882,9 +882,6 @@ mod tests {
     #[cfg(feature = "image")]
     #[test]
     fn round_trips_an_artifact_set() {
-        use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
-        use elide_image::primitive::{BoundingBox, Dimensions, Point};
-
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(100.0, 20.0));
         let layout = Layout::new(vec![LayoutRegion::new(
             ImageLocation::new(bbox),
@@ -894,7 +891,7 @@ mod tests {
         // an *empty* Layout (an image with no text), both stored, both survive.
         let blank = doc().child("blank");
         let set = ArtifactSet::new()
-            .insert_body::<Image>(doc(), layout.clone())
+            .insert_part::<Image>(doc(), layout.clone())
             .insert_part::<Image>(blank.clone(), Layout::default());
 
         // Both reach the wire: the non-empty document Layout and the
@@ -916,12 +913,11 @@ mod tests {
         // Both reconstruct through the registry: the document as the same Layout,
         // and the nested part as an *empty* Layout that is present (Some), so a
         // re-run seeds it and the enricher skips, rather than re-OCR'ing a blank.
-        let mut registry = ModalityRegistry::default();
-        registry.register::<Image>();
+        let registry = ReportDeserializer::new().with_modality::<Image>();
         let json = serde_json::to_string(&set).unwrap();
         let mut de = serde_json::Deserializer::from_str(&json);
         let back = registry.deserialize_artifacts(&mut de).expect("artifacts");
-        let restored = back.body::<Image>().expect("layout reconstructed");
+        let restored = back.part::<Image>(&doc()).expect("layout reconstructed");
         assert_eq!(restored, &layout);
         assert_eq!(restored.text(), "hi Alice");
         let part = back
@@ -938,10 +934,7 @@ mod tests {
     #[cfg(feature = "image")]
     #[test]
     fn a_null_or_absent_artifact_is_dropped() {
-        use elide_image::modality::Image;
-
-        let mut registry = ModalityRegistry::default();
-        registry.register::<Image>();
+        let registry = ReportDeserializer::new().with_modality::<Image>();
 
         for json in [
             r#"{ "parts": [{ "id": ["document"], "modality": "image", "artifact": null }] }"#,
@@ -953,7 +946,7 @@ mod tests {
                 .deserialize_artifacts(&mut de)
                 .expect("a null/absent artifact deserializes without error");
             assert!(
-                set.body::<Image>().is_none(),
+                set.part::<Image>(&doc()).is_none(),
                 "the document artifact was dropped: {json}",
             );
             assert!(

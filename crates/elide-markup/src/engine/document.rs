@@ -256,9 +256,13 @@ mod tests {
         let mut doc = load(raw);
         let at = raw.find("Alice").unwrap();
         let location = TextLocation::marked_source(SourceRef::new(at..at + "Alice".len()));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("[NAME]"));
-        doc.stream.write_at(rs).await.unwrap();
+        doc.stream
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("[NAME]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(doc.encoded(), "<root><name>[NAME]</name></root>");
     }
 
@@ -275,11 +279,12 @@ mod tests {
             at..at + "Alice".len(),
             "some/part.xml",
         ));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("[NAME]"));
         let err = doc
             .stream
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("[NAME]"),
+            )]))
             .await
             .expect_err("part-tagged ref must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -294,11 +299,12 @@ mod tests {
         let mut doc = load(raw);
         let past = raw.len() + 4;
         let location = TextLocation::marked_source(SourceRef::new(past..past + 3));
-        let mut rs = Redactions::new();
-        rs.push(location, TextReplacement::substituted("[NAME]"));
         let err = doc
             .stream
-            .write_at(rs)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("[NAME]"),
+            )]))
             .await
             .expect_err("out-of-range source must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -309,9 +315,13 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut doc = load(raw);
         let chunk = chunk_where(&mut doc, |t| t == "Alice");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location, TextReplacement::substituted("[NAME]"));
-        doc.stream.write_at(rs).await.unwrap();
+        doc.stream
+            .write_at(Redactions::from([(
+                chunk.location,
+                TextReplacement::substituted("[NAME]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(doc.encoded(), "<root><name>[NAME]</name></root>");
     }
 
@@ -320,9 +330,13 @@ mod tests {
         let raw = r#"<user email="alice@example.com">Bob</user>"#;
         let mut doc = load(raw);
         let chunk = chunk_where(&mut doc, |t| t == "alice@example.com");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
-        doc.stream.write_at(rs).await.unwrap();
+        doc.stream
+            .write_at(Redactions::from([(
+                chunk.location,
+                TextReplacement::substituted("[EMAIL]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(doc.encoded(), r#"<user email="[EMAIL]">Bob</user>"#);
     }
 
@@ -331,9 +345,13 @@ mod tests {
         let raw = "<doc><![CDATA[alice@example.com]]></doc>";
         let mut doc = load(raw);
         let chunk = chunk_where(&mut doc, |t| t == "alice@example.com");
-        let mut rs = Redactions::new();
-        rs.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
-        doc.stream.write_at(rs).await.unwrap();
+        doc.stream
+            .write_at(Redactions::from([(
+                chunk.location,
+                TextReplacement::substituted("[EMAIL]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(doc.encoded(), "<doc><![CDATA[[EMAIL]]]></doc>");
     }
 
@@ -347,9 +365,13 @@ mod tests {
             chunk.location.range().unwrap().start + at
                 ..chunk.location.range().unwrap().start + at + "alice@example.com".len(),
         );
-        let mut rs = Redactions::new();
-        rs.push(loc, TextReplacement::substituted("[EMAIL]"));
-        doc.stream.write_at(rs).await.unwrap();
+        doc.stream
+            .write_at(Redactions::from([(
+                loc,
+                TextReplacement::substituted("[EMAIL]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(doc.encoded(), "<p>contact [EMAIL] today</p>");
     }
 
@@ -374,9 +396,13 @@ mod tests {
             chunk.location.range().unwrap().start + at
                 ..chunk.location.range().unwrap().start + at + "alice@example.com".len(),
         );
-        let mut rs = Redactions::new();
-        rs.push(loc, TextReplacement::substituted("[EMAIL]"));
-        doc.stream.write_at(rs).await.unwrap();
+        doc.stream
+            .write_at(Redactions::from([(
+                loc,
+                TextReplacement::substituted("[EMAIL]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(
             doc.encoded(),
             r#"<p><script>var a="keep@x.com";</script>mail [EMAIL]</p>"#

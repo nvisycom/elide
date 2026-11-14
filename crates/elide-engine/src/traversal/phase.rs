@@ -3,17 +3,19 @@
 //! report entry in place, fold changed blob children back, remove unreadable
 //! ones).
 
+use std::collections::HashSet;
+
 use elide_codec::StreamMut;
-use elide_core::Result;
 use elide_core::modality::NoArtifact;
 use elide_core::recognition::Scope;
 use elide_core::redaction::HiddenContentPolicy;
+use elide_core::{Error, Result};
 
 use super::{Child, Fold, PartVisitor};
 use crate::Orchestrator;
-use crate::analysis::{ArtifactGroup, ArtifactSet, PartReport, Report, StrippedRecord};
+use crate::analysis::{ArtifactGroup, ArtifactSet, Report, StrippedRecord};
 use crate::part_id::PartId;
-use crate::pipeline::BoxFuture;
+use crate::pipeline::{BoxFuture, PartAnalysis};
 
 /// The analysis phase: batch each level's streams through the pipeline for
 /// their modality and scatter the findings and enrichment artifact into the
@@ -67,15 +69,9 @@ impl PartVisitor for Analyze<'_> {
                 let analyses = pipeline
                     .analyze_streams(&mut handles, self.scope, policy, &seeds)
                     .await?;
-                for (id, (entities, artifact)) in ids.into_iter().zip(analyses) {
+                for (id, PartAnalysis { entities, artifact }) in ids.into_iter().zip(analyses) {
                     let name = entities.modality_name();
-                    self.report.parts.insert(
-                        id.clone(),
-                        PartReport {
-                            modality: *modality,
-                            entities,
-                        },
-                    );
+                    self.report.parts.insert(id.clone(), entities);
                     if let Some(artifact) = artifact {
                         self.artifacts.set_part(id, *modality, name, artifact);
                     }
@@ -96,13 +92,16 @@ impl PartVisitor for Analyze<'_> {
 }
 
 /// The redaction phase: redact each stream in place through its report
-/// entry, marking the document changed, fold a changed blob child's re-encoded
-/// bytes back into its parent, and remove a blob no codec can read.
+/// entry, fold a changed blob child's re-encoded bytes back into its parent,
+/// and remove a blob no codec can read.
 pub(crate) struct Redact<'p> {
     /// The (possibly edited) report to apply; entities gain a redaction event.
     pub(crate) report: &'p mut Report,
     /// The hidden content this run sees stripped.
     pub(crate) stripped: StrippedRecord,
+    /// The report parts this run applied, so a part the walk never reached is
+    /// caught rather than silently left unredacted.
+    pub(crate) applied: HashSet<PartId>,
 }
 
 impl PartVisitor for Redact<'_> {
@@ -115,16 +114,25 @@ impl PartVisitor for Redact<'_> {
         Box::pin(async move {
             let mut changed = false;
             for (part_id, mut handle) in streams {
-                let Some(entry) = self.report.parts.get_mut(&part_id) else {
-                    continue; // no findings for this stream
+                let Some(entities) = self.report.parts.get_mut(&part_id) else {
+                    continue;
                 };
-                let Some(pipeline) = orchestrator.pipeline_for(entry.modality) else {
-                    continue; // pipeline for this modality is gone
+                // Nothing to apply is nothing lost, whatever the group's modality.
+                if entities.is_empty() {
+                    continue;
+                }
+                let Some(pipeline) = orchestrator.pipeline_for(entities.modality()) else {
+                    // Entities with no pipeline to apply them would ship the part
+                    // unredacted.
+                    return Err(Error::malformed(format!(
+                        "no pipeline is registered for the {} entities of part `{part_id}`",
+                        entities.modality_name()
+                    )));
                 };
-                pipeline
-                    .apply_stream(&mut handle, entry.entities.as_mut(), orchestrator.scope())
+                changed |= pipeline
+                    .apply_stream(&mut handle, entities.as_mut(), orchestrator.scope())
                     .await?;
-                changed = true;
+                self.applied.insert(part_id);
             }
             Ok(changed)
         })

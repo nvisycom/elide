@@ -311,30 +311,34 @@ mod tests {
     #[tokio::test]
     async fn a_redaction_across_items_replaces_in_the_first_and_cuts_the_rest() {
         let mut stream = stream();
-        let mut redactions = Redactions::new();
         // "Jane Roe\njane.roe@example.com": the whole passage, across the break.
-        redactions.push(
-            TextLocation::inline(0..29),
-            TextReplacement::substituted("[X]"),
-        );
-        stream.write_at(redactions).await.unwrap();
+        stream
+            .write_at(Redactions::from([(
+                TextLocation::inline(0..29),
+                TextReplacement::substituted("[X]"),
+            )]))
+            .await
+            .unwrap();
         assert_eq!(values(&stream), ["[X]", "", "\n", "", "", "Next"]);
     }
 
     #[tokio::test]
     async fn a_redaction_within_a_passage_keeps_the_separator() {
         let mut stream = stream();
-        let mut redactions = Redactions::new();
         // "Roe": the tail of one item and the whole of the next.
-        redactions.push(
-            TextLocation::inline(5..8),
-            TextReplacement::substituted("[NAME]"),
-        );
-        redactions.push(
-            TextLocation::inline(9..29),
-            TextReplacement::substituted("[EMAIL]"),
-        );
-        stream.write_at(redactions).await.unwrap();
+        stream
+            .write_at(Redactions::from([
+                (
+                    TextLocation::inline(5..8),
+                    TextReplacement::substituted("[NAME]"),
+                ),
+                (
+                    TextLocation::inline(9..29),
+                    TextReplacement::substituted("[EMAIL]"),
+                ),
+            ]))
+            .await
+            .unwrap();
         assert_eq!(
             values(&stream),
             ["Jane [NAME]", "", "\n", "[EMAIL]", "", "Next"]

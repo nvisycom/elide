@@ -46,7 +46,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let report = orchestrator.anonymize_with(&mut doc, report).await?;
 
     let body = report
-        .document::<Text>()
+        .part::<Text>(&doc.id())
         .ok()
         .map(|part| part.entities())
         .expect("the docx body is text and its pipeline is registered");
@@ -108,7 +108,7 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
     orchestrator.pick(&mut report)?;
 
     let planned: Vec<(uuid::Uuid, String)> = report
-        .document::<Text>()?
+        .part::<Text>(&doc.id())?
         .entities()
         .iter()
         .map(|entity| {
@@ -122,7 +122,7 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
     // Picking again records nothing new.
     let events = |report: &Report| -> usize {
         report
-            .document::<Text>()
+            .part::<Text>(&doc.id())
             .map(|part| part.entities().iter().map(|e| e.audit.events().len()).sum())
             .unwrap_or_default()
     };
@@ -131,7 +131,7 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
     assert_eq!(events(&report), before, "a repeated pick adds nothing");
 
     let applied = orchestrator.anonymize_with(&mut doc, report).await?;
-    let body = applied.document::<Text>()?;
+    let body = applied.part::<Text>(&doc.id())?;
     for (id, operator) in planned {
         let entity = body.entity(id).expect("the planned entity is still there");
         let selections = entity

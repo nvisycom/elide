@@ -106,9 +106,15 @@ impl<M: TextRedactable> Operator<M> for HmacHash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         let digest = self.digest(&entity.label, data.as_ref())?;
-        Ok(M::Replacement::from(TextReplacement::substituted(digest)))
+        Ok(Some(M::Replacement::from(TextReplacement::substituted(
+            digest,
+        ))))
     }
 }
 

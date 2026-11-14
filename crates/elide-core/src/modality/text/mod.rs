@@ -115,11 +115,12 @@ mod tests {
 
     #[test]
     fn sort_by_position_orders_in_place() {
-        let mut batch: Redactions<Text> = Redactions::new();
         // Pushed out of order.
-        batch.push(TextLocation::inline(20..25), TextReplacement::Removed);
-        batch.push(TextLocation::inline(0..5), TextReplacement::Removed);
-        batch.push(TextLocation::inline(10..15), TextReplacement::Removed);
+        let mut batch: Redactions<Text> = Redactions::from([
+            (TextLocation::inline(20..25), TextReplacement::Removed),
+            (TextLocation::inline(0..5), TextReplacement::Removed),
+            (TextLocation::inline(10..15), TextReplacement::Removed),
+        ]);
 
         batch.sort_by_position();
 

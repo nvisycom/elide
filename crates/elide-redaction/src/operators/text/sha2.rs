@@ -81,8 +81,14 @@ impl<M: TextRedactable> Operator<M> for Sha2Hash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, _entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+    async fn anonymize(
+        &self,
+        _entity: &Entity<M>,
+        data: &M::Data,
+    ) -> Result<Option<M::Replacement>> {
         let digest = self.digest(data.as_ref());
-        Ok(M::Replacement::from(TextReplacement::substituted(digest)))
+        Ok(Some(M::Replacement::from(TextReplacement::substituted(
+            digest,
+        ))))
     }
 }

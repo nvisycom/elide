@@ -333,6 +333,7 @@ mod tests {
     use super::*;
     use crate::fixtures::{pack_parts, part_names, read_part};
     use crate::opc::sanitize::sanitize;
+    use crate::opc::xml_edit::expect_edit;
 
     const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
@@ -447,7 +448,7 @@ mod tests {
     #[test]
     fn nested_notes_are_cut_whole() {
         let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape>a<v:shape><x:ClientData ObjectType="Note"/></v:shape><x:ClientData ObjectType="Note"/></v:shape><v:rect/></xml>"#;
-        let edited = CommentNotes.apply(raw).unwrap().unwrap();
+        let edited = expect_edit(raw, &CommentNotes);
         assert_eq!(
             edited.text,
             r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:rect/></xml>"#
@@ -458,7 +459,7 @@ mod tests {
     #[test]
     fn a_note_counts_once_whatever_its_text_events() {
         let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><v:textbox><div>Jane &amp; Co</div></v:textbox><x:ClientData ObjectType="Note"/></v:shape></xml>"#;
-        let edited = CommentNoteText.apply(raw).unwrap().unwrap();
+        let edited = expect_edit(raw, &CommentNoteText);
         assert_eq!(edited.count, 1);
         assert!(edited.text.contains("<div></div>"), "{}", edited.text);
     }

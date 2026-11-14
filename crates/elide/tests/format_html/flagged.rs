@@ -35,7 +35,7 @@ async fn redact_sparing(
         .report;
     if let Some(region) = region {
         report
-            .document_mut::<Text>()
+            .part_mut::<Text>(&documents[0].id())
             .expect("the page is text")
             .suppress_within(&TextLocation::inline(region));
     }

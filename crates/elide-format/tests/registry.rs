@@ -81,13 +81,14 @@ async fn decode_redact_reencode_round_trip() {
         .expect("decoded");
     let mut stream = document.stream_mut::<Text>("body").expect("text stream");
 
-    let mut batch = Redactions::new();
     // "contact " is 8 bytes; "alice@example.test" is 18 → 8..26.
-    batch.push(
-        TextLocation::inline(8..26),
-        TextReplacement::substituted("[EMAIL]"),
-    );
-    stream.write_at(batch).await.expect("redacted");
+    stream
+        .write_at(Redactions::from([(
+            TextLocation::inline(8..26),
+            TextReplacement::substituted("[EMAIL]"),
+        )]))
+        .await
+        .expect("redacted");
 
     let out = document.encode().expect("re-encoded");
     assert_eq!(out.as_bytes(), b"contact [EMAIL] today");
@@ -131,12 +132,13 @@ async fn registry_decodes_and_redacts_csv() {
         .find(|chunk| chunk.location.row_index == 1 && chunk.location.column_index == 1);
     assert!(email_chunk.is_some(), "found the email cell");
 
-    let mut batch: Redactions<Tabular> = Redactions::new();
-    batch.push(
-        TabularLocation::new(1, 1),
-        TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-    );
-    stream.write_at(batch).await.expect("redacted");
+    stream
+        .write_at(Redactions::from([(
+            TabularLocation::new(1, 1),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        )]))
+        .await
+        .expect("redacted");
 
     let out = document.encode().expect("re-encoded");
     assert_eq!(out.decode().unwrap(), "name,email\nAlice,[EMAIL]\n");

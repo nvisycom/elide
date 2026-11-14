@@ -40,14 +40,12 @@ schema = [
     "elide-audio?/schema",
 ]
 
-## The non-text modalities, forwarded to `elide-core` and to
-## `elide-redaction`, whose `Erase` every pipeline needs. A report can carry a
-## group of any compiled-in modality, so these gate the matching arm of the
-## `Report` JSON schema; `text` and `metadata` are always available.
-image = ["dep:elide-image", "elide-redaction/image"]
-audio = ["dep:elide-audio", "elide-redaction/audio"]
-tabular = ["elide-core/tabular", "elide-redaction/tabular"]
-
+## The non-text modalities. A report can carry a group of any compiled-in
+## modality, so these gate the matching arm of the `Report` JSON schema; `text`
+## and `metadata` are always available.
+image = ["dep:elide-image"]
+audio = ["dep:elide-audio"]
+tabular = ["elide-core/tabular"]
 
 [dependencies]
 # Internal crates
@@ -78,8 +76,7 @@ schemars = { workspace = true, features = [], optional = true }
 elide-core = { workspace = true, features = ["mocks"] }
 elide-codec = { workspace = true, features = ["serde", "mocks"] }
 elide-format = { workspace = true, features = ["serde", "png", "jpeg"] }
-elide-image = { workspace = true, features = ["exif", "jpeg", "png"] }
-elide-redaction = { workspace = true, features = ["image"] }
+elide-image = { workspace = true, features = ["fixtures"] }
 
 # (De)serialization
 serde_json = { workspace = true, features = [] }
@@ -87,10 +84,6 @@ serde_json = { workspace = true, features = [] }
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
 async-trait = { workspace = true, features = [] }
-
-# Image processing
-image = { workspace = true, features = [] }
-little_exif = { workspace = true, features = [] }
 
 # Templating & schema
 jsonschema = { workspace = true, features = [] }

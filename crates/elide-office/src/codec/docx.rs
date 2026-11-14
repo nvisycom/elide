@@ -162,9 +162,13 @@ mod tests {
         let location = TextLocation::marked_source(SourceRef::in_part(bob..bob + 3, BODY_PART));
         assert!(location.is_marked());
 
-        let mut redactions = Redactions::new();
-        redactions.push(location, TextReplacement::substituted("[NAME]"));
-        doc.body.write_at(redactions).await.unwrap();
+        doc.body
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted("[NAME]"),
+            )]))
+            .await
+            .unwrap();
 
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
         let out = Native::encode(&doc, &[], &[]).unwrap();

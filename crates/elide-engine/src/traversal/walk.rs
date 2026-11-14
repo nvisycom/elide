@@ -5,7 +5,7 @@ use elide_codec::{Document as CodecDocument, LocalId};
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
 
-use super::{Child, Fold, MAX_CONTAINER_DEPTH, PartVisitor, body_part_id};
+use super::{Child, Fold, MAX_CONTAINER_DEPTH, PartVisitor};
 use crate::Orchestrator;
 use crate::part_id::PartId;
 use crate::pipeline::BoxFuture;
@@ -79,11 +79,20 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
                     )
                 })
                 .collect();
-            let mut body_seen = false;
+            // A document's first stream is its own content, keyed under the
+            // document's path; each later stream keys under its local id.
             let streams = document
                 .streams_mut()
                 .into_iter()
-                .map(|(id, stream)| (body_part_id(prefix, &id, &mut body_seen), stream))
+                .enumerate()
+                .map(|(i, (id, stream))| {
+                    let part = if i == 0 {
+                        prefix.clone()
+                    } else {
+                        prefix.child(id)
+                    };
+                    (part, stream)
+                })
                 .collect();
 
             let mut changed = self
@@ -99,8 +108,8 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             for (id, part_id, bytes, hint) in blobs {
                 if depth + 1 > MAX_CONTAINER_DEPTH {
                     return Err(Error::malformed(format!(
-                        "container nesting exceeds the depth limit of \
-                             {MAX_CONTAINER_DEPTH} at part `{part_id}`"
+                        "container nesting exceeds the depth limit of {MAX_CONTAINER_DEPTH} \
+                         at part `{part_id}`"
                     )));
                 }
                 let fold = match self

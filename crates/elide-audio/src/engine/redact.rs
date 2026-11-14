@@ -114,7 +114,6 @@ pub(crate) fn apply<S: Default + Clone + ToneSample>(
         AudioReplacement::Removed => {
             samples.drain(start..end);
         }
-        AudioReplacement::Unchanged => {}
     }
 }
 

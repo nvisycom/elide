@@ -35,6 +35,8 @@ pub mod text;
 
 mod chunk;
 mod data_reader;
+#[cfg(feature = "fixtures")]
+mod data_reader_ext;
 mod data_writer;
 mod hint;
 mod text_recognizable;
@@ -42,6 +44,9 @@ mod text_redactable;
 
 pub use self::chunk::Chunk;
 pub use self::data_reader::{ChunkReader, DataReader};
+#[cfg(feature = "fixtures")]
+#[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
+pub use self::data_reader_ext::DataReaderExt;
 pub use self::data_writer::DataWriter;
 pub use self::hint::{Hint, ResolvedHint};
 pub use self::text_recognizable::TextRecognizable;
@@ -180,10 +185,14 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// a substituted/removed string, an image a blur/block/pixelate region,
 /// audio a silenced/removed span. An operator computes one of these from
 /// the entity and its data; the codec writes it back into the document.
-/// A near-empty marker, like the others.
 ///
 /// [`Operator`]: crate::redaction::Operator
-pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
+pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {
+    /// The replacement that removes the entity entirely: text drops its
+    /// characters, a table cell its text, a metadata field its value, audio
+    /// its interval, an image its region.
+    fn removed() -> Self;
+}
 
 /// Enrichment an [`Enricher`] derives from a payload for recognizers to read.
 ///

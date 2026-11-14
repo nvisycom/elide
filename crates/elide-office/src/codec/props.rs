@@ -166,16 +166,16 @@ mod tests {
     #[tokio::test]
     async fn write_at_removes_and_overwrites_fields() {
         let mut stream = DocPropsStream::new(Bytes::from_static(CORE));
-        let mut redactions = Redactions::new();
-        redactions.push(
-            MetadataLocation::new("creator"),
-            TextReplacement::substituted("[REDACTED]").into(),
-        );
-        redactions.push(
-            MetadataLocation::new("title"),
-            TextReplacement::Removed.into(),
-        );
-        stream.write_at(redactions).await.unwrap();
+        stream
+            .write_at(Redactions::from([
+                (
+                    MetadataLocation::new("creator"),
+                    TextReplacement::substituted("[REDACTED]"),
+                ),
+                (MetadataLocation::new("title"), TextReplacement::Removed),
+            ]))
+            .await
+            .unwrap();
         let xml = stream.xml.clone();
         let fields = props::fields(&xml);
         assert!(

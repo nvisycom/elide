@@ -1,17 +1,12 @@
-//! The per-modality reconstruction registry driving deserialization: a group's
-//! wire form drops its concrete modality type (tagged only by
+//! [`ReportDeserializer`]: the per-modality registry that rebuilds a serialized
+//! [`Report`] or [`ArtifactSet`].
+//!
+//! A group's wire form drops its concrete modality type (tagged only by
 //! [`Modality::NAME`]), and deserialization is not object-safe, so the concrete
-//! type is recovered from a per-name parser registered here.
+//! type is recovered from a parser registered here per modality name. The seed
+//! visitors that drive the buffered `{ parts: [..] }` traversal live in
+//! [`serde`](super::serde); this module owns the parsers they route through.
 //!
-//! The [`Orchestrator`] holds a [`ModalityRegistry`]: [`with_modality`] registers,
-//! per modality name, a parser that deserializes that group as the concrete
-//! `Vec<Entity<M>>` (and, alongside it, its `M::Artifact`). The seed visitors
-//! that drive the buffered `{ body, parts }` traversal live in
-//! [`serde`](super::serde); this module owns the registry those seeds route
-//! through and the public [`ReportDeserializer`].
-//!
-//! [`Orchestrator`]: crate::Orchestrator
-//! [`with_modality`]: crate::Orchestrator::with_modality
 //! [`Modality::NAME`]: elide_core::modality::Modality::NAME
 
 use std::any::TypeId;
@@ -19,6 +14,7 @@ use std::collections::HashMap;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
+use elide_core::{Error, Result};
 use serde::de::{DeserializeSeed, Deserializer};
 
 use super::artifacts::ArtifactSet;
@@ -26,10 +22,7 @@ use super::group::{ArtifactGroup, EntityGroup};
 use super::report::Report;
 use super::serde::{ArtifactSetSeed, ReportSeed};
 
-/// Parses one erased entity group as its concrete `Vec<Entity<M>>`. Registered
-/// per modality name by [`Orchestrator::with_modality`].
-///
-/// [`Orchestrator::with_modality`]: crate::Orchestrator::with_modality
+/// Parses one erased entity group as its concrete `Vec<Entity<M>>`.
 type GroupParser = fn(
     &mut dyn erased_serde::Deserializer<'_>,
 ) -> Result<Box<dyn EntityGroup>, erased_serde::Error>;
@@ -42,30 +35,73 @@ type ArtifactParser = fn(
 ) -> Result<Box<dyn ArtifactGroup>, erased_serde::Error>;
 
 /// What a registered modality contributes to reconstruction: how to parse its
-/// group, and the routing [`TypeId`] the report entry stores for the apply path.
+/// entities and its artifact, and the modality's [`TypeId`], which the artifact
+/// set stores for the apply path.
 #[derive(Clone, Copy)]
 pub(super) struct ModalityEntry {
     pub(super) parse: GroupParser,
     pub(super) parse_artifact: ArtifactParser,
     pub(super) type_id: TypeId,
-    pub(super) modality_name: &'static str,
 }
 
-/// The orchestrator's per-modality reconstruction registry, keyed by
-/// [`Modality::NAME`]. Populated by [`with_modality`] so a deserialized report
-/// is reconstructed against exactly the modalities the orchestrator handles.
+/// Rebuilds a serialized [`Report`] or [`ArtifactSet`] against the modalities
+/// registered with it.
 ///
-/// [`Modality::NAME`]: elide_core::modality::Modality::NAME
-/// [`with_modality`]: crate::Orchestrator::with_modality
+/// A report's wire form tags each group with its modality name but not the
+/// concrete type, and deserialization is not object-safe, so a bare
+/// `Report: Deserialize` is impossible. Register the modalities the report may
+/// contain with [`with_modality`], then reconstruct with [`deserialize`]. The
+/// modalities registered here need only be *deserializable*; they need no
+/// pipeline, so a review layer can rebuild an edited report without the engine
+/// that produced it. Build one with [`Report::deserializer`], or use the one an
+/// [`Orchestrator`] keeps for its registered modalities
+/// ([`Orchestrator::deserializer`]).
+///
+/// ```
+/// use elide_core::modality::metadata::Metadata;
+/// use elide_core::modality::text::Text;
+/// use elide_engine::Report;
+///
+/// let json = r#"{ "parts": [{ "id": ["notes.txt"], "modality": "text", "entities": [] }] }"#;
+/// let report = Report::deserializer()
+///     .with_modality::<Text>()
+///     .with_modality::<Metadata>()
+///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
+/// assert_eq!(report.part_ids().count(), 1);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// [`with_modality`]: Self::with_modality
+/// [`deserialize`]: Self::deserialize
+/// [`Orchestrator`]: crate::Orchestrator
+/// [`Orchestrator::deserializer`]: crate::Orchestrator::deserializer
+/// [`Report::deserializer`]: Report::deserializer
 #[derive(Default)]
-pub(crate) struct ModalityRegistry {
+pub struct ReportDeserializer {
     entries: HashMap<&'static str, ModalityEntry>,
 }
 
-impl ModalityRegistry {
-    /// Register modality `M`, keyed by its name. Called by
-    /// [`with_modality`](crate::Orchestrator::with_modality) alongside the
-    /// pipeline registration.
+impl ReportDeserializer {
+    /// A deserializer with no modalities registered.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register modality `M`, so a group tagged with its name deserializes as
+    /// it: its entities as `Vec<Entity<M>>`, its artifact as `M::Artifact`.
+    #[must_use]
+    pub fn with_modality<M>(mut self) -> Self
+    where
+        M: Modality,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        self.register::<M>();
+        self
+    }
+
+    /// Register modality `M` in place, keyed by its name.
     pub(crate) fn register<M>(&mut self)
     where
         M: Modality,
@@ -84,138 +120,64 @@ impl ModalityRegistry {
                     Ok(Box::new(artifact) as Box<dyn ArtifactGroup>)
                 },
                 type_id: TypeId::of::<M>(),
-                modality_name: M::NAME,
             },
         );
     }
 
-    /// The entry registered for `modality`, or `None` if this orchestrator has
-    /// no pipeline for it.
-    pub(super) fn entry(&self, modality: &str) -> Option<ModalityEntry> {
-        self.entries.get(modality).copied()
+    /// The registered name and entry for `modality`, or `None` if it is not
+    /// registered.
+    pub(super) fn entry(&self, modality: &str) -> Option<(&'static str, ModalityEntry)> {
+        self.entries
+            .get_key_value(modality)
+            .map(|(&name, &entry)| (name, entry))
     }
 
-    /// Reconstruct a [`Report`] from `deserializer`, routing each group to its
-    /// registered modality, the shared core of [`Report::deserializer`] and
-    /// [`Orchestrator::deserialize_report`]. Maps any deserialization failure to
-    /// a [`MalformedInput`] error.
+    /// Reconstruct a [`Report`], routing each group to its registered modality.
     ///
-    /// [`Report::deserializer`]: Report::deserializer
-    /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
+    /// A group naming an unregistered modality is handled by what dropping it
+    /// would cost: an *empty* group is skipped, since nothing is lost (as
+    /// [`analyze`] ignores a part whose modality has no pipeline); a
+    /// *non-empty* one is an error, since its entities may carry a reviewer's
+    /// edits. A reconstructed report applies with [`anonymize_with`] exactly
+    /// as one built by hand.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if the payload is not a valid report, or if a group
+    /// carries entities under an unregistered modality.
+    ///
+    /// [`analyze`]: crate::Orchestrator::analyze
+    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(crate) fn deserialize<'de, D>(&self, deserializer: D) -> elide_core::Result<Report>
+    pub fn deserialize<'de, D>(&self, deserializer: D) -> Result<Report>
     where
         D: Deserializer<'de>,
     {
         ReportSeed::new(self)
             .deserialize(deserializer)
-            .map_err(|e| elide_core::Error::malformed(e.to_string()))
+            .map_err(|e| Error::malformed(e.to_string()))
     }
 
-    /// Reconstruct an [`ArtifactSet`] from `deserializer`,
-    /// routing each group's artifact to its registered modality's
-    /// `parse_artifact`. Maps any failure to a [`MalformedInput`] error.
+    /// Reconstruct an [`ArtifactSet`], routing each group's artifact to its
+    /// registered modality, to pass to [`re_analyze`] so the OCR/transcript is
+    /// reused rather than recomputed.
     ///
+    /// A group naming an unregistered modality is skipped: without a parser
+    /// its enrichment cannot be rebuilt, and a re-run that lacks it simply
+    /// re-enriches that group.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if the payload is not a valid artifact set.
+    ///
+    /// [`re_analyze`]: crate::Orchestrator::re_analyze
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(crate) fn deserialize_artifacts<'de, D>(
-        &self,
-        deserializer: D,
-    ) -> elide_core::Result<ArtifactSet>
+    pub fn deserialize_artifacts<'de, D>(&self, deserializer: D) -> Result<ArtifactSet>
     where
         D: Deserializer<'de>,
     {
         ArtifactSetSeed::new(self)
             .deserialize(deserializer)
-            .map_err(|e| elide_core::Error::malformed(e.to_string()))
-    }
-}
-
-/// Rebuilds a serialized [`Report`] without the machinery that runs one.
-///
-/// It needs none of the analyzers, anonymizers, or codec registry needed to
-/// *run* one.
-///
-/// A report's wire form tags each group with its modality name but not the
-/// concrete type, and deserialization is not object-safe, so a bare
-/// `Report: Deserialize` is impossible. Register the modalities the report may
-/// contain with [`with_modality`], then reconstruct with [`deserialize`]. The
-/// modalities registered here need only be *deserializable*; they need no
-/// pipeline.
-///
-/// This is the deserialize-only counterpart to the full [`Orchestrator`], for a
-/// review layer that reconstructs an edited report without re-building the
-/// engine that produced it. Build one with [`Report::deserializer`].
-///
-/// ```ignore
-/// let report = Report::deserializer()
-///     .with_modality::<Text>()
-///     .with_modality::<Image>()
-///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
-/// ```
-///
-/// [`with_modality`]: Self::with_modality
-/// [`deserialize`]: Self::deserialize
-/// [`Orchestrator`]: crate::Orchestrator
-/// [`Report::deserializer`]: Report::deserializer
-#[derive(Default)]
-pub struct ReportDeserializer {
-    registry: ModalityRegistry,
-}
-
-impl ReportDeserializer {
-    /// A deserializer with no modalities registered.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Register modality `M`, so a group tagged with its name deserializes as
-    /// it.
-    ///
-    /// The group reconstructs as `Vec<Entity<M>>`. Returns `self` for chaining.
-    #[must_use]
-    pub fn with_modality<M>(mut self) -> Self
-    where
-        M: Modality,
-        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-    {
-        self.registry.register::<M>();
-        self
-    }
-
-    /// Reconstruct a [`Report`], routing each group to its registered modality.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`MalformedInput`] error if the payload is not a valid report,
-    /// or if a group carries entities under a modality that was not registered,
-    /// see [`Orchestrator::deserialize_report`] for the empty-vs-non-empty rule.
-    ///
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
-    pub fn deserialize<'de, D>(&self, deserializer: D) -> elide_core::Result<Report>
-    where
-        D: Deserializer<'de>,
-    {
-        self.registry.deserialize(deserializer)
-    }
-
-    /// Reconstruct an [`ArtifactSet`] from `deserializer`,
-    /// routing each group's artifact to a registered modality. The
-    /// artifact-side counterpart to [`deserialize`](Self::deserialize), for
-    /// restoring the enrichment persisted beside a report.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`MalformedInput`] error if the payload is not a valid
-    /// artifact set.
-    ///
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub fn deserialize_artifacts<'de, D>(&self, deserializer: D) -> elide_core::Result<ArtifactSet>
-    where
-        D: Deserializer<'de>,
-    {
-        self.registry.deserialize_artifacts(deserializer)
+            .map_err(|e| Error::malformed(e.to_string()))
     }
 }

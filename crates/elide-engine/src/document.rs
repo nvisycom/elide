@@ -5,13 +5,17 @@
 //!   `&mut Document` or a `&mut [Document]` interchangeably.
 //! - [`RegistryDocumentExt`] decodes raw bytes straight into a named `Document`.
 
+use std::future::Future;
 use std::path::Path;
+use std::slice;
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document as CodecDocument, FormatId};
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 use elide_format::FormatRegistry;
+
+use crate::PartId;
 
 /// One document the engine redacts: its name and its decoded document.
 ///
@@ -56,6 +60,17 @@ impl Document {
     pub fn format_id(&self) -> FormatId {
         self.document.format_id()
     }
+
+    /// The [`PartId`] of this document's own content in a [`Report`] or
+    /// [`ArtifactSet`]: its name, as a one-segment path. Its container parts
+    /// key beneath it.
+    ///
+    /// [`Report`]: crate::Report
+    /// [`ArtifactSet`]: crate::ArtifactSet
+    #[must_use]
+    pub fn id(&self) -> PartId {
+        PartId::leaf(self.name.clone())
+    }
 }
 
 /// Seals [`AsDocuments`] and [`RegistryDocumentExt`] so neither is a public
@@ -89,7 +104,7 @@ impl<T: sealed::Sealed + ?Sized> sealed::Sealed for &mut T {}
 
 impl AsDocuments for Document {
     fn as_documents_mut(&mut self) -> &mut [Document] {
-        std::slice::from_mut(self)
+        slice::from_mut(self)
     }
 }
 
@@ -127,7 +142,8 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
 /// name's own extension (a real filename like `report.docx`); [`document_with`]
 /// takes the format explicitly, for a name that carries none or a misleading one.
 ///
-/// Sealed, implemented only for [`FormatRegistry`].
+/// Both return a `Send` future, so a decode can be spawned onto a
+/// multi-threaded runtime. Sealed, implemented only for [`FormatRegistry`].
 ///
 /// [`document`]: Self::document
 /// [`document_with`]: Self::document_with
@@ -151,7 +167,7 @@ pub trait RegistryDocumentExt: sealed::Sealed {
         name: impl Into<String>,
         bytes: impl Into<ContentData>,
         policy: HiddenContentPolicy,
-    ) -> impl std::future::Future<Output = Result<Document>>;
+    ) -> impl Future<Output = Result<Document>> + Send;
 
     /// Decode `bytes` into a [`Document`] named `name`, its hidden content
     /// handled under `policy`, resolving the format from the explicit
@@ -169,43 +185,48 @@ pub trait RegistryDocumentExt: sealed::Sealed {
         extension: &str,
         bytes: impl Into<ContentData>,
         policy: HiddenContentPolicy,
-    ) -> impl std::future::Future<Output = Result<Document>>;
+    ) -> impl Future<Output = Result<Document>> + Send;
 }
 
 impl sealed::Sealed for FormatRegistry {}
 
+// The arguments are converted before the future is built, so the future holds
+// only owned, `Send` values whatever types the caller passes.
 impl RegistryDocumentExt for FormatRegistry {
-    async fn document(
+    fn document(
         &self,
         name: impl Into<String>,
         bytes: impl Into<ContentData>,
         policy: HiddenContentPolicy,
-    ) -> Result<Document> {
+    ) -> impl Future<Output = Result<Document>> + Send {
         let name = name.into();
-        // The format is the name's own extension, lowercased, resolved via
-        // `Path::extension` (which ignores a leading-dot dotfile like `.rels`).
-        let extension = Path::new(&name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase);
-        let Some(extension) = extension else {
-            return Err(Error::malformed(format!(
-                "document name `{name}` has no extension to resolve a format from; \
+        let bytes = bytes.into();
+        async move {
+            // `Path::extension` ignores a leading-dot dotfile like `.rels`; the
+            // registry matches the extension case-insensitively.
+            let Some(extension) = Path::new(&name).extension().and_then(|e| e.to_str()) else {
+                return Err(Error::malformed(format!(
+                    "document name `{name}` has no extension to resolve a format from; \
                      use `document_with` with an explicit extension"
-            )));
-        };
-        let document = self.decode(bytes, &extension, policy).await?;
-        Ok(Document::new(name, document))
+                )));
+            };
+            let document = self.decode(bytes, extension, policy).await?;
+            Ok(Document::new(name, document))
+        }
     }
 
-    async fn document_with(
+    fn document_with(
         &self,
         name: impl Into<String>,
         extension: &str,
         bytes: impl Into<ContentData>,
         policy: HiddenContentPolicy,
-    ) -> Result<Document> {
-        let document = self.decode(bytes, extension, policy).await?;
-        Ok(Document::new(name, document))
+    ) -> impl Future<Output = Result<Document>> + Send {
+        let name = name.into();
+        let bytes = bytes.into();
+        async move {
+            let document = self.decode(bytes, extension, policy).await?;
+            Ok(Document::new(name, document))
+        }
     }
 }

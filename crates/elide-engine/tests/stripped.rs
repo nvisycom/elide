@@ -25,7 +25,7 @@ fn container() -> Bytes {
 async fn an_unreadable_embedding_is_reported_before_it_is_removed() -> Result<()> {
     let registry = FormatRegistry::new().with_format(mock_format());
     let orchestrator = Orchestrator::new().with_registry(registry.clone());
-    let unreadable = PartId::new("outer.mock").child("notes.bin");
+    let unreadable = PartId::leaf("outer.mock").child("notes.bin");
 
     let handle = registry
         .decode(container(), MOCK_EXT, HiddenContentPolicy::default())

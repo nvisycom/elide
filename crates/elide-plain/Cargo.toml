@@ -49,5 +49,8 @@ async-trait = { workspace = true, features = [] }
 tracing = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["fixtures"] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

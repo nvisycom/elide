@@ -322,6 +322,7 @@ impl DataWriter<Tabular> for CsvHandler {
 #[cfg(test)]
 mod tests {
     use elide_codec::Loader;
+    use elide_core::modality::DataReaderExt;
 
     use super::super::loader::CsvLoader;
     use super::*;
@@ -360,7 +361,7 @@ mod tests {
         let h = load("name\nAlice Carter\n").await;
         // Row 1, col 0 = "Alice Carter"; bytes 0..5 = "Alice".
         let loc = TabularLocation::new(1, 0).with_span(0..5);
-        assert_eq!(h.read_at(&loc).await.unwrap().unwrap().as_str(), "Alice");
+        assert_eq!(h.expect_at(&loc).await.as_str(), "Alice");
     }
 
     #[tokio::test]
@@ -382,13 +383,13 @@ mod tests {
     #[tokio::test]
     async fn redact_replaces_intra_cell_range_and_reencodes() {
         let mut h = load("name,email\nAlice,alice@x.test\n").await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
         // Row 1, col 1 = "alice@x.test"; replace the whole cell.
-        batch.push(
+        h.write_at(Redactions::from([(
             TabularLocation::new(1, 1),
             TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-        );
-        h.write_at(batch).await.unwrap();
+        )]))
+        .await
+        .unwrap();
         let out = h.encode().unwrap();
         assert_eq!(out.decode().unwrap(), "name,email\nAlice,[EMAIL]\n");
     }
@@ -396,10 +397,13 @@ mod tests {
     #[tokio::test]
     async fn drop_row_removes_the_record() {
         let mut h = load("name,city\nAlice,NYC\nBob,LA\n").await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
         // A match anywhere in Bob's row (row 2) drops the whole record.
-        batch.push(TabularLocation::new(2, 0), TabularReplacement::DropRow);
-        h.write_at(batch).await.unwrap();
+        h.write_at(Redactions::from([(
+            TabularLocation::new(2, 0),
+            TabularReplacement::DropRow,
+        )]))
+        .await
+        .unwrap();
         let out = h.encode().unwrap();
         assert_eq!(out.decode().unwrap(), "name,city\nAlice,NYC\n");
     }
@@ -407,21 +411,26 @@ mod tests {
     #[tokio::test]
     async fn drop_multiple_rows_stays_aligned() {
         let mut h = load("n\nA\nB\nC\nD\n").await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
         // Drop rows 1 (A) and 3 (C); bottom-up removal keeps indices valid.
-        batch.push(TabularLocation::new(1, 0), TabularReplacement::DropRow);
-        batch.push(TabularLocation::new(3, 0), TabularReplacement::DropRow);
-        h.write_at(batch).await.unwrap();
+        h.write_at(Redactions::from([
+            (TabularLocation::new(1, 0), TabularReplacement::DropRow),
+            (TabularLocation::new(3, 0), TabularReplacement::DropRow),
+        ]))
+        .await
+        .unwrap();
         assert_eq!(h.encode().unwrap().decode().unwrap(), "n\nB\nD\n");
     }
 
     #[tokio::test]
     async fn drop_row_never_drops_the_header() {
         let mut h = load("name,city\nAlice,NYC\n").await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
         // Targeting the header row (0) is a no-op, the schema survives.
-        batch.push(TabularLocation::new(0, 0), TabularReplacement::DropRow);
-        h.write_at(batch).await.unwrap();
+        h.write_at(Redactions::from([(
+            TabularLocation::new(0, 0),
+            TabularReplacement::DropRow,
+        )]))
+        .await
+        .unwrap();
         assert_eq!(
             h.encode().unwrap().decode().unwrap(),
             "name,city\nAlice,NYC\n"
@@ -431,10 +440,13 @@ mod tests {
     #[tokio::test]
     async fn drop_column_removes_header_and_every_cell() {
         let mut h = load("name,ssn,city\nAlice,111,NYC\nBob,222,LA\n").await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
         // A match in the ssn column (col 1) drops it across all rows.
-        batch.push(TabularLocation::new(1, 1), TabularReplacement::DropColumn);
-        h.write_at(batch).await.unwrap();
+        h.write_at(Redactions::from([(
+            TabularLocation::new(1, 1),
+            TabularReplacement::DropColumn,
+        )]))
+        .await
+        .unwrap();
         assert_eq!(
             h.encode().unwrap().decode().unwrap(),
             "name,city\nAlice,NYC\nBob,LA\n"

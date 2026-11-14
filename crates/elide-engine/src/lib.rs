@@ -9,23 +9,21 @@ mod pipeline;
 mod traversal;
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
-use elide_core::redaction::Operator;
 use elide_core::{Error, Result};
 use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
-use elide_redaction::operators::Erase;
 
+use self::analysis::StrippedRecord;
 pub use self::analysis::{
     AnalyzedDocument, ArtifactSet, Part, PartMut, Report, ReportDeserializer, StrippedItem,
 };
-use self::analysis::{ModalityRegistry, StrippedRecord};
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
 use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
@@ -70,12 +68,10 @@ use self::traversal::{Analyze, Redact, Walk};
 pub struct Orchestrator {
     registry: FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
-    /// Per-modality parsers for reconstructing a serialized [`Report`], keyed by
-    /// modality name. Populated alongside `pipelines` in [`with_modality`], so a
-    /// deserialized report is rebuilt against exactly the registered modalities.
-    ///
-    /// [`with_modality`]: Self::with_modality
-    groups: ModalityRegistry,
+    /// Rebuilds a serialized [`Report`] or [`ArtifactSet`], registered
+    /// alongside each pipeline so it covers exactly the orchestrator's
+    /// modalities.
+    deserializer: ReportDeserializer,
     scope: Scope,
 }
 
@@ -84,7 +80,7 @@ impl Default for Orchestrator {
         let mut orchestrator = Self {
             registry: FormatRegistry::default(),
             pipelines: HashMap::new(),
-            groups: ModalityRegistry::default(),
+            deserializer: ReportDeserializer::new(),
             scope: Scope::default(),
         };
         orchestrator.insert_pipeline(metadata::pipeline());
@@ -109,11 +105,12 @@ impl Orchestrator {
         Self::default()
     }
 
-    /// Set the [`FormatRegistry`] that decodes a document's container parts.
+    /// Set the [`FormatRegistry`] that decodes the documents embedded in a
+    /// document.
     ///
-    /// A body-only document needs no registry; a container (DOCX, …) needs one
-    /// that covers its part formats, typically
-    /// [`FormatRegistry::with_builtin`].
+    /// A document that embeds none needs no registry; one that does (a DOCX
+    /// with an embedded image, …) needs one that covers their formats,
+    /// typically [`FormatRegistry::with_builtin`].
     ///
     /// [`FormatRegistry::with_builtin`]: elide_format::FormatRegistry::with_builtin
     #[must_use]
@@ -127,8 +124,8 @@ impl Orchestrator {
     /// The caller's analysis-wide assertions: languages, jurisdictions, tags,
     /// catalog, correlation id.
     ///
-    /// A `Scope` is modality-free, so one drives the body and every
-    /// container part alike; no need to repeat it per [`with_modality`].
+    /// A `Scope` is modality-free, so one drives every part alike; no need to
+    /// repeat it per [`with_modality`].
     ///
     /// [`with_modality`]: Self::with_modality
     #[must_use]
@@ -158,7 +155,6 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => {
@@ -188,7 +184,6 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.analyzer = analyzer,
@@ -206,15 +201,12 @@ impl Orchestrator {
     ///
     /// For a modality whose entities are supplied out-of-band (a rebuilt report)
     /// and only redacted: there is no need to fabricate an analyzer.
-    ///
-    /// [`with_modality`]: Self::with_modality
     #[must_use]
     pub fn with_anonymizer<M>(mut self, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.set_anonymizer(anonymizer),
@@ -244,7 +236,7 @@ impl Orchestrator {
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
     {
         self.pipelines.insert(TypeId::of::<M>(), Box::new(pipeline));
-        self.groups.register::<M>();
+        self.deserializer.register::<M>();
     }
 
     /// The registered pipelines, keyed by modality [`TypeId`], for the part-walk
@@ -289,9 +281,9 @@ impl Orchestrator {
     /// pipeline analyzes it. A document or part with no matching pipeline (or
     /// that no codec can decode) passes through untouched.
     ///
-    /// Read a part with [`Report::part`] keyed by its name, and edit it with
-    /// [`Report::part_mut`] before applying. For the common single-document
-    /// case, [`Report::document`] reads the sole document directly.
+    /// Read a part with [`Report::part`] keyed by its [`PartId`], and edit it
+    /// with [`Report::part_mut`] before applying. A document's own content is
+    /// keyed by [`Document::id`].
     ///
     /// [`with_scope`]: Self::with_scope
     /// [`anonymize_with`]: Self::anonymize_with
@@ -348,7 +340,7 @@ impl Orchestrator {
         // the same path, so the second would overwrite the first in the report and
         // never be reached at apply. Reject the collision up front rather than
         // silently drop a document's redaction.
-        let mut names = std::collections::HashSet::new();
+        let mut names = HashSet::new();
         for document in documents.iter() {
             if !names.insert(document.name.as_str()) {
                 return Err(Error::malformed(format!(
@@ -371,7 +363,7 @@ impl Orchestrator {
             stripped: StrippedRecord::default(),
         };
         for document in documents.iter_mut() {
-            let prefix = PartId::leaf(document.name.clone());
+            let prefix = document.id();
             Walk::new(self, &mut visitor)
                 .parts(&mut document.document, &prefix, 0)
                 .await?;
@@ -393,7 +385,7 @@ impl Orchestrator {
     /// a blob is decoded into its own child document, redacted the same
     /// way, re-encoded, and folded back into its parent via its `replace_blob`. A
     /// document's own `encode` then writes it out post-order, so a nested
-    /// document re-encodes (carrying its *own* body redaction) before the level
+    /// document re-encodes (carrying its *own* redaction) before the level
     /// above writes it.
     ///
     /// Returns the report, now applied: redaction stamps a redaction event into
@@ -401,7 +393,14 @@ impl Orchestrator {
     /// audit trail (recognition through redaction), serialize it to hand the
     /// audit to a caller.
     ///
-    /// [`analyze`]: Self::analyze
+    /// # Errors
+    ///
+    /// [`MalformedInput`] when a report part with entities cannot be applied:
+    /// no pipeline is registered for its modality, its stream is of another
+    /// modality, or it names no part of `documents`. The documents may already
+    /// be partly redacted then; do not encode them.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     pub async fn anonymize_with(
         &self,
         mut documents: impl AsDocuments,
@@ -417,14 +416,26 @@ impl Orchestrator {
         let mut visitor = Redact {
             report: &mut report,
             stripped: StrippedRecord::default(),
+            applied: HashSet::new(),
         };
         for document in documents.iter_mut() {
-            let prefix = PartId::leaf(document.name.clone());
+            let prefix = document.id();
             Walk::new(self, &mut visitor)
                 .parts(&mut document.document, &prefix, 0)
                 .await?;
         }
-        let stripped = visitor.stripped;
+        let Redact {
+            stripped, applied, ..
+        } = visitor;
+        // A part the walk never reached (a hand-built or edited report naming a
+        // part these documents do not have) would leave its entities unredacted.
+        if let Some(id) = report.parts.iter().find_map(|(id, entities)| {
+            (!entities.is_empty() && !applied.contains(id)).then_some(id)
+        }) {
+            return Err(Error::malformed(format!(
+                "report part `{id}` names no part of the documents"
+            )));
+        }
         report.set_stripped(stripped);
         Ok(report)
     }
@@ -450,9 +461,9 @@ impl Orchestrator {
     /// [`anonymize_with`]: Self::anonymize_with
     /// [`with_scope`]: Self::with_scope
     pub fn pick(&self, report: &mut Report) -> Result<()> {
-        for part in report.parts.values_mut() {
-            if let Some(pipeline) = self.pipelines.get(&part.modality) {
-                pipeline.pick(part.entities.as_mut(), &self.scope)?;
+        for entities in report.parts.values_mut() {
+            if let Some(pipeline) = self.pipelines.get(&entities.modality()) {
+                pipeline.pick(entities.as_mut(), &self.scope)?;
             }
         }
         Ok(())
@@ -478,76 +489,20 @@ impl Orchestrator {
         self.anonymize_with(&mut *documents, analyzed.report).await
     }
 
-    /// Reconstruct a [`Report`] from its serialized form, by producing
-    /// modality.
-    ///
-    /// Each group is routed back to the modality that produced it.
-    ///
-    /// The serialized report tags each group with its modality name but not the
-    /// concrete type, and deserialization is not object-safe, so the report
-    /// cannot rebuild itself. This orchestrator can: [`with_modality`] registered
-    /// a parser per modality, so each group is parsed as the right
-    /// `Vec<Entity<M>>`. Reconstructed parts carry no cached handle;
-    /// [`anonymize_with`] re-decodes them from the container, exactly as for any
-    /// report built by hand.
+    /// The [`ReportDeserializer`] for this orchestrator's modalities, to
+    /// rebuild a serialized [`Report`] or [`ArtifactSet`] against exactly the
+    /// modalities it registers pipelines for.
     ///
     /// The round trip for a review layer: [`analyze`], serialize the report, ship
-    /// it out for editing, then `deserialize_report` it back here and
-    /// [`anonymize_with`]. Both ends configure the same modalities.
+    /// it out for editing, then deserialize it back here and [`anonymize_with`]
+    /// it. Persist the [`artifacts`] the same way to hand to [`re_analyze`].
     ///
-    /// A group naming a modality this orchestrator has no pipeline for is handled
-    /// by what it would cost to drop it, deliberately splitting the difference
-    /// with [`analyze`] (which silently ignores a part whose modality has no
-    /// pipeline): an *empty* such group is skipped, the part could not have been
-    /// redacted anyway, so nothing is lost, and the round trip succeeds just as a
-    /// fresh analysis of the same document would; a *non-empty* one is a hard
-    /// error, since its entities may carry a reviewer's edits that silently
-    /// dropping the group would lose.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`MalformedInput`] error if the payload is not a valid report,
-    /// or if a group carries entities under a modality this orchestrator has no
-    /// pipeline for (see above).
-    ///
-    /// [`with_modality`]: Self::with_modality
     /// [`analyze`]: Self::analyze
     /// [`anonymize_with`]: Self::anonymize_with
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub fn deserialize_report<'de, D>(&self, deserializer: D) -> Result<Report>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        self.groups.deserialize(deserializer)
-    }
-
-    /// Reconstruct an [`ArtifactSet`] from a serialized payload, rebuilding each
-    /// group's enrichment against the registered modalities (keyed by name).
-    ///
-    /// The counterpart to [`deserialize_report`](Self::deserialize_report) for
-    /// the enrichment [`analyze`](Self::analyze) returns beside the report:
-    /// serialize [`AnalyzedDocument::artifacts`], ship it across the review gap,
-    /// then deserialize it back here and pass it to
-    /// [`re_analyze`](Self::re_analyze) so the OCR/transcript is reused rather
-    /// than recomputed. Both ends configure the same modalities.
-    ///
-    /// A group naming a modality this orchestrator has no pipeline for is
-    /// skipped: without a parser its enrichment cannot be rebuilt, and a re-run
-    /// that lacks it simply re-enriches that group.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`MalformedInput`] error if the payload is not a valid artifact
-    /// set.
-    ///
-    /// [`analyze`]: Self::analyze
     /// [`re_analyze`]: Self::re_analyze
-    /// [`AnalyzedDocument::artifacts`]: crate::AnalyzedDocument::artifacts
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub fn deserialize_artifacts<'de, D>(&self, deserializer: D) -> Result<ArtifactSet>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        self.groups.deserialize_artifacts(deserializer)
+    /// [`artifacts`]: AnalyzedDocument::artifacts
+    #[must_use]
+    pub fn deserializer(&self) -> &ReportDeserializer {
+        &self.deserializer
     }
 }
