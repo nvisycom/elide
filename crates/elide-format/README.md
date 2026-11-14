@@ -28,6 +28,9 @@ use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_format::FormatRegistry;
 
+# #[cfg(not(feature = "txt"))]
+# fn main() {}
+# #[cfg(feature = "txt")]
 # #[tokio::main(flavor = "current_thread")]
 # async fn main() -> elide_core::Result<()> {
 let registry = FormatRegistry::with_builtin();
