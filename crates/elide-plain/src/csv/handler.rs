@@ -7,11 +7,12 @@
 //! parsed rows. Only the *location* is tabular: a `(row, column)` address
 //! plus an optional intra-cell byte range.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 
 use csv::Terminator;
 use elide_codec::content::ContentData;
-use elide_codec::string::RedactRange;
+use elide_codec::string::{DisjointSpans, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
@@ -167,11 +168,13 @@ impl CsvHandler {
     /// # Errors
     ///
     /// [`MalformedInput`] for a cell, span, row or column the table doesn't
-    /// have, leaving the table partly edited.
+    /// have, or two edits of one cell that overlap, leaving the table partly
+    /// edited.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     fn apply(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
         redactions.sort_by_position();
+        self.ensure_disjoint_cells(&redactions)?;
 
         // Apply cell edits first, before any structural drop shifts indices.
         // Right-to-left so an edit's length delta doesn't move earlier
@@ -200,6 +203,33 @@ impl CsvHandler {
             self.drop_row(row)?;
         }
         Ok(())
+    }
+
+    /// Refuse a batch with two edits of one cell that overlap, a whole-cell
+    /// edit counting as the cell's full span. Applied right to left, disjoint
+    /// edits each meet the cell as it was up to their end.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a cell the table doesn't have, or an overlapping
+    /// pair.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn ensure_disjoint_cells(&self, redactions: &Redactions<Tabular>) -> Result<()> {
+        let mut cells: BTreeMap<(u32, u32), Vec<Range<usize>>> = BTreeMap::new();
+        for (location, replacement) in redactions.iter() {
+            if !matches!(replacement, TabularReplacement::Cell(_)) {
+                continue;
+            }
+            let cell = self
+                .cell_at(location.row_index, location.column_index)
+                .ok_or_else(|| no_cell(location))?;
+            cells
+                .entry((location.row_index, location.column_index))
+                .or_default()
+                .push(location.span.clone().unwrap_or(0..cell.len()));
+        }
+        cells.values().try_for_each(|spans| spans.ensure_disjoint())
     }
 
     /// Splice `replacement` over the cell (or the span within it) `location`
@@ -602,6 +632,55 @@ mod tests {
                 "{location:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn overlapping_edits_of_one_cell_are_an_error() {
+        let substituted =
+            |value: &str| TabularReplacement::Cell(TextReplacement::substituted(value));
+        let src = "id\nabcdef\n";
+        let mut h = load(src).await;
+        let error = h
+            .write_at(Redactions::from([
+                (
+                    TabularLocation::new(1, 0).with_span(0..7),
+                    substituted("[A]"),
+                ),
+                (
+                    TabularLocation::new(1, 0).with_span(3..6),
+                    substituted("123456789"),
+                ),
+            ]))
+            .await
+            .expect_err("overlapping edits of one cell must fail");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
+
+        // A whole-cell edit overlaps any span of the cell; touching spans apply.
+        let error = h
+            .write_at(Redactions::from([
+                (TabularLocation::new(1, 0), substituted("[A]")),
+                (
+                    TabularLocation::new(1, 0).with_span(3..6),
+                    substituted("[B]"),
+                ),
+            ]))
+            .await
+            .expect_err("a whole-cell edit overlaps a span of it");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        h.write_at(Redactions::from([
+            (
+                TabularLocation::new(1, 0).with_span(0..3),
+                substituted("[A]"),
+            ),
+            (
+                TabularLocation::new(1, 0).with_span(3..6),
+                substituted("[B]"),
+            ),
+        ]))
+        .await
+        .unwrap();
+        assert_eq!(h.encode().unwrap().as_bytes(), b"id\n[A][B]\n");
     }
 
     #[tokio::test]

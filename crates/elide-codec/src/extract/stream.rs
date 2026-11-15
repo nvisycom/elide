@@ -68,33 +68,41 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
         TextLocation::source(range, source)
     }
 
-    /// The decoded span `location` addresses.
+    /// The decoded span `location` addresses, checked against the text.
     ///
-    /// Prefers its raw [`source`](TextLocation::source) references when
-    /// present: each is reverse-resolved via
+    /// A resolved location is addressed by its decoded
+    /// [`range`](TextLocation::range) alone, the span a read covers; its
+    /// source references describe it but never narrow it. A reviewer mark has
+    /// no span yet: each of its references is reverse-resolved via
     /// [`SourceAddresser::locate_source`], and together they must cover one
-    /// run of text. Falls back to the decoded [`range`](TextLocation::range).
+    /// run of text.
     ///
     /// # Errors
     ///
     /// [`MalformedInput`] for a location that resolves to nothing, never a
-    /// no-op: a bad part name, an offset past the part, a cross-part span, or
-    /// references with text between them would leave bytes unredacted under a
-    /// green audit.
+    /// no-op: a span outside the text or splitting a character, a bad part
+    /// name, an offset past the part, a cross-part span, or references with
+    /// text between them would leave bytes unredacted under a green audit.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     fn span_for(&self, location: &TextLocation) -> Result<Range<usize>> {
         let state = &self.state;
-        let source = location.source_refs();
-        if source.is_empty() {
-            return location
+        let TextLocation::Marked(mark) = location else {
+            let range = location
                 .range()
                 .cloned()
-                .ok_or_else(|| Error::malformed("a location with no span or source reference"));
-        }
-        let pieces = self.addresser.locate_source(&state.items, source);
+                .ok_or_else(|| Error::malformed("a location with no span"))?;
+            state.text(range.clone())?;
+            return Ok(range);
+        };
+        let Marked::Source { refs } = mark else {
+            return Err(Error::malformed(
+                "a rendered-page mark does not address a structured document",
+            ));
+        };
+        let pieces = self.addresser.locate_source(&state.items, refs);
         if pieces.is_empty() {
-            let refs: Vec<String> = source
+            let refs: Vec<String> = refs
                 .iter()
                 .map(|src| match &src.part {
                     Some(part) => format!("{part}#{}..{}", src.range.start, src.range.end),
@@ -161,12 +169,10 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
         let TextLocation::Marked(mark) = &location else {
             return Ok(location);
         };
-        let Marked::Source { refs } = mark else {
-            return Err(Error::malformed(
-                "a rendered-page mark does not address a structured document",
-            ));
-        };
         let span = self.span_for(&location)?;
+        let Marked::Source { refs } = mark else {
+            unreachable!("span_for rejects a rendered-page mark");
+        };
         Ok(TextLocation::source(span, refs.clone()))
     }
 
@@ -231,8 +237,8 @@ impl<A: Send + Sync + 'static> DataWriter<Text> for ExtractStream<A> {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use elide_core::modality::DataReader;
     use elide_core::modality::text::TextReplacement;
+    use elide_core::modality::{DataReader, ModalityLocation};
 
     use super::*;
     use crate::extract::ItemEdit;
@@ -406,6 +412,38 @@ mod tests {
         let err = marked.write_at(batch).await.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         assert_eq!(values(&marked), values(&stream()));
+    }
+
+    #[tokio::test]
+    async fn a_span_splitting_a_character_changes_nothing() {
+        let items = vec![item("é", Passage::Start), item("ABC", Passage::Continue)];
+        let mut stream = ExtractStream::new(FormatId::new("test"), items, Unaddressed);
+        // Byte 1 is inside "é"; "AB" must survive the failed batch.
+        let batch = Redactions::from([(TextLocation::inline(1..4), TextReplacement::Removed)]);
+        let err = stream.write_at(batch).await.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(values(&stream), ["é", "ABC"]);
+    }
+
+    #[tokio::test]
+    async fn a_cluster_of_a_span_and_a_mark_redacts_the_whole_span() {
+        let mut marked = addressed();
+        // A detection of "Jane Roe" fused with a mark on "R": the fused
+        // location carries only the mark's reference, but its span is the
+        // name, which a read covers and the write must too.
+        let mark = marked
+            .resolve(TextLocation::marked_source(SourceRef::new(5..6)))
+            .unwrap();
+        let fused = TextLocation::inline(0..8).union(&mark).unwrap();
+        assert_eq!(fused.source_refs(), [SourceRef::new(5..6)]);
+        let read = marked.read_at(&fused).await.unwrap();
+        assert_eq!(read.as_str(), "Jane Roe");
+        let batch = Redactions::from([(fused, TextReplacement::Removed)]);
+        marked.write_at(batch).await.unwrap();
+        assert_eq!(
+            values(&marked),
+            ["", "", "\n", "jane.roe@", "example.com", "Next"]
+        );
     }
 
     /// A range past the text, or a mark the addresser cannot place, is an

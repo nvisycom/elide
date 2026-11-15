@@ -24,7 +24,7 @@ pub trait DisjointSpans {
 impl DisjointSpans for [Range<usize>] {
     fn ensure_disjoint(&self) -> Result<()> {
         let mut spans: Vec<&Range<usize>> = self.iter().collect();
-        spans.sort_by_key(|span| span.start);
+        spans.sort_by_key(|span| (span.start, span.end));
         match spans.windows(2).find(|pair| pair[0].end > pair[1].start) {
             Some(pair) => Err(Error::malformed(format!(
                 "redactions {}..{} and {}..{} overlap; merge them into one",

@@ -432,15 +432,10 @@ impl Stream<Text> for JsonHandler {
         let TextLocation::Marked(mark) = &location else {
             return Ok(location);
         };
+        let edit = self.edit_for(&location)?;
         let Marked::Source { refs } = mark else {
-            return Err(Error::malformed(
-                "a rendered-page mark does not address JSON",
-            ));
+            unreachable!("edit_for rejects a rendered-page mark");
         };
-        let (first, rest) = refs
-            .split_first()
-            .expect("a mark has at least one source reference");
-        let edit = self.resolve_source(first, rest)?;
         let start = self.offsets[edit.slot].decoded;
         Ok(TextLocation::source(
             start + edit.value.start..start + edit.value.end,
@@ -573,28 +568,30 @@ impl JsonHandler {
 
     /// The [`LeafEdit`] a redaction `location` targets.
     ///
-    /// A location carrying a raw [`source`](TextLocation::source) reference is
-    /// resolved through the serialized bytes (JSON is single-file, so any
-    /// `part`-tagged ref is rejected); otherwise the decoded
-    /// [`range`](TextLocation::range) locates the leaf. Either way the returned
-    /// value range feeds the same splice.
+    /// A resolved location is addressed by its decoded
+    /// [`range`](TextLocation::range) alone, the span a read covers; its
+    /// source references describe it but never narrow it. A reviewer mark has
+    /// no span yet: its raw references are resolved through the serialized
+    /// bytes (JSON is single-file, so a `part`-tagged ref is rejected). Every
+    /// reference must land in the same leaf, and only whitespace may separate
+    /// them: the edit covers them together.
     ///
     /// Every location that resolves to no value is `Err`: dropping the edit
     /// would leave a green audit over an unredacted document. That covers a
-    /// location with neither a range nor a source ref, and a malformed range
-    /// (reversed, structural, past-value, escape-splitting).
-    ///
-    /// A location's [`source`](TextLocation::source) may hold **several** refs,
-    /// one logical span fragmented across escapes or fused from several runs.
-    /// *Every* ref is resolved, *all* must land in the same leaf, and only
-    /// whitespace may separate them: the edit covers them together. Resolving
-    /// only the first would splice
-    /// it and report success while ignoring the rest, leaving the caller's later
-    /// coordinates unredacted under a green audit.
+    /// rendered-page mark and a malformed range (reversed, structural,
+    /// past-value, escape-splitting).
     fn edit_for(&self, location: &TextLocation) -> Result<LeafEdit> {
-        match location.source_refs().split_first() {
-            Some((first, rest)) => self.resolve_source(first, rest),
-            None => self.resolve_range(location),
+        match location {
+            TextLocation::Marked(Marked::Source { refs }) => {
+                let (first, rest) = refs
+                    .split_first()
+                    .expect("a mark has at least one source reference");
+                self.resolve_source(first, rest)
+            }
+            TextLocation::Marked(_) => Err(Error::malformed(
+                "a rendered-page mark does not address JSON",
+            )),
+            _ => self.resolve_range(location),
         }
     }
 
@@ -702,9 +699,9 @@ impl JsonHandler {
     ///
     /// [`range`]: TextLocation::range
     fn resolve_range(&self, location: &TextLocation) -> Result<LeafEdit> {
-        let range = location.range().ok_or_else(|| {
-            Error::malformed("a JSON redaction needs a byte range or a source reference")
-        })?;
+        let range = location
+            .range()
+            .ok_or_else(|| Error::malformed("a JSON redaction needs a byte range"))?;
         if range.start > range.end {
             return Err(Error::malformed(format!(
                 "redaction range {}..{} is reversed",
@@ -762,6 +759,7 @@ impl Slot {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
+    use elide_core::modality::ModalityLocation;
     use elide_core::modality::text::TextReplacement;
 
     use super::*;
@@ -1167,6 +1165,24 @@ mod tests {
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
+        Ok(())
+    }
+
+    /// A detection fused with a mark carries only the mark's reference, but
+    /// its span is the whole value: the write covers what the read covers.
+    #[tokio::test]
+    async fn a_cluster_of_a_span_and_a_mark_redacts_the_whole_span() -> Result<()> {
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let b = src.find("bcd").unwrap();
+        let mark = h.resolve(TextLocation::marked_source(SourceRef::new(b..b + 1)))?;
+        let start = mark.range().unwrap().start;
+        let fused = TextLocation::inline(start..start + 3).union(&mark).unwrap();
+        assert_eq!(fused.source_refs(), [SourceRef::new(b..b + 1)]);
+        assert_eq!(h.read_at(&fused).await?.as_str(), "bcd");
+        h.write_at(Redactions::from([(fused, TextReplacement::Removed)]))
+            .await?;
+        assert_eq!(encoded(&h), r#"{"a":""}"#);
         Ok(())
     }
 
