@@ -162,6 +162,46 @@ impl CsvHandler {
         Ok(bytes)
     }
 
+    /// Apply `redactions`: cell edits, then column and row drops.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a cell, span, row or column the table doesn't
+    /// have, leaving the table partly edited.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn apply(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
+        redactions.sort_by_position();
+
+        // Apply cell edits first, before any structural drop shifts indices.
+        // Right-to-left so an edit's length delta doesn't move earlier
+        // intra-cell offsets in the same cell. Collect drop targets as we go.
+        let mut drop_rows = BTreeSet::new();
+        let mut drop_cols = BTreeSet::new();
+        for (location, replacement) in redactions.iter().rev() {
+            match replacement {
+                TabularReplacement::Cell(cell) => self.redact_one(location, cell)?,
+                TabularReplacement::DropRow => {
+                    drop_rows.insert(location.row_index);
+                }
+                TabularReplacement::DropColumn => {
+                    drop_cols.insert(location.column_index);
+                }
+            }
+        }
+
+        // Then delete structure, highest index first so each removal leaves
+        // the not-yet-removed indices valid: columns right-to-left, rows
+        // bottom-up.
+        for &col in drop_cols.iter().rev() {
+            self.drop_column(col)?;
+        }
+        for &row in drop_rows.iter().rev() {
+            self.drop_row(row)?;
+        }
+        Ok(())
+    }
+
     /// Splice `replacement` over the cell (or the span within it) `location`
     /// names. A cell or span the table doesn't have is an error: skipping it
     /// would leave the content unredacted.
@@ -300,35 +340,11 @@ impl DataReader<Tabular> for CsvHandler {
 
 #[async_trait::async_trait]
 impl DataWriter<Tabular> for CsvHandler {
-    async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
-        redactions.sort_by_position();
-
-        // Apply cell edits first, before any structural drop shifts indices.
-        // Right-to-left so an edit's length delta doesn't move earlier
-        // intra-cell offsets in the same cell. Collect drop targets as we go.
-        let mut drop_rows = BTreeSet::new();
-        let mut drop_cols = BTreeSet::new();
-        for (location, replacement) in redactions.iter().rev() {
-            match replacement {
-                TabularReplacement::Cell(cell) => self.redact_one(location, cell)?,
-                TabularReplacement::DropRow => {
-                    drop_rows.insert(location.row_index);
-                }
-                TabularReplacement::DropColumn => {
-                    drop_cols.insert(location.column_index);
-                }
-            }
-        }
-
-        // Then delete structure, highest index first so each removal leaves
-        // the not-yet-removed indices valid: columns right-to-left, rows
-        // bottom-up.
-        for &col in drop_cols.iter().rev() {
-            self.drop_column(col)?;
-        }
-        for &row in drop_rows.iter().rev() {
-            self.drop_row(row)?;
-        }
+    async fn write_at(&mut self, redactions: Redactions<Tabular>) -> Result<()> {
+        // Apply to a copy, kept only once the whole batch applies.
+        let mut staged = Self::new(self.data.clone());
+        staged.apply(redactions)?;
+        *self = staged;
         Ok(())
     }
 }
@@ -527,6 +543,19 @@ mod tests {
         assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
     }
 
+    /// The line ending is the one closing the first record, not a line break
+    /// inside a quoted field before it.
+    #[tokio::test]
+    async fn a_quoted_line_break_does_not_set_the_line_ending() {
+        for src in [
+            "\"first\nname\",email\r\nAlice,a@x.test\r\n",
+            "\"first\r\nname\",email\nAlice,a@x.test\n",
+        ] {
+            let h = load(src).await;
+            assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes(), "{src:?}");
+        }
+    }
+
     /// A `\r` inside a quoted cell is content, kept on write.
     #[tokio::test]
     async fn a_carriage_return_inside_a_cell_is_kept() {
@@ -554,13 +583,24 @@ mod tests {
             (TabularLocation::new(9, 0), TabularReplacement::DropRow),
             (TabularLocation::new(1, 9), TabularReplacement::DropColumn),
         ];
+        let src = "name,city\nAlice,NYC\n";
         for (location, replacement) in batches {
-            let mut h = load("name,city\nAlice,NYC\n").await;
+            let mut h = load(src).await;
+            // Valid edits in the same batch are not kept either.
             let error = h
-                .write_at(Redactions::from([(location.clone(), replacement)]))
+                .write_at(Redactions::from([
+                    (location.clone(), replacement),
+                    (TabularLocation::new(1, 0), substituted()),
+                    (TabularLocation::new(0, 1), TabularReplacement::DropColumn),
+                ]))
                 .await
                 .expect_err("an unwritable location must fail");
             assert_eq!(error.kind(), ErrorKind::MalformedInput, "{location:?}");
+            assert_eq!(
+                h.encode().unwrap().as_bytes(),
+                src.as_bytes(),
+                "{location:?}"
+            );
         }
     }
 

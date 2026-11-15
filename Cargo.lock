@@ -1412,7 +1412,6 @@ dependencies = [
  "elide-codec",
  "elide-core",
  "tokio",
- "tracing",
 ]
 
 [[package]]

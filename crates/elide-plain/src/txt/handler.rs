@@ -17,7 +17,7 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
-use elide_codec::string::{ContiguousSpan, RedactRange};
+use elide_codec::string::{ContiguousSpan, DisjointSpans, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::text::{Marked, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -121,6 +121,11 @@ impl DataWriter<Text> for TxtHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't invalidate
         // earlier locations: sort ascending by position, then walk in reverse.
+        let spans = redactions
+            .iter()
+            .map(|(location, _)| span(location).cloned())
+            .collect::<Result<Vec<_>>>()?;
+        spans.ensure_disjoint()?;
         redactions.sort_by_position();
         for (location, replacement) in redactions.into_iter().rev() {
             self.redact_one(&location, &replacement)?;
@@ -349,6 +354,26 @@ mod tests {
             assert_eq!(error.kind(), ErrorKind::MalformedInput, "{location:?}");
             assert_eq!(h.text(), "one line");
         }
+    }
+
+    #[tokio::test]
+    async fn overlapping_redactions_are_an_error() {
+        let mut h = handler("Jane Roe");
+        let error = h
+            .write_at(Redactions::from([
+                (
+                    TextLocation::inline(0..6),
+                    TextReplacement::substituted("[A]"),
+                ),
+                (
+                    TextLocation::inline(5..8),
+                    TextReplacement::substituted("[B]"),
+                ),
+            ]))
+            .await
+            .expect_err("overlapping redactions must fail");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.text(), "Jane Roe");
     }
 
     #[tokio::test]

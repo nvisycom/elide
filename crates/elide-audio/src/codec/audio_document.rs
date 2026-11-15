@@ -60,10 +60,7 @@ mod tests {
 
         let clip = AudioBuffer::open(&fixtures::wav_ramp(1), AudioFormat::Wav).unwrap();
         let document = AudioDocument {
-            clip: AudioStream {
-                clip,
-                format_id: FormatId::new("elide.audio.wav"),
-            },
+            clip: AudioStream::new(clip, FormatId::new("elide.audio.wav")).unwrap(),
             format: AudioFormat::Wav,
         };
         let error = document

@@ -3,7 +3,10 @@
 
 use std::ops::Range;
 
+use elide_core::{Error, Result};
+
 use super::{ExtractedItem, ItemEdit, Passage};
+use crate::string::{ContiguousSpan, RedactRange};
 
 /// The mutable decoded item stream of a structured document, owned by its
 /// [`ExtractStream`](super::ExtractStream).
@@ -80,6 +83,115 @@ impl<A> SpliceState<A> {
             }
         }
         Some(edits)
+    }
+
+    /// The text `range` (a range of the concatenated stream) covers.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if `range` runs past the stream or splits a
+    /// character.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn text(&self, range: Range<usize>) -> Result<String> {
+        let edits = self.covering(range.clone()).ok_or_else(|| {
+            Error::malformed(format!(
+                "range {}..{} is outside the text",
+                range.start, range.end
+            ))
+        })?;
+        edits
+            .into_iter()
+            .map(|edit| self.items[edit.item].value.get(edit.local))
+            .collect::<Option<String>>()
+            .ok_or_else(|| {
+                Error::malformed(format!(
+                    "range {}..{} splits a UTF-8 character",
+                    range.start, range.end
+                ))
+            })
+    }
+
+    /// The one span of the concatenated stream that `edits` cover together,
+    /// as [`ContiguousSpan`] joins them.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if there are no edits, one is outside its item, or
+    /// anything but whitespace separates two of them.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn contiguous_span(&self, edits: &[ItemEdit]) -> Result<Range<usize>> {
+        let mut pieces = Vec::with_capacity(edits.len());
+        for ItemEdit { item, local } in edits {
+            let (Some(&start), Some(&end)) =
+                (self.item_starts.get(*item), self.item_starts.get(item + 1))
+            else {
+                return Err(Error::malformed(format!(
+                    "item {item} is outside the stream"
+                )));
+            };
+            if local.start > local.end || start + local.end > end {
+                return Err(Error::malformed(format!(
+                    "range {}..{} is outside item {item}",
+                    local.start, local.end
+                )));
+            }
+            pieces.push(start + local.start..start + local.end);
+        }
+        // Join within the stretch the pieces span, not the whole stream.
+        let (Some(start), Some(end)) = (
+            pieces.iter().map(|piece| piece.start).min(),
+            pieces.iter().map(|piece| piece.end).max(),
+        ) else {
+            return Err(Error::malformed("the mark covers no text"));
+        };
+        let hull = start..end;
+        let window = self.text(hull.clone())?;
+        let span = window.contiguous_span(
+            pieces
+                .into_iter()
+                .map(|piece| piece.start - hull.start..piece.end - hull.start),
+        )?;
+        Ok(hull.start + span.start..hull.start + span.end)
+    }
+
+    /// Splice `value` over `span`, a range of the concatenated stream.
+    ///
+    /// The value takes the place of the covered text of the first item, and
+    /// the covered text of the rest is cut, so each item keeps its own markup.
+    /// Separators are never edited.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if `span` runs past the stream or splits a
+    /// character.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn redact(&mut self, span: Range<usize>, value: &str) -> Result<()> {
+        let edits: Vec<ItemEdit> = self
+            .covering(span.clone())
+            .ok_or_else(|| {
+                Error::malformed(format!(
+                    "range {}..{} is outside the text",
+                    span.start, span.end
+                ))
+            })?
+            .into_iter()
+            .filter(|edit| self.items[edit.item].passage != Passage::Separator)
+            .collect();
+        let Some(first) = edits.first().map(|edit| edit.item) else {
+            return Ok(());
+        };
+        // Right to left, so an edit never shifts the ones still to come.
+        for ItemEdit { item, local } in edits.into_iter().rev() {
+            let text = if item == first { value } else { "" };
+            let before_len = self.items[item].value.len();
+            self.items[item].value.redact_range(text, local)?;
+            let delta = self.items[item].value.len() as isize - before_len as isize;
+            self.shift_starts_after(item, delta);
+        }
+        Ok(())
     }
 
     /// Shift every offset after item `i` by `delta` (an edit's length change).

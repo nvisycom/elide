@@ -40,12 +40,12 @@ pub trait SourceAddresser<A>: Send + Sync {
     /// text in a container part, which it can express as part byte spans but not
     /// as a decoded-stream offset. `source` is the entity's whole
     /// [`SourceRef`](elide_core::modality::text::TextLocation::source) list; each
-    /// reference must lie within one item, and the references within one item
-    /// resolve to one contiguous decoded range of it. Returns the [`ItemEdit`]s to
-    /// apply, one per item in item order, or none when a reference resolves to no
-    /// item (or the addresser does not address items by source span, the
-    /// default). The returned edits feed the same path a decoded-range redaction
-    /// uses.
+    /// reference must lie within one item. Returns one [`ItemEdit`] per
+    /// reference, the decoded range it covers, or none when a reference
+    /// resolves to no item (or the addresser does not address items by source
+    /// span, the default). The stream joins them into one span, refusing
+    /// references that text separates, and redacts it as it would a decoded
+    /// range.
     fn locate_source(&self, _items: &[ExtractedItem<A>], _source: &[SourceRef]) -> Vec<ItemEdit> {
         Vec::new()
     }

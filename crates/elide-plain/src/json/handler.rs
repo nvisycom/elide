@@ -18,7 +18,7 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
-use elide_codec::string::{ContiguousSpan, RedactRange};
+use elide_codec::string::{ContiguousSpan, DisjointSpans, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::text::{Marked, SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
@@ -495,6 +495,14 @@ impl DataWriter<Text> for JsonHandler {
         // Apply per-leaf edits right-to-left within each leaf so earlier
         // edits in the same leaf don't shift later ones.
         plan.sort_by(|(a, _), (b, _)| a.slot.cmp(&b.slot).then(b.value.start.cmp(&a.value.start)));
+        let spans: Vec<Range<usize>> = plan
+            .iter()
+            .map(|(edit, _)| {
+                let start = self.offsets[edit.slot].decoded;
+                start + edit.value.start..start + edit.value.end
+            })
+            .collect();
+        spans.ensure_disjoint()?;
         let edited = !plan.is_empty();
         for (edit, value) in plan {
             let Slot::Leaf(leaf) = &mut self.slots[edit.slot] else {
@@ -553,10 +561,12 @@ impl JsonHandler {
             let Slot::Leaf(leaf) = &self.slots[index] else {
                 return None;
             };
-            (range.end <= self.offsets[index + 1].decoded).then(|| LeafAt {
-                index,
-                leaf,
-                decoded_start: self.offsets[index].decoded,
+            (range.start <= range.end && range.end <= self.offsets[index + 1].decoded).then(|| {
+                LeafAt {
+                    index,
+                    leaf,
+                    decoded_start: self.offsets[index].decoded,
+                }
             })
         })
     }
@@ -1398,6 +1408,56 @@ mod tests {
                 TextLocation::inline(start + 2..start),
                 TextReplacement::substituted("X"),
             )]))
+            .await
+            .expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_at_rejects_overlapping_edits_of_one_value() -> Result<()> {
+        let src = r#"{"a":"Jane Roe"}"#;
+        let mut h = handler(src);
+        let start = find_chunk(&h, "Jane Roe").location.range().unwrap().start;
+        let err = h
+            .write_at(Redactions::from([
+                (
+                    TextLocation::inline(start..start + 6),
+                    TextReplacement::substituted("[A]"),
+                ),
+                (
+                    TextLocation::inline(start + 5..start + 8),
+                    TextReplacement::substituted("[B]"),
+                ),
+            ]))
+            .await
+            .expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src);
+        // Touching edits are not an overlap.
+        h.write_at(Redactions::from([
+            (
+                TextLocation::inline(start..start + 5),
+                TextReplacement::substituted("[A]"),
+            ),
+            (
+                TextLocation::inline(start + 5..start + 8),
+                TextReplacement::substituted("[B]"),
+            ),
+        ]))
+        .await?;
+        assert_eq!(encoded(&h), r#"{"a":"[A][B]"}"#);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn read_at_rejects_a_reversed_range() -> Result<()> {
+        // An end before the value's start would underflow its local offset.
+        let h = handler(r#"{"a":"bcd"}"#);
+        let chunk = find_chunk(&h, "bcd");
+        let start = chunk.location.range().unwrap().start;
+        let err = h
+            .read_at(&TextLocation::inline(start + 2..0))
             .await
             .expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);

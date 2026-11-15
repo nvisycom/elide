@@ -1,12 +1,15 @@
 //! The fields a metadata stream surfaces, read and redacted in place.
 
+use std::collections::BTreeMap;
+use std::ops::Range;
+
 use elide_core::modality::Chunk;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use crate::FlaggedItem;
-use crate::string::RedactRange;
+use crate::string::{DisjointSpans, RedactRange};
 
 /// The fields a metadata stream surfaces, in document order.
 ///
@@ -81,19 +84,30 @@ impl MetadataFields {
     ///
     /// # Errors
     ///
-    /// [`MalformedInput`] if no field has a redaction's key, or its span is
-    /// outside the value or splits a character. Nothing is skipped.
+    /// [`MalformedInput`] if no field has a redaction's key, two redactions of
+    /// a field overlap, or a span is outside the value or splits a character.
+    /// Nothing is skipped, and on an error no field is changed.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     pub fn redact(
         &mut self,
         mut redactions: Redactions<Metadata>,
     ) -> Result<Vec<(String, String)>> {
+        let mut spans: BTreeMap<&str, Vec<Range<usize>>> = BTreeMap::new();
+        for (location, _) in redactions.iter() {
+            let field = self.field(&location.key)?;
+            let span = location.span.clone().unwrap_or(0..field.as_str().len());
+            spans.entry(location.key.as_str()).or_default().push(span);
+        }
+        for spans in spans.values() {
+            spans.ensure_disjoint()?;
+        }
         redactions.sort_by_position();
+        // Edit a copy, kept only once every redaction applies.
+        let mut fields = self.fields.clone();
         let mut edited: Vec<String> = Vec::new();
         for (location, replacement) in redactions.into_iter().rev() {
-            let field = self
-                .fields
+            let field = fields
                 .iter_mut()
                 .find(|field| field.key == location.key)
                 .ok_or_else(|| unknown_field(&location.key))?;
@@ -112,15 +126,15 @@ impl MetadataFields {
         // would shift the spans still to come.
         let mut edits = Vec::with_capacity(edited.len());
         for key in edited {
-            let Some(field) = self.fields.iter_mut().find(|field| field.key == key) else {
+            let Some(field) = fields.iter_mut().find(|field| field.key == key) else {
                 continue;
             };
             let value = field.as_str().trim().to_owned();
             field.value = value.clone().into();
             edits.push((key, value));
         }
-        self.fields
-            .retain(|field| !field.as_str().trim().is_empty());
+        fields.retain(|field| !field.as_str().trim().is_empty());
+        self.fields = fields;
         Ok(edits)
     }
 
@@ -210,10 +224,41 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_field_is_an_error() {
+    fn overlapping_redactions_of_a_field_are_an_error() {
         let mut fields = fields();
-        let redactions =
-            Redactions::from([(MetadataLocation::new("keywords"), TextReplacement::Removed)]);
+        let redactions = Redactions::from([
+            (part(9, 17), TextReplacement::substituted("[NAME]")),
+            (
+                MetadataLocation::new("description"),
+                TextReplacement::Removed,
+            ),
+        ]);
         assert!(fields.redact(redactions).is_err());
+        // Whole fields of different keys do not overlap.
+        let redactions = Redactions::from([
+            (
+                MetadataLocation::new("description"),
+                TextReplacement::Removed,
+            ),
+            (MetadataLocation::new("title"), TextReplacement::Removed),
+        ]);
+        assert!(fields.redact(redactions).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_field_is_an_error_and_changes_nothing() {
+        let mut fields = fields();
+        let redactions = Redactions::from([
+            (part(9, 17), TextReplacement::substituted("[NAME]")),
+            (MetadataLocation::new("keywords"), TextReplacement::Removed),
+            (MetadataLocation::new("title"), TextReplacement::Removed),
+        ]);
+        assert!(fields.redact(redactions).is_err());
+        let values: Vec<String> = fields
+            .chunks()
+            .into_iter()
+            .map(|chunk| chunk.data.as_str().to_owned())
+            .collect();
+        assert_eq!(values, ["Photo of Jane Roe in Kyiv", "Plan"]);
     }
 }

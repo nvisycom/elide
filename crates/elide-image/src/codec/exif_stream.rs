@@ -61,11 +61,15 @@ impl DataReader<Metadata> for ExifStream {
 #[async_trait::async_trait]
 impl DataWriter<Metadata> for ExifStream {
     async fn write_at(&mut self, redactions: Redactions<Metadata>) -> Result<()> {
-        let edits = self.fields.redact(redactions)?;
+        // The fields change only once the image takes the edits too.
+        let mut fields = self.fields.clone();
+        let edits = fields.redact(redactions)?;
         let edits: Vec<(&str, &str)> = edits
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
-        self.state.edit_metadata(&edits)
+        self.state.edit_metadata(&edits)?;
+        self.fields = fields;
+        Ok(())
     }
 }

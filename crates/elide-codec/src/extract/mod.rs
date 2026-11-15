@@ -124,21 +124,3 @@ pub struct ItemEdit {
     /// The byte range to replace within that item's decoded value.
     pub local: Range<usize>,
 }
-
-impl ItemEdit {
-    /// `edits` merged per item, in item order: the edits of one item become one
-    /// covering the first start to the last end.
-    pub fn merged(mut edits: Vec<ItemEdit>) -> Vec<ItemEdit> {
-        edits.sort_by_key(|edit| (edit.item, edit.local.start));
-        let mut merged: Vec<ItemEdit> = Vec::with_capacity(edits.len());
-        for edit in edits {
-            match merged.last_mut() {
-                Some(last) if last.item == edit.item => {
-                    last.local.end = last.local.end.max(edit.local.end);
-                }
-                _ => merged.push(edit),
-            }
-        }
-        merged
-    }
-}
