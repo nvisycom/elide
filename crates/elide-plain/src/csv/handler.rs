@@ -167,12 +167,15 @@ impl CsvHandler {
     ///
     /// # Errors
     ///
-    /// [`MalformedInput`] for a cell, span, row or column the table doesn't
-    /// have, or two edits of one cell that overlap, leaving the table partly
+    /// [`MalformedInput`] for a location naming a sheet, a cell, span, row or
+    /// column the table doesn't have, or two edits of one cell that overlap, leaving the table partly
     /// edited.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     fn apply(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
+        for (location, _) in redactions.iter() {
+            unsheeted(location)?;
+        }
         redactions.sort_by_position();
         self.ensure_disjoint_cells(&redactions)?;
 
@@ -357,6 +360,7 @@ impl Encode for CsvHandler {
 #[async_trait::async_trait]
 impl DataReader<Tabular> for CsvHandler {
     async fn read_at(&self, location: &TabularLocation) -> Result<TextData> {
+        unsheeted(location)?;
         let cell = self
             .cell_at(location.row_index, location.column_index)
             .ok_or_else(|| no_cell(location))?;
@@ -376,6 +380,17 @@ impl DataWriter<Tabular> for CsvHandler {
         staged.apply(redactions)?;
         *self = staged;
         Ok(())
+    }
+}
+
+/// Refuse a location that names a sheet: a CSV file is one table, and the
+/// location addresses a table this isn't.
+fn unsheeted(location: &TabularLocation) -> Result<()> {
+    match &location.sheet_name {
+        Some(sheet) => Err(Error::malformed(format!(
+            "CSV has no sheets, but the location names sheet {sheet:?}"
+        ))),
+        None => Ok(()),
     }
 }
 
@@ -681,6 +696,27 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(h.encode().unwrap().as_bytes(), b"id\n[A][B]\n");
+    }
+
+    /// A CSV file is one table: a location naming a sheet addresses another.
+    #[tokio::test]
+    async fn a_location_naming_a_sheet_is_an_error() {
+        let substituted =
+            |value: &str| TabularReplacement::Cell(TextReplacement::substituted(value));
+        let src = "id\nabcdef\n";
+        let mut h = load(src).await;
+        let sheeted = TabularLocation::new(1, 0).with_sheet_name("Z");
+        let error = h.read_at(&sheeted).await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        let error = h
+            .write_at(Redactions::from([
+                (sheeted.with_span(0..1), substituted("LONG")),
+                (TabularLocation::new(1, 0).with_span(3..6), substituted("X")),
+            ]))
+            .await
+            .expect_err("a sheet-qualified location must fail");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
     }
 
     #[tokio::test]
