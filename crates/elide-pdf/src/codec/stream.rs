@@ -14,6 +14,9 @@ use elide_core::{Error, Result};
 use super::FORMAT_ID;
 use super::state::PdfState;
 
+/// The whole of a page, as a rendered rectangle.
+const WHOLE_PAGE: UnitBoundingBox = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
+
 /// The body [`Stream<Text>`] of a PDF: yields each page's text as a chunk and
 /// records per-page redactions onto the shared [`PdfState`], which the
 /// [`PdfDocument`](super::document::PdfDocument) applies on encode.
@@ -33,15 +36,11 @@ impl Stream<Text> for PdfStream {
         // detection runs per chunk, so a span can never straddle a page boundary.
         Ok(self
             .state
-            .pages()
-            .iter()
-            .map(|page| Chunk {
-                location: TextLocation::rendered(
-                    0..page.text.len(),
-                    page.number,
-                    [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)],
-                ),
-                data: TextData::new(page.text.clone()),
+            .texts()
+            .into_iter()
+            .map(|(number, text)| Chunk {
+                location: TextLocation::rendered(0..text.len(), number, [WHOLE_PAGE]),
+                data: TextData::new(text),
                 hints: Vec::new(),
             })
             .collect())
@@ -60,20 +59,21 @@ impl Stream<Text> for PdfStream {
         // Resolve the entity's rendered rectangles from this page's glyph
         // geometry. The range is byte offsets, but glyph geometry is keyed by
         // character offset, so convert against the page text (which the chunk
-        // carries) before looking the span up. Geometry is best-effort: a span
-        // covering only synthetic gaps yields no boxes, so fall back to a
-        // whole-page anchor — the entity is still located on its page.
+        // carries) before looking the span up. A span covering only synthetic
+        // gaps, or a page with no glyph geometry (the flatten path), yields no
+        // boxes, so falls back to a whole-page anchor: the entity is still
+        // located on its page.
         let page_text = chunk.data.as_str();
         let rects = self
             .state
-            .geometry_for(number)
-            .and_then(|geometry| {
+            .block(number)
+            .and_then(|block| {
                 let char_start = page_text.get(..local_range.start)?.chars().count();
                 let char_end = page_text.get(..local_range.end)?.chars().count();
-                let boxes = geometry.rects_for(char_start..char_end);
+                let boxes = block.rects_for(char_start..char_end);
                 (!boxes.is_empty()).then_some(boxes)
             })
-            .unwrap_or_else(|| vec![UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]);
+            .unwrap_or_else(|| vec![WHOLE_PAGE]);
 
         // PDF text has no flat source byte coordinate (glyph runs in content
         // streams), so no byte anchor is carried — only the page-local span and
@@ -96,12 +96,8 @@ impl Stream<Text> for PdfStream {
             ));
         };
         let number = *page;
-        let text = &self
-            .state
-            .page_by_number(number)
-            .ok_or_else(|| Error::malformed(format!("no page {number}")))?
-            .text;
-        let geometry = self.state.geometry_for(number).ok_or_else(|| {
+        let text = self.state.text(number)?;
+        let geometry = self.state.block(number).ok_or_else(|| {
             Error::malformed(format!(
                 "page {number} has no glyph geometry to place a mark on"
             ))
@@ -132,11 +128,8 @@ impl Stream<Text> for PdfStream {
 impl DataReader<Text> for PdfStream {
     async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
         let (range, number) = page_span(location)?;
-        let page = self
-            .state
-            .page_by_number(number)
-            .ok_or_else(|| Error::malformed(format!("no page {number}")))?;
-        page.text
+        self.state
+            .text(number)?
             .get(range.clone())
             .map(TextData::new)
             .ok_or_else(|| {
@@ -151,11 +144,13 @@ impl DataReader<Text> for PdfStream {
 #[async_trait::async_trait]
 impl DataWriter<Text> for PdfStream {
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
-        for (location, _replacement) in redactions.into_iter() {
-            let (range, page) = page_span(&location)?;
-            self.state.record(page, range)?;
-        }
-        Ok(())
+        let spans = redactions
+            .into_iter()
+            .map(|(location, _replacement)| {
+                page_span(&location).map(|(range, page)| (page, range.clone()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.state.record(spans)
     }
 }
 
@@ -174,5 +169,74 @@ fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
         _ => Err(Error::malformed(
             "a PDF location needs a page-local span and its page",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use elide_core::modality::text::TextReplacement;
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    use super::*;
+    use crate::codec::state::Pages;
+    use crate::document::Pdf;
+
+    /// The body stream of a one-page document showing `Jane Roe`.
+    fn body() -> PdfStream {
+        let mut doc = Document::with_version("1.5");
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Tj", vec![Object::string_literal("Jane Roe")]),
+            Operation::new("ET", vec![]),
+        ];
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            Content { operations }.encode().unwrap(),
+        ));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let blocks = Pdf::open(&bytes).unwrap().text().unwrap();
+        PdfStream {
+            state: PdfState::new(Pages::Glyph(blocks)),
+        }
+    }
+
+    fn redaction(page: u32, range: Range<usize>) -> (TextLocation, TextReplacement) {
+        (
+            TextLocation::rendered(range, page, [WHOLE_PAGE]),
+            TextReplacement::substituted("[NAME]"),
+        )
+    }
+
+    /// A batch with one span the document doesn't have records none of it.
+    #[tokio::test]
+    async fn a_failed_batch_records_nothing() {
+        let mut body = body();
+        let batch = Redactions::from([redaction(1, 0..4), redaction(2, 0..4)]);
+        assert!(body.write_at(batch).await.is_err());
+        assert!(body.state.detections().is_empty());
+
+        body.write_at(Redactions::from([redaction(1, 0..4)]))
+            .await
+            .unwrap();
+        assert_eq!(body.state.detections().len(), 1);
     }
 }

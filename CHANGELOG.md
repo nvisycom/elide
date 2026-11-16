@@ -38,8 +38,10 @@ and this project adheres to
   redacted through the pipeline registered for their modality; an embedded
   document nothing was redacted in keeps its original bytes, and an embedded
   file no codec can read is removed
-- Optional PDF page rendering to images via the native PDFium library
-  (`pdf-render` feature)
+- Optional PDF page rendering via the native PDFium library (`pdf-render`
+  feature): scanned pages are rendered for OCR and replaced by their redacted
+  image, and `RasterMode::Always` replaces every page by an image with the
+  detected text painted over, rendered at its configured DPI
 
 #### Detection
 
@@ -119,9 +121,14 @@ and this project adheres to
 - PDF: a document encrypted with a user password is refused; catalog, page,
   and trailer entries are kept by allowlist; marked content's alternate text
   is stripped; kept internal links are reduced to their navigation; embedded
-  files get neutral names; images are surfaced to the image pipeline, and one
-  that cannot be (fax, JBIG2, stencil masks, inline images) is removed rather
-  than shipped unscanned
+  files get neutral names; every image is surfaced to the image pipeline,
+  wherever it is drawn from, and one that cannot be (fax, JBIG2, stencil
+  masks, inline images) is removed rather than shipped unscanned; the
+  document is always re-serialized, so a prior revision's superseded objects
+  never ship; a page whose content cannot be read, text drawn in a tiling
+  pattern or before a font is selected, forms nested too deep, an embedded
+  file outside the attachment tree, and an encode naming a part the document
+  never surfaced are refused rather than passed through
 - Office documents surface the text they keep in attributes and outside a
   workbook's cells (authors, sheet, table, and defined names, bookmarks,
   dropdown entries, validation messages, headers and footers, formulas,
@@ -160,7 +167,8 @@ and this project adheres to
 - **elide-markup:** HTML and XML handlers, the markup sanitizer, and character
   reference decoding
 - **elide-office:** DOCX, XLSX, and PPTX extraction and byte-faithful redaction
-- **elide-pdf:** PDF text extraction and born-digital redaction
+- **elide-pdf:** PDF glyph-deletion and raster redaction of text, images, and
+  attachments
 - **elide-image:** Raster image decode and encode, EXIF read and strip, and
   pixel-region redaction, with OCR enrichment
 - **elide-audio:** Audio decode and encode and time-span redaction, with

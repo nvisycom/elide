@@ -1,21 +1,19 @@
 //! [`Store`]: the opened-document data holder the capabilities operate over.
 //!
-//! `Store` owns the parsed object graph and the pristine source bytes, plus the
-//! decompression bound, opened once and reused. It carries no
+//! `Store` owns the parsed object graph and the pristine source bytes, opened
+//! once and reused. It carries no
 //! extraction/inspection/redaction logic; those capabilities are functions in
 //! their own modules that take a `&Store` (or `&mut Store`) and read the object
 //! graph through it. The public [`Pdf`](super::Pdf) is a thin orchestrator over
 //! one `Store`.
-
-use std::num::NonZeroUsize;
 
 #[cfg(feature = "render")]
 use bytes::Bytes;
 use elide_core::{Error, Result};
 use lopdf::Document;
 
-/// The opened-document data holder: the parsed object graph, the source bytes,
-/// and the per-page decompression bound.
+/// The opened-document data holder: the parsed object graph and the source
+/// bytes.
 #[derive(Debug, Clone)]
 pub(crate) struct Store {
     /// The parsed object graph. Capabilities read and clone it through the
@@ -26,19 +24,13 @@ pub(crate) struct Store {
     /// re-serialisation.
     #[cfg(feature = "render")]
     source: Bytes,
-    /// Bound on a single page's decompressed content, guarding against a
-    /// decompression bomb.
-    max_page_bytes: NonZeroUsize,
 }
 
 impl Store {
-    /// Default bound on a single page's decompressed content.
-    pub(crate) const DEFAULT_MAX_PAGE_BYTES: NonZeroUsize =
-        NonZeroUsize::new(64 * 1024 * 1024).expect("non-zero");
     /// Maximum accepted source-document size (64 MiB).
     pub(crate) const MAX_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
 
-    /// Parse `document` under `max_page_bytes`, retaining the source bytes.
+    /// Parse `document`, retaining the source bytes.
     ///
     /// # Errors
     ///
@@ -46,7 +38,7 @@ impl Store {
     /// exceeds [`MAX_DOCUMENT_BYTES`](Self::MAX_DOCUMENT_BYTES), or
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
     /// bytes are not a readable PDF.
-    pub(crate) fn open(document: &[u8], max_page_bytes: NonZeroUsize) -> Result<Self> {
+    pub(crate) fn open(document: &[u8]) -> Result<Self> {
         if document.len() > Self::MAX_DOCUMENT_BYTES {
             return Err(Error::resource_limit(format!(
                 "document is {} bytes, over the {}-byte limit",
@@ -69,7 +61,6 @@ impl Store {
             doc,
             #[cfg(feature = "render")]
             source: Bytes::copy_from_slice(document),
-            max_page_bytes,
         })
     }
 
@@ -88,11 +79,6 @@ impl Store {
     #[cfg(feature = "render")]
     pub(crate) fn source_bytes(&self) -> Bytes {
         self.source.clone()
-    }
-
-    /// The per-page decompression bound.
-    pub(crate) fn max_page_bytes(&self) -> NonZeroUsize {
-        self.max_page_bytes
     }
 }
 
@@ -139,14 +125,13 @@ mod tests {
 
     #[test]
     fn a_pdf_that_needs_a_password_is_refused() {
-        let error = Store::open(&encrypted("secret"), Store::DEFAULT_MAX_PAGE_BYTES)
-            .expect_err("a password-protected PDF");
+        let error = Store::open(&encrypted("secret")).expect_err("a password-protected PDF");
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
     }
 
     #[test]
     fn a_pdf_with_an_empty_user_password_opens() {
-        let store = Store::open(&encrypted(""), Store::DEFAULT_MAX_PAGE_BYTES).expect("opens");
+        let store = Store::open(&encrypted("")).expect("opens");
         assert!(!store.doc().is_encrypted());
     }
 }

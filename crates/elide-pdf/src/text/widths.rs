@@ -7,11 +7,12 @@
 //! [`WidthSource`] that answers [`advance`](WidthSource::advance) in glyph-space
 //! thousandths (the unit `/Widths` and `/W` use, `1000` to the em).
 //!
-//! Widths feed *spacing only*, never redaction: a glyph whose width is unknown
-//! still deletes correctly (deletion works off glyph byte ranges, not geometry).
-//! So every lookup is best-effort — a missing or unparseable table yields
-//! [`WidthSource::Unknown`], and the caller falls back to treating any positional
-//! move as a word boundary rather than failing.
+//! Widths place glyphs: they decide where a word space is read, and the boxes a
+//! detection's rectangles and a reviewer's mark are resolved against. Deletion
+//! itself works off glyph byte ranges, so a glyph whose width is unknown still
+//! deletes. Every lookup is best-effort: a missing or unparseable table yields
+//! [`WidthSource::Unknown`], and the caller falls back to treating any
+//! positional move as a word boundary rather than failing.
 
 use std::collections::BTreeMap;
 

@@ -1,310 +1,137 @@
-//! Raster redaction: destructively overwrite detected pixels and emit a fresh
-//! image-only PDF.
+//! Raster redaction: select the glyph boxes a detection covers, and paint them
+//! over in a rendered page.
 //!
-//! This is the redaction guarantee. A text-layer rewrite edits drawing
-//! operators, which cannot reliably remove a value on subset/CID fonts and
-//! leaves metadata, annotations, and prior revisions untouched. Raster
-//! redaction instead works on the *rendered pixels*: it fills every detected
-//! glyph's box with an opaque colour and rebuilds a new document whose only
-//! content is the sanitised page images, **no object, stream, or byte from the
-//! source is copied forward**, so nothing can survive underneath.
-//!
-//! The output is not searchable or accessible: it is images. That is the
-//! deliberate trade for a guarantee that the original text is gone.
+//! The page is then written back as that one image
+//! ([`reflatten`](super::reflatten())), so none of its text, vector content, or
+//! images survives underneath.
+
+use std::collections::BTreeMap;
 
 use elide_core::{Error, Result};
+use image::{Rgb, RgbImage};
 
-use super::{Glyph, PageObservation, PixelRect, emit};
-use crate::document::Store;
+use super::{GlyphBox, PageObservation, PixelRect};
 use crate::text::Detection;
 
-/// Redact `detections` by destructively overwriting their pixels in the rendered
-/// `pages`, then emit a fresh image-only PDF from the document in `store`.
-///
-/// `pages` are the observations from [`observe`](crate::document::Pdf::observe) (or an
-/// equivalent with OCR-sourced glyphs for scanned pages). Each detection's glyph
-/// boxes are filled with `fill_rgb`; the output PDF's only content is the
-/// sanitised page images. No source object is copied forward.
-///
-/// Returns the new document bytes and a [`Certificate`](super::Certificate)
-/// binding the source, the sanitised pixels, and the output by SHA-256.
+/// The colour a redacted glyph box is painted.
+const FILL: Rgb<u8> = Rgb([0, 0, 0]);
+
+/// The glyph boxes `detections` cover, keyed by page.
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page's pixel buffer
-/// size does not match its dimensions, or a detection names a page not present in
-/// `pages` or selects no glyph to redact.
-pub(crate) fn redact_raster(
-    store: &Store,
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a detection
+/// names a page not in `pages`, or selects no glyph: a span that would paint
+/// nothing is a redaction that cannot be carried out, not a no-op.
+pub(crate) fn glyph_boxes(
     pages: &[PageObservation],
     detections: &[Detection],
-    fill_rgb: [u8; 3],
-) -> Result<(Vec<u8>, emit::Certificate)> {
-    let mut pages = pages.to_vec();
-
-    validate_pages(&pages, detections)?;
-
-    // Fill each detection's glyph boxes on its page.
-    for page in &mut pages {
-        for d in detections.iter().filter(|d| d.page == page.page) {
-            for rect in glyph_rects(&page.glyphs, d.start, d.end) {
-                fill_rect(&mut page.pixels, page.width, page.height, rect, fill_rgb);
-            }
-        }
-    }
-
-    // The fill above set every covered pixel to `fill_rgb`; a mismatch here would
-    // mean the fill and verify disagree on which pixels a detection selects,
-    // which must never ship.
-    debug_assert!(
-        verify_raster_coverage(&pages, detections, fill_rgb).is_ok(),
-        "redact_raster left a covered pixel unfilled"
-    );
-
-    emit::emit(&store.source_bytes(), pages)
-}
-
-/// Verify that every detection's glyph boxes are painted `fill_rgb` in `pages`.
-///
-/// Returns `Ok(())` iff, for every detection, every pixel of every glyph box it
-/// selects, by the same span-overlap rule and page-bounds clipping
-/// [`redact_raster`](crate::document::Pdf::redact_raster) fills with, is exactly
-/// `fill_rgb` in that page's [`pixels`](PageObservation::pixels).
-///
-/// A raster redaction's output is an image-only PDF with no text layer, so
-/// re-observing the output yields no glyphs and the rects cannot be re-derived
-/// from it. Verification therefore runs against the observations *after* the
-/// fill: they carry both the glyphs and the now-painted pixels. A caller (or an
-/// end-to-end test) uses this to confirm a redaction actually painted the
-/// pixels it was meant to, without re-implementing the coordinate math.
-///
-/// # Errors
-///
-/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page's
-/// pixel buffer size does not match its dimensions, a detection names a page
-/// not present in `pages` or selects no glyph, or a covered pixel is not
-/// `fill_rgb` (naming the page and the offending pixel).
-pub(crate) fn verify_raster_coverage(
-    pages: &[PageObservation],
-    detections: &[Detection],
-    fill_rgb: [u8; 3],
-) -> Result<()> {
-    validate_pages(pages, detections)?;
-
-    for page in pages {
-        for d in detections.iter().filter(|d| d.page == page.page) {
-            for rect in glyph_rects(&page.glyphs, d.start, d.end) {
-                if let Some((x, y)) = unfilled_pixel(&page.pixels, page.width, rect, fill_rgb) {
-                    return Err(Error::redaction(format!(
-                        "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
-                        page.page
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Validate every page buffer and detection target, fail-closed.
-///
-/// An RGB8 buffer must be exactly `width * height * 3` bytes, or the fill would
-/// read/write out of bounds; every detection must name a page present in `pages`
-/// and select at least one glyph on it.
-fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result<()> {
-    for page in pages {
-        let expected = (page.width as usize)
-            .checked_mul(page.height as usize)
-            .and_then(|n| n.checked_mul(3));
-        if expected != Some(page.pixels.len()) {
-            return Err(Error::redaction(format!(
-                "page {} pixel buffer is {} bytes, expected {:?}",
-                page.page,
-                page.pixels.len(),
-                expected
-            )));
-        }
-    }
-
+) -> Result<BTreeMap<u32, Vec<GlyphBox>>> {
+    let mut boxes: BTreeMap<u32, Vec<GlyphBox>> = BTreeMap::new();
     for d in detections {
-        let Some(page) = pages.iter().find(|p| p.page == d.page) else {
-            return Err(Error::redaction(format!(
-                "detection names page {} not in the observed pages",
+        let page = pages.iter().find(|p| p.page == d.page).ok_or_else(|| {
+            Error::redaction(format!(
+                "detection names page {}, which has no text",
                 d.page
-            )));
-        };
-        // A detection that maps to no glyph would paint nothing, and both the
-        // fill and the coverage check would then "succeed" over an empty set,
-        // silently leaving the span in the output. Fail closed instead: an
-        // empty, out-of-range, or unmapped span is a redaction that cannot be
-        // carried out, not a no-op.
-        if glyph_rects(&page.glyphs, d.start, d.end).next().is_none() {
+            ))
+        })?;
+        let selected: Vec<GlyphBox> = page
+            .glyphs
+            .iter()
+            .filter(|g| g.start < d.end && g.end > d.start)
+            .map(|g| g.bounds)
+            .collect();
+        if selected.is_empty() {
             return Err(Error::redaction(format!(
                 "detection on page {} (chars {}..{}) selects no glyph to redact",
                 d.page, d.start, d.end
             )));
         }
+        boxes.entry(d.page).or_default().extend(selected);
     }
-
-    Ok(())
+    Ok(boxes)
 }
 
-/// The pixel boxes of every glyph whose span overlaps `[start, end)`.
-fn glyph_rects(glyphs: &[Glyph], start: usize, end: usize) -> impl Iterator<Item = PixelRect> + '_ {
-    glyphs
-        .iter()
-        .filter(move |g| g.start < end && g.end > start)
-        .map(|g| g.rect)
-}
-
-/// Clip `rect` to a `width` x `height` page: the half-open pixel ranges
-/// `x0..x1` by `y0..y1` it actually covers.
-fn clip_rect(width: u32, height: u32, rect: PixelRect) -> (u32, u32, u32, u32) {
-    let x0 = rect.x.min(width);
-    let y0 = rect.y.min(height);
-    let x1 = rect.x.saturating_add(rect.width).min(width);
-    let y1 = rect.y.saturating_add(rect.height).min(height);
-    (x0, y0, x1, y1)
-}
-
-/// Destructively overwrite `rect` in an RGB8 `pixels` buffer with `fill`,
-/// clipped to the page bounds.
-fn fill_rect(pixels: &mut [u8], width: u32, height: u32, rect: PixelRect, fill: [u8; 3]) {
-    let (x0, y0, x1, y1) = clip_rect(width, height, rect);
-    for y in y0..y1 {
-        let row = (y as usize) * (width as usize) * 3;
-        for x in x0..x1 {
-            let i = row + (x as usize) * 3;
-            pixels[i] = fill[0];
-            pixels[i + 1] = fill[1];
-            pixels[i + 2] = fill[2];
+/// Paint `rect` over `image`, clipped to its bounds.
+pub(crate) fn fill(image: &mut RgbImage, rect: PixelRect) {
+    let x1 = rect.x.saturating_add(rect.width).min(image.width());
+    let y1 = rect.y.saturating_add(rect.height).min(image.height());
+    for y in rect.y..y1 {
+        for x in rect.x..x1 {
+            image.put_pixel(x, y, FILL);
         }
     }
-}
-
-/// The first pixel of `rect` (clipped to `width`) not equal to `fill` in an
-/// RGB8 `pixels` buffer, as `(x, y)`; `None` if every covered pixel matches.
-///
-/// The page height is derived from the buffer length, so the same page-bounds
-/// clipping [`fill_rect`] applies holds, an out-of-bounds glyph box covers no
-/// pixels rather than reporting a false mismatch.
-fn unfilled_pixel(pixels: &[u8], width: u32, rect: PixelRect, fill: [u8; 3]) -> Option<(u32, u32)> {
-    let height = if width == 0 {
-        0
-    } else {
-        (pixels.len() / 3 / width as usize) as u32
-    };
-    let (x0, y0, x1, y1) = clip_rect(width, height, rect);
-    for y in y0..y1 {
-        let row = (y as usize) * (width as usize) * 3;
-        for x in x0..x1 {
-            let i = row + (x as usize) * 3;
-            if pixels[i..i + 3] != fill {
-                return Some((x, y));
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
+    use image::{Rgb, RgbImage};
 
-    use super::verify_raster_coverage;
-    use crate::render::{Glyph, GlyphSource, PageObservation, PixelRect};
-    use crate::text::Detection;
+    use super::*;
+    use crate::render::Glyph;
 
-    const FILL: [u8; 3] = [255, 0, 0];
-
-    /// A page filled entirely with `rgb`, carrying `glyphs`.
-    fn page(
-        page: u32,
-        width: u32,
-        height: u32,
-        rgb: [u8; 3],
-        glyphs: Vec<Glyph>,
-    ) -> PageObservation {
-        let pixels = rgb.repeat((width as usize) * (height as usize));
+    fn page(number: u32, glyphs: Vec<Glyph>) -> PageObservation {
         PageObservation {
-            page,
-            width,
-            height,
+            page: number,
             text: String::new(),
             glyphs,
-            pixels,
         }
     }
 
-    /// A text-sourced glyph spanning `[start, end)` with box `rect`.
-    fn glyph(start: usize, end: usize, rect: PixelRect) -> Glyph {
+    fn glyph(start: usize, end: usize, left: f32) -> Glyph {
         Glyph {
             start,
             end,
-            rect,
-            source: GlyphSource::Text,
+            bounds: GlyphBox {
+                left,
+                bottom: 0.0,
+                right: left + 1.0,
+                top: 1.0,
+            },
         }
     }
 
     #[test]
-    fn ok_when_every_covered_pixel_is_fill() {
-        let g = glyph(0, 1, PixelRect::new(1, 1, 2, 2));
-        let mut p = page(1, 4, 4, [0, 0, 0], vec![g]);
-        // Paint exactly the glyph box with the fill colour.
-        for y in 1..3 {
-            for x in 1..3 {
-                let i = (y * 4 + x) * 3;
-                p.pixels[i..i + 3].copy_from_slice(&FILL);
-            }
+    fn a_detection_selects_the_glyphs_it_overlaps() {
+        let pages = [page(
+            1,
+            vec![glyph(0, 1, 0.0), glyph(1, 2, 1.0), glyph(2, 3, 2.0)],
+        )];
+        let boxes = glyph_boxes(&pages, &[Detection::new(1, 1, 3)]).unwrap();
+        let lefts: Vec<f32> = boxes[&1].iter().map(|b| b.left).collect();
+        assert_eq!(lefts, [1.0, 2.0]);
+    }
+
+    #[test]
+    fn a_detection_on_a_page_without_text_is_an_error() {
+        let pages = [page(1, vec![glyph(0, 1, 0.0)])];
+        let err = glyph_boxes(&pages, &[Detection::new(2, 0, 1)]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
+
+    #[test]
+    fn a_detection_that_selects_no_glyph_is_an_error() {
+        let pages = [page(1, vec![glyph(5, 6, 0.0)])];
+        let err = glyph_boxes(&pages, &[Detection::new(1, 0, 1)]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
+
+    #[test]
+    fn a_fill_paints_its_rect_clipped_to_the_page() {
+        let mut image = RgbImage::from_pixel(4, 4, Rgb([255, 255, 255]));
+        fill(
+            &mut image,
+            PixelRect {
+                x: 2,
+                y: 1,
+                width: 9,
+                height: 2,
+            },
+        );
+        for (x, y, pixel) in image.enumerate_pixels() {
+            let inside = x >= 2 && (1..3).contains(&y);
+            assert_eq!(*pixel == FILL, inside, "pixel ({x}, {y})");
         }
-
-        let detections = [Detection::new(1, 0, 1)];
-        assert!(verify_raster_coverage(&[p], &detections, FILL).is_ok());
-    }
-
-    #[test]
-    fn err_when_a_covered_pixel_is_not_fill() {
-        // A page left entirely unpainted: the covered box is still black.
-        let g = glyph(0, 1, PixelRect::new(1, 1, 2, 2));
-        let p = page(1, 4, 4, [0, 0, 0], vec![g]);
-
-        let detections = [Detection::new(1, 0, 1)];
-        let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::Redaction);
-    }
-
-    #[test]
-    fn err_when_detection_names_absent_page() {
-        let p = page(1, 2, 2, FILL, vec![]);
-
-        let detections = [Detection::new(2, 0, 1)];
-        let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::Redaction);
-    }
-
-    #[test]
-    fn err_when_detection_selects_no_glyph() {
-        // The page exists and its buffer is valid, but no glyph overlaps the
-        // detected span, so a fill would paint nothing. This must fail closed
-        // rather than "succeed" over an empty pixel set and leave the span in.
-        let g = glyph(5, 6, PixelRect::new(1, 1, 2, 2));
-        let p = page(1, 4, 4, FILL, vec![g]);
-
-        let detections = [Detection::new(1, 0, 1)];
-        let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::Redaction);
-    }
-
-    #[test]
-    fn partial_clip_is_not_a_false_failure() {
-        // A glyph box straddling the right/bottom edge: only pixels inside the
-        // page are checked. The whole 2x2 page is fill, so the clipped box
-        // matches even though the box extends past the bounds.
-        let g = glyph(0, 1, PixelRect::new(1, 1, 4, 4));
-        let p = page(1, 2, 2, FILL, vec![g]);
-
-        let detections = [Detection::new(1, 0, 1)];
-        assert!(verify_raster_coverage(&[p], &detections, FILL).is_ok());
     }
 }
