@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use elide_core::{Error, Result};
 use image::{Rgb, RgbImage};
 
-use super::{GlyphBox, PageObservation, PixelRect};
-use crate::text::Detection;
+use super::{PageObservation, PixelRect};
+use crate::text::{Detection, DeviceRect};
 
 /// The colour a redacted glyph box is painted.
 const FILL: Rgb<u8> = Rgb([0, 0, 0]);
@@ -26,8 +26,8 @@ const FILL: Rgb<u8> = Rgb([0, 0, 0]);
 pub(crate) fn glyph_boxes(
     pages: &[PageObservation],
     detections: &[Detection],
-) -> Result<BTreeMap<u32, Vec<GlyphBox>>> {
-    let mut boxes: BTreeMap<u32, Vec<GlyphBox>> = BTreeMap::new();
+) -> Result<BTreeMap<u32, Vec<DeviceRect>>> {
+    let mut boxes: BTreeMap<u32, Vec<DeviceRect>> = BTreeMap::new();
     for d in detections {
         let page = pages.iter().find(|p| p.page == d.page).ok_or_else(|| {
             Error::redaction(format!(
@@ -35,11 +35,11 @@ pub(crate) fn glyph_boxes(
                 d.page
             ))
         })?;
-        let selected: Vec<GlyphBox> = page
+        let selected: Vec<DeviceRect> = page
             .glyphs
             .iter()
-            .filter(|g| g.start < d.end && g.end > d.start)
-            .map(|g| g.bounds)
+            .filter(|g| g.chars.start < d.end && g.chars.end > d.start)
+            .map(|g| g.rect)
             .collect();
         if selected.is_empty() {
             return Err(Error::redaction(format!(
@@ -69,25 +69,25 @@ mod tests {
     use image::{Rgb, RgbImage};
 
     use super::*;
-    use crate::render::Glyph;
+    use crate::text::{GlyphRect, PageFrame};
 
-    fn page(number: u32, glyphs: Vec<Glyph>) -> PageObservation {
+    fn page(number: u32, glyphs: Vec<GlyphRect>) -> PageObservation {
         PageObservation {
             page: number,
             text: String::new(),
             glyphs,
+            frame: PageFrame::LETTER,
         }
     }
 
-    fn glyph(start: usize, end: usize, left: f32) -> Glyph {
-        Glyph {
-            start,
-            end,
-            bounds: GlyphBox {
-                left,
-                bottom: 0.0,
-                right: left + 1.0,
-                top: 1.0,
+    fn glyph(start: usize, end: usize, left: f64) -> GlyphRect {
+        GlyphRect {
+            chars: start..end,
+            rect: DeviceRect {
+                min_x: left,
+                min_y: 0.0,
+                max_x: left + 1.0,
+                max_y: 1.0,
             },
         }
     }
@@ -99,7 +99,7 @@ mod tests {
             vec![glyph(0, 1, 0.0), glyph(1, 2, 1.0), glyph(2, 3, 2.0)],
         )];
         let boxes = glyph_boxes(&pages, &[Detection::new(1, 1, 3)]).unwrap();
-        let lefts: Vec<f32> = boxes[&1].iter().map(|b| b.left).collect();
+        let lefts: Vec<f64> = boxes[&1].iter().map(|b| b.min_x).collect();
         assert_eq!(lefts, [1.0, 2.0]);
     }
 

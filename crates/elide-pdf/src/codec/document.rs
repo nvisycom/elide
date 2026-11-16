@@ -2,6 +2,8 @@
 //! body stream recorded, with the redacted and removed image, scanned-page, and
 //! attachment blobs folded in, and checked to carry no hidden content.
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{Blob, LocalId, Native, StreamMut};
@@ -15,7 +17,7 @@ use crate::document::attachment::AttachmentReplacement;
 use crate::document::image::ImageReplacement;
 use crate::document::{Pdf, Redaction};
 #[cfg(feature = "render")]
-use crate::render::PageReplacement;
+use crate::render::ScannedPage;
 
 /// A decoded PDF: its page-text body stream over the sanitized document, with
 /// the embedded-image, scanned-page, and attachment [`Blob`]s alongside.
@@ -24,6 +26,9 @@ pub(super) struct PdfDocument {
     pub(super) body: PdfStream,
     /// The sanitized document bytes, which encode re-serialises from.
     pub(super) document: Bytes,
+    /// Each blob's bytes as surfaced, by id: a blob that comes back with the
+    /// same bytes is left as the document holds it.
+    pub(super) surfaced: BTreeMap<String, Bytes>,
 }
 
 impl Native for PdfDocument {
@@ -36,7 +41,15 @@ impl Native for PdfDocument {
 
     fn encode(&self, blobs: &[Blob], removed: &[LocalId]) -> Result<ContentData> {
         let mut redaction = Redaction::default();
+        #[cfg(feature = "render")]
+        {
+            redaction.scan_scale = self.body.state.scan_scale();
+        }
         for part in blobs {
+            let surfaced = self.surfaced.get(part.id.as_str());
+            if surfaced == Some(&part.bytes) {
+                continue;
+            }
             let bytes = part.bytes.to_vec();
             match PartId::parse(part.id.as_str())? {
                 PartId::Image(id) => {
@@ -48,11 +61,11 @@ impl Native for PdfDocument {
                         .push(AttachmentReplacement { id, bytes });
                 }
                 #[cfg(feature = "render")]
-                PartId::Page(number) => {
-                    redaction
-                        .pages
-                        .push(PageReplacement::encoded(number, bytes)?);
-                }
+                PartId::Page(number) => redaction.scanned.push(ScannedPage {
+                    number,
+                    original: surfaced.cloned().unwrap_or_default(),
+                    redacted: part.bytes.clone(),
+                }),
             }
         }
         // A removed blob is content no codec could read: an attachment is

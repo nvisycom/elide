@@ -36,7 +36,7 @@ use self::object::DocumentExt;
 use self::sanitize::SanitizeDocumentExt;
 pub(crate) use self::store::Store;
 #[cfg(feature = "render")]
-use crate::render::{self, PageObservation, PageReplacement};
+use crate::render::{self, PageObservation, PageReplacement, ScannedPage};
 use crate::text::{self, Detection, TextBlock};
 
 /// An opened PDF document: parsed once, then reused across operations.
@@ -152,6 +152,18 @@ impl Pdf {
         }
         #[cfg(feature = "render")]
         {
+            if !redaction.scanned.is_empty() {
+                let redraws = redaction.redraws_images();
+                let staged;
+                let drawn = if redraws {
+                    staged = Pdf::open(&doc.clone().save_pruned()?)?;
+                    &staged
+                } else {
+                    self
+                };
+                let pages = drawn.scanned(&redaction.scanned, redaction.scan_scale, redraws)?;
+                render::reflatten(&mut doc, &pages)?;
+            }
             render::reflatten(&mut doc, &redaction.pages)?;
             render::clear(&mut doc, &redaction.cleared_pages)?;
         }
@@ -206,21 +218,22 @@ impl Pdf {
         detections: &[Detection],
         redaction: Redaction,
     ) -> Result<Vec<u8>> {
+        let redraws = redaction.redraws_images();
         let images = Redaction {
             images: redaction.images,
             removed_images: redaction.removed_images,
             ..Redaction::default()
         };
         let redacted;
-        let pdf = if images.is_empty() {
-            self
-        } else {
+        let pdf = if redraws {
             redacted = Pdf::open(&self.apply(&[], &images)?)?;
             &redacted
+        } else {
+            self
         };
 
         let scanned: BTreeSet<u32> = redaction
-            .pages
+            .scanned
             .iter()
             .map(|page| page.number)
             .chain(redaction.cleared_pages.iter().copied())
@@ -232,7 +245,7 @@ impl Pdf {
             .collect();
         let boxes = render::glyph_boxes(pages, detections)?;
         let mut flat = render::flatten(&pdf.0, rendered, scale, &boxes)?;
-        flat.extend(redaction.pages);
+        flat.extend(pdf.scanned(&redaction.scanned, scale, redraws)?);
         let pages = Redaction {
             pages: flat,
             cleared_pages: redaction.cleared_pages,
@@ -241,6 +254,33 @@ impl Pdf {
             ..Redaction::default()
         };
         pdf.apply(&[], &pages)
+    }
+
+    /// The images that replace the redacted `scanned` pages, rendered at
+    /// `scale`. When `redrawn`, this document draws embedded images other than
+    /// the render the pipeline was given, so each redaction is laid over a
+    /// fresh render of the page (see [`render::composite`]); otherwise the
+    /// redacted image is the page as it is.
+    ///
+    /// # Errors
+    ///
+    /// As [`render::composite`], and
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a
+    /// redacted image lopdf cannot embed.
+    #[cfg(feature = "render")]
+    fn scanned(
+        &self,
+        scanned: &[ScannedPage],
+        scale: f32,
+        redrawn: bool,
+    ) -> Result<Vec<PageReplacement>> {
+        if redrawn {
+            return render::composite(&self.0, scanned, scale);
+        }
+        scanned
+            .iter()
+            .map(|page| PageReplacement::encoded(page.number, page.redacted.to_vec()))
+            .collect()
     }
 }
 
@@ -257,6 +297,13 @@ pub(crate) struct Redaction {
     /// Pages replaced by a single redacted image.
     #[cfg(feature = "render")]
     pub(crate) pages: Vec<PageReplacement>,
+    /// Scanned pages the image pipeline changed, each replaced by its redacted
+    /// image.
+    #[cfg(feature = "render")]
+    pub(crate) scanned: Vec<ScannedPage>,
+    /// The scale the scanned pages were rendered at.
+    #[cfg(feature = "render")]
+    pub(crate) scan_scale: f32,
     /// Scanned pages no codec could read, cleared.
     #[cfg(feature = "render")]
     pub(crate) cleared_pages: Vec<u32>,
@@ -267,10 +314,18 @@ pub(crate) struct Redaction {
 }
 
 impl Redaction {
+    /// Whether the redaction changes what an embedded image draws, so a page
+    /// rendered before it no longer shows what the document draws.
+    #[cfg(feature = "render")]
+    fn redraws_images(&self) -> bool {
+        !self.images.is_empty() || !self.removed_images.is_empty()
+    }
+
     /// Whether the redaction changes nothing.
     pub(crate) fn is_empty(&self) -> bool {
         #[cfg(feature = "render")]
-        let pages = self.pages.is_empty() && self.cleared_pages.is_empty();
+        let pages =
+            self.pages.is_empty() && self.scanned.is_empty() && self.cleared_pages.is_empty();
         #[cfg(not(feature = "render"))]
         let pages = true;
         self.text.is_empty()

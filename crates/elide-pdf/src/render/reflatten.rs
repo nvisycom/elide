@@ -6,6 +6,7 @@
 //! nothing of the original survives underneath, while every other page is left
 //! untouched.
 
+use bytes::Bytes;
 use elide_core::{Error, Result};
 use image::RgbImage;
 use lopdf::xobject::image_from;
@@ -13,6 +14,17 @@ use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
 use crate::document::object::DocumentExt;
 use crate::text::{PageFrame, page_frame};
+
+/// A scanned page as the image pipeline was given it, and as it came back.
+#[derive(Debug, Clone)]
+pub(crate) struct ScannedPage {
+    /// 1-based page number.
+    pub(crate) number: u32,
+    /// The page's render, as surfaced.
+    pub(crate) original: Bytes,
+    /// The redacted render.
+    pub(crate) redacted: Bytes,
+}
 
 /// One page reflatten: page `number`'s whole content replaced with `image`, a
 /// redacted image of the page as displayed.

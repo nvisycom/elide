@@ -29,10 +29,10 @@ mod walker;
 mod widths;
 
 pub(crate) use self::address::{Address, StreamTarget};
-pub(crate) use self::block::{FontEntry, TextBlock};
+pub(crate) use self::block::{FontEntry, PageGeometry, TextBlock};
 pub(crate) use self::cmap::scrub;
 pub(crate) use self::detection::Detection;
 #[cfg(feature = "render")]
-pub(crate) use self::geometry::{PageFrame, page_frame};
+pub(crate) use self::geometry::{DeviceRect, GlyphRect, PageFrame, page_frame};
 pub(crate) use self::offset::{GlyphBytes, OffsetMap, OffsetRun};
 pub(crate) use self::walker::text_blocks;

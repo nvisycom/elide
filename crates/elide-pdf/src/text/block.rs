@@ -7,8 +7,7 @@ use elide_core::primitive::UnitBoundingBox;
 use lopdf::ObjectId;
 
 use super::OffsetMap;
-use super::geometry::{DeviceRect, PageFrame};
-use super::walker::GlyphRect;
+use super::geometry::{DeviceRect, GlyphRect, PageFrame};
 
 /// One page's recovered text, plus the correspondence back to the glyphs that
 /// drew it.
@@ -45,6 +44,25 @@ pub(crate) struct TextBlock {
 }
 
 impl TextBlock {
+    /// The page's glyph boxes and frame.
+    pub(crate) fn geometry(&self) -> PageGeometry<'_> {
+        PageGeometry {
+            rects: &self.rects,
+            frame: &self.frame,
+        }
+    }
+}
+
+/// A page's glyph boxes in default user space and the frame that places them
+/// on the page as displayed: what a detected span's rectangles and a reviewer's
+/// mark are resolved against, whichever reader produced the glyphs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PageGeometry<'a> {
+    pub(crate) rects: &'a [GlyphRect],
+    pub(crate) frame: &'a PageFrame,
+}
+
+impl<'a> PageGeometry<'a> {
     /// The page-normalized rectangles covering the characters `chars`, one
     /// per line: the boxes of the glyphs that drew them, merged along each
     /// line.
@@ -65,14 +83,15 @@ impl TextBlock {
 
     /// The page-local character range of each glyph whose center falls in any
     /// of `regions` (page-normalized, top-left origin), in draw order.
-    pub(crate) fn glyphs_in<'a>(
-        &'a self,
+    pub(crate) fn glyphs_in(
+        self,
         regions: &'a [UnitBoundingBox],
     ) -> impl Iterator<Item = Range<usize>> + 'a {
+        let frame = self.frame;
         self.rects
             .iter()
             .filter(move |glyph| {
-                let rect = self.frame.normalize(glyph.rect);
+                let rect = frame.normalize(glyph.rect);
                 let x = rect.x + rect.width / 2.0;
                 let y = rect.y + rect.height / 2.0;
                 regions.iter().any(|region| {

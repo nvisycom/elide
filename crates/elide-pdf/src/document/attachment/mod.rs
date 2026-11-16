@@ -108,17 +108,58 @@ pub(crate) fn attachments(store: &Store) -> Result<Vec<Attachment>> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    // An embedded file reached some other way would ship unscanned.
-    let stray = doc.objects.iter().find(|(id, object)| {
-        !seen.contains(id)
-            && matches!(object, Object::Stream(stream) if stream.dict.has_type(b"EmbeddedFile"))
-    });
-    if let Some((id, _)) = stray {
+    // An embedded file reached some other way would ship unscanned: one typed
+    // as such, or one a file specification's `/EF` names (the type is
+    // optional).
+    let mut embedded: BTreeSet<ObjectId> = doc
+        .objects
+        .iter()
+        .filter(|(_, object)| {
+            matches!(object, Object::Stream(stream) if stream.dict.has_type(b"EmbeddedFile"))
+        })
+        .map(|(&id, _)| id)
+        .collect();
+    for object in doc.objects.values() {
+        embedded_files(object, 0, &mut embedded);
+    }
+    if let Some(id) = embedded.difference(&seen).next() {
         return Err(Error::malformed(format!(
             "embedded file {id:?} is outside the attachment tree and associated files"
         )));
     }
     Ok(attachments)
+}
+
+/// How deep a value nests dictionaries and arrays before the `/EF` search
+/// stops looking.
+const MAX_EF_DEPTH: usize = 32;
+
+/// Collect into `out` every stream an `/EF` dictionary within `object` names.
+fn embedded_files(object: &Object, depth: usize, out: &mut BTreeSet<ObjectId>) {
+    if depth > MAX_EF_DEPTH {
+        return;
+    }
+    let dict = match object {
+        Object::Dictionary(dict) => dict,
+        Object::Stream(stream) => &stream.dict,
+        Object::Array(items) => {
+            for item in items {
+                embedded_files(item, depth + 1, out);
+            }
+            return;
+        }
+        _ => return,
+    };
+    if let Ok(Object::Dictionary(files)) = dict.get(b"EF") {
+        out.extend(
+            files
+                .iter()
+                .filter_map(|(_, file)| file.as_reference().ok()),
+        );
+    }
+    for (_, value) in dict.iter() {
+        embedded_files(value, depth + 1, out);
+    }
 }
 
 /// Write each replacement's bytes into its attachment's stream and drop every
@@ -378,6 +419,23 @@ mod tests {
             b"Jane Roe".to_vec(),
         ));
         doc.catalog_mut().unwrap().set("Private", stray);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        assert!(Pdf::open(&bytes).unwrap().attachments().is_err());
+    }
+
+    /// An untyped embedded file a file specification names outside the tree
+    /// is refused too.
+    #[test]
+    fn an_untyped_embedded_file_outside_the_tree_is_an_error() {
+        let mut doc = Document::load_mem(&with_attachments(&[("a.txt", b"x")])).unwrap();
+        let stray = doc.add_object(Stream::new(dictionary! {}, b"Jane Roe".to_vec()));
+        let spec = doc.add_object(dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::string_literal("b.txt"),
+            "EF" => dictionary! { "F" => stray },
+        });
+        doc.catalog_mut().unwrap().set("Private", spec);
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         assert!(Pdf::open(&bytes).unwrap().attachments().is_err());

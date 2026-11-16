@@ -17,6 +17,8 @@
 //! *not* part of that state (they reset at `BT` and are set by the text-
 //! positioning operators), so [`Cursor`] holds them separately.
 
+use std::ops::Range;
+
 use elide_core::primitive::UnitBoundingBox;
 use lopdf::{Document, ObjectId};
 
@@ -184,19 +186,40 @@ impl Cursor {
     }
 }
 
+/// One glyph's box and the decoded character range it drew, so a detected
+/// character span can be resolved back to the page rectangles it covers.
+#[derive(Debug, Clone)]
+pub(crate) struct GlyphRect {
+    /// The page-local decoded character range this glyph produced.
+    pub(crate) chars: Range<usize>,
+    /// The glyph's box in default user space, bottom-left origin.
+    pub(crate) rect: DeviceRect,
+}
+
 /// An axis-aligned box in device (page) space, as the glyph quad projects to.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DeviceRect {
-    pub(super) min_x: f64,
-    pub(super) min_y: f64,
-    pub(super) max_x: f64,
-    pub(super) max_y: f64,
+    pub(crate) min_x: f64,
+    pub(crate) min_y: f64,
+    pub(crate) max_x: f64,
+    pub(crate) max_y: f64,
 }
 
 impl DeviceRect {
+    /// The box's four corners, as `(x, y)` points.
+    #[cfg(feature = "render")]
+    pub(crate) fn corners(&self) -> [(f64, f64); 4] {
+        [
+            (self.min_x, self.min_y),
+            (self.max_x, self.min_y),
+            (self.max_x, self.max_y),
+            (self.min_x, self.max_y),
+        ]
+    }
+
     /// The axis-aligned bounds of four device-space corners (a glyph quad mapped
     /// through a possibly-rotated matrix is not axis-aligned; take its extent).
-    pub(super) fn of_corners(corners: [(f64, f64); 4]) -> DeviceRect {
+    pub(crate) fn of_corners(corners: [(f64, f64); 4]) -> DeviceRect {
         let xs = corners.map(|(x, _)| x);
         let ys = corners.map(|(_, y)| y);
         DeviceRect {
@@ -358,14 +381,23 @@ impl SpaceRule {
 /// Read a page's visible rectangle and display rotation into a [`PageFrame`],
 /// or `None` when the page has no readable box.
 ///
-/// `/CropBox` (the displayed region) is preferred, falling back to `/MediaBox`;
-/// both and `/Rotate` are inheritable, so this walks up `/Parent` for a value the
-/// page itself does not set. A missing or junk rotation is zero.
+/// The visible rectangle is the `/CropBox` clipped to the `/MediaBox`, either
+/// one alone when the other is missing (or they do not overlap). Both and
+/// `/Rotate` are inheritable, so this walks up `/Parent` for a value the page
+/// itself does not set, resolving references. A missing or junk rotation is
+/// zero.
 pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame> {
-    let [x0, y0, x1, y1] = inherited_rect(doc, page_id, b"CropBox")
-        .or_else(|| inherited_rect(doc, page_id, b"MediaBox"))?;
+    let media = inherited_rect(doc, page_id, b"MediaBox").map(normalize_rect);
+    let crop = inherited_rect(doc, page_id, b"CropBox").map(normalize_rect);
+    let [x0, y0, x1, y1] = match (crop, media) {
+        (Some(crop), Some(media)) => intersect(crop, media).unwrap_or(media),
+        (Some(rect), None) | (None, Some(rect)) => rect,
+        (None, None) => return None,
+    };
     let rotate = doc
-        .inherited(page_id, b"Rotate", |value| value.as_i64().ok())
+        .inherited(page_id, b"Rotate", |value| {
+            doc.resolve(value)?.as_i64().ok()
+        })
         .unwrap_or(0);
     // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
     // defensive against junk).
@@ -373,12 +405,29 @@ pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame>
     let rotate = (rotate / 90) * 90;
 
     Some(PageFrame {
-        crop_x0: x0.min(x1),
-        crop_y0: y0.min(y1),
-        crop_w: (x1 - x0).abs(),
-        crop_h: (y1 - y0).abs(),
+        crop_x0: x0,
+        crop_y0: y0,
+        crop_w: x1 - x0,
+        crop_h: y1 - y0,
         rotate,
     })
+}
+
+/// `[x0, y0, x1, y1]` with its corners ordered low to high.
+fn normalize_rect([x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
+    [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)]
+}
+
+/// The overlap of two normalized rectangles, or `None` when they share no
+/// area.
+fn intersect(a: [f64; 4], b: [f64; 4]) -> Option<[f64; 4]> {
+    let overlap = [
+        a[0].max(b[0]),
+        a[1].max(b[1]),
+        a[2].min(b[2]),
+        a[3].min(b[3]),
+    ];
+    (overlap[0] < overlap[2] && overlap[1] < overlap[3]).then_some(overlap)
 }
 
 /// Resolve a 4-number rectangle attribute (`MediaBox`/`CropBox`) on a page,
@@ -583,5 +632,44 @@ mod tests {
             inherited_rect(&doc, page, b"MediaBox"),
             Some([0.0, 0.0, 595.0, 842.0]),
         );
+    }
+
+    /// A page with `boxes` set on it directly, and its id.
+    fn page_with(boxes: Vec<(&str, Object)>) -> (Document, ObjectId) {
+        let mut doc = Document::with_version("1.7");
+        let mut page = dictionary! { "Type" => "Page" };
+        for (key, value) in boxes {
+            page.set(key, value);
+        }
+        let id = doc.add_object(page);
+        (doc, id)
+    }
+
+    fn rect(values: [i64; 4]) -> Object {
+        Object::Array(values.into_iter().map(Object::Integer).collect())
+    }
+
+    /// The visible page is the crop box clipped to the media box.
+    #[test]
+    fn the_crop_box_is_clipped_to_the_media_box() {
+        let (doc, page) = page_with(vec![
+            ("MediaBox", rect([0, 0, 600, 800])),
+            ("CropBox", rect([-100, 0, 600, 800])),
+        ]);
+        let frame = page_frame(&doc, page).unwrap();
+        assert!(
+            close(frame.crop_x0, 0.0) && close(frame.crop_w, 600.0),
+            "{frame:?}"
+        );
+    }
+
+    #[test]
+    fn an_indirect_rotation_is_read() {
+        let (mut doc, page) = page_with(vec![("MediaBox", rect([0, 0, 600, 800]))]);
+        let rotation = doc.add_object(Object::Integer(90));
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .set("Rotate", rotation);
+        assert_eq!(page_frame(&doc, page).unwrap().rotate, 90);
     }
 }

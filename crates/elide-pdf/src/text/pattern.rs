@@ -108,9 +108,84 @@ fn draws_text(
 mod tests {
     use elide_core::ErrorKind;
     use lopdf::content::Operation;
-    use lopdf::dictionary;
+    use lopdf::{ObjectId, dictionary};
 
     use super::*;
+    use crate::document::sanitize::SanitizeDocumentExt;
+
+    /// A one-page document whose page paints a tiling pattern that draws a
+    /// form showing text, each classifier stored as a reference when
+    /// `indirect` names it, sanitized as at decode.
+    fn painting_a_pattern(indirect: &[&str]) -> Document {
+        let mut doc = Document::with_version("1.5");
+        let mut value = |key: &str, direct: Object| -> Object {
+            if indirect.contains(&key) {
+                Object::Reference(doc.add_object(direct))
+            } else {
+                direct
+            }
+        };
+        let subtype = value("Subtype", Object::Name(b"Form".to_vec()));
+        let pattern_type = value("PatternType", Object::Integer(1));
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let shows = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Tj", vec![Object::string_literal("Jane Roe")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let form = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => subtype,
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            },
+            shows.encode().unwrap(),
+        ));
+        let pattern = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "Pattern", "PatternType" => pattern_type,
+                "Resources" => dictionary! { "XObject" => dictionary! { "T" => form } },
+            },
+            b"/T Do".to_vec(),
+        ));
+        let pages: ObjectId = doc.new_object_id();
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"/Pattern cs /P0 scn 0 0 10 10 re f".to_vec(),
+        ));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        doc.sanitize().unwrap();
+        doc
+    }
+
+    /// A pattern classified through a reference is still inspected.
+    #[test]
+    fn a_referenced_pattern_type_is_inspected() {
+        let err = refuse_text(&painting_a_pattern(&["PatternType"])).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
+
+    /// A form classified through a reference is still followed.
+    #[test]
+    fn a_referenced_form_subtype_is_followed() {
+        let err = refuse_text(&painting_a_pattern(&["Subtype"])).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
 
     /// A tiling pattern's text is tiled across a fill the walk does not
     /// follow, so the document is refused, even through a form it draws.

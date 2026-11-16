@@ -6,10 +6,12 @@ use std::ops::Range;
 use bytes::Bytes;
 use elide_core::{Error, Result};
 
+#[cfg(feature = "render")]
+use super::SCAN_DPI;
 use crate::document::{Pdf, Redaction};
 #[cfg(feature = "render")]
 use crate::render::PageObservation;
-use crate::text::{Detection, TextBlock};
+use crate::text::{Detection, PageGeometry, TextBlock};
 
 /// A decoded PDF's pages, as the redaction mode reads them.
 #[derive(Debug)]
@@ -73,13 +75,27 @@ impl PdfState {
             .ok_or_else(|| Error::malformed(format!("no page {number}")))
     }
 
-    /// The page numbered `number` with its glyph geometry, on the glyph
-    /// deletion path.
-    pub(super) fn block(&self, number: u32) -> Option<&TextBlock> {
+    /// The glyph boxes and frame of the page numbered `number`.
+    pub(super) fn geometry(&self, number: u32) -> Option<PageGeometry<'_>> {
         match &self.pages {
-            Pages::Glyph(blocks) => blocks.iter().find(|b| b.page == number),
+            Pages::Glyph(blocks) => blocks
+                .iter()
+                .find(|b| b.page == number)
+                .map(TextBlock::geometry),
             #[cfg(feature = "render")]
-            Pages::Flatten { .. } => None,
+            Pages::Flatten { pages, .. } => pages
+                .iter()
+                .find(|p| p.page == number)
+                .map(PageObservation::geometry),
+        }
+    }
+
+    /// The scale a scanned page was rendered at.
+    #[cfg(feature = "render")]
+    pub(super) fn scan_scale(&self) -> f32 {
+        match &self.pages {
+            Pages::Glyph(_) => SCAN_DPI.scale_factor(),
+            Pages::Flatten { scale, .. } => *scale,
         }
     }
 

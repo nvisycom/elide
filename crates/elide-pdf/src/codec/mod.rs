@@ -28,13 +28,18 @@ use elide_codec::{Format, FormatId};
 
 use self::loader::PdfDocumentLoader;
 #[cfg(feature = "render")]
-use crate::primitive::RasterMode;
+use crate::primitive::{Dpi, RasterMode};
 
 /// The stable [`FormatId`] of the PDF format, `elide.document.pdf`.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 
 /// The body stream's part id; excluded from the blob-part fold on assemble.
 const BODY_PART_ID: &str = "body";
+
+/// The resolution a scanned page is rendered at for OCR, outside
+/// [`RasterMode::Always`].
+#[cfg(feature = "render")]
+const SCAN_DPI: Dpi = Dpi::OCR;
 
 /// The PDF [`Format`], decoding pages for glyph deletion.
 ///

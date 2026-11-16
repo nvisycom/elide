@@ -11,20 +11,27 @@ use std::sync::LazyLock;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use image::{ImageFormat, RgbImage};
+use image::{ImageFormat, RgbImage, load_from_memory};
 use pdfium_render::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use super::raster::fill;
-use super::{Glyph, GlyphBox, PageObservation, PageReplacement, PixelRect};
+use super::{PageReplacement, PixelRect, ScannedPage};
+use crate::text::{DeviceRect, GlyphRect};
 
 /// Most pages a document may have to be read or rendered: a page is rendered
 /// to a full bitmap, so an unbounded count is a memory denial of service.
 const MAX_PAGES: PdfPageIndex = 10_000;
 
-/// Most pixels one page may render to: PDFium allocates four bytes a pixel,
-/// so this bounds a page's bitmap at 1 GiB, past an A0 page at 300 DPI.
-const MAX_PAGE_PIXELS: f32 = 268_435_456.0;
+/// Most pixels one page may render to. A render holds PDFium's four-byte
+/// bitmap, a four-byte copy, and a three-byte RGB copy at once, so this bounds
+/// one page near 700 MiB; an A2 page at 300 DPI (35 million pixels) fits.
+const MAX_PAGE_PIXELS: f32 = 67_108_864.0;
+
+/// Most pixels one call may render across all its pages: about 2,000 Letter
+/// pages at 300 DPI. Each page's output is kept until the call returns, so a
+/// document of many huge blank pages would otherwise run without bound.
+const MAX_DOCUMENT_PIXELS: f32 = 17_179_869_184.0;
 
 /// Dedicated single-thread pool for PDFium operations.
 static PDF_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
@@ -78,17 +85,17 @@ fn bind() -> Result<Pdfium> {
     Ok(Pdfium::new(bindings))
 }
 
-/// Every page's text and glyph boxes. A page whose text layer PDFium cannot
-/// read has no text, so it is treated as scanned.
+/// Every page's text and glyph boxes, in page order. A page whose text layer
+/// PDFium cannot read has no text, so it is treated as scanned.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
 /// document cannot be loaded, or a glyph's box cannot be read: a character
 /// with no box could be detected but never painted over.
-pub(crate) fn observe(pdf_bytes: &[u8]) -> Result<Vec<PageObservation>> {
+pub(crate) fn observe(pdf_bytes: &[u8]) -> Result<Vec<(String, Vec<GlyphRect>)>> {
     with_document(pdf_bytes, |document| {
-        let mut observations = Vec::new();
+        let mut pages = Vec::new();
         for (number, page) in (1u32..).zip(document.pages().iter()) {
             let mut text = String::new();
             let mut glyphs = Vec::new();
@@ -103,25 +110,20 @@ pub(crate) fn observe(pdf_bytes: &[u8]) -> Result<Vec<PageObservation>> {
                     let b = ch.loose_bounds().map_err(|e| {
                         Error::malformed(format!("page {number} glyph {start} has no box: {e}"))
                     })?;
-                    glyphs.push(Glyph {
-                        start,
-                        end: start + 1,
-                        bounds: GlyphBox {
-                            left: b.left().value,
-                            bottom: b.bottom().value,
-                            right: b.right().value,
-                            top: b.top().value,
+                    glyphs.push(GlyphRect {
+                        chars: start..start + 1,
+                        rect: DeviceRect {
+                            min_x: f64::from(b.left().value),
+                            min_y: f64::from(b.bottom().value),
+                            max_x: f64::from(b.right().value),
+                            max_y: f64::from(b.top().value),
                         },
                     });
                 }
             }
-            observations.push(PageObservation {
-                page: number,
-                text,
-                glyphs,
-            });
+            pages.push((text, glyphs));
         }
-        Ok(observations)
+        Ok(pages)
     })
 }
 
@@ -129,107 +131,180 @@ pub(crate) fn observe(pdf_bytes: &[u8]) -> Result<Vec<PageObservation>> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
-/// document cannot be loaded, a page cannot be rendered, or a number names no
-/// page; [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) for
-/// a page that renders too large.
+/// As [`each_page`], and
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
+/// page cannot be encoded.
 pub(crate) fn render_pages(
     pdf_bytes: &[u8],
     numbers: &BTreeSet<u32>,
     scale: f32,
 ) -> Result<BTreeMap<u32, Bytes>> {
-    with_document(pdf_bytes, |document| {
-        let config = PdfRenderConfig::new().scale_page_by_factor(scale);
-        let mut out = BTreeMap::new();
-        for (number, page) in (1u32..).zip(document.pages().iter()) {
-            if !numbers.contains(&number) {
-                continue;
-            }
-            let image = render(&page, number, scale, &config)?;
-            let mut png = Cursor::new(Vec::new());
-            image
-                .write_to(&mut png, ImageFormat::Png)
-                .map_err(|e| Error::malformed(format!("failed to encode page {number}: {e}")))?;
-            out.insert(number, Bytes::from(png.into_inner()));
-        }
-        every_page(numbers, out.len())?;
-        Ok(out)
-    })
+    let mut out = BTreeMap::new();
+    each_page(
+        pdf_bytes,
+        numbers,
+        scale,
+        &BTreeMap::new(),
+        |number, image| {
+            out.insert(number, png(number, &image)?);
+            Ok(())
+        },
+    )?;
+    Ok(out)
 }
 
 /// The 1-based pages `numbers` rendered at `scale`, each with the glyph boxes
-/// `fill` names for it painted over, as the image that replaces the page.
+/// `boxes` names for it painted over, as the image that replaces the page.
 ///
 /// # Errors
 ///
-/// As [`render_pages`], and as [`PageReplacement::pixels`].
+/// As [`each_page`], and as [`PageReplacement::pixels`].
 pub(crate) fn flatten(
     pdf_bytes: &[u8],
     numbers: &BTreeSet<u32>,
     scale: f32,
-    boxes: &BTreeMap<u32, Vec<GlyphBox>>,
+    boxes: &BTreeMap<u32, Vec<DeviceRect>>,
 ) -> Result<Vec<PageReplacement>> {
+    let mut out = Vec::new();
+    each_page(pdf_bytes, numbers, scale, boxes, |number, image| {
+        out.push(PageReplacement::pixels(number, image)?);
+        Ok(())
+    })?;
+    Ok(out)
+}
+
+/// Each of the `scanned` pages rendered at `scale` with its redaction laid
+/// over: every pixel the redacted image changed from the page's original
+/// render, so what the document now draws (its redacted embedded images)
+/// shows everywhere else.
+///
+/// # Errors
+///
+/// As [`each_page`];
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if an
+/// image cannot be decoded, and
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if its size is
+/// not the page's.
+pub(crate) fn composite(
+    pdf_bytes: &[u8],
+    scanned: &[ScannedPage],
+    scale: f32,
+) -> Result<Vec<PageReplacement>> {
+    let numbers: BTreeSet<u32> = scanned.iter().map(|page| page.number).collect();
+    let mut out = Vec::new();
+    each_page(
+        pdf_bytes,
+        &numbers,
+        scale,
+        &BTreeMap::new(),
+        |number, mut image| {
+            let Some(page) = scanned.iter().find(|page| page.number == number) else {
+                unreachable!("only the scanned pages are rendered");
+            };
+            let original = decode(number, &page.original)?;
+            let redacted = decode(number, &page.redacted)?;
+            if original.dimensions() != image.dimensions()
+                || redacted.dimensions() != image.dimensions()
+            {
+                return Err(Error::redaction(format!(
+                    "page {number}'s redacted image is not the size of the page"
+                )));
+            }
+            for ((pixel, before), after) in image
+                .pixels_mut()
+                .zip(original.pixels())
+                .zip(redacted.pixels())
+            {
+                if before != after {
+                    *pixel = *after;
+                }
+            }
+            out.push(PageReplacement::pixels(number, image)?);
+            Ok(())
+        },
+    )?;
+    Ok(out)
+}
+
+/// Render each of the 1-based pages `numbers` at `scale`, paint over the boxes
+/// `boxes` names for it, and hand it to `visit`, on the PDFium thread.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+/// document cannot be loaded, a page cannot be rendered, or a number names no
+/// page; [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) for
+/// a page, or pages together, too large to render;
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a box that
+/// cannot be placed; or as `visit`.
+fn each_page(
+    pdf_bytes: &[u8],
+    numbers: &BTreeSet<u32>,
+    scale: f32,
+    boxes: &BTreeMap<u32, Vec<DeviceRect>>,
+    mut visit: impl FnMut(u32, RgbImage) -> Result<()> + Send,
+) -> Result<()> {
     with_document(pdf_bytes, |document| {
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
-        let mut out = Vec::new();
+        let mut rendered = 0usize;
+        let mut total = 0.0f32;
         for (number, page) in (1u32..).zip(document.pages().iter()) {
             if !numbers.contains(&number) {
                 continue;
             }
-            let mut image = render(&page, number, scale, &config)?;
-            for glyph in boxes.get(&number).into_iter().flatten() {
-                let mut pixels = [(0, 0); 4];
-                for (pixel, (x, y)) in pixels.iter_mut().zip(glyph.corners()) {
-                    *pixel = page
-                        .points_to_pixels(PdfPoints::new(x), PdfPoints::new(y), &config)
-                        .map_err(|e| {
-                            Error::redaction(format!(
-                                "page {number} glyph box cannot be placed: {e}"
-                            ))
-                        })?;
-                }
-                fill(&mut image, PixelRect::covering(pixels));
+            let pixels = page.width().value * scale * page.height().value * scale;
+            total += pixels;
+            if pixels.is_nan() || pixels > MAX_PAGE_PIXELS {
+                return Err(Error::resource_limit(format!(
+                    "page {number} would render to {pixels} pixels, over the \
+                     {MAX_PAGE_PIXELS}-pixel limit"
+                )));
             }
-            out.push(PageReplacement::pixels(number, image)?);
+            if total > MAX_DOCUMENT_PIXELS {
+                return Err(Error::resource_limit(format!(
+                    "the pages would render to more than {MAX_DOCUMENT_PIXELS} pixels"
+                )));
+            }
+            let mut image = page
+                .render_with_config(&config)
+                .and_then(|bitmap| bitmap.as_image())
+                .map(|image| image.into_rgb8())
+                .map_err(|e| Error::malformed(format!("failed to render page {number}: {e}")))?;
+            for glyph in boxes.get(&number).into_iter().flatten() {
+                let mut corners = [(0, 0); 4];
+                for (corner, (x, y)) in corners.iter_mut().zip(glyph.corners()) {
+                    let (x, y) = (PdfPoints::new(x as f32), PdfPoints::new(y as f32));
+                    *corner = page.points_to_pixels(x, y, &config).map_err(|e| {
+                        Error::redaction(format!("page {number} glyph box cannot be placed: {e}"))
+                    })?;
+                }
+                fill(&mut image, PixelRect::covering(corners));
+            }
+            visit(number, image)?;
+            rendered += 1;
         }
-        every_page(numbers, out.len())?;
-        Ok(out)
+        if rendered == numbers.len() {
+            return Ok(());
+        }
+        Err(Error::malformed(format!(
+            "asked to render {} pages, but the document has only {rendered} of them",
+            numbers.len()
+        )))
     })
 }
 
-/// Render `page` (numbered `number`) at `config` to RGB pixels.
-///
-/// The page's size is checked before PDFium allocates its bitmap, so a page
-/// claiming an enormous box is refused rather than rendered.
-fn render(
-    page: &PdfPage<'_>,
-    number: u32,
-    scale: f32,
-    config: &PdfRenderConfig,
-) -> Result<RgbImage> {
-    let pixels = page.width().value * scale * page.height().value * scale;
-    if pixels.is_nan() || pixels > MAX_PAGE_PIXELS {
-        return Err(Error::resource_limit(format!(
-            "page {number} would render to {pixels} pixels, over the \
-             {MAX_PAGE_PIXELS}-pixel limit"
-        )));
-    }
-    let bitmap = page
-        .render_with_config(config)
-        .map_err(|e| Error::malformed(format!("failed to render page {number}: {e}")))?;
-    bitmap
-        .as_image()
-        .map(|image| image.into_rgb8())
-        .map_err(|e| Error::malformed(format!("failed to convert page {number}: {e}")))
+/// `image` encoded as a PNG.
+fn png(number: u32, image: &RgbImage) -> Result<Bytes> {
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, ImageFormat::Png)
+        .map_err(|e| Error::malformed(format!("failed to encode page {number}: {e}")))?;
+    Ok(Bytes::from(png.into_inner()))
 }
 
-/// Refuse a render that produced fewer pages than were asked for.
-fn every_page(numbers: &BTreeSet<u32>, rendered: usize) -> Result<()> {
-    if rendered == numbers.len() {
-        return Ok(());
-    }
-    Err(Error::malformed(format!(
-        "asked to render {} pages, but the document has only {rendered} of them",
-        numbers.len()
-    )))
+/// The pixels of page `number`'s encoded image `bytes`.
+fn decode(number: u32, bytes: &[u8]) -> Result<RgbImage> {
+    load_from_memory(bytes)
+        .map(|image| image.into_rgb8())
+        .map_err(|e| Error::malformed(format!("page {number}'s image cannot be decoded: {e}")))
 }

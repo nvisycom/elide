@@ -1,53 +1,31 @@
-//! Glyph geometry for raster redaction: where a glyph sits on its page, and
-//! the pixels it covers once the page is rendered.
+//! Glyph geometry for raster redaction: a page's glyphs as PDFium reads them,
+//! and the pixels a glyph covers once the page is rendered.
 
-/// A glyph's box on its page, in PDF points: page space, bottom-left origin,
-/// before any crop or rotation, as PDFium reports glyph bounds.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct GlyphBox {
-    pub(crate) left: f32,
-    pub(crate) bottom: f32,
-    pub(crate) right: f32,
-    pub(crate) top: f32,
-}
-
-impl GlyphBox {
-    /// The box's four corners, as `(x, y)` points.
-    pub(crate) fn corners(&self) -> [(f32, f32); 4] {
-        [
-            (self.left, self.bottom),
-            (self.right, self.bottom),
-            (self.right, self.top),
-            (self.left, self.top),
-        ]
-    }
-}
-
-/// One glyph: the span of page text it drew and its box.
-///
-/// `start`/`end` are character offsets into the page's text, the unit a
-/// [`Detection`](crate::text::Detection) carries, so a detected span selects
-/// the glyphs to paint over.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Glyph {
-    /// Start character offset into the page text (inclusive).
-    pub(crate) start: usize,
-    /// End character offset into the page text (exclusive).
-    pub(crate) end: usize,
-    /// The glyph's box on the page.
-    pub(crate) bounds: GlyphBox,
-}
+use crate::text::{GlyphRect, PageFrame, PageGeometry};
 
 /// A page's text as PDFium reads it, with every glyph's box: the text
 /// detection runs over, and the boxes a detected span selects.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) struct PageObservation {
     /// 1-based page number.
     pub(crate) page: u32,
     /// The page's text.
     pub(crate) text: String,
-    /// Every glyph's span and box, in reading order.
-    pub(crate) glyphs: Vec<Glyph>,
+    /// Every glyph's character span and box in default user space, in reading
+    /// order.
+    pub(crate) glyphs: Vec<GlyphRect>,
+    /// The page's visible box and rotation.
+    pub(crate) frame: PageFrame,
+}
+
+impl PageObservation {
+    /// The page's glyph boxes and frame.
+    pub(crate) fn geometry(&self) -> PageGeometry<'_> {
+        PageGeometry {
+            rects: &self.glyphs,
+            frame: &self.frame,
+        }
+    }
 }
 
 /// An axis-aligned rectangle in rendered-page pixels (top-left origin).
@@ -72,8 +50,14 @@ impl PixelRect {
         let xs = corners.map(|(x, _)| x);
         let ys = corners.map(|(_, y)| y);
         let clamp = |v: i32| u32::try_from(v).unwrap_or(0);
-        let (x0, x1) = (clamp(min(xs) - 1), clamp(max(xs)).saturating_add(2));
-        let (y0, y1) = (clamp(min(ys) - 1), clamp(max(ys)).saturating_add(2));
+        let (x0, x1) = (
+            clamp(min(xs).saturating_sub(1)),
+            clamp(max(xs)).saturating_add(2),
+        );
+        let (y0, y1) = (
+            clamp(min(ys).saturating_sub(1)),
+            clamp(max(ys)).saturating_add(2),
+        );
         Self {
             x: x0,
             y: y0,
@@ -123,5 +107,12 @@ mod tests {
                 height: 8
             }
         );
+    }
+
+    #[test]
+    fn an_extreme_corner_does_not_overflow() {
+        let r = PixelRect::covering([(i32::MIN, i32::MIN), (4, i32::MIN), (4, 6), (i32::MIN, 6)]);
+        assert_eq!((r.x, r.y), (0, 0));
+        assert_eq!((r.width, r.height), (6, 8));
     }
 }

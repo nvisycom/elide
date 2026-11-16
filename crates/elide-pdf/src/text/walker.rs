@@ -11,14 +11,15 @@
 //! glyphs, so this is what recovers the logical text a caller runs detection over.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
 use std::slice;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, Encoding, Object, ObjectId};
 
-use super::geometry::{Cursor, DeviceRect, Matrix, PageFrame, SpaceRule, TextState, page_frame};
+use super::geometry::{
+    Cursor, DeviceRect, GlyphRect, Matrix, PageFrame, SpaceRule, TextState, page_frame,
+};
 use super::glyphs::decode_glyphs;
 use super::scope::{Scope, dict_or_ref, scope_fonts, scope_xobject_id};
 use super::widths::{GlyphMetrics, WidthSource};
@@ -81,16 +82,6 @@ struct TextRun<'a> {
     /// The font-table index of the currently selected font, stamped onto every
     /// glyph pushed so a deletion can later reach that font's `/ToUnicode`.
     font: u16,
-}
-
-/// One glyph's device-space box and the decoded character range it drew, so a
-/// detected char span can be resolved back to the page rectangles it covers.
-#[derive(Debug, Clone)]
-pub(crate) struct GlyphRect {
-    /// The page-local decoded character range this glyph produced.
-    pub(crate) chars: Range<usize>,
-    /// The glyph's box in device (user) space, bottom-left origin.
-    pub(crate) rect: DeviceRect,
 }
 
 impl TextRun<'_> {
@@ -902,7 +893,7 @@ mod tests {
         );
         // Resolve the whole span's rects through the page geometry, as the codec
         // does.
-        let geometry = &block;
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line → one rect: {rects:?}");
         let r = rects[0];
@@ -929,7 +920,7 @@ mod tests {
             ],
             true,
         );
-        let geometry = &block;
+        let geometry = block.geometry();
         let regions: Vec<_> = [0..4, 9..12]
             .into_iter()
             .flat_map(|chars| geometry.rects_for(chars))
@@ -1136,7 +1127,7 @@ mod tests {
         // And it is positioned by the inherited transform: the glyph box sits
         // near the form's translated origin x = 20/100 = 0.2, not the content's
         // local x = 0.
-        let geometry = &block;
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
         assert!(
@@ -1249,7 +1240,7 @@ mod tests {
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         assert_eq!(block.text, "Hi");
-        let geometry = &block;
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
         // Width > 0 proves the inherited font's widths advanced the pen; with no
@@ -1421,7 +1412,7 @@ mod tests {
         doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
-        let geometry = &block;
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
         // "AB" at F1's 900/1000 × 10pt × 2 glyphs = 18pt wide, /100-pt page =
