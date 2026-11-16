@@ -22,8 +22,7 @@ pub(super) fn source_span(part: &str, offsets: &OffsetMap, local: Range<usize>) 
 /// Reverse of [`source_span`]: locate the block indices and decoded-local
 /// ranges that raw `source` references address. `blocks` yields each block's
 /// part, raw span, and offset map in item order. Each reference must lie
-/// within one block of its part; the references within one block resolve to
-/// the range from the first decoded start to the last decoded end.
+/// within one block of its part, and resolves to one edit of it.
 ///
 /// Fails closed (no edits) when a reference names no part or lies in no block:
 /// raw offsets are part-local, so a reference is never matched against another
@@ -57,7 +56,7 @@ pub(super) fn locate_source<'a>(
             local: first.start..last.end,
         });
     }
-    ItemEdit::merged(edits)
+    edits
 }
 
 #[cfg(test)]

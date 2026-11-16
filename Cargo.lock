@@ -1411,9 +1411,7 @@ dependencies = [
  "csv",
  "elide-codec",
  "elide-core",
- "serde_json",
  "tokio",
- "tracing",
 ]
 
 [[package]]

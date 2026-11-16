@@ -7,10 +7,12 @@
 //! parsed rows. Only the *location* is tabular: a `(row, column)` address
 //! plus an optional intra-cell byte range.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 
+use csv::Terminator;
 use elide_codec::content::ContentData;
-use elide_codec::string::RedactRange;
+use elide_codec::string::{DisjointSpans, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
@@ -19,6 +21,7 @@ use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use super::loader::CsvLoader;
+use crate::slice::slice;
 
 /// Stable [`FormatId`] for the CSV codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.csv");
@@ -34,10 +37,9 @@ pub fn format() -> Format {
 /// The CSV [`Format`] with explicit parsing options: header and delimiter.
 ///
 /// `has_headers` chooses whether the first row is the header (its default,
-/// `true`). A header row still enters the detection stream, but it gains
-/// column-name context hints for the data below it and is protected from a
-/// [`DropRow`](elide_core::redaction) redaction; a headerless file wants
-/// `false` so its first row is an ordinary, droppable data row.
+/// `true`). A header row enters the detection stream like any other and gives
+/// the cells below it their column-name context hints; a headerless file wants
+/// `false` so its first row is read as data.
 ///
 /// `delimiter` sets the field separator; `None` auto-detects it (a comma when
 /// nothing stands out), which can misread a TSV or semicolon-delimited file, so
@@ -53,8 +55,9 @@ fn format_from(loader: CsvLoader) -> Format {
         .with_content_types(["text/csv"])
 }
 
-/// Parsed CSV content: an optional header row plus the data rows, with
-/// the metadata needed to re-serialize byte-for-byte.
+/// Parsed CSV content: an optional header row plus the data rows, with the
+/// delimiter and line endings to write them back with. Quoting is normalized
+/// on write: a field is quoted only where it needs to be.
 #[derive(Debug, Clone)]
 pub(crate) struct CsvData {
     /// Header row, when the source had one.
@@ -65,6 +68,8 @@ pub(crate) struct CsvData {
     pub delimiter: u8,
     /// Whether the original ended with a newline.
     pub trailing_newline: bool,
+    /// Whether the original's records end in `\r\n` rather than `\n`.
+    pub crlf: bool,
 }
 
 /// Handler for parsed CSV content. Each cell is independently addressable
@@ -126,168 +131,53 @@ impl CsvHandler {
             .map(String::as_str)
     }
 
-    /// Re-serialize the rows to CSV bytes, honoring the original
-    /// delimiter and trailing-newline.
+    /// Re-serialize the rows to CSV bytes with the original delimiter, line
+    /// endings and trailing newline.
     fn serialize(&self) -> Result<Vec<u8>> {
+        let terminator = if self.data.crlf {
+            Terminator::CRLF
+        } else {
+            Terminator::Any(b'\n')
+        };
         let mut writer = csv::WriterBuilder::new()
             .delimiter(self.data.delimiter)
+            .terminator(terminator)
             .has_headers(false)
             .from_writer(Vec::new());
+        let write_error = |e: csv::Error| Error::processing(format!("CSV write: {e}"));
         if let Some(headers) = &self.data.headers {
-            writer
-                .write_record(headers)
-                .map_err(|e| Error::processing(format!("CSV write: {e}")))?;
+            writer.write_record(headers).map_err(write_error)?;
         }
         for row in &self.data.rows {
-            writer
-                .write_record(row)
-                .map_err(|e| Error::processing(format!("CSV write: {e}")))?;
+            writer.write_record(row).map_err(write_error)?;
         }
         let mut bytes = writer
             .into_inner()
             .map_err(|e| Error::processing(format!("CSV flush: {e}")))?;
-        // The csv crate writes CRLF; normalize to LF and honor the
-        // original trailing-newline so a clean file round-trips exactly.
-        bytes.retain(|&b| b != b'\r');
-        if !self.data.trailing_newline && bytes.last() == Some(&b'\n') {
-            bytes.pop();
+        if !self.data.trailing_newline {
+            let ending: &[u8] = if self.data.crlf { b"\r\n" } else { b"\n" };
+            if bytes.ends_with(ending) {
+                bytes.truncate(bytes.len() - ending.len());
+            }
         }
         Ok(bytes)
     }
 
-    fn redact_one(
-        &mut self,
-        location: &TabularLocation,
-        replacement: &TextReplacement,
-    ) -> Result<()> {
-        let Some(cell) = self
-            .row_cells_mut(location.row_index)
-            .and_then(|cells| cells.get_mut(location.column_index as usize))
-        else {
-            return Ok(());
-        };
-        let span = location.span.clone().unwrap_or(0..cell.len());
-        let value = replacement.value().unwrap_or_default();
-        cell.redact_range(value, span)
-    }
-
-    /// Drop the data row at `row_index` (the same addressing as
-    /// [`row_cells`]). The header row is never dropped, removing it would
-    /// strip the table's schema, so a drop targeting it is a no-op.
+    /// Apply `redactions`: cell edits, then column and row drops.
     ///
-    /// [`row_cells`]: Self::row_cells
-    fn drop_row(&mut self, row_index: u32) {
-        let data_index = match &self.data.headers {
-            Some(_) if row_index == 0 => {
-                tracing::debug!("tabular drop-row targeting the header; skipping");
-                return;
-            }
-            Some(_) => (row_index - 1) as usize,
-            None => row_index as usize,
-        };
-        if data_index < self.data.rows.len() {
-            self.data.rows.remove(data_index);
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a location naming a sheet, a cell, span, row or
+    /// column the table doesn't have, or two edits of one cell that overlap, leaving the table partly
+    /// edited.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn apply(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
+        for (location, _) in redactions.iter() {
+            unsheeted(location)?;
         }
-    }
-
-    /// Drop column `col` from the header and every data row.
-    fn drop_column(&mut self, col: u32) {
-        let col = col as usize;
-        if let Some(headers) = self.data.headers.as_mut()
-            && col < headers.len()
-        {
-            headers.remove(col);
-        }
-        for row in &mut self.data.rows {
-            if col < row.len() {
-                row.remove(col);
-            }
-        }
-    }
-}
-
-impl Stream<Tabular> for CsvHandler {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
-    fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
-        let mut chunks = Vec::new();
-        for row in 0..self.total_rows() {
-            for col in 0..self.row_len(row).unwrap_or(0) as u32 {
-                let cell = self
-                    .cell_at(row, col)
-                    .expect("bounds checked above")
-                    .to_owned();
-                let mut location = TabularLocation::new(row, col);
-                let mut hints = Vec::new();
-                if let Some(name) = self.column_name(col) {
-                    location = location.with_column_name(name.to_owned());
-                    // The header label lives in the header cell at row 0, same
-                    // column, a real tabular location the boost can point at.
-                    let header_location =
-                        TabularLocation::new(0, col).with_column_name(name.to_owned());
-                    hints.push(ResolvedHint::new(
-                        header_location,
-                        TextData::new(name.to_owned()),
-                    ));
-                }
-                chunks.push(Chunk {
-                    location,
-                    data: TextData::new(cell),
-                    hints,
-                });
-            }
-        }
-        Ok(chunks)
-    }
-
-    fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
-        // `local` carries the chunk-local intra-cell span (its row/column are
-        // placeholders); a missing span means the whole cell. Re-anchor onto
-        // the chunk's real cell coordinates.
-        let cell = self.cell_at(chunk.location.row_index, chunk.location.column_index)?;
-        let span = local.span.unwrap_or(0..cell.len());
-        if span.start > span.end || span.end > cell.len() {
-            return None;
-        }
-        let mut location =
-            TabularLocation::new(chunk.location.row_index, chunk.location.column_index)
-                .with_span(span);
-        if let Some(name) = &chunk.location.column_name {
-            location = location.with_column_name(name.clone());
-        }
-        if let Some(sheet) = &chunk.location.sheet_name {
-            location = location.with_sheet_name(sheet.clone());
-        }
-        Some(location)
-    }
-}
-
-impl Encode for CsvHandler {
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(bytes::Bytes::from(self.serialize()?)))
-    }
-}
-
-#[async_trait::async_trait]
-impl DataReader<Tabular> for CsvHandler {
-    async fn read_at(&self, location: &TabularLocation) -> Result<Option<TextData>> {
-        let Some(cell) = self.cell_at(location.row_index, location.column_index) else {
-            return Ok(None);
-        };
-        // An intra-cell span slices the cell; no span reads the whole cell.
-        match &location.span {
-            Some(span) => Ok(cell.get(span.clone()).map(TextData::new)),
-            None => Ok(Some(TextData::new(cell.to_owned()))),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DataWriter<Tabular> for CsvHandler {
-    async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
         redactions.sort_by_position();
+        self.ensure_disjoint_cells(&redactions)?;
 
         // Apply cell edits first, before any structural drop shifts indices.
         // Right-to-left so an edit's length delta doesn't move earlier
@@ -310,19 +200,212 @@ impl DataWriter<Tabular> for CsvHandler {
         // the not-yet-removed indices valid: columns right-to-left, rows
         // bottom-up.
         for &col in drop_cols.iter().rev() {
-            self.drop_column(col);
+            self.drop_column(col)?;
         }
         for &row in drop_rows.iter().rev() {
-            self.drop_row(row);
+            self.drop_row(row)?;
+        }
+        Ok(())
+    }
+
+    /// Refuse a batch with two edits of one cell that overlap, a whole-cell
+    /// edit counting as the cell's full span. Applied right to left, disjoint
+    /// edits each meet the cell as it was up to their end.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a cell the table doesn't have, or an overlapping
+    /// pair.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn ensure_disjoint_cells(&self, redactions: &Redactions<Tabular>) -> Result<()> {
+        let mut cells: BTreeMap<(u32, u32), Vec<Range<usize>>> = BTreeMap::new();
+        for (location, replacement) in redactions.iter() {
+            if !matches!(replacement, TabularReplacement::Cell(_)) {
+                continue;
+            }
+            let cell = self
+                .cell_at(location.row_index, location.column_index)
+                .ok_or_else(|| no_cell(location))?;
+            cells
+                .entry((location.row_index, location.column_index))
+                .or_default()
+                .push(location.span.clone().unwrap_or(0..cell.len()));
+        }
+        cells.values().try_for_each(|spans| spans.ensure_disjoint())
+    }
+
+    /// Splice `replacement` over the cell (or the span within it) `location`
+    /// names. A cell or span the table doesn't have is an error: skipping it
+    /// would leave the content unredacted.
+    fn redact_one(
+        &mut self,
+        location: &TabularLocation,
+        replacement: &TextReplacement,
+    ) -> Result<()> {
+        let cell = self
+            .row_cells_mut(location.row_index)
+            .and_then(|cells| cells.get_mut(location.column_index as usize))
+            .ok_or_else(|| no_cell(location))?;
+        let span = location.span.clone().unwrap_or(0..cell.len());
+        let value = replacement.value().unwrap_or_default();
+        cell.redact_range(value, span)
+    }
+
+    /// Drop the row at `row_index` (the same addressing as [`row_cells`]).
+    /// Dropping the header row writes the table without one.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if there is no such row.
+    ///
+    /// [`row_cells`]: Self::row_cells
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn drop_row(&mut self, row_index: u32) -> Result<()> {
+        let data_index = match &self.data.headers {
+            Some(_) if row_index == 0 => {
+                self.data.headers = None;
+                return Ok(());
+            }
+            Some(_) => (row_index - 1) as usize,
+            None => row_index as usize,
+        };
+        if data_index >= self.data.rows.len() {
+            return Err(Error::malformed(format!("no CSV row {row_index} to drop")));
+        }
+        self.data.rows.remove(data_index);
+        Ok(())
+    }
+
+    /// Drop column `col` from the header and every data row that has it.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if no row has the column.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn drop_column(&mut self, col: u32) -> Result<()> {
+        let index = col as usize;
+        let mut dropped = false;
+        for row in self.data.headers.iter_mut().chain(&mut self.data.rows) {
+            if index < row.len() {
+                row.remove(index);
+                dropped = true;
+            }
+        }
+        if !dropped {
+            return Err(Error::malformed(format!("no CSV column {col} to drop")));
         }
         Ok(())
     }
 }
 
+impl Stream<Tabular> for CsvHandler {
+    fn format(&self) -> FormatId {
+        FORMAT_ID
+    }
+
+    fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
+        let mut chunks = Vec::new();
+        for row in 0..self.total_rows() {
+            for col in 0..self.row_len(row).unwrap_or(0) as u32 {
+                let cell = self
+                    .cell_at(row, col)
+                    .expect("bounds checked above")
+                    .to_owned();
+                let mut location = TabularLocation::new(row, col);
+                let mut hints = Vec::new();
+                if let Some(name) = self.column_name(col) {
+                    location = location.with_column_name(name.to_owned());
+                    // A data cell's label is the header cell above it, a real
+                    // tabular location the boost can point at.
+                    if row > 0 {
+                        let header_location =
+                            TabularLocation::new(0, col).with_column_name(name.to_owned());
+                        hints.push(ResolvedHint::new(
+                            header_location,
+                            TextData::new(name.to_owned()),
+                        ));
+                    }
+                }
+                chunks.push(Chunk {
+                    location,
+                    data: TextData::new(cell),
+                    hints,
+                });
+            }
+        }
+        Ok(chunks)
+    }
+
+    fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
+        // `local` carries the chunk-local intra-cell span (its row/column are
+        // placeholders); a missing span means the whole cell. Re-anchor onto
+        // the chunk's real cell coordinates.
+        let cell = self.cell_at(chunk.location.row_index, chunk.location.column_index)?;
+        let span = local.span.unwrap_or(0..cell.len());
+        if span.start > span.end || span.end > cell.len() {
+            return None;
+        }
+        Some(chunk.location.clone().with_span(span))
+    }
+}
+
+impl Encode for CsvHandler {
+    fn encode(&self) -> Result<ContentData> {
+        Ok(ContentData::from(self.serialize()?))
+    }
+}
+
+#[async_trait::async_trait]
+impl DataReader<Tabular> for CsvHandler {
+    async fn read_at(&self, location: &TabularLocation) -> Result<TextData> {
+        unsheeted(location)?;
+        let cell = self
+            .cell_at(location.row_index, location.column_index)
+            .ok_or_else(|| no_cell(location))?;
+        // An intra-cell span slices the cell; no span reads the whole cell.
+        match &location.span {
+            Some(span) => slice(cell, span).map(TextData::new),
+            None => Ok(TextData::new(cell.to_owned())),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DataWriter<Tabular> for CsvHandler {
+    async fn write_at(&mut self, redactions: Redactions<Tabular>) -> Result<()> {
+        // Apply to a copy, kept only once the whole batch applies.
+        let mut staged = Self::new(self.data.clone());
+        staged.apply(redactions)?;
+        *self = staged;
+        Ok(())
+    }
+}
+
+/// Refuse a location that names a sheet: a CSV file is one table, and the
+/// location addresses a table this isn't.
+fn unsheeted(location: &TabularLocation) -> Result<()> {
+    match &location.sheet_name {
+        Some(sheet) => Err(Error::malformed(format!(
+            "CSV has no sheets, but the location names sheet {sheet:?}"
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// The error for a location naming a cell the table doesn't have.
+fn no_cell(location: &TabularLocation) -> Error {
+    Error::malformed(format!(
+        "no CSV cell at row {}, column {}",
+        location.row_index, location.column_index
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use elide_codec::Loader;
-    use elide_core::modality::DataReaderExt;
+    use elide_core::ErrorKind;
 
     use super::super::loader::CsvLoader;
     use super::*;
@@ -361,7 +444,7 @@ mod tests {
         let h = load("name\nAlice Carter\n").await;
         // Row 1, col 0 = "Alice Carter"; bytes 0..5 = "Alice".
         let loc = TabularLocation::new(1, 0).with_span(0..5);
-        assert_eq!(h.expect_at(&loc).await.as_str(), "Alice");
+        assert_eq!(h.read_at(&loc).await.unwrap().as_str(), "Alice");
     }
 
     #[tokio::test]
@@ -422,19 +505,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drop_row_never_drops_the_header() {
-        let mut h = load("name,city\nAlice,NYC\n").await;
-        // Targeting the header row (0) is a no-op, the schema survives.
-        h.write_at(Redactions::from([(
-            TabularLocation::new(0, 0),
-            TabularReplacement::DropRow,
-        )]))
+    async fn drop_row_drops_the_header_too() {
+        let mut h = load("name,city\nAlice,NYC\nBob,LA\n").await;
+        h.write_at(Redactions::from([
+            (TabularLocation::new(0, 0), TabularReplacement::DropRow),
+            (TabularLocation::new(2, 0), TabularReplacement::DropRow),
+        ]))
         .await
         .unwrap();
-        assert_eq!(
-            h.encode().unwrap().decode().unwrap(),
-            "name,city\nAlice,NYC\n"
-        );
+        assert_eq!(h.encode().unwrap().decode().unwrap(), "Alice,NYC\n");
     }
 
     #[tokio::test]
@@ -461,6 +540,7 @@ mod tests {
             rows: vec![vec!["a".into(), "b".into()], vec!["c".into(), "d".into()]],
             delimiter: b',',
             trailing_newline: true,
+            crlf: false,
         });
         let first = handler.chunks().unwrap().into_iter().next().unwrap();
         assert_eq!(first.location.row_index, 0);
@@ -471,9 +551,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn options_disable_headers_so_the_first_row_is_droppable() {
-        // The header-protecting default (`has_headers = true`) refuses to drop
-        // row 0; `has_headers = false` makes it an ordinary droppable row.
+    async fn options_disable_headers_so_the_first_row_is_data() {
+        // With `has_headers = false`, row 0 is an ordinary data row.
         let mut handler = CsvLoader::new(false, None)
             .decode(ContentData::from_text("a@x.test,b\nc,d\n"))
             .await
@@ -481,8 +560,13 @@ mod tests {
         let first = handler.chunks().unwrap().into_iter().next().unwrap();
         assert_eq!(first.location.row_index, 0);
         assert!(first.location.column_name.is_none());
-        // Dropping row 0 removes it (a header would be protected).
-        handler.drop_row(0);
+        handler
+            .write_at(Redactions::from([(
+                TabularLocation::new(0, 0),
+                TabularReplacement::DropRow,
+            )]))
+            .await
+            .unwrap();
         assert_eq!(handler.encode().unwrap().decode().unwrap(), "c,d\n");
     }
 
@@ -495,6 +579,152 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(handler.row_cells(1).unwrap(), &["Alice", "a@x.test"]);
+    }
+
+    #[tokio::test]
+    async fn crlf_line_endings_round_trip() {
+        let src = "name,email\r\nAlice,a@x.test\r\n";
+        let h = load(src).await;
+        assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
+    }
+
+    /// The line ending is the one closing the first record, not a line break
+    /// inside a quoted field before it.
+    #[tokio::test]
+    async fn a_quoted_line_break_does_not_set_the_line_ending() {
+        for src in [
+            "\"first\nname\",email\r\nAlice,a@x.test\r\n",
+            "\"first\r\nname\",email\nAlice,a@x.test\n",
+        ] {
+            let h = load(src).await;
+            assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes(), "{src:?}");
+        }
+    }
+
+    /// A `\r` inside a quoted cell is content, kept on write.
+    #[tokio::test]
+    async fn a_carriage_return_inside_a_cell_is_kept() {
+        let src = "name,note\nAlice,\"line one\r\nline two\"\n";
+        let h = load(src).await;
+        assert_eq!(h.cell_at(1, 1), Some("line one\r\nline two"));
+        assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn no_trailing_newline_round_trips() {
+        let h = load("a,b\r\nc,d").await;
+        assert_eq!(h.encode().unwrap().as_bytes(), b"a,b\r\nc,d");
+    }
+
+    /// A cell, span, row or column the table doesn't have fails the batch
+    /// rather than being skipped, which would leave the content unredacted.
+    #[tokio::test]
+    async fn a_location_outside_the_table_is_an_error() {
+        let substituted = || TabularReplacement::Cell(TextReplacement::substituted("[X]"));
+        let batches = [
+            (TabularLocation::new(9, 0), substituted()),
+            (TabularLocation::new(1, 9), substituted()),
+            (TabularLocation::new(1, 0).with_span(0..99), substituted()),
+            (TabularLocation::new(9, 0), TabularReplacement::DropRow),
+            (TabularLocation::new(1, 9), TabularReplacement::DropColumn),
+        ];
+        let src = "name,city\nAlice,NYC\n";
+        for (location, replacement) in batches {
+            let mut h = load(src).await;
+            // Valid edits in the same batch are not kept either.
+            let error = h
+                .write_at(Redactions::from([
+                    (location.clone(), replacement),
+                    (TabularLocation::new(1, 0), substituted()),
+                    (TabularLocation::new(0, 1), TabularReplacement::DropColumn),
+                ]))
+                .await
+                .expect_err("an unwritable location must fail");
+            assert_eq!(error.kind(), ErrorKind::MalformedInput, "{location:?}");
+            assert_eq!(
+                h.encode().unwrap().as_bytes(),
+                src.as_bytes(),
+                "{location:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn overlapping_edits_of_one_cell_are_an_error() {
+        let substituted =
+            |value: &str| TabularReplacement::Cell(TextReplacement::substituted(value));
+        let src = "id\nabcdef\n";
+        let mut h = load(src).await;
+        let error = h
+            .write_at(Redactions::from([
+                (
+                    TabularLocation::new(1, 0).with_span(0..7),
+                    substituted("[A]"),
+                ),
+                (
+                    TabularLocation::new(1, 0).with_span(3..6),
+                    substituted("123456789"),
+                ),
+            ]))
+            .await
+            .expect_err("overlapping edits of one cell must fail");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
+
+        // A whole-cell edit overlaps any span of the cell; touching spans apply.
+        let error = h
+            .write_at(Redactions::from([
+                (TabularLocation::new(1, 0), substituted("[A]")),
+                (
+                    TabularLocation::new(1, 0).with_span(3..6),
+                    substituted("[B]"),
+                ),
+            ]))
+            .await
+            .expect_err("a whole-cell edit overlaps a span of it");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        h.write_at(Redactions::from([
+            (
+                TabularLocation::new(1, 0).with_span(0..3),
+                substituted("[A]"),
+            ),
+            (
+                TabularLocation::new(1, 0).with_span(3..6),
+                substituted("[B]"),
+            ),
+        ]))
+        .await
+        .unwrap();
+        assert_eq!(h.encode().unwrap().as_bytes(), b"id\n[A][B]\n");
+    }
+
+    /// A CSV file is one table: a location naming a sheet addresses another.
+    #[tokio::test]
+    async fn a_location_naming_a_sheet_is_an_error() {
+        let substituted =
+            |value: &str| TabularReplacement::Cell(TextReplacement::substituted(value));
+        let src = "id\nabcdef\n";
+        let mut h = load(src).await;
+        let sheeted = TabularLocation::new(1, 0).with_sheet_name("Z");
+        let error = h.read_at(&sheeted).await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        let error = h
+            .write_at(Redactions::from([
+                (sheeted.with_span(0..1), substituted("LONG")),
+                (TabularLocation::new(1, 0).with_span(3..6), substituted("X")),
+            ]))
+            .await
+            .expect_err("a sheet-qualified location must fail");
+        assert_eq!(error.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.encode().unwrap().as_bytes(), src.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn only_data_cells_carry_the_header_hint() {
+        let h = load("name\nAlice\n").await;
+        let chunks = h.chunks().unwrap();
+        assert!(chunks[0].hints.is_empty());
+        assert_eq!(chunks[1].hints.len(), 1);
     }
 
     #[test]

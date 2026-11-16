@@ -1,6 +1,7 @@
 //! CSV loader: decode bytes to text, auto-detect the delimiter, and
 //! parse rows into a [`CsvHandler`].
 
+use csv::{ReaderBuilder, StringRecord};
 use elide_codec::Loader;
 use elide_codec::content::ContentData;
 use elide_core::modality::tabular::Tabular;
@@ -50,32 +51,40 @@ impl Loader for CsvLoader {
         let trailing_newline = text.ends_with('\n');
         let delimiter = self.delimiter.unwrap_or_else(|| detect_delimiter(&text));
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(self.has_headers)
+        let mut reader = ReaderBuilder::new()
+            .has_headers(false)
             .delimiter(delimiter)
             .flexible(true)
             .from_reader(text.as_bytes());
-
-        let headers = if self.has_headers {
-            let record = reader
-                .headers()
-                .map_err(|e| Error::malformed(format!("CSV header: {e}")))?;
-            Some(record.iter().map(String::from).collect())
-        } else {
-            None
-        };
-
-        let mut rows = Vec::new();
-        for record in reader.records() {
-            let record = record.map_err(|e| Error::malformed(format!("CSV row: {e}")))?;
-            rows.push(record.iter().map(String::from).collect());
+        let mut record = StringRecord::new();
+        let mut records: Vec<Vec<String>> = Vec::new();
+        let mut crlf = false;
+        while reader
+            .read_record(&mut record)
+            .map_err(|e| Error::malformed(format!("CSV record: {e}")))?
+        {
+            if records.is_empty() {
+                // The line ending is the one closing the first record, not a
+                // line break inside a quoted field. The reader stops inside
+                // that ending or just past it.
+                let bytes = text.as_bytes();
+                let end = usize::try_from(reader.position().byte()).unwrap_or(bytes.len());
+                let around =
+                    &bytes[end.saturating_sub(2).min(bytes.len())..(end + 1).min(bytes.len())];
+                crlf = around.windows(2).any(|pair| pair == b"\r\n");
+            }
+            records.push(record.iter().map(String::from).collect());
         }
+        let mut records = records.into_iter();
+        let headers = self.has_headers.then(|| records.next().unwrap_or_default());
+        let rows = records.collect();
 
         Ok(CsvHandler::new(CsvData {
             headers,
             rows,
             delimiter,
             trailing_newline,
+            crlf,
         }))
     }
 }

@@ -42,10 +42,7 @@ impl DocumentLoader for AudioDocumentLoader {
         stripped.record(HiddenContent::Properties, None, removed.tags);
         stripped.record(HiddenContent::PriorRevision, None, removed.padding);
         let native = AudioDocument {
-            clip: AudioStream {
-                clip,
-                format_id: self.format_id,
-            },
+            clip: AudioStream::new(clip, self.format_id)?,
             format: self.format,
         };
         Ok(Document::new(self.format_id, native, Vec::new()).with_stripped(stripped))

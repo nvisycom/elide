@@ -4,9 +4,9 @@
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use elide_core::Result;
 use elide_core::modality::metadata::MetadataData;
 use elide_core::redaction::Redactions;
+use elide_core::{Error, Result};
 
 use crate::ImageBuffer;
 use crate::modality::{Image, ImageData, ImageLocation};
@@ -54,28 +54,53 @@ impl ImageState {
         Ok(ImageData::new(buffer.raster().clone(), source))
     }
 
-    /// Crop the region `location` addresses into an [`ImageData`], or `None`
-    /// when the region falls outside the image.
-    pub(super) fn crop_encode(&self, location: &ImageLocation) -> Result<Option<ImageData>> {
+    /// Crop the region `location` addresses into an [`ImageData`].
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] when the region falls outside the image.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn crop_encode(&self, location: &ImageLocation) -> Result<ImageData> {
         let buffer = self.0.lock().unwrap();
-        let Some(region) = location.bounding_box.to_pixels(buffer.dimensions()) else {
-            return Ok(None);
-        };
-        let Some(cropped) = buffer.crop(region) else {
-            return Ok(None);
-        };
+        let cropped = location
+            .bounding_box
+            .to_pixels(buffer.dimensions())
+            .and_then(|region| buffer.crop(region))
+            .ok_or_else(outside_the_image)?;
         let source = cropped.encode()?;
-        Ok(Some(ImageData::new(cropped, source)))
+        Ok(ImageData::new(cropped, source))
     }
 
-    /// Redact every region in `redactions` that intersects the image, in place.
-    pub(super) fn redact(&self, redactions: Redactions<Image>) {
+    /// Redact every region in `redactions`, in place.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] when a region falls outside the image; nothing is
+    /// painted then.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn redact(&self, redactions: Redactions<Image>) -> Result<()> {
         let mut buffer = self.0.lock().unwrap();
         let dims = buffer.dimensions();
-        for (location, replacement) in redactions.into_iter() {
-            if let Some(region) = location.bounding_box.to_pixels(dims) {
-                buffer.redact(region, &replacement);
-            }
+        let regions = redactions
+            .into_iter()
+            .map(|(location, replacement)| {
+                let region = location
+                    .bounding_box
+                    .to_pixels(dims)
+                    .ok_or_else(outside_the_image)?;
+                Ok((region, replacement))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for (region, replacement) in regions {
+            buffer.redact(region, &replacement);
         }
+        Ok(())
     }
+}
+
+/// The error for a region no pixel of the image falls in.
+fn outside_the_image() -> Error {
+    Error::malformed("the region falls outside the image")
 }

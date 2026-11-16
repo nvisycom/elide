@@ -6,6 +6,7 @@
 
 mod formatting_round_trip;
 mod key_context;
+mod marked;
 mod nested;
 mod redaction;
 mod scalar_values;

@@ -3,13 +3,13 @@
 
 use std::ops::Range;
 
-use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
+use elide_core::modality::text::{Marked, SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
-use super::{ExtractedItem, ItemEdit, Passage, SourceAddresser, SpliceState};
-use crate::string::RedactRange;
+use super::{ExtractedItem, Passage, SourceAddresser, SpliceState};
+use crate::string::DisjointSpans;
 use crate::{FlaggedItem, FormatId, Stream};
 
 /// The [`Stream`] over a structured document's extracted, redactable items.
@@ -68,87 +68,53 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
         TextLocation::source(range, source)
     }
 
-    fn redact_one(
-        addresser: &dyn SourceAddresser<A>,
-        state: &mut SpliceState<A>,
-        location: &TextLocation,
-        replacement: &TextReplacement,
-    ) -> Result<()> {
-        // Resolve to the item and its decoded-local range. A location addressed
-        // by a raw `source` reference, e.g. an entity a review layer added by
-        // selecting text in a container part, is reverse-resolved through the
-        // addresser; otherwise the decoded `range` locates the item directly.
-        // Either way the edit path below is the same.
-        let edits: Vec<ItemEdit> = Self::resolve(addresser, state, location)?
-            .into_iter()
-            .filter(|edit| state.items[edit.item].passage != Passage::Separator)
-            .collect();
-        let Some(first) = edits.first().map(|edit| edit.item) else {
-            return Ok(());
-        };
-        // The replacement takes the place of the covered text of the first item,
-        // and the covered text of the rest is cut, so each item keeps its own
-        // markup. Right to left, so an edit never shifts the ones still to come.
-        let value = replacement.value().unwrap_or_default();
-        for ItemEdit { item, local } in edits.into_iter().rev() {
-            let text = if item == first { value } else { "" };
-            let before_len = state.items[item].value.len();
-            state.items[item].value.redact_range(text, local)?;
-            let delta = state.items[item].value.len() as isize - before_len as isize;
-            state.shift_starts_after(item, delta);
-        }
-        Ok(())
-    }
-
-    /// Resolve `location` to the [`ItemEdit`]s it targets, one per item it
-    /// covers.
+    /// The decoded span `location` addresses, checked against the text.
     ///
-    /// Prefers a raw [`source`](TextLocation::source) reference when present
-    /// (reverse-resolved via [`SourceAddresser::locate_source`]); falls back to
-    /// the decoded [`range`](TextLocation::range).
+    /// A resolved location is addressed by its decoded
+    /// [`range`](TextLocation::range) alone, the span a read covers; its
+    /// source references describe it but never narrow it. A reviewer mark has
+    /// no span yet: each of its references is reverse-resolved via
+    /// [`SourceAddresser::locate_source`], and together they must cover one
+    /// run of text.
     ///
-    /// An unresolvable **`source`** reference is a caller mistake, not a no-op:
-    /// the caller explicitly supplied raw byte coordinates to redact, and a bad
-    /// part name, an offset past the part, or a cross-part span means those
-    /// bytes were never redacted. Returning `Ok(None)` there would let a green
-    /// audit stand over an unredacted document, so it is an `Err` instead. A
-    /// missed decoded `range` resolves to nothing: the pipeline's own
-    /// coordinate, tolerated as a no-op.
-    fn resolve(
-        addresser: &dyn SourceAddresser<A>,
-        state: &SpliceState<A>,
-        location: &TextLocation,
-    ) -> Result<Vec<ItemEdit>> {
-        let source = location.source_refs();
-        if !source.is_empty() {
-            let edits = addresser.locate_source(&state.items, source);
-            if edits.is_empty() {
-                // A raw source reference that resolves to no redactable
-                // item (a bad part name, an offset past the part, a span
-                // crossing parts) is the caller's coordinate at fault.
-                let refs: Vec<String> = source
-                    .iter()
-                    .map(|src| match &src.part {
-                        Some(part) => {
-                            format!("{part}#{}..{}", src.range.start, src.range.end)
-                        }
-                        None => format!("{}..{}", src.range.start, src.range.end),
-                    })
-                    .collect();
-                return Err(Error::malformed(format!(
-                    "source reference resolves to no redactable item: {}",
-                    refs.join(" ")
-                )));
-            }
-            return Ok(edits);
-        }
-        // No source refs and no decoded range: a source-only location with an
-        // empty ref set, nothing to resolve. A decoded range is the pipeline's
-        // own coordinate, a miss is a tolerated no-op.
-        let Some(range) = location.range() else {
-            return Ok(Vec::new());
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a location that resolves to nothing, never a
+    /// no-op: a span outside the text or splitting a character, a bad part
+    /// name, an offset past the part, a cross-part span, or references with
+    /// text between them would leave bytes unredacted under a green audit.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn span_for(&self, location: &TextLocation) -> Result<Range<usize>> {
+        let state = &self.state;
+        let TextLocation::Marked(mark) = location else {
+            let range = location
+                .range()
+                .cloned()
+                .ok_or_else(|| Error::malformed("a location with no span"))?;
+            state.text(range.clone())?;
+            return Ok(range);
         };
-        Ok(state.covering(range.clone()).unwrap_or_default())
+        let Marked::Source { refs } = mark else {
+            return Err(Error::malformed(
+                "a rendered-page mark does not address a structured document",
+            ));
+        };
+        let pieces = self.addresser.locate_source(&state.items, refs);
+        if pieces.is_empty() {
+            let refs: Vec<String> = refs
+                .iter()
+                .map(|src| match &src.part {
+                    Some(part) => format!("{part}#{}..{}", src.range.start, src.range.end),
+                    None => format!("{}..{}", src.range.start, src.range.end),
+                })
+                .collect();
+            return Err(Error::malformed(format!(
+                "source reference resolves to no redactable item: {}",
+                refs.join(" ")
+            )));
+        }
+        state.contiguous_span(&pieces)
     }
 }
 
@@ -199,6 +165,17 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
         Some(self.source_location(start..end))
     }
 
+    fn resolve(&self, location: TextLocation) -> Result<TextLocation> {
+        let TextLocation::Marked(mark) = &location else {
+            return Ok(location);
+        };
+        let span = self.span_for(&location)?;
+        let Marked::Source { refs } = mark else {
+            unreachable!("span_for rejects a rendered-page mark");
+        };
+        Ok(TextLocation::source(span, refs.clone()))
+    }
+
     fn flagged(&self) -> Result<Vec<FlaggedItem<Text>>> {
         let flagged: Vec<_> = {
             let state = &self.state;
@@ -225,32 +202,33 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
 
 #[async_trait::async_trait]
 impl<A: Send + Sync + 'static> DataReader<Text> for ExtractStream<A> {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        // Reads address the decoded stream; a source-only location has no decoded
-        // range to read from.
-        let Some(range) = location.range() else {
-            return Ok(None);
-        };
-        let state = &self.state;
-        let Some(edits) = state.covering(range.clone()) else {
-            return Ok(None);
-        };
-        let text: Option<String> = edits
-            .into_iter()
-            .map(|edit| state.items[edit.item].value.get(edit.local))
-            .collect();
-        Ok(text.map(TextData::new))
+    async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
+        // Reads address the decoded stream: a mark is resolved to its span
+        // before it is read.
+        let range = location
+            .range()
+            .ok_or_else(|| Error::malformed("an unresolved mark has no text to read"))?;
+        self.state.text(range.clone()).map(TextData::new)
     }
 }
 
 #[async_trait::async_trait]
 impl<A: Send + Sync + 'static> DataWriter<Text> for ExtractStream<A> {
-    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
-        // Apply right-to-left so each edit's length delta doesn't
-        // invalidate earlier locations.
-        redactions.sort_by_position();
-        for (location, replacement) in redactions.into_iter().rev() {
-            Self::redact_one(&*self.addresser, &mut self.state, &location, &replacement)?;
+    async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
+        // Resolve every location against the text as it is, before any edit
+        // moves it, then apply right to left so an edit's length delta never
+        // moves a span still to come.
+        let mut edits = Vec::new();
+        for (location, replacement) in redactions {
+            let span = self.span_for(&location)?;
+            edits.push((span, replacement));
+        }
+        let spans: Vec<Range<usize>> = edits.iter().map(|(span, _)| span.clone()).collect();
+        spans.ensure_disjoint()?;
+        edits.sort_by_key(|(span, _)| span.start);
+        for (span, replacement) in edits.into_iter().rev() {
+            self.state
+                .redact(span, replacement.value().unwrap_or_default())?;
         }
         Ok(())
     }
@@ -258,14 +236,45 @@ impl<A: Send + Sync + 'static> DataWriter<Text> for ExtractStream<A> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::modality::DataReader;
+    use elide_core::ErrorKind;
+    use elide_core::modality::text::TextReplacement;
+    use elide_core::modality::{DataReader, ModalityLocation};
 
     use super::*;
+    use crate::extract::ItemEdit;
 
     /// Addresses nothing: the items carry no source pre-image.
     struct Unaddressed;
 
     impl SourceAddresser<()> for Unaddressed {}
+
+    /// Addresses each item's value as its own source: a reference is a range
+    /// of the concatenated values, within one item.
+    struct Identity;
+
+    impl SourceAddresser<()> for Identity {
+        fn locate_source(
+            &self,
+            items: &[ExtractedItem<()>],
+            source: &[SourceRef],
+        ) -> Vec<ItemEdit> {
+            let mut starts = vec![0];
+            for item in items {
+                starts.push(starts.last().unwrap() + item.value.len());
+            }
+            let mut edits = Vec::new();
+            for SourceRef { range, .. } in source {
+                let Some(item) = (0..items.len())
+                    .find(|&item| starts[item] <= range.start && range.end <= starts[item + 1])
+                else {
+                    return Vec::new();
+                };
+                let local = range.start - starts[item]..range.end - starts[item];
+                edits.push(ItemEdit { item, local });
+            }
+            edits
+        }
+    }
 
     fn item(value: &str, passage: Passage) -> ExtractedItem<()> {
         ExtractedItem {
@@ -349,6 +358,105 @@ mod tests {
     async fn a_read_spans_items() {
         let stream = stream();
         let read = stream.read_at(&TextLocation::inline(5..18)).await.unwrap();
-        assert_eq!(read.as_ref().map(TextData::as_str), Some("Roe\njane.roe@"));
+        assert_eq!(read.as_str(), "Roe\njane.roe@");
+    }
+
+    fn addressed() -> ExtractStream<()> {
+        let mut stream = stream();
+        stream.addresser = Box::new(Identity);
+        stream
+    }
+
+    #[test]
+    fn source_refs_resolve_to_the_run_they_cover() {
+        let stream = addressed();
+        // "Jane R" and "oe": two items, one name.
+        let mark =
+            TextLocation::marked_sources([SourceRef::new(0..6), SourceRef::new(6..8)]).unwrap();
+        assert_eq!(stream.resolve(mark).unwrap().range(), Some(&(0..8)));
+        // "oe" and "jane", across the line break between them.
+        let mark =
+            TextLocation::marked_sources([SourceRef::new(6..8), SourceRef::new(9..13)]).unwrap();
+        assert_eq!(stream.resolve(mark).unwrap().range(), Some(&(6..13)));
+    }
+
+    #[tokio::test]
+    async fn source_refs_with_text_between_them_are_rejected() {
+        let mut marked = addressed();
+        // "J" and "R" in one item, "ane " between them.
+        let within =
+            TextLocation::marked_sources([SourceRef::new(0..1), SourceRef::new(5..6)]).unwrap();
+        // "Jane" and "jane" in two items, " Roe\n" between them.
+        let across =
+            TextLocation::marked_sources([SourceRef::new(9..13), SourceRef::new(0..4)]).unwrap();
+        for mark in [within, across] {
+            let err = marked.resolve(mark.clone()).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::MalformedInput, "{mark:?}");
+            let batch = Redactions::from([(mark, TextReplacement::Removed)]);
+            assert!(marked.write_at(batch).await.is_err());
+        }
+        assert_eq!(values(&marked), values(&stream()));
+    }
+
+    #[tokio::test]
+    async fn overlapping_redactions_are_an_error() {
+        let mut marked = addressed();
+        // "Jane Roe" by span, and "Roe" by its source refs.
+        let batch = Redactions::from([
+            (TextLocation::inline(0..8), TextReplacement::Removed),
+            (
+                TextLocation::marked_sources([SourceRef::new(5..6), SourceRef::new(6..8)]).unwrap(),
+                TextReplacement::Removed,
+            ),
+        ]);
+        let err = marked.write_at(batch).await.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(values(&marked), values(&stream()));
+    }
+
+    #[tokio::test]
+    async fn a_span_splitting_a_character_changes_nothing() {
+        let items = vec![item("é", Passage::Start), item("ABC", Passage::Continue)];
+        let mut stream = ExtractStream::new(FormatId::new("test"), items, Unaddressed);
+        // Byte 1 is inside "é"; "AB" must survive the failed batch.
+        let batch = Redactions::from([(TextLocation::inline(1..4), TextReplacement::Removed)]);
+        let err = stream.write_at(batch).await.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(values(&stream), ["é", "ABC"]);
+    }
+
+    #[tokio::test]
+    async fn a_cluster_of_a_span_and_a_mark_redacts_the_whole_span() {
+        let mut marked = addressed();
+        // A detection of "Jane Roe" fused with a mark on "R": the fused
+        // location carries only the mark's reference, but its span is the
+        // name, which a read covers and the write must too.
+        let mark = marked
+            .resolve(TextLocation::marked_source(SourceRef::new(5..6)))
+            .unwrap();
+        let fused = TextLocation::inline(0..8).union(&mark).unwrap();
+        assert_eq!(fused.source_refs(), [SourceRef::new(5..6)]);
+        let read = marked.read_at(&fused).await.unwrap();
+        assert_eq!(read.as_str(), "Jane Roe");
+        let batch = Redactions::from([(fused, TextReplacement::Removed)]);
+        marked.write_at(batch).await.unwrap();
+        assert_eq!(
+            values(&marked),
+            ["", "", "\n", "jane.roe@", "example.com", "Next"]
+        );
+    }
+
+    /// A range past the text, or a mark the addresser cannot place, is an
+    /// error rather than a skipped entity.
+    #[tokio::test]
+    async fn an_unaddressable_location_is_an_error() {
+        let mut stream = stream();
+        let past = TextLocation::inline(0..999);
+        assert!(stream.read_at(&past).await.is_err());
+        let mark = TextLocation::marked_source(SourceRef::new(0..4));
+        assert!(stream.resolve(mark.clone()).is_err());
+        assert!(stream.read_at(&mark).await.is_err());
+        let batch = Redactions::from([(past, TextReplacement::Removed)]);
+        assert!(stream.write_at(batch).await.is_err());
     }
 }

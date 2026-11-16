@@ -190,7 +190,7 @@ impl SourceAddresser<XmlSpan> for MarkupAddresser {
                 local: first.start..last.end,
             });
         }
-        ItemEdit::merged(edits)
+        edits
     }
 }
 

@@ -11,6 +11,4 @@
 mod handler;
 mod loader;
 
-// `format`/`format_with` are `pub` so the crate root re-exports them as the
-// public contract; the handler/loader pair stays `pub(crate)`.
 pub use self::handler::{format, format_with};

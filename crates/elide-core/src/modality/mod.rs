@@ -35,8 +35,6 @@ pub mod text;
 
 mod chunk;
 mod data_reader;
-#[cfg(feature = "fixtures")]
-mod data_reader_ext;
 mod data_writer;
 mod hint;
 mod text_recognizable;
@@ -44,9 +42,6 @@ mod text_redactable;
 
 pub use self::chunk::Chunk;
 pub use self::data_reader::{ChunkReader, DataReader};
-#[cfg(feature = "fixtures")]
-#[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
-pub use self::data_reader_ext::DataReaderExt;
 pub use self::data_writer::DataWriter;
 pub use self::hint::{Hint, ResolvedHint};
 pub use self::text_recognizable::TextRecognizable;

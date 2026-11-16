@@ -78,6 +78,26 @@ impl PageGeometry {
         };
         block.rects_for(chars)
     }
+
+    /// The page-local character range of each glyph whose center falls in any
+    /// of `regions` (page-normalized, top-left origin), in draw order.
+    pub(crate) fn glyphs_in<'a>(
+        &'a self,
+        regions: &'a [UnitBoundingBox],
+    ) -> impl Iterator<Item = Range<usize>> + 'a {
+        self.rects
+            .iter()
+            .filter(move |glyph| {
+                let rect = self.frame.normalize(glyph.rect);
+                let x = rect.x + rect.width / 2.0;
+                let y = rect.y + rect.height / 2.0;
+                regions.iter().any(|region| {
+                    (region.x..=region.x + region.width).contains(&x)
+                        && (region.y..=region.y + region.height).contains(&y)
+                })
+            })
+            .map(|glyph| glyph.chars.clone())
+    }
 }
 
 /// A borrowed view over a page's geometry, so the merge/normalize logic is

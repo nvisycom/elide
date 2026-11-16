@@ -95,4 +95,25 @@ pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Any + Send + Sync
     fn lift(&self, _chunk: &Chunk<M>, local: M::Location) -> Option<M::Location> {
         Some(local)
     }
+
+    /// Resolve `location` to the form this stream reads and writes.
+    ///
+    /// A reviewer's mark can name content by where it physically sits (a
+    /// text [`Marked`] location: raw source bytes, or a rendered-page region)
+    /// with no decoded span. Reads and writes address decoded spans, so the
+    /// engine resolves every entity's location here before redacting: a mark
+    /// becomes the span it covers, keeping the reviewer's anchor, and a
+    /// location that already has a span passes through. The default passes
+    /// every location through, for a modality with no such marks.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] if `location` is a mark this stream cannot resolve:
+    /// a mark is never dropped.
+    ///
+    /// [`Marked`]: elide_core::modality::text::Marked
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn resolve(&self, location: M::Location) -> Result<M::Location> {
+        Ok(location)
+    }
 }

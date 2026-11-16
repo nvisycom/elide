@@ -81,15 +81,23 @@ impl Stream<Tabular> for XlsxStream {
 
 #[async_trait::async_trait]
 impl DataReader<Tabular> for XlsxStream {
-    async fn read_at(&self, location: &TabularLocation) -> Result<Option<TextData>> {
-        let Some(cell) = self.state.cell_at(location)? else {
-            return Ok(None);
-        };
+    async fn read_at(&self, location: &TabularLocation) -> Result<TextData> {
+        let cell = self.state.cell_at(location)?.ok_or_else(|| {
+            Error::malformed(format!(
+                "no XLSX cell at row {}, column {}",
+                location.row_index, location.column_index
+            ))
+        })?;
         // An intra-cell span slices the cell; no span reads the whole cell.
-        match &location.span {
-            Some(span) => Ok(cell.get(span.clone()).map(TextData::new)),
-            None => Ok(Some(TextData::new(cell))),
-        }
+        let Some(span) = &location.span else {
+            return Ok(TextData::new(cell));
+        };
+        cell.get(span.clone()).map(TextData::new).ok_or_else(|| {
+            Error::malformed(format!(
+                "span {}..{} is outside the cell or splits a character",
+                span.start, span.end
+            ))
+        })
     }
 }
 

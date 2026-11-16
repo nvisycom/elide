@@ -69,16 +69,21 @@ and this project adheres to
 - `Orchestrator::pick` records on every entity the operator `anonymize_with`
   will apply, as a `Selection` event, so a review can show the plan before
   anything is applied
+- A reviewer can mark text by where it sits rather than by span: raw bytes in
+  a part (DOCX, PPTX, HTML, XML, JSON, TXT) or a region of a rendered
+  PDF page. Applying the report resolves each mark to the text it covers
 - Applying a report fails closed: a part with entities that no registered
-  pipeline can apply, or that names no part of the documents, is an error
-  rather than a part left unredacted
+  pipeline can apply, or that names no part of the documents, a mark the
+  document cannot place, and a location a stream cannot read or write are
+  each an error rather than content left unredacted
 
 #### Redaction
 
 - Redaction operators for text (replace, mask, erase, hash, HMAC, encrypt,
   truncate, clamp, date generalization, pseudonymize, keep), tabular cells
-  (drop row, drop column), images (blackbox, blur, pixelate), and audio
-  (silence, beep), selected per entity by an `Anonymizer`'s ordered rules;
+  (drop row, the header row included; drop column), images (blackbox, blur,
+  pixelate), and audio (silence, beep), selected per entity by an
+  `Anonymizer`'s ordered rules;
   `Erase` and `Keep` serve every modality, and `Keep` writes nothing, so a kept
   entity is left exactly as it was in every format and is recorded as
   selected, not redacted

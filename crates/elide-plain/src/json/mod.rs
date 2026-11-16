@@ -13,8 +13,6 @@ mod handler;
 mod loader;
 mod parser;
 
-// `format` is `pub` so the crate root re-exports it as the public contract;
-// the handler/loader pair is `pub(crate)` for each to reference the other.
 pub(crate) use self::handler::JsonHandler;
 pub use self::handler::format;
 pub(crate) use self::loader::JsonLoader;

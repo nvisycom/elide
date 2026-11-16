@@ -40,7 +40,7 @@ impl Stream<Image> for PixelStream {
 
 #[async_trait::async_trait]
 impl DataReader<Image> for PixelStream {
-    async fn read_at(&self, location: &ImageLocation) -> Result<Option<ImageData>> {
+    async fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
         self.state.crop_encode(location)
     }
 }
@@ -48,7 +48,6 @@ impl DataReader<Image> for PixelStream {
 #[async_trait::async_trait]
 impl DataWriter<Image> for PixelStream {
     async fn write_at(&mut self, redactions: Redactions<Image>) -> Result<()> {
-        self.state.redact(redactions);
-        Ok(())
+        self.state.redact(redactions)
     }
 }

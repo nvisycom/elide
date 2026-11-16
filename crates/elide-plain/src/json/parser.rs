@@ -146,7 +146,7 @@ impl<'a> SlotParser<'a> {
                 "unexpected byte {b:#x} at offset {}",
                 self.pos
             ))),
-            None => Err(Error::malformed("unexpected end of input".to_string())),
+            None => Err(Error::malformed("unexpected end of input")),
         }
     }
 
@@ -258,20 +258,24 @@ impl<'a> SlotParser<'a> {
                     value.push(decoded);
                     self.pos += source_len;
                 }
+                Some(b) if b < 0x20 => {
+                    return Err(Error::malformed(format!(
+                        "unescaped control character in a JSON string at offset {}",
+                        self.pos
+                    )));
+                }
                 Some(_) => {
-                    let ch_start = self.pos;
-                    // Advance one UTF-8 codepoint without reading the
-                    // escape table.
-                    let rest = &self.src[ch_start..];
-                    let ch = rest
+                    // `pos` is on a character boundary: every step advances
+                    // by a whole character or escape.
+                    let ch = self.src[self.pos..]
                         .chars()
                         .next()
-                        .ok_or_else(|| Error::malformed("unterminated string".to_string()))?;
+                        .ok_or_else(|| Error::malformed("unterminated string"))?;
                     value.push(ch);
                     self.pos += ch.len_utf8();
                 }
                 None => {
-                    return Err(Error::malformed("unterminated string".to_string()));
+                    return Err(Error::malformed("unterminated string"));
                 }
             }
         }
@@ -300,7 +304,7 @@ impl<'a> SlotParser<'a> {
         // its contract of erroring on malformed input.
         if !is_json_literal(&literal) {
             return Err(Error::malformed(format!(
-                "invalid JSON literal {literal:?} at offset {start}"
+                "invalid JSON literal at offset {start}"
             )));
         }
         Ok(Leaf {
@@ -331,6 +335,23 @@ mod tests {
         // Exactly MAX_DEPTH levels is fine and round-trips.
         let ok = format!("{}{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH));
         assert!(parse_slots(&ok).is_ok(), "MAX_DEPTH nesting should parse");
+    }
+
+    #[test]
+    fn rejects_a_raw_control_character_in_a_string() {
+        let err = parse_slots("[\"a\u{1}b\"]").expect_err("raw U+0001 is not JSON");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert!(
+            parse_slots(r#"["a\u0001b"]"#).is_ok(),
+            "the escaped form is"
+        );
+    }
+
+    /// The error names the offset, never the document's bytes.
+    #[test]
+    fn a_bad_literal_is_not_quoted_in_the_error() {
+        let err = parse_slots("[123456789x]").expect_err("not a number");
+        assert!(!err.to_string().contains("123456789"), "{err}");
     }
 
     #[test]
