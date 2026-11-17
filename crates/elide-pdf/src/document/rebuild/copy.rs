@@ -6,9 +6,9 @@ use elide_core::{Error, Result};
 use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
-use super::{MAX_NESTING, Rebuild, record};
+use super::{MAX_NESTING, Rebuild, ScopedCopy, record};
 use crate::document::image;
-use crate::document::object::{DocumentExt, StreamExt};
+use crate::document::object::{DocumentExt, ObjectExt, StreamExt};
 use crate::text::{readable_cmap, to_unicode};
 
 /// How many references a value is followed through.
@@ -60,7 +60,8 @@ impl<'a> Rebuild<'a> {
     }
 
     /// The object `id` refers to copied as `kind`: a dictionary or stream as
-    /// its own object, copied once per kind; anything else in place.
+    /// its own object, copied once per kind (and per scope, for content that
+    /// borrows the scope it is drawn in); anything else in place.
     fn copy_reference<'s>(
         &mut self,
         kind: Kind,
@@ -95,27 +96,32 @@ impl<'a> Rebuild<'a> {
             return self.copy(kind, object, scope, depth + 1);
         }
         // Content without resources of its own resolves its names in the
-        // scope it is drawn in, so it is copied for each use.
-        if self.borrows_scope(kind, object) {
-            return match self.copy_object(kind, Some(target), object, scope, depth + 1)? {
-                Some(object) => Ok(Some(Object::Reference(self.out.add_object(object)))),
-                None => Ok(None),
-            };
-        }
-        if let Some(&copy) = self.copies.get(&(target, kind)) {
-            return Ok(Some(Object::Reference(copy)));
+        // scope it is drawn in, so it is copied once for each scope whose
+        // resources differ; any other object is copied once.
+        let drawn_in: &[&Dictionary] = if self.borrows_scope(kind, object) {
+            scope
+        } else {
+            &[]
+        };
+        let copies = self.copies.entry((target, kind)).or_default();
+        let same_scope =
+            |(resources, _): &&ScopedCopy| resources.iter().eq(drawn_in.iter().copied());
+        if let Some((_, copy)) = copies.iter().find(same_scope) {
+            return Ok(Some(Object::Reference(*copy)));
         }
         // The copy's id is taken first, so an object that refers back to
         // itself (a form drawing a pattern drawing the form) refers to it.
         let copy = self.out.new_object_id();
-        self.copies.insert((target, kind), copy);
+        copies.push((drawn_in.iter().map(|dict| (*dict).clone()).collect(), copy));
         match self.copy_object(kind, Some(target), object, scope, depth + 1)? {
             Some(object) => {
                 self.out.objects.insert(copy, object);
                 Ok(Some(Object::Reference(copy)))
             }
             None => {
-                self.copies.remove(&(target, kind));
+                if let Some(copies) = self.copies.get_mut(&(target, kind)) {
+                    copies.retain(|(_, id)| *id != copy);
+                }
                 Ok(None)
             }
         }
@@ -385,7 +391,9 @@ impl<'a> Rebuild<'a> {
     ///
     /// # Errors
     ///
-    /// As [`to_unicode`].
+    /// As [`to_unicode`] and [`readable_cmap`]: the rewrites across the
+    /// document add at most
+    /// [`MAX_CONTENT_BYTES`](crate::document::object::MAX_CONTENT_BYTES).
     fn unicode_map<'s>(
         &mut self,
         value: &'s Object,
@@ -400,7 +408,11 @@ impl<'a> Rebuild<'a> {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
         }
-        let Some(content) = stream.decoded().ok().and_then(|data| readable_cmap(&data)) else {
+        let content = match stream.decoded() {
+            Ok(data) => readable_cmap(&data, &mut self.cmap_budget)?,
+            Err(_) => None,
+        };
+        let Some(content) = content else {
             return self.table(value, TO_UNICODE, scope, depth);
         };
         let dict = self.stream_keys(
@@ -427,14 +439,24 @@ impl<'a> Rebuild<'a> {
     where
         'a: 's,
     {
-        match value {
-            Object::Stream(stream) => self.form(stream, TILING, scope, depth).map(Some),
-            Object::Dictionary(_) => self.table(value, SHADING_PATTERN, scope, depth),
+        // A pattern's kind is its shape: a stream is a tiling pattern, a
+        // dictionary a shading pattern. `/PatternType` is written to match,
+        // so a viewer and the text walk read the copy as the same kind.
+        let (mut copy, kind) = match value {
+            Object::Stream(stream) => (self.form(stream, TILING, scope, depth)?, 1),
+            Object::Dictionary(_) => match self.table(value, SHADING_PATTERN, scope, depth)? {
+                Some(copy) => (copy, 2),
+                None => return Ok(None),
+            },
             _ => {
                 self.residue += 1;
-                Ok(None)
+                return Ok(None);
             }
+        };
+        if let Some(dict) = copy.dict_mut() {
+            dict.set("PatternType", Object::Integer(kind));
         }
+        Ok(Some(copy))
     }
 
     /// A colour space array: the family name, then its parameters, each

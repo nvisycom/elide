@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use elide_core::{Error, Result};
 use image::imageops::FilterType;
-use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
+use image::{DynamicImage, GenericImageView, RgbImage, Rgba, RgbaImage};
 
 use crate::modality::{ImageFormat, ImageReplacement};
 use crate::primitive::{BoundingBox, Color, Dimensions, Point};
@@ -30,6 +30,20 @@ impl RasterImage {
     /// Wrap a decoded image that encodes to `format`.
     pub(super) fn new(inner: DynamicImage, format: ImageFormat) -> Self {
         Self { inner, format }
+    }
+
+    /// The image of `size` whose pixels are `samples`, 8-bit RGB row by row,
+    /// encoding to `format`; `None` when `samples` is not that many pixels.
+    #[must_use]
+    pub fn from_rgb(size: Dimensions<u32>, samples: Vec<u8>, format: ImageFormat) -> Option<Self> {
+        RgbImage::from_raw(size.width, size.height, samples)
+            .map(|image| Self::new(DynamicImage::ImageRgb8(image), format))
+    }
+
+    /// The image's pixels as 8-bit RGB samples, row by row.
+    #[must_use]
+    pub fn into_rgb(self) -> Vec<u8> {
+        self.inner.into_rgb8().into_raw()
     }
 
     /// The image's pixel dimensions.

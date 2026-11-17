@@ -1423,6 +1423,7 @@ dependencies = [
  "bytes",
  "elide-codec",
  "elide-core",
+ "elide-image",
  "image",
  "lopdf",
  "pdfium-render",

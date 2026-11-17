@@ -8,7 +8,6 @@ use elide_core::redaction::Redactions;
 
 use super::image_state::ImageState;
 use crate::modality::{Image, ImageData, ImageLocation};
-use crate::primitive::{BoundingBox, Dimensions, Point};
 
 /// The pixel stream: yields the whole frame as one chunk and redacts regions in
 /// place on the shared [`ImageState`], which the `#exif` stream edits too and
@@ -24,15 +23,9 @@ impl Stream<Image> for PixelStream {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
-        let dims = self.state.dimensions();
-        let bbox = BoundingBox::from_origin(
-            Point::new(0.0, 0.0),
-            Dimensions::new(dims.width as f64, dims.height as f64),
-        );
-        let data = self.state.image_data()?;
         Ok(vec![Chunk {
-            location: ImageLocation::new(bbox),
-            data,
+            location: self.state.frame(),
+            data: self.state.data()?,
             hints: Vec::new(),
         }])
     }
@@ -41,7 +34,7 @@ impl Stream<Image> for PixelStream {
 #[async_trait::async_trait]
 impl DataReader<Image> for PixelStream {
     async fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
-        self.state.crop_encode(location)
+        self.state.read_at(location)
     }
 }
 

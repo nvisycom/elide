@@ -68,7 +68,15 @@ pub(crate) fn scrub(
 /// A range whose destinations change is written as the array of them (a
 /// range's destinations step its first one's last UTF-16 unit, as
 /// [`lopdf`] reads them). A destination that is not UTF-16 stays as written.
-pub(crate) fn readable_cmap(cmap: &[u8]) -> Option<Vec<u8>> {
+///
+/// Each rewrite's growth over what it replaces is taken from `budget`: a
+/// range of a few bytes expands to all its destinations.
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if the
+/// rewrites grow the CMap by more than `budget` bytes.
+pub(crate) fn readable_cmap(cmap: &[u8], budget: &mut usize) -> Result<Option<Vec<u8>>> {
     // Latin-1 maps each byte to one char and back, so tokens outside the
     // destinations keep their exact bytes.
     let text: String = cmap.iter().map(|&b| char::from(b)).collect();
@@ -95,6 +103,14 @@ pub(crate) fn readable_cmap(cmap: &[u8]) -> Option<Vec<u8>> {
         };
         match entry {
             Some((written, used)) => {
+                let replaced: usize = tokens[i..i + used]
+                    .iter()
+                    .map(|token| token.text.chars().count())
+                    .sum();
+                let growth = written.chars().count().saturating_sub(replaced);
+                *budget = budget.checked_sub(growth).ok_or_else(|| {
+                    Error::resource_limit("the /ToUnicode CMaps rewrite past their size limit")
+                })?;
                 changed = true;
                 out.push_str(&written);
                 i += used;
@@ -105,7 +121,7 @@ pub(crate) fn readable_cmap(cmap: &[u8]) -> Option<Vec<u8>> {
             }
         }
     }
-    changed.then(|| out.chars().map(|c| c as u8).collect())
+    Ok(changed.then(|| out.chars().map(|c| c as u8).collect()))
 }
 
 /// The `<src> <dst>` entry at the start of `tokens` with `dst` rewritten, and
@@ -496,11 +512,33 @@ mod tests {
         assert!(s.contains("endcmap"), "surrounding structure lost");
     }
 
+    /// A range of a few bytes expands to all its destinations, so a rewrite
+    /// growing past its budget is refused, and one within it takes its growth.
+    #[test]
+    fn a_rewrite_takes_its_growth_from_the_budget() {
+        let cmap = b"1 beginbfrange\n<0000> <00FF> <2F00>\nendbfrange\n";
+        let err = readable_cmap(cmap, &mut 1_000).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ResourceLimit);
+        let mut budget = 10_000;
+        let out = readable_cmap(cmap, &mut budget).unwrap().unwrap();
+        assert_eq!(10_000 - budget, out.len() - cmap.len());
+    }
+
+    /// A CMap nothing in is rewritten takes nothing from the budget, however
+    /// large it is.
+    #[test]
+    fn an_unchanged_cmap_takes_no_budget() {
+        let cmap = b"1 beginbfchar\n<0041> <0041>\nendbfchar\n".repeat(100);
+        let mut budget = 0;
+        assert_eq!(readable_cmap(&cmap, &mut budget).unwrap(), None);
+    }
+
     #[test]
     fn writes_bfchar_destinations_as_readable_text() {
         // Chrome maps 山 to the Kangxi radical ⼭ (U+2F2D); Quartz maps fi to ﬁ.
         let cmap = b"2 beginbfchar\n<0681> <2F2D>\n<0003> <FB01>\nendbfchar\n";
-        let out = String::from_utf8(readable_cmap(cmap).unwrap()).unwrap();
+        let out =
+            String::from_utf8(readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap()).unwrap();
         assert_eq!(
             out,
             "2 beginbfchar\n<0681> <5C71>\n<0003> <00660069>\nendbfchar\n"
@@ -510,14 +548,15 @@ mod tests {
     #[test]
     fn leaves_a_cmap_without_forms_alone() {
         let cmap = b"1 beginbfchar\n<0041> <0041>\nendbfchar\n1 beginbfrange\n<01> <03> <0061>\nendbfrange\n";
-        assert_eq!(readable_cmap(cmap), None);
+        assert_eq!(readable_cmap(cmap, &mut { usize::MAX }).unwrap(), None);
     }
 
     #[test]
     fn writes_a_changed_range_as_its_destinations() {
         // <2F2B>..<2F2D> are the radicals for 尸, 屮 and 山.
         let cmap = b"1 beginbfrange\n<10> <12> <2F2B>\nendbfrange\n";
-        let out = String::from_utf8(readable_cmap(cmap).unwrap()).unwrap();
+        let out =
+            String::from_utf8(readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap()).unwrap();
         assert_eq!(
             out,
             "1 beginbfrange\n<10> <12> [<5C38> <5C6E> <5C71>]\nendbfrange\n"
@@ -527,14 +566,15 @@ mod tests {
     #[test]
     fn writes_a_range_array_entry_by_entry() {
         let cmap = b"beginbfrange <10> <11> [<0041> <2F2D>] endbfrange";
-        let out = String::from_utf8(readable_cmap(cmap).unwrap()).unwrap();
+        let out =
+            String::from_utf8(readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap()).unwrap();
         assert_eq!(out, "beginbfrange <10> <11> [<0041> <5C71>] endbfrange");
     }
 
     #[test]
     fn keeps_bytes_outside_the_destinations() {
         let cmap = b"/CMapName /\xE9 def\nbeginbfchar <01> <2F2D> endbfchar";
-        let out = readable_cmap(cmap).unwrap();
+        let out = readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap();
         assert_eq!(
             out,
             b"/CMapName /\xE9 def\nbeginbfchar <01> <5C71> endbfchar"

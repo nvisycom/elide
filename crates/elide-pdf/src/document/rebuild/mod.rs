@@ -48,7 +48,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use self::keys::Kind;
 use self::layers::Layers;
-use crate::document::object::{DocumentExt, ObjectExt};
+use crate::document::object::{DocumentExt, MAX_CONTENT_BYTES, ObjectExt};
 use crate::text::{PRINT_BOXES, PageBoxes, page_boxes};
 
 /// How deep forms, patterns, and glyph procedures may nest in one another.
@@ -111,13 +111,19 @@ pub(crate) fn check(doc: &Document) -> Result<()> {
     )))
 }
 
+/// One copy of a source object: the resource dictionaries of the scope it
+/// was copied for (none when it does not borrow its scope), and its id.
+type ScopedCopy = (Vec<Dictionary>, ObjectId);
+
 /// The state of one rebuild.
 struct Rebuild<'a> {
     source: &'a Document,
     out: Document,
-    /// The copy of each source object already copied, by the kind it was
-    /// copied as.
-    copies: HashMap<(ObjectId, Kind), ObjectId>,
+    /// The copies of each source object, by the kind it was copied as: one
+    /// per scope for content that borrows the scope it is drawn in, keyed by
+    /// that scope's resource dictionaries (equal resources resolve every name
+    /// alike), and one for anything else, keyed by no scope.
+    copies: HashMap<(ObjectId, Kind), Vec<ScopedCopy>>,
     /// The id each source page's copy takes.
     pages: BTreeMap<ObjectId, ObjectId>,
     /// The source XObjects cut and recorded, so they are not also recorded as
@@ -131,6 +137,9 @@ struct Rebuild<'a> {
     /// How many entries, values, and operators nothing models were dropped
     /// unrecorded.
     residue: usize,
+    /// The bytes the `/ToUnicode` CMap rewrites may still add: a rewrite
+    /// expands each changed range to all its destinations.
+    cmap_budget: usize,
 }
 
 impl<'a> Rebuild<'a> {
@@ -145,6 +154,7 @@ impl<'a> Rebuild<'a> {
             layers: Layers::read(source),
             stripped: StrippedContent::new(),
             residue: 0,
+            cmap_budget: MAX_CONTENT_BYTES,
         }
     }
 
@@ -258,7 +268,12 @@ impl<'a> Rebuild<'a> {
         self.out.trailer.set("Root", catalog_id);
 
         // A form or image a resource dictionary lists but no content draws.
-        let copied: HashSet<ObjectId> = self.copies.keys().map(|(id, _)| *id).collect();
+        let copied: HashSet<ObjectId> = self
+            .copies
+            .iter()
+            .filter(|(_, copies)| !copies.is_empty())
+            .map(|((id, _), _)| *id)
+            .collect();
         let mut listed = HashSet::new();
         for object in source.objects.values() {
             listed_xobjects(source, object, 0, &mut listed);
@@ -671,6 +686,7 @@ mod tests {
     use super::*;
     use crate::document::attachment::tree::Tree;
     use crate::document::attachment::with_attachments;
+    use crate::document::object::DictionaryExt;
     use crate::document::{Pdf, Redaction, Store};
     use crate::text::Detection;
 
@@ -1017,6 +1033,34 @@ mod tests {
         assert_eq!(names, ["attachment-1.pdf", "attachment-2.txt"]);
         assert!(!text_of(&out).contains("Jane_Roe"));
         check(&out).unwrap();
+    }
+
+    /// A file specification whose `/EF` is an indirect dictionary still
+    /// attaches its file.
+    #[test]
+    fn an_indirect_embedded_file_dictionary_is_followed() {
+        let mut source =
+            Document::load_mem(&with_attachments(&[("notes.txt", b"Jane Roe")])).unwrap();
+        let spec = source
+            .objects
+            .iter()
+            .find(|(_, object)| object.as_dict().is_ok_and(|d| d.get(b"EF").is_ok()))
+            .map(|(id, _)| *id)
+            .unwrap();
+        let files = source
+            .get_dictionary(spec)
+            .unwrap()
+            .get(b"EF")
+            .unwrap()
+            .clone();
+        let files = source.add_object(files);
+        source
+            .get_dictionary_mut(spec)
+            .unwrap()
+            .set("EF", Object::Reference(files));
+
+        let (out, _) = rebuilt(&source);
+        assert_eq!(Tree::read(&out).unwrap().entries.len(), 1);
     }
 
     /// The first page's resources in `doc`.
@@ -1428,6 +1472,61 @@ mod tests {
                 .unwrap(),
             b"Data"
         );
+    }
+
+    /// A form with no resources of its own drawn many times in one scope is
+    /// copied once there, however many names and forms draw it, and is not
+    /// recorded as undisplayed: a chain of such forms each drawing the next
+    /// many times stays one copy per form.
+    #[test]
+    fn a_form_without_resources_is_copied_once_per_scope() {
+        let mut doc = Document::with_version("1.7");
+        let leaf = doc.add_object(Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+            Content {
+                operations: show("Hello"),
+            }
+            .encode()
+            .unwrap(),
+        ));
+        let middle = doc.add_object(Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+            b"/A Do /B Do /A Do".to_vec(),
+        ));
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let content = doc.add_object(Stream::new(dictionary! {}, b"/M Do /N Do /M Do".to_vec()));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            "Resources" => dictionary! {
+                "Font" => dictionary! { "F1" => font },
+                "XObject" => dictionary! { "M" => middle, "N" => middle, "A" => leaf, "B" => leaf },
+            },
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(
+                dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
+            ),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+
+        let (out, stripped) = rebuilt(&doc);
+        let forms = out
+            .objects
+            .values()
+            .filter(|object| {
+                object
+                    .as_stream()
+                    .is_ok_and(|stream| stream.dict.has_subtype(b"Form"))
+            })
+            .count();
+        assert_eq!(forms, 2);
+        assert_eq!(count(&stripped, HiddenContent::Undisplayed), 0);
     }
 
     /// A form with no resources of its own is copied for each scope it is

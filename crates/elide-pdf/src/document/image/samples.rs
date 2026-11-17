@@ -22,8 +22,10 @@ use lopdf::{Dictionary, Document, Object, Stream};
 
 use crate::document::object::DocumentExt;
 
-/// The largest decoded image accepted, in bytes: a sample stream may claim any
-/// size, so its decode is bounded to refuse a decompression bomb.
+/// The largest image accepted, in bytes, both as packed samples and as the
+/// pixels they decode to: a sample stream may claim any size, and a 1-bit
+/// sample expands to a whole byte per channel, so both are bounded to refuse
+/// a decompression bomb.
 const MAX_SAMPLE_BYTES: usize = 256 * 1024 * 1024;
 
 /// An image's decoded pixels: 8-bit gray or RGB, row-major.
@@ -58,6 +60,11 @@ impl Space {
             Self::Cmyk => 4,
         }
     }
+
+    /// Whether a pixel decodes to three RGB bytes, else one gray byte.
+    fn rgb(&self) -> bool {
+        !matches!(self, Self::Gray { .. } | Self::Indexed { rgb: false, .. })
+    }
 }
 
 /// The shape of an image's samples, read from its dictionary.
@@ -72,6 +79,14 @@ impl Layout {
     /// The bytes one row of samples takes, padded to a whole byte.
     fn row_bytes(&self) -> usize {
         (self.width as usize * self.space.components() * self.bits).div_ceil(8)
+    }
+
+    /// The bytes the decoded pixels take, or `None` past `usize`.
+    fn pixel_bytes(&self) -> Option<usize> {
+        let channels = if self.space.rgb() { 3 } else { 1 };
+        (self.width as usize)
+            .checked_mul(self.height as usize)?
+            .checked_mul(channels)
     }
 }
 
@@ -90,7 +105,8 @@ pub(crate) fn is_supported(doc: &Document, dict: &Dictionary) -> bool {
 }
 
 /// The layout `dict` describes, or `None` when its samples are of a kind this
-/// module does not decode or claim more than [`MAX_SAMPLE_BYTES`].
+/// module does not decode, or they or their pixels take more than
+/// [`MAX_SAMPLE_BYTES`].
 fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
     let width = u32::try_from(dict.get(b"Width").ok()?.as_i64().ok()?).ok()?;
     let height = u32::try_from(dict.get(b"Height").ok()?.as_i64().ok()?).ok()?;
@@ -131,8 +147,9 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
             )?,
         }
     };
-    let size = layout.row_bytes().checked_mul(height as usize)?;
-    (size <= MAX_SAMPLE_BYTES).then_some(layout)
+    let samples = layout.row_bytes().checked_mul(height as usize)?;
+    let pixels = layout.pixel_bytes()?;
+    (samples <= MAX_SAMPLE_BYTES && pixels <= MAX_SAMPLE_BYTES).then_some(layout)
 }
 
 /// The pixels of the raw-sample image XObject `stream` in `doc`. Samples
@@ -154,20 +171,16 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
     samples.resize(size, 0);
 
     let count = layout.width as usize * layout.space.components();
-    let mut data = Vec::with_capacity(layout.width as usize * layout.height as usize * 3);
+    let mut data = Vec::with_capacity(layout.pixel_bytes().unwrap_or_default());
     for row in samples.chunks_exact(row_bytes) {
         let values = unpack(row, layout.bits, count);
         pixels(&layout.space, layout.bits, &values, &mut data)
             .ok_or_else(|| Error::malformed("image palette index out of range"))?;
     }
-    let rgb = !matches!(
-        layout.space,
-        Space::Gray { .. } | Space::Indexed { rgb: false, .. }
-    );
     Ok(Pixels {
         width: layout.width,
         height: layout.height,
-        rgb,
+        rgb: layout.space.rgb(),
         data,
     })
 }
@@ -359,6 +372,20 @@ mod tests {
             vec![1, 0],
         );
         assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 255, 0, 0]);
+    }
+
+    /// An image whose packed samples fit the bound but whose pixels do not is
+    /// refused: 1-bit samples expand to a byte each.
+    #[test]
+    fn pixels_past_the_bound_are_refused() {
+        let doc = Document::new();
+        let mask = dictionary! { "Width" => 65_536, "Height" => 32_768, "ImageMask" => true };
+        assert!(!is_supported(&doc, &mask));
+        let gray = dictionary! {
+            "Width" => 65_536, "Height" => 32_768, "BitsPerComponent" => 1,
+            "ColorSpace" => "DeviceGray",
+        };
+        assert!(!is_supported(&doc, &gray));
     }
 
     /// A stencil mask reads as gray, its painted samples (0 under the

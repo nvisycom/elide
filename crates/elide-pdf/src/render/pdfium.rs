@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use image::{ImageFormat, RgbImage, load_from_memory};
+use image::{ImageFormat, RgbImage};
 use pdfium_render::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
@@ -175,19 +175,13 @@ pub(crate) fn flatten(
     Ok(out)
 }
 
-/// Each of the `scanned` pages rendered at `scale` with its redaction laid
-/// over: every pixel the redacted image changed from the page's original
-/// render, so what the document now draws (its redacted embedded images)
-/// shows everywhere else.
+/// Each of the `scanned` pages rendered fresh at `scale`, with the regions
+/// redacted on it painted over, as the image that replaces it.
 ///
 /// # Errors
 ///
-/// As [`each_page`];
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if an
-/// image cannot be decoded, and
-/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if its size is
-/// not the page's.
-pub(crate) fn composite(
+/// As [`each_page`] and [`ScannedPage::repainted`].
+pub(crate) fn repaint(
     pdf_bytes: &[u8],
     scanned: &[ScannedPage],
     scale: f32,
@@ -199,29 +193,12 @@ pub(crate) fn composite(
         &numbers,
         scale,
         &BTreeMap::new(),
-        |number, mut image| {
-            let Some(page) = scanned.iter().find(|page| page.number == number) else {
-                unreachable!("only the scanned pages are rendered");
-            };
-            let original = decode(number, &page.original)?;
-            let redacted = decode(number, &page.redacted)?;
-            if original.dimensions() != image.dimensions()
-                || redacted.dimensions() != image.dimensions()
-            {
-                return Err(Error::redaction(format!(
-                    "page {number}'s redacted image is not the size of the page"
-                )));
-            }
-            for ((pixel, before), after) in image
-                .pixels_mut()
-                .zip(original.pixels())
-                .zip(redacted.pixels())
-            {
-                if before != after {
-                    *pixel = *after;
-                }
-            }
-            out.push(PageReplacement::pixels(number, image)?);
+        |number, image| {
+            let page = scanned
+                .iter()
+                .find(|page| page.number == number)
+                .ok_or_else(|| Error::redaction(format!("page {number} was not asked for")))?;
+            out.push(page.repainted(image)?);
             Ok(())
         },
     )?;
@@ -302,11 +279,4 @@ fn png(number: u32, image: &RgbImage) -> Result<Bytes> {
         .write_to(&mut png, ImageFormat::Png)
         .map_err(|e| Error::malformed(format!("failed to encode page {number}: {e}")))?;
     Ok(Bytes::from(png.into_inner()))
-}
-
-/// The pixels of page `number`'s encoded image `bytes`.
-fn decode(number: u32, bytes: &[u8]) -> Result<RgbImage> {
-    load_from_memory(bytes)
-        .map(|image| image.into_rgb8())
-        .map_err(|e| Error::malformed(format!("page {number}'s image cannot be decoded: {e}")))
 }

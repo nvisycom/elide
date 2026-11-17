@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
 
-use crate::document::object::{DictionaryExt, ObjectExt};
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
 
 /// How deep the name tree is walked before it is treated as malformed: a real
 /// tree is a few levels deep, a cyclic or adversarial one is not walked forever.
@@ -160,7 +160,7 @@ fn entry(doc: &Document, key: &Object, value: &Object) -> Option<Entry> {
         Object::Dictionary(dict) => dict,
         _ => return None,
     };
-    let files = spec.get(b"EF").and_then(Object::as_dict).ok()?;
+    let files = doc.resolve_dict(spec.get(b"EF").ok()?)?;
     let stream = files
         .get(b"UF")
         .or_else(|_| files.get(b"F"))

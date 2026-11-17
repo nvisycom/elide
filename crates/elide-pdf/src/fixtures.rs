@@ -32,6 +32,15 @@ pub fn raw_image() -> Bytes {
     drawing(vec![image], Vec::new())
 }
 
+/// A one-page scanned PDF: no text, one 2x2 image of RGB `(200, 200, 200)`
+/// drawn over the whole 100x100pt page.
+#[must_use]
+pub fn scanned_image() -> Bytes {
+    let mut image = Stream::new(image_dict(2, 2, None), vec![200; 12]);
+    image.compress().expect("compress raw samples");
+    drawing_scaled(vec![image], 100)
+}
+
 /// A one-page PDF drawing three images, two the image pipeline cannot read.
 ///
 /// A fax-coded image (`CCITTFaxDecode`), a JPEG image, and an inline image; the
@@ -99,6 +108,28 @@ pub fn images(pdf: &[u8]) -> Vec<Bytes> {
     streams(pdf, |dict| dict_name(dict, b"Subtype") == Some(b"Image"))
 }
 
+/// The decoded samples of every image in `pdf`, to assert on its pixels.
+///
+/// # Panics
+///
+/// Panics if `pdf` is not a readable PDF or an image cannot be decoded.
+#[must_use]
+pub fn image_samples(pdf: &[u8]) -> Vec<Bytes> {
+    let doc = Document::load_mem(pdf).expect("a readable PDF");
+    doc.objects
+        .values()
+        .filter_map(|object| match object {
+            Object::Stream(stream) if dict_name(&stream.dict, b"Subtype") == Some(b"Image") => {
+                let samples = stream
+                    .decompressed_content()
+                    .unwrap_or_else(|_| stream.content.clone());
+                Some(Bytes::from(samples))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The stream bytes of every embedded file in `pdf`, to assert on them.
 ///
 /// # Panics
@@ -134,6 +165,17 @@ pub fn draws_images(pdf: &[u8]) -> bool {
 /// A one-page PDF that draws each of `images` (named `Im1`, `Im2`, …), then
 /// runs the `extra` operations.
 fn drawing(images: Vec<Stream>, extra: Vec<Operation>) -> Bytes {
+    page_of(images, extra, None)
+}
+
+/// A one-page PDF that draws each of `images` scaled to `size` points square.
+fn drawing_scaled(images: Vec<Stream>, size: i64) -> Bytes {
+    page_of(images, Vec::new(), Some(size))
+}
+
+/// A one-page PDF that draws each of `images`, scaled to `size` points square
+/// when given, then runs the `extra` operations.
+fn page_of(images: Vec<Stream>, extra: Vec<Operation>, size: Option<i64>) -> Bytes {
     let mut doc = Document::with_version("1.5");
     let pages = doc.new_object_id();
     let mut xobjects = Dictionary::new();
@@ -142,7 +184,24 @@ fn drawing(images: Vec<Stream>, extra: Vec<Operation>) -> Bytes {
         let id = doc.add_object(image);
         let name = format!("Im{}", index + 1);
         xobjects.set(name.as_bytes(), id);
+        if let Some(size) = size {
+            operations.push(Operation::new("q", vec![]));
+            operations.push(Operation::new(
+                "cm",
+                vec![
+                    size.into(),
+                    0.into(),
+                    0.into(),
+                    size.into(),
+                    0.into(),
+                    0.into(),
+                ],
+            ));
+        }
         operations.push(Operation::new("Do", vec![Object::Name(name.into_bytes())]));
+        if size.is_some() {
+            operations.push(Operation::new("Q", vec![]));
+        }
     }
     operations.extend(extra);
     let resources = doc.add_object(dictionary! { "XObject" => xobjects });

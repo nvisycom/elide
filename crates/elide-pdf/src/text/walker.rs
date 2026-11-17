@@ -343,6 +343,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         },
         pen: None,
         active: BTreeSet::new(),
+        patterns: BTreeSet::new(),
         page,
         walks_remaining: MAX_XOBJECT_WALKS,
     };
@@ -704,8 +705,8 @@ fn walk_xobject<'a>(
 /// A pattern's cell is drawn in its own graphics state, in the page's default
 /// space transformed by the pattern's `/Matrix` (8.7.3.1), so it inherits no
 /// font or transform. Its text is located once, however many times the cell is
-/// tiled, and deleting it from the one stream removes it from every tile. A
-/// shading pattern draws no text.
+/// tiled or the pattern selected, and deleting it from the one stream removes
+/// it from every tile. A shading pattern draws no text.
 fn walk_pattern<'a>(
     doc: &'a Document,
     name: &[u8],
@@ -722,9 +723,10 @@ fn walk_pattern<'a>(
     if stream
         .dict
         .get(b"PatternType")
-        .and_then(Object::as_i64)
         .ok()
-        != Some(1)
+        .and_then(ObjectExt::as_number)
+        != Some(1.0)
+        || !ctx.patterns.insert(id)
     {
         return Ok(());
     }
@@ -837,6 +839,9 @@ struct Walk<'a> {
     /// every stream of the page (`None` before the first glyph).
     pen: Option<(f64, f64)>,
     active: BTreeSet<ObjectId>,
+    /// The tiling patterns already walked on this page: a pattern's walk does
+    /// not depend on where it is selected, so each is walked once.
+    patterns: BTreeSet<ObjectId>,
     page: u32,
     /// Form XObject walks still permitted on this page. The stack-based `active`
     /// guard stops re-entry (cycles) but not re-walks: a form reached through

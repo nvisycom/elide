@@ -119,8 +119,8 @@ impl Pdf {
     /// The document with `redaction` applied, every step on one copy of the
     /// document and saved once: the glyphs of the detected text deleted
     /// (located through `blocks`, this document's [`text`](Pdf::text)), the
-    /// redacted images and pages written back, the unreadable ones removed or
-    /// cleared, and the attachments replaced or dropped.
+    /// redacted images and pages written back, the unreadable images removed,
+    /// and the attachments replaced or dropped.
     ///
     /// # Errors
     ///
@@ -158,7 +158,6 @@ impl Pdf {
                 render::reflatten(&mut doc, &pages)?;
             }
             render::reflatten(&mut doc, &redaction.pages)?;
-            render::clear(&mut doc, &redaction.cleared_pages)?;
         }
         attachment::replace(
             &mut doc,
@@ -194,10 +193,11 @@ impl Pdf {
     }
 
     /// The document with every page replaced by a redacted image of it: a
-    /// scanned page by its redacted blob in `redaction`, every other page
-    /// rendered at `scale` with the glyphs `detections` cover in `pages`
-    /// painted over. The embedded images are redacted first, so the render
-    /// shows them redacted, and the attachments are replaced or dropped.
+    /// scanned page by its render with its redacted regions painted over,
+    /// every other page rendered at `scale` with the glyphs `detections`
+    /// cover in `pages` painted over. The embedded images are redacted first,
+    /// so the render shows them redacted, and the attachments are replaced or
+    /// dropped.
     ///
     /// # Errors
     ///
@@ -225,12 +225,7 @@ impl Pdf {
             self
         };
 
-        let scanned: BTreeSet<u32> = redaction
-            .scanned
-            .iter()
-            .map(|page| page.number)
-            .chain(redaction.cleared_pages.iter().copied())
-            .collect();
+        let scanned: BTreeSet<u32> = redaction.scanned.iter().map(|page| page.number).collect();
         let rendered: BTreeSet<u32> = pages
             .iter()
             .map(|page| page.page)
@@ -241,7 +236,6 @@ impl Pdf {
         flat.extend(pdf.scanned(&redaction.scanned, scale, redraws)?);
         let pages = Redaction {
             pages: flat,
-            cleared_pages: redaction.cleared_pages,
             attachments: redaction.attachments,
             removed_attachments: redaction.removed_attachments,
             ..Redaction::default()
@@ -251,15 +245,14 @@ impl Pdf {
 
     /// The images that replace the redacted `scanned` pages, rendered at
     /// `scale`. When `redrawn`, this document draws embedded images other than
-    /// the render the pipeline was given, so each redaction is laid over a
-    /// fresh render of the page (see [`render::composite`]); otherwise the
-    /// redacted image is the page as it is.
+    /// the render the pipeline was given, so each page's redacted regions are
+    /// painted over a fresh render of it: its redacted images show, and every
+    /// redacted region stays covered. Otherwise each page is its render as
+    /// redacted.
     ///
     /// # Errors
     ///
-    /// As [`render::composite`], and
-    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a
-    /// redacted image lopdf cannot embed.
+    /// As [`render::repaint`] and [`ScannedPage::replacement`].
     #[cfg(feature = "render")]
     fn scanned(
         &self,
@@ -268,12 +261,9 @@ impl Pdf {
         redrawn: bool,
     ) -> Result<Vec<PageReplacement>> {
         if redrawn {
-            return render::composite(&self.0, scanned, scale);
+            return render::repaint(&self.0, scanned, scale);
         }
-        scanned
-            .iter()
-            .map(|page| PageReplacement::encoded(page.number, page.redacted.to_vec()))
-            .collect()
+        scanned.iter().map(ScannedPage::replacement).collect()
     }
 }
 
@@ -290,16 +280,13 @@ pub(crate) struct Redaction {
     /// Pages replaced by a single redacted image.
     #[cfg(feature = "render")]
     pub(crate) pages: Vec<PageReplacement>,
-    /// Scanned pages the image pipeline changed, each replaced by its redacted
-    /// image.
+    /// Scanned pages the image pipeline redacted, each replaced by its render
+    /// with the redacted regions painted over.
     #[cfg(feature = "render")]
     pub(crate) scanned: Vec<ScannedPage>,
     /// The scale the scanned pages were rendered at.
     #[cfg(feature = "render")]
     pub(crate) scan_scale: f32,
-    /// Scanned pages no codec could read, cleared.
-    #[cfg(feature = "render")]
-    pub(crate) cleared_pages: Vec<u32>,
     /// Attachments replaced with their redacted bytes.
     pub(crate) attachments: Vec<AttachmentReplacement>,
     /// Attachments dropped from the document.
@@ -317,8 +304,7 @@ impl Redaction {
     /// Whether the redaction changes nothing.
     pub(crate) fn is_empty(&self) -> bool {
         #[cfg(feature = "render")]
-        let pages =
-            self.pages.is_empty() && self.scanned.is_empty() && self.cleared_pages.is_empty();
+        let pages = self.pages.is_empty() && self.scanned.is_empty();
         #[cfg(not(feature = "render"))]
         let pages = true;
         self.text.is_empty()
@@ -424,6 +410,27 @@ mod tests {
     /// the pattern's one stream draws every tile.
     #[test]
     fn text_in_a_tiling_pattern_is_found_and_deleted() {
+        tiling_text(Object::Integer(1), 1);
+    }
+
+    /// A tiling pattern whose `/PatternType` is the real `1.0` is still a
+    /// tiling pattern, and its text is still found.
+    #[test]
+    fn a_real_pattern_type_is_still_a_tiling_pattern() {
+        tiling_text(Object::Real(1.0), 1);
+    }
+
+    /// A pattern selected before every fill, more times than the page's walk
+    /// budget, is walked once: its text reads once and the page is not
+    /// refused.
+    #[test]
+    fn a_pattern_selected_many_times_is_walked_once() {
+        tiling_text(Object::Integer(1), 5_000);
+    }
+
+    /// Find and delete the text a tiling pattern of `/PatternType` `kind`
+    /// draws, the page selecting it `selections` times.
+    fn tiling_text(kind: Object, selections: usize) {
         let mut doc = Document::with_version("1.5");
         let font = doc.add_object(dictionary! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
@@ -438,7 +445,7 @@ mod tests {
         };
         let pattern = doc.add_object(Stream::new(
             dictionary! {
-                "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                "Type" => "Pattern", "PatternType" => kind, "PaintType" => 1, "TilingType" => 1,
                 "BBox" => vec![0.into(), 0.into(), 50.into(), 20.into()],
                 "XStep" => 50, "YStep" => 20,
                 "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
@@ -447,7 +454,7 @@ mod tests {
         ));
         let content = doc.add_object(Stream::new(
             dictionary! {},
-            b"/Pattern cs /P0 scn 0 0 100 100 re f".to_vec(),
+            b"/Pattern cs /P0 scn 0 0 100 100 re f\n".repeat(selections),
         ));
         let pages = doc.new_object_id();
         let page = doc.add_object(dictionary! {

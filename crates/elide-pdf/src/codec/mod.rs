@@ -1,9 +1,9 @@
 //! The codec adapter for PDF: the format, decoded for redaction.
 //!
-//! A decoded document is a page-text body `Stream<Text>` (`PdfStream`), with
-//! a [`Blob`](elide_codec::Blob) per embedded image and attachment, and (with
-//! the `render` feature) per scanned page. A redaction on the body stream is
-//! recorded on its `PdfState` and applied on encode:
+//! A decoded document is a page-text body `Stream<Text>` (`PdfStream`), (with
+//! the `render` feature) a `Stream<Image>` per scanned page (`PageStream`), and
+//! a [`Blob`](elide_codec::Blob) per embedded image and attachment. A redaction
+//! on the body stream is recorded on its `PdfState` and applied on encode:
 //!
 //! - **Glyph deletion** (the default): the detected glyphs are deleted from the
 //!   content streams, keeping a selectable text layer with the detected spans
@@ -18,9 +18,11 @@
 //! [`RasterMode`]: crate::primitive::RasterMode
 //! [`RasterMode::Always`]: crate::primitive::RasterMode::Always
 
+mod blob_id;
 mod document;
 mod loader;
-mod part_id;
+#[cfg(feature = "render")]
+mod page;
 mod state;
 mod stream;
 

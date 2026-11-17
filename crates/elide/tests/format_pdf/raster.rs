@@ -19,9 +19,11 @@ use bytes::Bytes;
 use elide::Result;
 use elide::codec::pdf::{Dpi, RasterMode, pdf_format_with};
 use elide::codec::{ContentData, Document, FormatRegistry, LocalId};
-use elide::modality::ChunkReader;
 use elide::modality::text::Text;
-use elide::redaction::HiddenContentPolicy;
+use elide::modality::{ChunkReader, DataWriter};
+use elide::redaction::{HiddenContentPolicy, Redactions};
+use elide_image::modality::{Image, ImageReplacement};
+use elide_image::primitive::Color;
 use elide_pdf::fixtures;
 
 use crate::support::fixture::Fixture;
@@ -152,6 +154,45 @@ async fn images_and_attachments_are_surfaced() -> Result<()> {
     assert_eq!(
         fixtures::attachments(out.as_bytes()),
         [Bytes::from_static(b"[NAME]")]
+    );
+    Ok(())
+}
+
+/// A region redacted on a scanned page stays covered when an image on the
+/// page is removed too, even where the box is the colour the page already
+/// was: the region is painted over the page as it is then drawn.
+#[tokio::test]
+#[ignore = "requires the native PDFium library at runtime"]
+async fn a_scanned_page_region_stays_covered_over_a_removed_image() -> Result<()> {
+    let mut doc = pdf_format_with(RasterMode::Auto)
+        .decode(
+            ContentData::new(fixtures::scanned_image()),
+            HiddenContentPolicy::default(),
+        )
+        .await?;
+    let image: LocalId = doc
+        .blobs()
+        .iter()
+        .find(|blob| blob.id.as_str().starts_with("img-"))
+        .map(|blob| blob.id.clone())
+        .expect("the image is surfaced");
+    doc.remove_blob(&image)?;
+
+    let mut page = doc
+        .stream_mut::<Image>("page-1")
+        .expect("the page is scanned");
+    let frame = page.chunks()?.remove(0).location;
+    let mut redactions = Redactions::new();
+    let grey = Color::rgb(200, 200, 200);
+    redactions.push(frame, ImageReplacement::Block { color: grey });
+    page.write_at(redactions).await?;
+
+    let out = doc.encode()?;
+    let samples = fixtures::image_samples(out.as_bytes());
+    assert_eq!(samples.len(), 1, "the page is one image");
+    assert!(
+        samples[0].iter().all(|&sample| sample == 200),
+        "the removed image's blank page shows through the box"
     );
     Ok(())
 }

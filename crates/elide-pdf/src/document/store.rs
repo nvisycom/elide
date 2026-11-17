@@ -108,6 +108,10 @@ impl Store {
 /// crypt filter of their own (`/EFF`, 7.6.2), which lopdf does not apply, so
 /// their data is still ciphertext: it defines a crypt filter that is neither
 /// its stream nor its string default, and has an embedded file.
+///
+/// lopdf drops the encryption dictionary on load and keeps no `/EFF`, so the
+/// filter the files use cannot be read: a document that defines such a filter
+/// without selecting it is refused too.
 fn own_file_filter(doc: &Document) -> bool {
     let Some(state) = &doc.encryption_state else {
         return false;

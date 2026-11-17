@@ -1,5 +1,4 @@
-//! Page reflatten: replace a whole page's content with a single redacted image,
-//! or clear a page no codec could read.
+//! Page reflatten: replace a whole page's content with a single redacted image.
 //!
 //! A page's redacted raster replaces everything it drew: its content and
 //! resources are rewritten to draw that one image over the whole page, so
@@ -8,21 +7,72 @@
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use image::RgbImage;
-use lopdf::xobject::image_from;
-use lopdf::{Dictionary, Document, Object, Stream, dictionary};
+use elide_image::modality::{ImageFormat, ImageReplacement};
+use elide_image::primitive::{BoundingBox, Dimensions};
+use elide_image::{ImageBuffer, RasterImage};
+use image::{RgbImage, load_from_memory};
+use lopdf::{Document, Object, Stream, dictionary};
 
 use crate::text::{PageBoxes, page_boxes};
 
-/// A scanned page as the image pipeline was given it, and as it came back.
+/// A scanned page as the image pipeline redacted it.
 #[derive(Debug, Clone)]
 pub(crate) struct ScannedPage {
     /// 1-based page number.
     pub(crate) number: u32,
-    /// The page's render, as surfaced.
-    pub(crate) original: Bytes,
-    /// The redacted render.
-    pub(crate) redacted: Bytes,
+    /// The page's PNG render, every region redacted on it painted in.
+    pub(crate) painted: Bytes,
+    /// Each region of the render redacted, with how.
+    pub(crate) redactions: Vec<(BoundingBox<u32>, ImageReplacement)>,
+}
+
+impl ScannedPage {
+    /// The image that replaces the page: its render as redacted.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// if the render cannot be decoded, and as [`PageReplacement::pixels`].
+    pub(crate) fn replacement(&self) -> Result<PageReplacement> {
+        let pixels = load_from_memory(&self.painted)
+            .map_err(|e| {
+                Error::malformed(format!(
+                    "page {}'s render cannot be decoded: {e}",
+                    self.number
+                ))
+            })?
+            .into_rgb8();
+        PageReplacement::pixels(self.number, pixels)
+    }
+
+    /// The image that replaces the page: `render`, a fresh render of it, with
+    /// every redacted region painted over.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if `render`
+    /// is not the size of the render the regions were found on, and as
+    /// [`PageReplacement::pixels`].
+    pub(crate) fn repainted(&self, render: RgbImage) -> Result<PageReplacement> {
+        let size = Dimensions::new(render.width(), render.height());
+        let mismatch = || {
+            Error::redaction(format!(
+                "page {}'s render is not the size of the one it was redacted on",
+                self.number
+            ))
+        };
+        if size != ImageBuffer::dimensions_of(&self.painted)? {
+            return Err(mismatch());
+        }
+        let mut raster = RasterImage::from_rgb(size, render.into_raw(), ImageFormat::Png)
+            .ok_or_else(mismatch)?;
+        for (region, replacement) in &self.redactions {
+            raster.redact(*region, replacement);
+        }
+        let pixels =
+            RgbImage::from_raw(size.width, size.height, raster.into_rgb()).ok_or_else(mismatch)?;
+        PageReplacement::pixels(self.number, pixels)
+    }
 }
 
 /// One page reflatten: page `number`'s whole content replaced with `image`, a
@@ -36,19 +86,6 @@ pub(crate) struct PageReplacement {
 }
 
 impl PageReplacement {
-    /// Page `number` replaced by an encoded (PNG or JPEG) image.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the bytes
-    /// are not an image lopdf can embed.
-    pub(crate) fn encoded(number: u32, image: Vec<u8>) -> Result<Self> {
-        let image = image_from(image).map_err(|e| {
-            Error::redaction(format!("could not build image for page {number}: {e}"))
-        })?;
-        Ok(Self { number, image })
-    }
-
     /// Page `number` replaced by `pixels`, stored losslessly.
     ///
     /// # Errors
@@ -129,29 +166,6 @@ pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) ->
         page.set("CropBox", size);
         page.set("Rotate", 0);
         page.set("UserUnit", 1);
-    }
-    Ok(())
-}
-
-/// Clear the content of the 1-based pages `numbers` of `doc`: each page keeps
-/// its place and size, but draws nothing and holds no resources, so what it
-/// drew is dropped from the file.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a page does not exist or its content
-/// cannot be replaced.
-pub(crate) fn clear(doc: &mut Document, numbers: &[u32]) -> Result<()> {
-    let pages = doc.get_pages();
-    for number in numbers {
-        let id = *pages
-            .get(number)
-            .ok_or_else(|| Error::malformed(format!("page {number} does not exist")))?;
-        doc.change_page_content(id, Vec::new())
-            .map_err(|e| Error::malformed(format!("clear page {number}: {e}")))?;
-        doc.get_dictionary_mut(id)
-            .map_err(|e| Error::malformed(format!("clear page {number}: {e}")))?
-            .set("Resources", Dictionary::new());
     }
     Ok(())
 }
