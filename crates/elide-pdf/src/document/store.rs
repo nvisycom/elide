@@ -9,9 +9,9 @@
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use lopdf::{Document, Object};
+use lopdf::Document;
 
-use crate::document::object::ObjectExt;
+use crate::document::object::{DictionaryExt, ObjectExt};
 
 /// The opened-document data holder: the parsed object graph and its bytes.
 #[derive(Debug, Clone)]
@@ -122,14 +122,11 @@ fn own_file_filter(doc: &Document) -> bool {
         .keys()
         .any(|name| !defaults.contains(&name.as_slice()));
     other
-        && doc.objects.values().any(|object| {
-            let dict = match object {
-                Object::Dictionary(dict) => dict,
-                Object::Stream(stream) => &stream.dict,
-                _ => return false,
-            };
-            dict.get(b"EF").is_ok() || dict.has_type(b"EmbeddedFile")
-        })
+        && doc
+            .objects
+            .values()
+            .filter_map(ObjectExt::dict)
+            .any(|dict| dict.get(b"EF").is_ok() || dict.is_type(doc, b"EmbeddedFile"))
 }
 
 #[cfg(test)]
@@ -139,23 +136,17 @@ mod tests {
 
     use elide_core::ErrorKind;
     use lopdf::encryption::crypt_filters::{Aes128CryptFilter, CryptFilter};
-    use lopdf::{EncryptionState, EncryptionVersion, Permissions, Stream, dictionary};
+    use lopdf::{
+        Dictionary, EncryptionState, EncryptionVersion, Object, Permissions, Stream, dictionary,
+    };
 
     use super::*;
+    use crate::fixtures::with_pages;
 
     /// A one-page PDF, unencrypted.
     fn document() -> Document {
         let mut doc = Document::with_version("1.7");
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(
-                dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
-            ),
-        );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
+        with_pages(&mut doc, [Dictionary::new()]);
         doc.trailer.set(
             "ID",
             vec![

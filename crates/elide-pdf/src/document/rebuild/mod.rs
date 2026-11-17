@@ -38,7 +38,7 @@ mod layers;
 mod record;
 mod widgets;
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use elide_codec::StrippedContent;
 use elide_core::redaction::HiddenContent;
@@ -48,14 +48,13 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use self::keys::Kind;
 use self::layers::Layers;
-use crate::document::object::{DocumentExt, MAX_CONTENT_BYTES, ObjectExt};
+use crate::document::name_tree::NameTree;
+use crate::document::object::{DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, ObjectExt};
+use crate::document::scope::Scope;
 use crate::text::{PRINT_BOXES, PageBoxes, page_boxes};
 
 /// How deep forms, patterns, and glyph procedures may nest in one another.
 const MAX_NESTING: usize = 32;
-
-/// How deep a name tree of named destinations is walked.
-const MAX_TREE_DEPTH: usize = 32;
 
 /// A rebuilt document.
 pub(crate) struct Rebuilt {
@@ -167,18 +166,6 @@ impl<'a> Rebuild<'a> {
         }
     }
 
-    /// The name `dict` holds under `key`, resolved.
-    fn name<'s>(&self, dict: &'s Dictionary, key: &[u8]) -> Option<&'s [u8]>
-    where
-        'a: 's,
-    {
-        let source: &'s Document = self.source;
-        dict.get(key)
-            .ok()
-            .and_then(|value| source.resolve(value))
-            .and_then(|value| value.as_name().ok())
-    }
-
     /// Record one `content` the rebuild did not copy.
     fn record(&mut self, content: HiddenContent) {
         self.stripped.record(content, None, 1);
@@ -263,7 +250,7 @@ impl<'a> Rebuild<'a> {
             new_catalog.set("AF", af?);
         }
         if let Ok(intents) = catalog.get(b"OutputIntents")
-            && let Some(intents) = self.copy(Kind::OutputIntent, intents, &[], 0)?
+            && let Some(intents) = self.copy(Kind::OutputIntent, intents, &Scope::default(), 0)?
         {
             new_catalog.set("OutputIntents", intents);
         }
@@ -350,7 +337,7 @@ impl<'a> Rebuild<'a> {
         let dict = source
             .get_dictionary(id)
             .map_err(|e| Error::malformed(format!("page {id:?}: {e}")))?;
-        let scope = scope(source, id);
+        let scope = Scope::page(source, id);
         let bytes = source.page_content(id)?;
         let (mut content, mut resources) = self.content(&bytes, &scope, 0)?;
 
@@ -368,7 +355,7 @@ impl<'a> Rebuild<'a> {
                 self.residue += 1;
                 continue;
             };
-            if self.name(annotation, b"Subtype") == Some(b"Widget") {
+            if annotation.is_subtype(self.source, b"Widget") {
                 appearances.extend(self.flatten(annotation)?);
                 continue;
             }
@@ -448,7 +435,7 @@ impl<'a> Rebuild<'a> {
     /// recorded by what it is.
     fn link(&mut self, dict: &'a Dictionary) -> Result<Option<Object>> {
         let Some(dest) = self.internal_destination(dict) else {
-            self.record(record::annotation(dict));
+            self.record(record::annotation(self.source, dict));
             return Ok(None);
         };
         let mut link = Dictionary::from_iter([
@@ -456,7 +443,7 @@ impl<'a> Rebuild<'a> {
             ("Subtype", Object::Name(b"Link".to_vec())),
             ("Dest", dest),
         ]);
-        let scope: Vec<&Dictionary> = Vec::new();
+        let scope = Scope::default();
         let fields: [(&[u8], Kind); 7] = [
             (b"Rect", Kind::Value),
             (b"Border", Kind::Value),
@@ -499,8 +486,7 @@ impl<'a> Rebuild<'a> {
     /// action (a `/Next` can run script after the jump).
     fn internal_destination(&self, dict: &Dictionary) -> Option<Object> {
         let source = self.source;
-        let subtype = dict.get(b"Subtype").ok().and_then(|s| source.resolve(s));
-        if subtype.and_then(|s| s.as_name().ok()) != Some(b"Link") {
+        if !dict.is_subtype(source, b"Link") {
             return None;
         }
         let target = match dict.get(b"A").ok().and_then(|a| source.resolve_dict(a)) {
@@ -523,7 +509,7 @@ impl<'a> Rebuild<'a> {
 
     /// The explicit destination `dest` names, its page mapped to the copy.
     fn destination(&self, dest: &Object, depth: usize) -> Option<Object> {
-        if depth > MAX_TREE_DEPTH {
+        if depth > MAX_NESTING {
             return None;
         }
         let source = self.source;
@@ -591,31 +577,14 @@ fn parse_version(version: &str) -> Option<(u32, u32)> {
     Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
-/// The resource dictionaries the page `id`'s content resolves names in: its
-/// own and those it inherits, nearest first.
-fn scope(source: &Document, id: ObjectId) -> Vec<&Dictionary> {
-    let Ok((own, inherited)) = source.get_page_resources(id) else {
-        return Vec::new();
-    };
-    own.into_iter()
-        .chain(
-            inherited
-                .into_iter()
-                .filter_map(|id| source.get_dictionary(id).ok()),
-        )
-        .collect()
-}
-
 /// Collect into `out` every XObject a resource dictionary within `object`
 /// lists.
 fn listed_xobjects(doc: &Document, object: &Object, depth: usize, out: &mut HashSet<ObjectId>) {
     if depth > MAX_NESTING {
         return;
     }
-    let dict = match object {
-        Object::Dictionary(dict) => dict,
-        Object::Stream(stream) => &stream.dict,
-        _ => return,
+    let Some(dict) = object.dict() else {
+        return;
     };
     if let Some(entries) = dict.get(b"XObject").ok().and_then(|e| doc.resolve_dict(e)) {
         out.extend(entries.iter().filter_map(|(_, x)| x.as_reference().ok()));
@@ -653,46 +622,13 @@ fn reachable(doc: &Document) -> HashSet<ObjectId> {
 }
 
 /// Each name in `source`'s `/Names` tree of destinations, with the first
-/// destination it names, walked breadth first to [`MAX_TREE_DEPTH`]; a node
-/// that does not resolve is skipped.
+/// destination it names; a node that cannot be read leaves out only the
+/// destinations under it.
 fn destinations(source: &Document) -> HashMap<&[u8], &Object> {
     let mut out = HashMap::new();
-    let Some(root) = source
-        .catalog()
-        .ok()
-        .and_then(|catalog| catalog.get(b"Names").ok())
-        .and_then(|names| source.resolve_dict(names))
-        .and_then(|names| names.get(b"Dests").ok())
-    else {
-        return out;
-    };
-    let mut queue = VecDeque::from([(root, 0)]);
-    let mut seen = HashSet::new();
-    while let Some((node, depth)) = queue.pop_front() {
-        if depth > MAX_TREE_DEPTH {
-            break;
-        }
-        if let Object::Reference(id) = node
-            && !seen.insert(*id)
-        {
-            continue;
-        }
-        let Some(node) = source.resolve_dict(node) else {
-            continue;
-        };
-        if let Some(pairs) = node
-            .get(b"Names")
-            .ok()
-            .and_then(|n| source.resolve_array(n))
-        {
-            for [key, dest] in pairs.as_chunks::<2>().0 {
-                if let Object::String(key, _) = key {
-                    out.entry(key.as_slice()).or_insert(dest);
-                }
-            }
-        }
-        if let Some(kids) = node.get(b"Kids").ok().and_then(|k| source.resolve_array(k)) {
-            queue.extend(kids.iter().map(|kid| (kid, depth + 1)));
+    for (key, dest) in NameTree::read(source, b"Dests").pairs {
+        if let Object::String(key, _) = key {
+            out.entry(key.as_slice()).or_insert(dest);
         }
     }
     out
@@ -705,9 +641,8 @@ mod tests {
 
     use super::*;
     use crate::document::attachment::tree::Tree;
-    use crate::document::attachment::with_attachments;
-    use crate::document::object::DictionaryExt;
     use crate::document::{Pdf, Redaction, Store};
+    use crate::fixtures::{with_attachments, with_pages};
     use crate::text::Detection;
 
     /// A one-page document: Helvetica as `/F1`, the page drawing `operations`,
@@ -729,21 +664,12 @@ mod tests {
             dictionary! {},
             Content { operations }.encode().unwrap(),
         ));
-        let pages = doc.new_object_id();
         let mut dict = dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content, "Resources" => all,
+            "Contents" => content, "Resources" => all,
             "MediaBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
         };
         dict.extend(&page);
-        let page = doc.add_object(dict);
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
-        );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
+        let page = with_pages(&mut doc, [dict])[0];
         (doc, page)
     }
 
@@ -1572,23 +1498,17 @@ mod tests {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
         let content = doc.add_object(Stream::new(dictionary! {}, b"/M Do /N Do /M Do".to_vec()));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-            "Resources" => dictionary! {
-                "Font" => dictionary! { "F1" => font },
-                "XObject" => dictionary! { "M" => middle, "N" => middle, "A" => leaf, "B" => leaf },
-            },
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(
-                dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
-            ),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+                "Resources" => dictionary! {
+                    "Font" => dictionary! { "F1" => font },
+                    "XObject" => dictionary! { "M" => middle, "N" => middle, "A" => leaf, "B" => leaf },
+                },
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
 
         let (out, stripped) = rebuilt(&doc);
         let forms = out
@@ -1597,7 +1517,7 @@ mod tests {
             .filter(|object| {
                 object
                     .as_stream()
-                    .is_ok_and(|stream| stream.dict.has_subtype(b"Form"))
+                    .is_ok_and(|stream| stream.dict.is_subtype(&out, b"Form"))
             })
             .count();
         assert_eq!(forms, 2);
@@ -1639,29 +1559,23 @@ mod tests {
             .unwrap(),
         ));
         let content = doc.add_object(Stream::new(dictionary! {}, b"/Fm Do".to_vec()));
-        let pages = doc.new_object_id();
-        let kids: Vec<Object> = ["Helvetica", "Courier"]
+        let pages: Vec<Dictionary> = ["Helvetica", "Courier"]
             .into_iter()
             .map(|base| {
                 let font = doc.add_object(dictionary! {
                     "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
                 });
-                Object::Reference(doc.add_object(dictionary! {
-                    "Type" => "Page", "Parent" => pages, "Contents" => content,
+                dictionary! {
+                    "Contents" => content,
                     "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
                     "Resources" => dictionary! {
                         "Font" => dictionary! { "F1" => font },
                         "XObject" => dictionary! { "Fm" => form },
                     },
-                }))
+                }
             })
             .collect();
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => 2 }),
-        );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
+        with_pages(&mut doc, pages);
 
         let (out, _) = rebuilt(&doc);
         out.get_pages()
@@ -1729,37 +1643,31 @@ mod tests {
             dictionary! {},
             b"BT /T3 1 Tf (a) Tj ET".to_vec(),
         ));
-        let pages = doc.new_object_id();
-        let kids: Vec<Object> = [&b"0 0 1 1 re f"[..], b"0 0 2 2 re f"]
+        let pages: Vec<Dictionary> = [&b"0 0 1 1 re f"[..], b"0 0 2 2 re f"]
             .into_iter()
             .map(|drawing| {
                 let form = doc.add_object(Stream::new(
                     dictionary! { "Type" => "XObject", "Subtype" => "Form" },
                     drawing.to_vec(),
                 ));
-                Object::Reference(doc.add_object(dictionary! {
-                    "Type" => "Page", "Parent" => pages, "Contents" => content,
+                dictionary! {
+                    "Contents" => content,
                     "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
                     "Resources" => dictionary! {
                         "Font" => dictionary! { "T3" => font },
                         "XObject" => dictionary! { "Fm" => form },
                     },
-                }))
+                }
             })
             .collect();
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => 2 }),
-        );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
+        with_pages(&mut doc, pages);
         let (out, _) = rebuilt(&doc);
         out.objects
             .values()
             .filter(|object| {
                 object
                     .as_dict()
-                    .is_ok_and(|dict| dict.has_subtype(b"Type3"))
+                    .is_ok_and(|dict| dict.is_subtype(&out, b"Type3"))
             })
             .count()
     }

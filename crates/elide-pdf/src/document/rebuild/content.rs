@@ -24,7 +24,8 @@ use lopdf::{Dictionary, Object};
 
 use super::keys::Kind;
 use super::{MAX_NESTING, Rebuild};
-use crate::document::object::DocumentExt;
+use crate::document::object::{DictionaryExt, DocumentExt};
+use crate::document::scope::Scope;
 
 /// Every content operator the PDF specification defines, but the inline image
 /// and marked-content operators the rebuild handles itself.
@@ -60,7 +61,7 @@ impl<'a> Rebuild<'a> {
     pub(super) fn content<'s>(
         &mut self,
         bytes: &[u8],
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<(Vec<u8>, Dictionary)>
     where
@@ -108,7 +109,7 @@ impl<'a> Rebuild<'a> {
                         continue;
                     };
                     let properties = match properties {
-                        Object::Name(name) => self.lookup(scope, b"Properties", name),
+                        Object::Name(name) => scope.lookup(self.source, b"Properties", name),
                         other => Some(other),
                     };
                     if operator == "BDC"
@@ -254,7 +255,7 @@ impl<'a> Rebuild<'a> {
         // everything this content draws in it.
         for name in DEFAULT_SPACES {
             if !has(&resources, b"ColorSpace", name)
-                && let Some(space) = self.lookup(scope, b"ColorSpace", name)
+                && let Some(space) = scope.lookup(self.source, b"ColorSpace", name)
                 && let Some(space) = self.copy(Kind::ColorSpace, space, scope, depth + 1)?
             {
                 insert(&mut resources, b"ColorSpace", name, space);
@@ -275,7 +276,7 @@ impl<'a> Rebuild<'a> {
         operation: Operation,
         category: &[u8],
         kind: Kind,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         resources: &mut Dictionary,
         kept: &mut Vec<Operation>,
         depth: usize,
@@ -292,7 +293,7 @@ impl<'a> Rebuild<'a> {
             return Ok(());
         };
         if !has(resources, category, name) {
-            let Some(value) = self.lookup(scope, category, name) else {
+            let Some(value) = scope.lookup(self.source, category, name) else {
                 self.residue += 1;
                 return Ok(());
             };
@@ -310,7 +311,7 @@ impl<'a> Rebuild<'a> {
     fn draw<'s>(
         &mut self,
         operation: Operation,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         resources: &mut Dictionary,
         kept: &mut Vec<Operation>,
         depth: usize,
@@ -327,7 +328,7 @@ impl<'a> Rebuild<'a> {
             kept.push(operation);
             return Ok(());
         }
-        let Some(value) = self.lookup(scope, b"XObject", name) else {
+        let Some(value) = scope.lookup(self.source, b"XObject", name) else {
             self.residue += 1;
             return Ok(());
         };
@@ -345,7 +346,7 @@ impl<'a> Rebuild<'a> {
             self.cut.extend(id);
             return Ok(());
         }
-        let kind = match self.name(&xobject.dict, b"Subtype") {
+        let kind = match xobject.dict.name(self.source, b"Subtype") {
             Some(b"Form") => Kind::Form,
             Some(b"Image") => Kind::Image,
             Some(b"PS") => {
@@ -373,7 +374,7 @@ impl<'a> Rebuild<'a> {
     fn state_font<'s>(
         &mut self,
         gs: &Operation,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         resources: &mut Dictionary,
         depth: usize,
     ) -> Result<Option<Operation>>
@@ -384,8 +385,8 @@ impl<'a> Rebuild<'a> {
         let Some(Object::Name(name)) = gs.operands.first() else {
             return Ok(None);
         };
-        let setting = self
-            .lookup(scope, b"ExtGState", name)
+        let setting = scope
+            .lookup(source, b"ExtGState", name)
             .and_then(|state| source.resolve_dict(state))
             .and_then(|state| state.get(b"Font").ok())
             .and_then(|font| source.resolve_array(font));
@@ -402,7 +403,7 @@ impl<'a> Rebuild<'a> {
         // The font keeps the name it already has here, else takes the first
         // name nothing in scope uses.
         let taken = |name: &[u8]| {
-            has(resources, b"Font", name) || self.lookup(scope, b"Font", name).is_some()
+            has(resources, b"Font", name) || scope.lookup(self.source, b"Font", name).is_some()
         };
         let name = resources
             .get(b"Font")
@@ -421,27 +422,6 @@ impl<'a> Rebuild<'a> {
             "Tf",
             vec![Object::Name(name), size.clone()],
         )))
-    }
-
-    /// The entry `name` of the `category` sub-dictionary of the first
-    /// resource dictionary in `scope` that has it.
-    fn lookup<'s>(
-        &self,
-        scope: &[&'s Dictionary],
-        category: &[u8],
-        name: &[u8],
-    ) -> Option<&'s Object>
-    where
-        'a: 's,
-    {
-        let source: &'s _ = self.source;
-        scope.iter().find_map(|resources| {
-            let entries = resources
-                .get(category)
-                .ok()
-                .and_then(|entries| source.resolve_dict(entries))?;
-            entries.get(name).ok()
-        })
     }
 }
 

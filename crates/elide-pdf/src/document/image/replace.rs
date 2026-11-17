@@ -121,7 +121,7 @@ fn stencil_from(bytes: &[u8]) -> Result<Stream> {
 
 /// Whether `id` is an image XObject of `doc`.
 fn is_image(doc: &Document, id: ObjectId) -> bool {
-    matches!(doc.get_object(id), Ok(Object::Stream(stream)) if stream.dict.has_subtype(b"Image"))
+    matches!(doc.get_object(id), Ok(Object::Stream(stream)) if stream.dict.is_subtype(doc, b"Image"))
 }
 
 #[cfg(test)]

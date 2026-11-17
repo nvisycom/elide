@@ -10,6 +10,7 @@ use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::document::object::{DictionaryExt, DocumentExt, StreamExt};
+use crate::document::scope::Scope;
 
 /// Where a content stream is written back: a page's content, or a form
 /// XObject's.
@@ -24,7 +25,7 @@ pub(crate) enum Target {
 /// dictionaries its names resolve against.
 pub(crate) fn plan<C>(
     doc: &Document,
-    mut rewrite: impl FnMut(&[u8], &[Dictionary]) -> Result<Option<(Vec<u8>, C)>>,
+    mut rewrite: impl FnMut(&[u8], &Scope<'_>) -> Result<Option<(Vec<u8>, C)>>,
 ) -> Result<Vec<(Target, Vec<u8>, C)>> {
     let mut edits = Vec::new();
     // Pages can share content streams: rewrite each set once.
@@ -33,9 +34,8 @@ pub(crate) fn plan<C>(
         if !seen.insert(doc.get_page_contents(page)) {
             continue;
         }
-        let resources = doc.page_resources(page);
         let bytes = doc.page_content(page)?;
-        if let Some((content, cut)) = rewrite(&bytes, &resources)? {
+        if let Some((content, cut)) = rewrite(&bytes, &Scope::page(doc, page))? {
             edits.push((Target::Page(page), content, cut));
         }
     }
@@ -43,19 +43,12 @@ pub(crate) fn plan<C>(
         let Object::Stream(stream) = object else {
             continue;
         };
-        if !stream.dict.has_subtype(b"Form") {
+        if !stream.dict.is_subtype(doc, b"Form") {
             continue;
         }
         let bytes = stream.decoded()?;
-        let resources: Vec<Dictionary> = stream
-            .dict
-            .get(b"Resources")
-            .ok()
-            .and_then(|r| doc.resolve_dict(r))
-            .cloned()
-            .into_iter()
-            .collect();
-        if let Some((content, cut)) = rewrite(&bytes, &resources)? {
+        let scope = Scope::default().inner(doc, &stream.dict);
+        if let Some((content, cut)) = rewrite(&bytes, &scope)? {
             edits.push((Target::Form(id), content, cut));
         }
     }

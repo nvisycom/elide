@@ -3,7 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod codec;
-#[cfg(feature = "fixtures")]
+#[cfg(any(test, feature = "fixtures"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
 pub mod fixtures;
 pub mod primitive;

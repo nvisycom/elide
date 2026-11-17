@@ -1,27 +1,16 @@
 //! The places a PDF records its embedded files: the `/EmbeddedFiles` name
-//! tree, walked and edited node by node, and the `/AF` associated-file arrays.
+//! tree and the `/AF` associated-file arrays.
 
 use std::collections::BTreeSet;
 
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
 
+use crate::document::name_tree::{self, NameTree, Node};
 use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
 
-/// How deep the name tree is walked before it is treated as malformed: a real
-/// tree is a few levels deep, a cyclic or adversarial one is not walked forever.
-const MAX_TREE_DEPTH: usize = 32;
-
-/// Where a name-tree node lives: an indirect object, or inline under the
-/// catalog's `/Names` (itself inline, or the indirect object named here).
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Node {
-    /// A node that is its own indirect object.
-    Object(ObjectId),
-    /// The tree's root written inline in the `/Names` dictionary, which is the
-    /// catalog's own entry (`None`) or the indirect object named.
-    InlineRoot(Option<ObjectId>),
-}
+/// The name tree of embedded files under the catalog's `/Names`.
+const EMBEDDED_FILES: &[u8] = b"EmbeddedFiles";
 
 /// One file in the tree: its name and its embedded-file stream.
 #[derive(Debug)]
@@ -41,114 +30,36 @@ pub(crate) struct Tree<'a> {
 
 impl<'a> Tree<'a> {
     /// Read the tree of `doc`, empty when the document attaches no file.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// a node of the tree cannot be read, so a file under it would go unseen.
     pub(crate) fn read(doc: &'a Document) -> Result<Self> {
-        let mut tree = Self {
-            nodes: Vec::new(),
-            entries: Vec::new(),
-        };
-        let Some(names) = doc.catalog().ok().and_then(|c| c.get(b"Names").ok()) else {
-            return Ok(tree);
-        };
-        let (names, names_id) = match names {
-            Object::Reference(id) => (doc.get_dictionary(*id).ok(), Some(*id)),
-            Object::Dictionary(dict) => (Some(dict), None),
-            _ => (None, None),
-        };
-        let Some(root) = names.and_then(|names| names.get(b"EmbeddedFiles").ok()) else {
-            return Ok(tree);
-        };
-        let mut visited = BTreeSet::new();
-        match root {
-            Object::Reference(id) => tree.walk(doc, Node::Object(*id), &mut visited, 0)?,
-            Object::Dictionary(_) => tree.walk(doc, Node::InlineRoot(names_id), &mut visited, 0)?,
-            _ => {}
+        let tree = NameTree::read(doc, EMBEDDED_FILES);
+        if !tree.complete {
+            return Err(Error::malformed(
+                "attachment name tree cannot be read whole",
+            ));
         }
-        Ok(tree)
-    }
-
-    /// Record `node` and its entries, then walk its kids.
-    fn walk(
-        &mut self,
-        doc: &'a Document,
-        node: Node,
-        visited: &mut BTreeSet<ObjectId>,
-        depth: usize,
-    ) -> Result<()> {
-        if depth > MAX_TREE_DEPTH {
-            return Err(Error::malformed("attachment name tree is too deep"));
-        }
-        if let Node::Object(id) = node
-            && !visited.insert(id)
-        {
-            return Err(Error::malformed("attachment name tree is cyclic"));
-        }
-        let dict = node_dict(doc, node)
-            .ok_or_else(|| Error::malformed("unreadable attachment name tree node"))?;
-        self.nodes.push(node);
-        if let Ok(names) = dict.get(b"Names").and_then(Object::as_array) {
-            for pair in names.chunks(2) {
-                let [key, value] = pair else {
-                    return Err(Error::malformed(
-                        "attachment name tree has an unpaired name",
-                    ));
-                };
-                if let Some(entry) = entry(doc, key, value) {
-                    self.entries.push(entry);
-                }
-            }
-        }
-        if let Ok(kids) = dict.get(b"Kids").and_then(Object::as_array) {
-            for kid in kids {
-                let id = kid
-                    .as_reference()
-                    .map_err(|_| Error::malformed("attachment name tree kid is not a reference"))?;
-                self.walk(doc, Node::Object(id), visited, depth + 1)?;
-            }
-        }
-        Ok(())
+        let entries = tree
+            .pairs
+            .into_iter()
+            .filter_map(|(key, value)| entry(doc, key, value))
+            .collect();
+        Ok(Self {
+            nodes: tree.nodes,
+            entries,
+        })
     }
 }
 
 /// Drop every entry whose embedded-file stream is in `removed` from the tree
 /// `nodes` of `doc`.
 pub(crate) fn drop_entries(doc: &mut Document, nodes: &[Node], removed: &BTreeSet<ObjectId>) {
-    // Decide which pairs each node keeps while the tree is still readable: a
-    // value resolves to its stream through a (possibly referenced) file
-    // specification, which a mutable borrow of the node would block.
-    let kept_by_node: Vec<(Node, Vec<bool>)> = nodes
-        .iter()
-        .filter_map(|&node| {
-            let names = node_dict(doc, node)?
-                .get(b"Names")
-                .and_then(Object::as_array)
-                .ok()?;
-            let keep = names
-                .chunks(2)
-                .map(|pair| match pair {
-                    [key, value] => {
-                        entry(doc, key, value).is_none_or(|e| !removed.contains(&e.stream))
-                    }
-                    _ => true,
-                })
-                .collect();
-            Some((node, keep))
-        })
-        .collect();
-    for (node, keep) in kept_by_node {
-        let Some(dict) = node_dict_mut(doc, node) else {
-            continue;
-        };
-        let Ok(Object::Array(names)) = dict.get_mut(b"Names") else {
-            continue;
-        };
-        let kept: Vec<Object> = names
-            .chunks(2)
-            .zip(&keep)
-            .filter(|(_, keep)| **keep)
-            .flat_map(|(pair, _)| pair.iter().cloned())
-            .collect();
-        *names = kept;
-    }
+    name_tree::retain(doc, EMBEDDED_FILES, nodes, |doc, key, value| {
+        entry(doc, key, value).is_none_or(|entry| !removed.contains(&entry.stream))
+    });
 }
 
 /// The file entry a name-tree `key` / `value` pair describes, or `None` when the
@@ -170,49 +81,6 @@ fn entry<'a>(doc: &'a Document, key: &Object, value: &'a Object) -> Option<Entry
         .or_else(|| decode_text_string(key).ok())
         .unwrap_or_default();
     Some(Entry { name, stream, spec })
-}
-
-/// The dictionary of the tree node `node` in `doc`.
-pub(crate) fn node_dict(doc: &Document, node: Node) -> Option<&Dictionary> {
-    match node {
-        Node::Object(id) => doc.get_dictionary(id).ok(),
-        Node::InlineRoot(names) => names_dict(doc, names)?
-            .get(b"EmbeddedFiles")
-            .and_then(Object::as_dict)
-            .ok(),
-    }
-}
-
-/// The dictionary of the tree node `node` in `doc`, mutably.
-fn node_dict_mut(doc: &mut Document, node: Node) -> Option<&mut Dictionary> {
-    let names = match node {
-        Node::Object(id) => return doc.get_dictionary_mut(id).ok(),
-        Node::InlineRoot(Some(id)) => doc.get_dictionary_mut(id).ok()?,
-        Node::InlineRoot(None) => doc
-            .catalog_mut()
-            .ok()?
-            .get_mut(b"Names")
-            .and_then(Object::as_dict_mut)
-            .ok()?,
-    };
-    names
-        .get_mut(b"EmbeddedFiles")
-        .and_then(Object::as_dict_mut)
-        .ok()
-}
-
-/// The catalog's `/Names` dictionary: the indirect object `names`, or the
-/// catalog's inline entry.
-fn names_dict(doc: &Document, names: Option<ObjectId>) -> Option<&Dictionary> {
-    match names {
-        Some(id) => doc.get_dictionary(id).ok(),
-        None => doc
-            .catalog()
-            .ok()?
-            .get(b"Names")
-            .and_then(Object::as_dict)
-            .ok(),
-    }
 }
 
 /// Every file associated through an `/AF` array, on any object of `doc`, in

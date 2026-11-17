@@ -16,6 +16,7 @@ use lopdf::{Dictionary, Object, dictionary};
 use super::Rebuild;
 use super::keys::Kind;
 use crate::document::object::DocumentExt;
+use crate::document::scope::Scope;
 
 /// The annotation flags that keep a widget from being shown (12.5.3): Hidden
 /// and NoView.
@@ -86,15 +87,15 @@ impl<'a> Rebuild<'a> {
 
         // An appearance without resources of its own resolves names in the
         // form's default resources.
-        let defaults: Vec<&Dictionary> = source
-            .catalog()
-            .ok()
-            .and_then(|catalog| catalog.get(b"AcroForm").ok())
-            .and_then(|form| source.resolve_dict(form))
-            .and_then(|form| form.get(b"DR").ok())
-            .and_then(|resources| source.resolve_dict(resources))
-            .into_iter()
-            .collect();
+        let defaults = Scope::new(
+            source
+                .catalog()
+                .ok()
+                .and_then(|catalog| catalog.get(b"AcroForm").ok())
+                .and_then(|form| source.resolve_dict(form))
+                .and_then(|form| form.get(b"DR").ok())
+                .and_then(|resources| source.resolve_dict(resources)),
+        );
         let Some(form) = self.copy(Kind::Form, appearance, &defaults, 0)? else {
             self.record(HiddenContent::FormField);
             return Ok(None);
@@ -136,7 +137,7 @@ impl<'a> Rebuild<'a> {
         let stroking = opacity(b"CA");
         let nonstroking = opacity(b"ca").or(stroking);
         let blend = match dict.get(b"BM") {
-            Ok(blend) => self.copy(Kind::Value, blend, &[], 0)?,
+            Ok(blend) => self.copy(Kind::Value, blend, &Scope::default(), 0)?,
             Err(_) => None,
         };
         let normal = blend

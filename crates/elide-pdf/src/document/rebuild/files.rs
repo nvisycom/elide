@@ -15,6 +15,7 @@ use super::keys::Kind;
 use super::{Rebuild, record};
 use crate::document::attachment::tree::Tree;
 use crate::document::object::{DictionaryExt, DocumentExt};
+use crate::document::scope::Scope;
 
 /// The neutral name every attached file is given.
 const NEUTRAL_PREFIX: &str = "attachment-";
@@ -63,7 +64,7 @@ impl Rebuild<'_> {
         };
         let mut out = Vec::new();
         for spec in specs {
-            match self.copy(Kind::FileSpec, spec, &[], 0)? {
+            match self.copy(Kind::FileSpec, spec, &Scope::default(), 0)? {
                 Some(spec) => out.push(spec),
                 None => self.residue += 1,
             }
@@ -106,7 +107,13 @@ impl Rebuild<'_> {
                 self.drop_key(key, record::entry);
             }
         }
-        let Some(file) = self.copy(Kind::EmbeddedFile, &Object::Reference(stream), &[], 0)? else {
+        let Some(file) = self.copy(
+            Kind::EmbeddedFile,
+            &Object::Reference(stream),
+            &Scope::default(),
+            0,
+        )?
+        else {
             return Ok(None);
         };
         let neutral = if is_neutral(name) {

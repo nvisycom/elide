@@ -168,13 +168,14 @@ mod tests {
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage, load_from_memory};
-    use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
+    use lopdf::{Document as PdfDocument, Stream, dictionary};
 
     use super::PdfDocumentLoader;
     use crate::codec::blob_id::BlobId;
     use crate::codec::page::PageStream;
     use crate::codec::state::{Pages, PdfState};
     use crate::document::Pdf;
+    use crate::fixtures::with_pages;
 
     /// A solid-colour PNG of `w`x`h`.
     fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
@@ -190,21 +191,17 @@ mod tests {
     /// to tell whether the original page content survives a reflatten.
     fn scanned_doc() -> Bytes {
         let mut doc = PdfDocument::with_version("1.5");
-        let pages_id = doc.new_object_id();
         let content = doc.add_object(Stream::new(
             dictionary! {},
             b"q 1 0 0 1 0 0 cm % SCANNED-PAGE-MARKER".to_vec(),
         ));
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages_id, "Contents" => content,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-        });
-        let pages = dictionary! {
-            "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-        };
-        doc.objects.insert(pages_id, Object::Dictionary(pages));
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
-        doc.trailer.set("Root", catalog);
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            }],
+        );
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         Bytes::from(out)
@@ -339,20 +336,14 @@ mod tests {
             dictionary! {},
             b"q 100 0 0 100 0 0 cm /Im1 Do Q".to_vec(),
         ));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "Resources" => dictionary! { "XObject" => dictionary! { "Im1" => image } },
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "XObject" => dictionary! { "Im1" => image } },
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         let bytes = Bytes::from(bytes);

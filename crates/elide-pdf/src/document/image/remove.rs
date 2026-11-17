@@ -5,10 +5,10 @@ use std::collections::HashSet;
 
 use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Document, Object, ObjectId};
 
 use crate::document::content::{apply, drop_xobjects, plan};
-use crate::document::object::DocumentExt;
+use crate::document::scope::Scope;
 
 /// Remove the image XObjects `images` from `doc`'s pages and form XObjects,
 /// and (when `inline` holds) every inline image, returning how many drawing
@@ -28,7 +28,7 @@ pub(crate) fn remove(
     images: &HashSet<ObjectId>,
     inline: bool,
 ) -> Result<usize> {
-    let edits = plan(doc, |bytes, resources| {
+    let edits = plan(doc, |bytes, scope| {
         let content =
             Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let before = content.operations.len();
@@ -37,7 +37,7 @@ pub(crate) fn remove(
             .into_iter()
             .filter(|operation| match operation.operator.as_str() {
                 "BI" => !inline,
-                "Do" => !draws(doc, operation, resources, images),
+                "Do" => !draws(doc, operation, scope, images),
                 _ => true,
             })
             .collect();
@@ -76,22 +76,18 @@ fn drop_masks(doc: &mut Document, images: &HashSet<ObjectId>) {
 }
 
 /// Whether the `Do` `operation` draws one of `images`, by its name in
-/// `resources`.
+/// `scope`.
 fn draws(
     doc: &Document,
     operation: &Operation,
-    resources: &[Dictionary],
+    scope: &Scope<'_>,
     images: &HashSet<ObjectId>,
 ) -> bool {
     let [Object::Name(name)] = operation.operands.as_slice() else {
         return false;
     };
-    resources.iter().any(|dict| {
-        dict.get(b"XObject")
-            .ok()
-            .and_then(|entries| doc.resolve_dict(entries))
-            .and_then(|entries| entries.get(name).ok())
-            .and_then(|xobject| xobject.as_reference().ok())
-            .is_some_and(|id| images.contains(&id))
-    })
+    scope
+        .lookup(doc, b"XObject", name)
+        .and_then(|xobject| xobject.as_reference().ok())
+        .is_some_and(|id| images.contains(&id))
 }

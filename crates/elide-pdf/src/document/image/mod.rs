@@ -109,7 +109,7 @@ pub(crate) fn surfaced(doc: &Document) -> Result<Vec<SurfacedImage>> {
     doc.objects
         .iter()
         .filter_map(|(&id, object)| match object {
-            Object::Stream(stream) if stream.dict.has_subtype(b"Image") => Some((id, stream)),
+            Object::Stream(stream) if stream.dict.is_subtype(doc, b"Image") => Some((id, stream)),
             _ => None,
         })
         .map(|((number, generation), stream)| {
@@ -137,6 +137,7 @@ mod tests {
     use lopdf::dictionary;
 
     use super::*;
+    use crate::fixtures::with_pages;
 
     /// A 1x1 gray image of raw samples.
     fn gray() -> Stream {
@@ -176,19 +177,13 @@ mod tests {
             .encode()
             .unwrap(),
         ));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "Resources" => dictionary! { "XObject" => dictionary! { "Fm" => form } },
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "XObject" => dictionary! { "Fm" => form } },
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
         (doc, image, mask)
     }
 

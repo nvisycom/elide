@@ -15,17 +15,17 @@ use std::slice;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
-use lopdf::{Document, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use super::geometry::{
     Cursor, DeviceRect, GlyphRect, Matrix, PageFrame, SpaceRule, TextState, page_frame,
 };
 use super::glyphs::{FontText, decode_glyphs};
-use super::scope::{Scope, dict_or_ref, scope_entry_id, scope_fonts};
 use super::widths::{GlyphMetrics, WidthSource};
 use super::{Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::document::Store;
 use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt, StreamExt};
+use crate::document::scope::Scope;
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (ISO 32000-1 §9.3.3).
@@ -323,11 +323,6 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let content = Content::decode(&content_data)
         .map_err(|e| Error::malformed(format!("page {page} content: {e}")))?;
 
-    // The page's own resources, the scope its `Tf`/`Do` names resolve in.
-    let (resources, resource_ids) = doc
-        .get_page_resources(page_id)
-        .map_err(|e| Error::malformed(format!("page {page} resources: {e}")))?;
-
     let mut text = String::new();
     let mut runs: Vec<OffsetRun> = Vec::new();
     let mut next_char = 0usize;
@@ -352,10 +347,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         doc,
         &content,
         StreamTarget::PageContent,
-        &Scope {
-            inline: resources,
-            referenced: &resource_ids,
-        },
+        &Scope::page(doc, page_id),
         MAX_XOBJECT_DEPTH,
         None,
         &mut ctx,
@@ -429,11 +421,11 @@ struct InheritedFont<'a> {
 /// font-table slot + resolved encoding and the caller's [`TextState`] (whose CTM
 /// already has the form's `/Matrix` composed in). `None` at page level, where
 /// the state starts fresh.
-fn walk_stream(
-    doc: &Document,
+fn walk_stream<'a>(
+    doc: &'a Document,
     content: &Content,
     stream: StreamTarget,
-    scope: &Scope<'_>,
+    scope: &Scope<'a>,
     depth: u8,
     inherited: Option<Inherited<'_>>,
     ctx: &mut Walk<'_>,
@@ -442,7 +434,11 @@ fn walk_stream(
     // per font in the shared table. A local name->slot map points the run at the
     // right entry on each `Tf`, and name->encoding / name->widths carry what a
     // `Tf` then needs to decode and position that font's glyphs.
-    let font_dicts = scope_fonts(doc, scope);
+    let font_dicts: Vec<(&[u8], &Dictionary)> = scope
+        .entries(doc, b"Font")
+        .into_iter()
+        .filter_map(|(name, font)| Some((name, doc.resolve_dict(font)?)))
+        .collect();
     let mut font_slot: BTreeMap<Vec<u8>, u16> = BTreeMap::new();
     let mut encodings: BTreeMap<Vec<u8>, Option<FontText>> = BTreeMap::new();
     let mut widths: BTreeMap<Vec<u8>, WidthSource> = BTreeMap::new();
@@ -467,10 +463,10 @@ fn walk_stream(
             )));
         };
         ctx.accum.fonts.push(FontEntry { to_unicode });
-        font_slot.insert(name.clone(), slot);
-        encodings.insert(name.clone(), FontText::of(doc, font)?);
-        widths.insert(name.clone(), WidthSource::from_font(doc, font));
-        metrics.insert(name.clone(), GlyphMetrics::from_font(doc, font));
+        font_slot.insert(name.to_vec(), slot);
+        encodings.insert(name.to_vec(), FontText::of(doc, font)?);
+        widths.insert(name.to_vec(), WidthSource::from_font(doc, font));
+        metrics.insert(name.to_vec(), GlyphMetrics::from_font(doc, font));
     }
 
     // The current font's resolved encoding: `None` before any `Tf` (unless a
@@ -686,14 +682,17 @@ fn walk_xobject<'a>(
     inherited: Inherited<'a>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
-    let Some(id) = scope_entry_id(doc, scope, b"XObject", name) else {
+    let Some(id) = scope
+        .lookup(doc, b"XObject", name)
+        .and_then(|xobject| xobject.as_reference().ok())
+    else {
         return Ok(());
     };
     let Ok(Object::Stream(stream)) = doc.get_object(id) else {
         return Ok(());
     };
     // Only Form XObjects carry content to walk; images are not text.
-    if !stream.dict.has_subtype(b"Form") {
+    if !stream.dict.is_subtype(doc, b"Form") {
         return Ok(());
     }
     walk_nested(doc, id, stream, scope, depth, inherited, ctx)
@@ -714,7 +713,10 @@ fn walk_pattern<'a>(
     depth: u8,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
-    let Some(id) = scope_entry_id(doc, scope, b"Pattern", name) else {
+    let Some(id) = scope
+        .lookup(doc, b"Pattern", name)
+        .and_then(|pattern| pattern.as_reference().ok())
+    else {
         return Ok(());
     };
     let Ok(Object::Stream(stream)) = doc.get_object(id) else {
@@ -767,18 +769,7 @@ fn walk_nested<'a>(
         .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
     // Its own resources, or the parent scope when it declares none.
-    let inner_scope = match stream
-        .dict
-        .get(b"Resources")
-        .ok()
-        .and_then(|r| dict_or_ref(doc, r))
-    {
-        Some(resources) => Scope {
-            inline: Some(resources),
-            referenced: &[],
-        },
-        None => *scope,
-    };
+    let inner_scope = scope.inner(doc, &stream.dict);
 
     // Charge the total-walk budget. Exhausting it means a page fans out to
     // more walks than any legitimate document, so fail closed rather than let
@@ -859,6 +850,7 @@ mod tests {
     use lopdf::{Dictionary, dictionary};
 
     use super::*;
+    use crate::fixtures::with_pages;
 
     /// Build a one-page document whose single content stream is `ops`, drawing
     /// with a simple Helvetica font (no `/Widths`, so glyph advances are unknown —
@@ -897,26 +889,14 @@ mod tests {
         });
         let content = Content { operations: ops };
         let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages_id,
-            "Contents" => content_id,
-            "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages",
-                "Kids" => vec![page_id.into()],
-                "Count" => 1,
-            }),
-        );
-        doc.add_object(dictionary! {
-            "Type" => "Catalog",
-            "Pages" => pages_id,
-        });
+        let page_id = with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content_id,
+                "Resources" => resources,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+            }],
+        )[0];
 
         text_block_for_page(&doc, 1, page_id).unwrap()
     }
@@ -1162,21 +1142,14 @@ mod tests {
         let resources = doc.add_object(dictionary! {
             "XObject" => dictionary! { "Fm" => form_id },
         });
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages_id,
-            "Contents" => content_id,
-            "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
-            }),
-        );
-        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        let page_id = with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content_id,
+                "Resources" => resources,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+            }],
+        )[0];
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         // The form's text is extracted (inheritance did not drop it).
@@ -1281,19 +1254,14 @@ mod tests {
             "Font" => dictionary! { "F1" => font_id },
             "XObject" => dictionary! { "Fm" => form_id },
         });
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
-            "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
-            }),
-        );
-        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        let page_id = with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content_id,
+                "Resources" => resources,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+            }],
+        )[0];
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         assert_eq!(block.text, "Hi");
@@ -1389,19 +1357,14 @@ mod tests {
             "Font" => dictionary! { "F1" => font_id },
             "XObject" => dictionary! { "Fm" => form_id },
         });
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
-            "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 400.into(), 200.into()],
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
-            }),
-        );
-        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        let page_id = with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content_id,
+                "Resources" => resources,
+                "MediaBox" => vec![0.into(), 0.into(), 400.into(), 200.into()],
+            }],
+        )[0];
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         // A gap entering the form (Alpha→Beta) and leaving it (Beta→Gamma) are
@@ -1454,19 +1417,14 @@ mod tests {
         let resources = doc.add_object(dictionary! {
             "Font" => dictionary! { "F1" => wide, "F2" => narrow },
         });
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
-            "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
-            }),
-        );
-        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        let page_id = with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content_id,
+                "Resources" => resources,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+            }],
+        )[0];
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         let geometry = block.geometry();
@@ -1504,20 +1462,14 @@ mod tests {
             dictionary! {},
             Content { operations: ops }.encode().unwrap(),
         ));
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages_id,
-            "Contents" => content,
-            "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
-            }),
-        );
+        let page_id = with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => resources,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+            }],
+        )[0];
         (doc, page_id)
     }
 

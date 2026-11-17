@@ -61,7 +61,7 @@ impl WidthSource {
     /// treated as simple (`/Widths` + `/FirstChar`). Anything missing or
     /// unreadable yields [`Unknown`](WidthSource::Unknown).
     pub(super) fn from_font(doc: &Document, font: &Dictionary) -> WidthSource {
-        if font.has_subtype(b"Type0") {
+        if font.is_subtype(doc, b"Type0") {
             Self::from_type0(doc, font)
         } else {
             Self::from_simple(doc, font)
@@ -235,7 +235,7 @@ impl GlyphMetrics {
 /// Resolve a font's `/FontDescriptor`, following a `/Type0` font to its
 /// descendant CIDFont (whose descriptor carries the metrics).
 fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Dictionary> {
-    let owner = if font.has_subtype(b"Type0") {
+    let owner = if font.is_subtype(doc, b"Type0") {
         font.get(b"DescendantFonts")
             .ok()
             .and_then(|o| doc.resolve_array(o))

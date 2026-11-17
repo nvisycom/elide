@@ -38,10 +38,6 @@ pub(crate) trait DocumentExt {
         read: impl Fn(&Object) -> Option<T>,
     ) -> Option<T>;
 
-    /// The resource dictionaries `page`'s content resolves names against: its
-    /// own and those it inherits.
-    fn page_resources(&self, page: ObjectId) -> Vec<Dictionary>;
-
     /// The decoded content of `page`, its content streams concatenated, at
     /// most [`MAX_CONTENT_BYTES`].
     ///
@@ -98,20 +94,6 @@ impl DocumentExt for Document {
             id = dict.get(b"Parent").ok()?.as_reference().ok()?;
         }
         None
-    }
-
-    fn page_resources(&self, page: ObjectId) -> Vec<Dictionary> {
-        let Ok((own, inherited)) = self.get_page_resources(page) else {
-            return Vec::new();
-        };
-        own.cloned()
-            .into_iter()
-            .chain(
-                inherited
-                    .into_iter()
-                    .filter_map(|id| self.get_dictionary(id).ok().cloned()),
-            )
-            .collect()
     }
 
     fn page_content(&self, page: ObjectId) -> Result<Vec<u8>> {
@@ -225,18 +207,32 @@ impl ObjectExt for Object {
 
 /// Reads and writes of one [`Dictionary`].
 pub(crate) trait DictionaryExt {
+    /// The name the dictionary holds under `key`, following a reference
+    /// into `doc`.
+    fn name<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a [u8]>;
+
+    /// Whether the dictionary's `/Type` is `kind`.
+    fn is_type(&self, doc: &Document, kind: &[u8]) -> bool;
+
     /// Whether the dictionary's `/Subtype` is `subtype`.
-    fn has_subtype(&self, subtype: &[u8]) -> bool;
+    fn is_subtype(&self, doc: &Document, subtype: &[u8]) -> bool;
 
     /// This file specification's file name: its Unicode `/UF`, else its `/F`.
     fn file_name(&self) -> Option<String>;
 }
 
 impl DictionaryExt for Dictionary {
-    fn has_subtype(&self, subtype: &[u8]) -> bool {
-        self.get(b"Subtype")
-            .and_then(Object::as_name)
-            .is_ok_and(|name| name == subtype)
+    fn name<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a [u8]> {
+        let value = doc.resolve(self.get(key).ok()?)?;
+        value.as_name().ok()
+    }
+
+    fn is_type(&self, doc: &Document, kind: &[u8]) -> bool {
+        self.name(doc, b"Type") == Some(kind)
+    }
+
+    fn is_subtype(&self, doc: &Document, subtype: &[u8]) -> bool {
+        self.name(doc, b"Subtype") == Some(subtype)
     }
 
     fn file_name(&self) -> Option<String> {

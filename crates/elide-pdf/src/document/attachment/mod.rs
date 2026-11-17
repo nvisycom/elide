@@ -163,51 +163,11 @@ pub(crate) fn replace(
     Ok(())
 }
 
-/// A test fixture: a one-page PDF attaching `files`, each `(name, bytes)`.
-#[cfg(test)]
-pub(crate) fn with_attachments(files: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut doc = Document::with_version("1.7");
-    let pages = doc.new_object_id();
-    let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
-    doc.objects.insert(
-        pages,
-        Object::Dictionary(
-            dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
-        ),
-    );
-    let mut kids = Vec::new();
-    for (name, bytes) in files {
-        let mut stream = Stream::new(
-            dictionary! { "Type" => "EmbeddedFile", "Params" => dictionary! { "Size" => bytes.len() as i64 } },
-            bytes.to_vec(),
-        );
-        stream.compress().unwrap();
-        let stream = doc.add_object(stream);
-        let spec = doc.add_object(dictionary! {
-            "Type" => "Filespec",
-            "F" => Object::string_literal(*name),
-            "EF" => dictionary! { "F" => stream },
-        });
-        let kid = doc.add_object(dictionary! {
-            "Names" => vec![Object::string_literal(*name), spec.into()],
-        });
-        kids.push(Object::Reference(kid));
-    }
-    let catalog = doc.add_object(dictionary! {
-        "Type" => "Catalog",
-        "Pages" => pages,
-        "Names" => dictionary! { "EmbeddedFiles" => dictionary! { "Kids" => kids } },
-    });
-    doc.trailer.set("Root", catalog);
-    let mut out = Vec::new();
-    doc.save_to(&mut out).unwrap();
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::document::{Pdf, Redaction};
+    use crate::fixtures::{with_attachments, with_pages};
 
     /// A redaction replacing and removing attachments only.
     fn attachments_redaction(
@@ -288,20 +248,8 @@ mod tests {
         let page_spec = spec(on_page);
         let catalog_spec = spec(on_catalog);
         let catalog_af = doc.add_object(Object::Array(vec![catalog_spec.into()]));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "AF" => vec![page_spec.into()],
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(
-                dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
-            ),
-        );
-        let catalog = doc.add_object(dictionary! {
-            "Type" => "Catalog", "Pages" => pages, "AF" => catalog_af,
-        });
-        doc.trailer.set("Root", catalog);
+        with_pages(&mut doc, [dictionary! { "AF" => vec![page_spec.into()] }]);
+        doc.catalog_mut().unwrap().set("AF", catalog_af);
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         out

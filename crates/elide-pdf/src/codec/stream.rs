@@ -180,6 +180,7 @@ mod tests {
     use super::*;
     use crate::codec::state::Pages;
     use crate::document::Pdf;
+    use crate::fixtures::with_pages;
     #[cfg(feature = "render")]
     use crate::render::PageObservation;
     #[cfg(feature = "render")]
@@ -201,19 +202,13 @@ mod tests {
             dictionary! {},
             Content { operations }.encode().unwrap(),
         ));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         let blocks = Pdf::open(&bytes).unwrap().text().unwrap();

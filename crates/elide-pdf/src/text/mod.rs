@@ -23,7 +23,6 @@ mod geometry;
 mod glyphs;
 mod offset;
 pub(crate) mod redact;
-mod scope;
 mod walker;
 mod widths;
 

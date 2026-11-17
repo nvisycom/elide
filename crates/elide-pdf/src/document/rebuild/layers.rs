@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
-use crate::document::object::DocumentExt;
+use crate::document::object::{DictionaryExt, DocumentExt};
 
 /// How deep a visibility expression (`/VE`) may nest before it is refused.
 const MAX_EXPRESSION_DEPTH: usize = 32;
@@ -42,11 +42,7 @@ impl<'a> Layers<'a> {
         let Some(dict) = self.doc.resolve_dict(membership) else {
             return false;
         };
-        let is_membership = dict
-            .get(b"Type")
-            .and_then(Object::as_name)
-            .is_ok_and(|kind| kind == b"OCMD");
-        if !is_membership {
+        if !dict.is_type(self.doc, b"OCMD") {
             return false;
         }
         if let Ok(expression) = dict.get(b"VE") {
@@ -60,10 +56,7 @@ impl<'a> Layers<'a> {
         if groups.is_empty() {
             return false;
         }
-        let policy = dict
-            .get(b"P")
-            .and_then(Object::as_name)
-            .unwrap_or(b"AnyOn".as_slice());
+        let policy = dict.name(self.doc, b"P").unwrap_or(b"AnyOn");
         match policy {
             b"AllOn" => groups.iter().any(|&hidden| hidden),
             b"AnyOff" => groups.iter().all(|&hidden| !hidden),
@@ -127,15 +120,12 @@ fn hidden_groups(doc: &Document) -> HashSet<ObjectId> {
     };
     let ids = |key: &[u8], dict: &Dictionary| -> HashSet<ObjectId> {
         dict.get(key)
-            .and_then(Object::as_array)
+            .ok()
+            .and_then(|array| doc.resolve_array(array))
             .map(|array| array.iter().filter_map(|o| o.as_reference().ok()).collect())
             .unwrap_or_default()
     };
-    let base_off = config
-        .get(b"BaseState")
-        .and_then(Object::as_name)
-        .is_ok_and(|state| state == b"OFF");
-    if base_off {
+    if config.name(doc, b"BaseState") == Some(b"OFF") {
         let on = ids(b"ON", config);
         ids(b"OCGs", properties)
             .into_iter()

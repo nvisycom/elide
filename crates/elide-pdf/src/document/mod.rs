@@ -16,8 +16,10 @@
 pub(crate) mod attachment;
 pub(crate) mod content;
 pub(crate) mod image;
+pub(crate) mod name_tree;
 pub(crate) mod object;
 pub(crate) mod rebuild;
+pub(crate) mod scope;
 mod store;
 
 use std::collections::HashSet;
@@ -322,6 +324,7 @@ mod tests {
     use lopdf::{Document, IncrementalDocument, Object, Stream, dictionary};
 
     use super::*;
+    use crate::fixtures::with_pages;
 
     /// A one-page document whose page shows `text`, and its content id.
     fn showing(text: &str) -> (Document, ObjectId) {
@@ -339,20 +342,14 @@ mod tests {
             dictionary! {},
             Content { operations }.encode().unwrap(),
         ));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
         (doc, content)
     }
 
@@ -456,20 +453,14 @@ mod tests {
             dictionary! {},
             b"/Pattern cs /P0 scn 0 0 100 100 re f\n".repeat(selections),
         ));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
 

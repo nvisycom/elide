@@ -8,7 +8,8 @@ use lopdf::{Dictionary, Object, ObjectId, Stream};
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
 use super::{MAX_NESTING, Rebuild, ScopedCopy, record};
 use crate::document::image;
-use crate::document::object::{DocumentExt, ObjectExt, StreamExt};
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt, StreamExt};
+use crate::document::scope::Scope;
 use crate::text::{readable_cmap, to_unicode};
 
 /// How many references a value is followed through.
@@ -21,7 +22,7 @@ impl<'a> Rebuild<'a> {
         &mut self,
         kind: Kind,
         value: &'s Object,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
@@ -66,7 +67,7 @@ impl<'a> Rebuild<'a> {
         &mut self,
         kind: Kind,
         id: ObjectId,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
@@ -99,7 +100,7 @@ impl<'a> Rebuild<'a> {
         // copied once for each scope whose resources differ; any other
         // object is copied once.
         let drawn_in: &[&Dictionary] = if self.borrows_scope(kind, object) {
-            scope
+            scope.dictionaries()
         } else {
             &[]
         };
@@ -151,22 +152,15 @@ impl<'a> Rebuild<'a> {
     /// in the scope it is drawn in: a form, tiling pattern, or Type3 font
     /// whose `/Resources`, if any, is not a dictionary it can use.
     fn borrows_scope(&self, kind: Kind, object: &Object) -> bool {
-        let dict = match object {
-            Object::Dictionary(dict) => dict,
-            Object::Stream(stream) => &stream.dict,
-            _ => return false,
+        let Some(dict) = object.dict() else {
+            return false;
         };
         let content = match kind {
             Kind::Form | Kind::Pattern => matches!(object, Object::Stream(_)),
-            Kind::Font => self.name(dict, b"Subtype") == Some(b"Type3"),
+            Kind::Font => dict.is_subtype(self.source, b"Type3"),
             _ => false,
         };
-        content
-            && dict
-                .get(b"Resources")
-                .ok()
-                .and_then(|resources| self.source.resolve_dict(resources))
-                .is_none()
+        content && Scope::own(self.source, dict).is_none()
     }
 
     /// The dictionary or stream `value` (the source object `id`, when it is
@@ -176,7 +170,7 @@ impl<'a> Rebuild<'a> {
         kind: Kind,
         id: Option<ObjectId>,
         value: &'s Object,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
@@ -229,7 +223,7 @@ impl<'a> Rebuild<'a> {
         &mut self,
         value: &'s Object,
         fields: &[(&[u8], Kind)],
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
@@ -276,7 +270,7 @@ impl<'a> Rebuild<'a> {
         dict: &'s Dictionary,
         fields: &[(&[u8], Kind)],
         handled: &[&[u8]],
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Dictionary>
     where
@@ -306,7 +300,7 @@ impl<'a> Rebuild<'a> {
         dict: &'s Dictionary,
         fields: &[(&[u8], Kind)],
         handled: &[&[u8]],
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Dictionary>
     where
@@ -319,17 +313,12 @@ impl<'a> Rebuild<'a> {
 
     /// A font, a Type3 font's glyph procedures rebuilt as content with names
     /// resolved in its own resources, else in `scope`.
-    fn font<'s>(
-        &mut self,
-        dict: &'s Dictionary,
-        scope: &[&'s Dictionary],
-        depth: usize,
-    ) -> Result<Object>
+    fn font<'s>(&mut self, dict: &'s Dictionary, scope: &Scope<'s>, depth: usize) -> Result<Object>
     where
         'a: 's,
     {
         let source = self.source;
-        let subtype = self.name(dict, b"Subtype");
+        let subtype = dict.name(self.source, b"Subtype");
         let handled: &[&[u8]] = match subtype {
             Some(b"Type3") => &[b"CharProcs", b"Resources"],
             Some(b"Type0") => &[b"Encoding"],
@@ -347,14 +336,7 @@ impl<'a> Rebuild<'a> {
         if subtype != Some(b"Type3") {
             return Ok(Object::Dictionary(out));
         }
-        let own = dict
-            .get(b"Resources")
-            .ok()
-            .and_then(|r| source.resolve_dict(r));
-        let inner: Vec<&Dictionary> = match own {
-            Some(own) => vec![own],
-            None => scope.to_vec(),
-        };
+        let inner = scope.inner(source, dict);
         let mut resources = Dictionary::new();
         let mut procs = Dictionary::new();
         let glyphs = dict
@@ -381,22 +363,13 @@ impl<'a> Rebuild<'a> {
         &mut self,
         stream: &'s Stream,
         fields: &[(&[u8], Kind)],
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Object>
     where
         'a: 's,
     {
-        let source = self.source;
-        let own = stream
-            .dict
-            .get(b"Resources")
-            .ok()
-            .and_then(|r| source.resolve_dict(r));
-        let inner: Vec<&Dictionary> = match own {
-            Some(own) => vec![own],
-            None => scope.to_vec(),
-        };
+        let inner = scope.inner(self.source, &stream.dict);
         let (content, resources) = self.content(&stream.decoded()?, &inner, depth + 1)?;
         let mut dict = self.stream_keys(
             &stream.dict,
@@ -427,7 +400,7 @@ impl<'a> Rebuild<'a> {
         &mut self,
         value: &'s Object,
         stream: &'s Stream,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
@@ -462,7 +435,7 @@ impl<'a> Rebuild<'a> {
     fn pattern<'s>(
         &mut self,
         value: &'s Object,
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
@@ -493,7 +466,7 @@ impl<'a> Rebuild<'a> {
     fn color_space<'s>(
         &mut self,
         items: &'s [Object],
-        scope: &[&'s Dictionary],
+        scope: &Scope<'s>,
         depth: usize,
     ) -> Result<Option<Object>>
     where
