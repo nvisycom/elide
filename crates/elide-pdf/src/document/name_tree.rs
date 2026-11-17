@@ -91,8 +91,7 @@ impl<'a> NameTree<'a> {
         };
         self.nodes.push(node);
         if let Ok(names) = dict.get(b"Names") {
-            let Some(names) = doc.resolve_array(names) else {
-                self.complete = false;
+            let Some(names) = self.array(doc, names, visited) else {
                 return;
             };
             let (pairs, unpaired) = names.as_chunks::<2>();
@@ -101,8 +100,7 @@ impl<'a> NameTree<'a> {
                 .extend(pairs.iter().map(|[key, value]| (key, value)));
         }
         if let Ok(kids) = dict.get(b"Kids") {
-            let Some(kids) = doc.resolve_array(kids) else {
-                self.complete = false;
+            let Some(kids) = self.array(doc, kids, visited) else {
                 return;
             };
             for kid in kids {
@@ -112,6 +110,23 @@ impl<'a> NameTree<'a> {
                 }
             }
         }
+    }
+
+    /// The array `value` resolves to, read once: an array object another
+    /// node already named, which no real tree shares, is not read again, so
+    /// a tree that shares one among many nodes costs its size once.
+    fn array(
+        &mut self,
+        doc: &'a Document,
+        value: &'a Object,
+        visited: &mut BTreeSet<ObjectId>,
+    ) -> Option<&'a Vec<Object>> {
+        let array = match value {
+            Object::Reference(id) if !visited.insert(*id) => None,
+            value => doc.resolve_array(value),
+        };
+        self.complete &= array.is_some();
+        array
     }
 }
 
@@ -245,6 +260,28 @@ mod tests {
             keys,
             [&Object::string_literal("a"), &Object::string_literal("b")]
         );
+    }
+
+    /// An array shared among many nodes is read once, its pairs taken once.
+    #[test]
+    fn a_shared_array_is_read_once() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let names = doc.add_object(Object::Array(vec![Object::string_literal("a"), 1.into()]));
+        let leaves: Vec<Object> = (0..3)
+            .map(|_| doc.add_object(dictionary! { "Names" => names }).into())
+            .collect();
+        let kids = doc.add_object(Object::Array(leaves));
+        let parents: Vec<Object> = (0..3)
+            .map(|_| doc.add_object(dictionary! { "Kids" => kids }).into())
+            .collect();
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! { "Dests" => dictionary! { "Kids" => parents } },
+        );
+        let tree = NameTree::read(&doc, b"Dests");
+        assert!(!tree.complete);
+        assert_eq!(tree.pairs.len(), 1);
     }
 
     #[test]

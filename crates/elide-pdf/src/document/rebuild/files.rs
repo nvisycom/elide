@@ -116,16 +116,19 @@ impl Rebuild<'_> {
         else {
             return Ok(None);
         };
-        let neutral = if is_neutral(name) {
+        let taken = |candidate: &str| self.files.values().any(|(_, name)| name == candidate);
+        let kept = is_neutral(name) && !taken(name);
+        let neutral = if kept {
             name.to_owned()
         } else {
-            self.record(HiddenContent::Properties);
-            let taken = |candidate: &String| self.files.values().any(|(_, name)| name == candidate);
             (self.files.len() + 1..)
                 .map(|index| neutral_name(index, name))
                 .find(|candidate| !taken(candidate))
                 .unwrap_or_default()
         };
+        if !kept {
+            self.record(HiddenContent::Properties);
+        }
         let mut copy = Dictionary::from_iter([
             ("Type", Object::Name(b"Filespec".to_vec())),
             ("F", Object::string_literal(neutral.clone())),

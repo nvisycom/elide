@@ -958,6 +958,26 @@ mod tests {
         assert_eq!(count(&stripped, HiddenContent::Annotation), 1);
     }
 
+    /// A neutral name another file already took is renamed, so no two files
+    /// share a name.
+    #[test]
+    fn a_neutral_name_already_taken_is_renamed() {
+        let source = Document::load_mem(&with_attachments(&[
+            ("attachment-1.private.pdf", b"first"),
+            ("attachment-1.pdf", b"second"),
+        ]))
+        .unwrap();
+        let (out, _) = rebuilt(&source);
+        let mut names: Vec<String> = Tree::read(&out)
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["attachment-1.pdf", "attachment-2.pdf"]);
+    }
+
     /// A named destination is found in the `/Names` tree past a kid that
     /// does not resolve.
     #[test]
