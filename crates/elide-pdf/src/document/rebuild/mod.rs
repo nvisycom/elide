@@ -135,6 +135,9 @@ struct Rebuild<'a> {
     /// specification, and its neutral name.
     files: BTreeMap<ObjectId, (ObjectId, String)>,
     layers: Layers<'a>,
+    /// The `/Names` tree of destinations, read once: each name's first
+    /// destination.
+    destinations: HashMap<&'a [u8], &'a Object>,
     stripped: StrippedContent,
     /// How many entries, values, and operators nothing models were dropped
     /// unrecorded.
@@ -157,6 +160,7 @@ impl<'a> Rebuild<'a> {
             cut: HashSet::new(),
             files: BTreeMap::new(),
             layers: Layers::read(source),
+            destinations: destinations(source),
             stripped: StrippedContent::new(),
             residue: 0,
             cmap_budget: MAX_CONTENT_BYTES,
@@ -559,42 +563,7 @@ impl<'a> Rebuild<'a> {
         {
             return Some(dest);
         }
-        let root = catalog
-            .get(b"Names")
-            .ok()
-            .and_then(|n| source.resolve_dict(n))?
-            .get(b"Dests")
-            .ok()?;
-        let mut queue = VecDeque::from([(root, 0)]);
-        let mut seen = HashSet::new();
-        while let Some((node, depth)) = queue.pop_front() {
-            if depth > MAX_TREE_DEPTH {
-                break;
-            }
-            if let Object::Reference(id) = node
-                && !seen.insert(*id)
-            {
-                continue;
-            }
-            let node = source.resolve_dict(node)?;
-            if let Some(pairs) = node
-                .get(b"Names")
-                .ok()
-                .and_then(|n| source.resolve_array(n))
-            {
-                for [key, dest] in pairs.as_chunks::<2>().0 {
-                    if let Object::String(key, _) = key
-                        && key == name
-                    {
-                        return Some(dest);
-                    }
-                }
-            }
-            if let Some(kids) = node.get(b"Kids").ok().and_then(|k| source.resolve_array(k)) {
-                queue.extend(kids.iter().map(|kid| (kid, depth + 1)));
-            }
-        }
-        None
+        self.destinations.get(name).copied()
     }
 }
 
@@ -681,6 +650,52 @@ fn reachable(doc: &Document) -> HashSet<ObjectId> {
         }
     }
     seen
+}
+
+/// Each name in `source`'s `/Names` tree of destinations, with the first
+/// destination it names, walked breadth first to [`MAX_TREE_DEPTH`]; a node
+/// that does not resolve is skipped.
+fn destinations(source: &Document) -> HashMap<&[u8], &Object> {
+    let mut out = HashMap::new();
+    let Some(root) = source
+        .catalog()
+        .ok()
+        .and_then(|catalog| catalog.get(b"Names").ok())
+        .and_then(|names| source.resolve_dict(names))
+        .and_then(|names| names.get(b"Dests").ok())
+    else {
+        return out;
+    };
+    let mut queue = VecDeque::from([(root, 0)]);
+    let mut seen = HashSet::new();
+    while let Some((node, depth)) = queue.pop_front() {
+        if depth > MAX_TREE_DEPTH {
+            break;
+        }
+        if let Object::Reference(id) = node
+            && !seen.insert(*id)
+        {
+            continue;
+        }
+        let Some(node) = source.resolve_dict(node) else {
+            continue;
+        };
+        if let Some(pairs) = node
+            .get(b"Names")
+            .ok()
+            .and_then(|n| source.resolve_array(n))
+        {
+            for [key, dest] in pairs.as_chunks::<2>().0 {
+                if let Object::String(key, _) = key {
+                    out.entry(key.as_slice()).or_insert(dest);
+                }
+            }
+        }
+        if let Some(kids) = node.get(b"Kids").ok().and_then(|k| source.resolve_array(k)) {
+            queue.extend(kids.iter().map(|kid| (kid, depth + 1)));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1017,6 +1032,40 @@ mod tests {
         assert_eq!(count(&stripped, HiddenContent::Annotation), 1);
     }
 
+    /// A named destination is found in the `/Names` tree past a kid that
+    /// does not resolve.
+    #[test]
+    fn a_named_destination_is_found_past_a_dangling_kid() {
+        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        doc.get_dictionary_mut(page).unwrap().set(
+            "Annots",
+            vec![Object::Dictionary(dictionary! {
+                "Subtype" => "Link",
+                "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+                "Dest" => Object::string_literal("chapter"),
+            })],
+        );
+        let leaf = doc.add_object(dictionary! {
+            "Names" => vec![Object::string_literal("chapter"), vec![page.into(), "Fit".into()].into()],
+        });
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! { "Dests" => dictionary! { "Kids" => vec![Object::Reference((9999, 0)), leaf.into()] } },
+        );
+
+        let (out, _) = rebuilt(&doc);
+        let new_page = out.get_pages().into_values().next().unwrap();
+        let links = page_dict(&out)
+            .get(b"Annots")
+            .and_then(Object::as_array)
+            .unwrap();
+        let link = out
+            .get_dictionary(links[0].as_reference().unwrap())
+            .unwrap();
+        let dest = link.get(b"Dest").and_then(Object::as_array).unwrap();
+        assert_eq!(dest[0], Object::Reference(new_page));
+    }
+
     /// Attached files keep their content under neutral names, and a rebuild
     /// of the result renames nothing.
     #[test]
@@ -1038,6 +1087,27 @@ mod tests {
         assert_eq!(names, ["attachment-1.pdf", "attachment-2.txt"]);
         assert!(!text_of(&out).contains("Jane_Roe"));
         check(&out).unwrap();
+    }
+
+    /// A name that starts like a neutral one but goes on past its number is
+    /// renamed like any other.
+    #[test]
+    fn a_name_past_its_neutral_number_is_renamed() {
+        let source = Document::load_mem(&with_attachments(&[
+            ("attachment-1.Jane Roe passport scan", b"scan"),
+            ("attachment-2.pdf", b"pdf bytes"),
+        ]))
+        .unwrap();
+        let (out, stripped) = rebuilt(&source);
+        assert_eq!(count(&stripped, HiddenContent::Properties), 1);
+        let names: Vec<String> = Tree::read(&out)
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert!(names.contains(&"attachment-2.pdf".to_owned()), "{names:?}");
+        assert!(names.iter().all(|name| !name.contains("Jane")), "{names:?}");
     }
 
     /// A file specification whose `/EF` is an indirect dictionary still
@@ -1538,9 +1608,30 @@ mod tests {
     /// drawn in, its names resolved there.
     #[test]
     fn a_form_without_resources_is_copied_per_scope() {
+        assert_eq!(form_fonts(None), ["Helvetica", "Courier"]);
+    }
+
+    /// A form whose `/Resources` is not a dictionary has none it can use, so
+    /// it is copied per scope too.
+    #[test]
+    fn a_form_with_unusable_resources_is_copied_per_scope() {
+        assert_eq!(form_fonts(Some(Object::Null)), ["Helvetica", "Courier"]);
+        assert_eq!(
+            form_fonts(Some(Object::Reference((9999, 0)))),
+            ["Helvetica", "Courier"]
+        );
+    }
+
+    /// The font each of two pages' copy of one shared form selects, each page
+    /// naming a different font `/F1` and the form's `/Resources` `resources`.
+    fn form_fonts(resources: Option<Object>) -> Vec<String> {
         let mut doc = Document::with_version("1.7");
+        let mut dict = dictionary! { "Type" => "XObject", "Subtype" => "Form" };
+        if let Some(resources) = resources {
+            dict.set("Resources", resources);
+        }
         let form = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+            dict,
             Content {
                 operations: show("Hello"),
             }
@@ -1573,8 +1664,7 @@ mod tests {
         doc.trailer.set("Root", catalog);
 
         let (out, _) = rebuilt(&doc);
-        let fonts: Vec<String> = out
-            .get_pages()
+        out.get_pages()
             .into_values()
             .map(|page| {
                 let resources = out
@@ -1611,8 +1701,7 @@ mod tests {
                 )
                 .into_owned()
             })
-            .collect();
-        assert_eq!(fonts, ["Helvetica", "Courier"]);
+            .collect()
     }
 
     /// The Type3 fonts in a rebuild of two pages sharing one Type3 font

@@ -142,12 +142,14 @@ impl Rebuild<'_> {
     }
 }
 
-/// Whether `name` is already neutral: `attachment-N`, with or without an
-/// extension.
+/// Whether `name` is already neutral: exactly what [`neutral_name`] writes
+/// for its number, so nothing of an original name survives after it.
 fn is_neutral(name: &str) -> bool {
     let stem = name.split_once('.').map_or(name, |(stem, _)| stem);
     stem.strip_prefix(NEUTRAL_PREFIX)
-        .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+        .filter(|number| number.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|number| number.parse().ok())
+        .is_some_and(|index| neutral_name(index, name) == name)
 }
 
 /// The neutral name of the `index`th attached file, keeping the extension of

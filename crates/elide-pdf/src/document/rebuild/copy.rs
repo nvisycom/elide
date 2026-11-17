@@ -148,8 +148,8 @@ impl<'a> Rebuild<'a> {
     }
 
     /// Whether `object`, copied as `kind`, is content that resolves its names
-    /// in the scope it is drawn in: a form, tiling pattern, or Type3 font with
-    /// no resources of its own.
+    /// in the scope it is drawn in: a form, tiling pattern, or Type3 font
+    /// whose `/Resources`, if any, is not a dictionary it can use.
     fn borrows_scope(&self, kind: Kind, object: &Object) -> bool {
         let dict = match object {
             Object::Dictionary(dict) => dict,
@@ -161,7 +161,12 @@ impl<'a> Rebuild<'a> {
             Kind::Font => self.name(dict, b"Subtype") == Some(b"Type3"),
             _ => false,
         };
-        content && dict.get(b"Resources").is_err()
+        content
+            && dict
+                .get(b"Resources")
+                .ok()
+                .and_then(|resources| self.source.resolve_dict(resources))
+                .is_none()
     }
 
     /// The dictionary or stream `value` (the source object `id`, when it is
