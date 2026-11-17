@@ -12,8 +12,7 @@ use image::RgbImage;
 use lopdf::xobject::image_from;
 use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
-use crate::document::object::DocumentExt;
-use crate::text::{PageFrame, page_frame};
+use crate::text::{PageBoxes, page_boxes};
 
 /// A scanned page as the image pipeline was given it, and as it came back.
 #[derive(Debug, Clone)]
@@ -102,16 +101,9 @@ pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) ->
         // unit), so it is drawn over a page of that size with no crop,
         // rotation, or unit of its own. A page with no box renders as US
         // Letter.
-        let frame = page_frame(doc, page_id).unwrap_or(PageFrame::LETTER);
-        let unit = doc
-            .get_dictionary(page_id)
-            .ok()
-            .and_then(|page| page.get(b"UserUnit").ok())
-            .and_then(|unit| doc.resolve_number(unit))
-            .filter(|unit| *unit > 0.0)
-            .unwrap_or(1.0);
-        let (width, height) = frame.displayed_size();
-        let (width, height) = (width * unit, height * unit);
+        let (width, height) = page_boxes(doc, page_id)
+            .unwrap_or(PageBoxes::LETTER)
+            .displayed_size();
 
         let image_id = doc.add_object(replacement.image.clone());
         let content = format!("q {width} 0 0 {height} 0 0 cm /Im0 Do Q");

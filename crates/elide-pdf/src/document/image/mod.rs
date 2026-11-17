@@ -103,7 +103,7 @@ pub(crate) struct SurfacedImage {
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) for an
-/// image that cannot be surfaced: the sanitizer removes those at decode, so one
+/// image that cannot be surfaced: the rebuild removes those at decode, so one
 /// left is an error, never an image shipped unscanned.
 pub(crate) fn surfaced(doc: &Document) -> Result<Vec<SurfacedImage>> {
     doc.objects

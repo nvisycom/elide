@@ -1,10 +1,9 @@
-//! The PDF [`DocumentLoader`]: sanitize the document, read its page text, and
+//! The PDF [`DocumentLoader`]: rebuild the document, read its page text, and
 //! surface its embedded images, attachments, and scanned pages as blobs.
 
 #[cfg(feature = "render")]
 use std::collections::BTreeSet;
 
-use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{Blob, Document, DocumentLoader, LocalId};
 use elide_core::Result;
@@ -38,16 +37,16 @@ impl PdfDocumentLoader {
         Self { raster }
     }
 
-    /// The [`Document`] of the sanitized `document` bytes, its decoded
-    /// `state`, and its `blobs`.
-    fn document(document: Bytes, state: PdfState, blobs: Vec<Blob>) -> Document {
+    /// The [`Document`] of the rebuilt `pdf`, its decoded `state`, and its
+    /// `blobs`.
+    fn document(pdf: Pdf, state: PdfState, blobs: Vec<Blob>) -> Document {
         let surfaced = blobs
             .iter()
             .map(|blob| (blob.id.as_str().to_owned(), blob.bytes.clone()))
             .collect();
         let native = PdfDocument {
             body: PdfStream { state },
-            document,
+            pdf,
             surfaced,
         };
         Document::new(FORMAT_ID, native, blobs)
@@ -59,9 +58,7 @@ impl DocumentLoader for PdfDocumentLoader {
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
         // Hidden content goes first, so everything below (the text, the
         // rendering, the surfaced images) reads only what will ship.
-        let (document, stripped) = Pdf::open(content.as_bytes())?.sanitize()?;
-        let document = Bytes::from(document);
-        let pdf = Pdf::open(&document)?;
+        let (pdf, stripped) = Pdf::open(content.as_bytes())?.rebuild()?;
 
         // Every embedded image and attached file is content of its own format,
         // decoded and redacted through the registry; one no codec reads is
@@ -82,7 +79,7 @@ impl DocumentLoader for PdfDocumentLoader {
         }));
 
         let pages = self.pages(&pdf, &mut blobs)?;
-        Ok(Self::document(document, PdfState::new(pages), blobs).with_stripped(stripped))
+        Ok(Self::document(pdf, PdfState::new(pages), blobs).with_stripped(stripped))
     }
 }
 
@@ -210,7 +207,7 @@ mod tests {
             })
             .collect();
         let state = PdfState::new(Pages::Glyph(Vec::new()));
-        PdfDocumentLoader::document(document, state, blobs)
+        PdfDocumentLoader::document(Pdf::open(&document).unwrap(), state, blobs)
     }
 
     #[test]
@@ -302,7 +299,8 @@ mod tests {
     fn an_unchanged_page_render_keeps_its_redacted_image() {
         let (bytes, image, page) = scanned_with_image();
         let state = PdfState::new(Pages::Glyph(Vec::new()));
-        let mut doc = PdfDocumentLoader::document(bytes, state, vec![image.clone(), page]);
+        let pdf = Pdf::open(&bytes).unwrap();
+        let mut doc = PdfDocumentLoader::document(pdf, state, vec![image.clone(), page]);
         doc.replace_blob(&image.id, Bytes::from(png(2, 2, [0, 0, 0])))
             .unwrap();
 

@@ -1,8 +1,8 @@
 //! The PDF engine: an opened document ([`Pdf`], over its [`Store`]) and what
 //! the crate does with one.
 //!
-//! - [`sanitize`] removes its hidden content, and checks an encoded one carries
-//!   none;
+//! - [`rebuild`] writes it afresh with only what the codec understands, and
+//!   checks an encoded one is such a rebuild;
 //! - [`image`] and [`attachment`] surface, replace, and remove its embedded
 //!   images and files;
 //! - [`content`] rewrites its content streams, and [`object`] extends lopdf's
@@ -17,14 +17,13 @@ pub(crate) mod attachment;
 pub(crate) mod content;
 pub(crate) mod image;
 pub(crate) mod object;
-pub(crate) mod sanitize;
+pub(crate) mod rebuild;
 mod store;
 
 use std::collections::HashSet;
 #[cfg(feature = "render")]
 use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(feature = "render")]
 use bytes::Bytes;
 use elide_codec::StrippedContent;
 use elide_core::Result;
@@ -32,8 +31,6 @@ use lopdf::ObjectId;
 
 use self::attachment::{Attachment, AttachmentId, AttachmentReplacement};
 use self::image::{ImageId, ImageReplacement, SurfacedImage};
-use self::object::DocumentExt;
-use self::sanitize::SanitizeDocumentExt;
 pub(crate) use self::store::Store;
 #[cfg(feature = "render")]
 use crate::render::{self, PageObservation, PageReplacement, ScannedPage};
@@ -58,36 +55,32 @@ impl Pdf {
         Store::open(document).map(Self)
     }
 
-    /// The document with its hidden content removed, as new bytes with the
-    /// record of what was removed: metadata, annotations other than internal
-    /// links, actions and scripts, form values, the outline and structure
-    /// tree, optional-content layers, thumbnails, and every object no longer
-    /// reachable from the document.
-    ///
-    /// The document is always re-serialized, so what the source file carries
-    /// outside its object graph (a prior revision's superseded objects, bytes
-    /// after the end marker) never reaches the output.
+    /// The document rebuilt with only what the codec understands, with the
+    /// record of what the source held that it did not copy (see [`rebuild`]).
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
-    /// content stream cannot be rewritten or the sanitized document cannot be
-    /// saved.
-    pub(crate) fn sanitize(&self) -> Result<(Vec<u8>, StrippedContent)> {
-        let mut doc = self.0.clone_doc();
-        let stripped = doc.sanitize()?;
-        Ok((doc.save_pruned()?, stripped))
+    /// As [`rebuild::rebuild`], and
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// the rebuilt document cannot be saved.
+    pub(crate) fn rebuild(&self) -> Result<(Pdf, StrippedContent)> {
+        let rebuilt = rebuild::rebuild(self.0.doc())?;
+        Ok((Pdf(Store::saved(rebuilt.document)?), rebuilt.stripped))
     }
 
-    /// Check that the document carries no hidden content: what the codec runs
-    /// on an encoded PDF before returning it.
+    /// The document's bytes.
+    pub(crate) fn bytes(&self) -> Bytes {
+        self.0.bytes()
+    }
+
+    /// Check that the document is a rebuild: what the codec runs on an encoded
+    /// PDF before returning it.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) naming what
-    /// survived.
-    pub(crate) fn check_sanitized(&self) -> Result<()> {
-        self.0.doc().check_sanitized()
+    /// As [`rebuild::check`].
+    pub(crate) fn check_rebuilt(&self) -> Result<()> {
+        rebuild::check(self.0.doc())
     }
 
     /// Every page's text, with the map from each character back to the glyph
@@ -136,7 +129,7 @@ impl Pdf {
     /// glyph cannot be found;
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
     /// content stream cannot be rewritten or the document cannot be saved.
-    pub(crate) fn apply(&self, blocks: &[TextBlock], redaction: &Redaction) -> Result<Vec<u8>> {
+    pub(crate) fn apply(&self, blocks: &[TextBlock], redaction: &Redaction) -> Result<Pdf> {
         let mut doc = self.0.clone_doc();
         if !redaction.text.is_empty() {
             text::redact::delete(&self.0, blocks, &mut doc, &redaction.text)?;
@@ -156,7 +149,7 @@ impl Pdf {
                 let redraws = redaction.redraws_images();
                 let staged;
                 let drawn = if redraws {
-                    staged = Pdf::open(&doc.clone().save_pruned()?)?;
+                    staged = Pdf(Store::saved(doc.clone())?);
                     &staged
                 } else {
                     self
@@ -172,7 +165,7 @@ impl Pdf {
             &redaction.attachments,
             &redaction.removed_attachments,
         )?;
-        doc.save_pruned()
+        Store::saved(doc).map(Pdf)
     }
 
     /// The 1-based pages `numbers` rendered at `scale` to PNG images, keyed by
@@ -217,7 +210,7 @@ impl Pdf {
         scale: f32,
         detections: &[Detection],
         redaction: Redaction,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Pdf> {
         let redraws = redaction.redraws_images();
         let images = Redaction {
             images: redaction.images,
@@ -226,7 +219,7 @@ impl Pdf {
         };
         let redacted;
         let pdf = if redraws {
-            redacted = Pdf::open(&self.apply(&[], &images)?)?;
+            redacted = self.apply(&[], &images)?;
             &redacted
         } else {
             self
@@ -382,7 +375,7 @@ mod tests {
     }
 
     /// An incremental update leaves the superseded content in the file, outside
-    /// the object graph; the sanitized document never carries it.
+    /// the object graph; the rebuilt document never carries it.
     #[test]
     fn a_superseded_revision_never_ships() {
         let (mut doc, content) = showing("Jane Roe");
@@ -405,8 +398,83 @@ mod tests {
             "the fixture keeps the old revision"
         );
 
-        let (sanitized, _) = Pdf::open(&updated).unwrap().sanitize().unwrap();
-        assert!(!contains(&sanitized, b"Jane Roe"));
-        assert!(contains(&sanitized, b"public"));
+        let (rebuilt, _) = Pdf::open(&updated).unwrap().rebuild().unwrap();
+        assert!(!contains(&rebuilt.bytes(), b"Jane Roe"));
+        assert!(contains(&rebuilt.bytes(), b"public"));
+    }
+
+    /// Every stream of the PDF `bytes`, decoded, as text.
+    fn streams_of(bytes: &[u8]) -> String {
+        let doc = Document::load_mem(bytes).unwrap();
+        doc.objects
+            .values()
+            .filter_map(|object| object.as_stream().ok())
+            .map(|stream| {
+                String::from_utf8_lossy(
+                    &stream
+                        .decompressed_content()
+                        .unwrap_or(stream.content.clone()),
+                )
+                .into_owned()
+            })
+            .collect()
+    }
+
+    /// Text a tiling pattern draws is detected and deleted like the page's:
+    /// the pattern's one stream draws every tile.
+    #[test]
+    fn text_in_a_tiling_pattern_is_found_and_deleted() {
+        let mut doc = Document::with_version("1.5");
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let cell = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Tj", vec![Object::string_literal("Jane Roe")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let pattern = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                "BBox" => vec![0.into(), 0.into(), 50.into(), 20.into()],
+                "XStep" => 50, "YStep" => 20,
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            },
+            cell.encode().unwrap(),
+        ));
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"/Pattern cs /P0 scn 0 0 100 100 re f".to_vec(),
+        ));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+
+        let (pdf, _) = Pdf::open(&bytes).unwrap().rebuild().unwrap();
+        let blocks = pdf.text().unwrap();
+        assert_eq!(blocks[0].text, "Jane Roe");
+        let redaction = Redaction {
+            text: vec![Detection::new(1, 0, 8)],
+            ..Redaction::default()
+        };
+        let out = pdf.apply(&blocks, &redaction).unwrap().bytes();
+        assert!(!streams_of(&out).contains("Jane Roe"));
+        Pdf::open(&out).unwrap().check_rebuilt().unwrap();
     }
 }

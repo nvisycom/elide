@@ -28,6 +28,8 @@ pub(crate) enum Node {
 pub(crate) struct Entry {
     pub(crate) name: String,
     pub(crate) stream: ObjectId,
+    /// The file specification that names it.
+    pub(crate) spec: Dictionary,
 }
 
 /// The `/EmbeddedFiles` name tree, read once: its nodes (so entries can be
@@ -168,7 +170,11 @@ fn entry(doc: &Document, key: &Object, value: &Object) -> Option<Entry> {
         .file_name()
         .or_else(|| decode_text_string(key).ok())
         .unwrap_or_default();
-    Some(Entry { name, stream })
+    Some(Entry {
+        name,
+        stream,
+        spec: spec.clone(),
+    })
 }
 
 /// The dictionary of the tree node `node` in `doc`.
@@ -288,33 +294,5 @@ fn associations<'a>(doc: &'a Document, af: &'a Object) -> Option<&'a Vec<Object>
         Object::Array(specs) => Some(specs),
         Object::Reference(id) => doc.get_object(*id).and_then(Object::as_array).ok(),
         _ => None,
-    }
-}
-
-/// Replace the attachment tree of `doc` with one leaf holding `pairs` (each a
-/// key and its file specification), sorted by key.
-pub(crate) fn write_leaf(doc: &mut Document, mut pairs: Vec<(String, Object)>) {
-    pairs.sort_by(|a, b| a.0.cmp(&b.0));
-    let leaf: Vec<Object> = pairs
-        .into_iter()
-        .flat_map(|(key, value)| [Object::string_literal(key), value])
-        .collect();
-    let mut root = Dictionary::new();
-    root.set("Names", Object::Array(leaf));
-    let names = match doc.catalog().ok().and_then(|c| c.get(b"Names").ok()) {
-        Some(Object::Reference(id)) => {
-            let id = *id;
-            doc.get_object_mut(id)
-                .ok()
-                .and_then(|o| o.as_dict_mut().ok())
-        }
-        _ => doc
-            .catalog_mut()
-            .ok()
-            .and_then(|catalog| catalog.get_mut(b"Names").ok())
-            .and_then(|names| names.as_dict_mut().ok()),
-    };
-    if let Some(names) = names {
-        names.set("EmbeddedFiles", Object::Dictionary(root));
     }
 }

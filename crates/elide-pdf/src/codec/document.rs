@@ -19,13 +19,14 @@ use crate::document::{Pdf, Redaction};
 #[cfg(feature = "render")]
 use crate::render::ScannedPage;
 
-/// A decoded PDF: its page-text body stream over the sanitized document, with
+/// A decoded PDF: its page-text body stream over the rebuilt document, with
 /// the embedded-image, scanned-page, and attachment [`Blob`]s alongside.
 pub(super) struct PdfDocument {
     /// The page-text body.
     pub(super) body: PdfStream,
-    /// The sanitized document bytes, which encode re-serialises from.
-    pub(super) document: Bytes,
+    /// The rebuilt document, parsed and saved: encode edits a copy of it, and
+    /// ships its bytes when nothing is redacted.
+    pub(super) pdf: Pdf,
     /// Each blob's bytes as surfaced, by id: a blob that comes back with the
     /// same bytes is left as the document holds it.
     pub(super) surfaced: BTreeMap<String, Bytes>,
@@ -80,11 +81,11 @@ impl Native for PdfDocument {
             }
         }
 
-        let bytes = self.body.state.redact(&self.document, redaction)?;
+        let bytes = self.body.state.redact(&self.pdf, redaction)?;
         Ok(ContentData::new(bytes))
     }
 
     fn validate(&self, output: &ContentData) -> Result<()> {
-        Pdf::open(output.as_bytes())?.check_sanitized()
+        Pdf::open(output.as_bytes())?.check_rebuilt()
     }
 }

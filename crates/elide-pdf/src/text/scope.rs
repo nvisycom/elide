@@ -39,9 +39,15 @@ pub(super) fn scope_fonts<'a>(
     out
 }
 
-/// Resolve the object id of the XObject named `name` in `scope`'s `/XObject`
-/// dictionary, if it is an indirect reference.
-pub(super) fn scope_xobject_id(doc: &Document, scope: &Scope<'_>, name: &[u8]) -> Option<ObjectId> {
+/// Resolve the object id of the resource named `name` in `scope`'s
+/// `category` dictionary (`/XObject`, `/Pattern`), if it is an indirect
+/// reference.
+pub(super) fn scope_entry_id(
+    doc: &Document,
+    scope: &Scope<'_>,
+    category: &[u8],
+    name: &[u8],
+) -> Option<ObjectId> {
     let resource_dicts = scope.inline.into_iter().chain(
         scope
             .referenced
@@ -49,9 +55,9 @@ pub(super) fn scope_xobject_id(doc: &Document, scope: &Scope<'_>, name: &[u8]) -
             .filter_map(|&id| doc.get_dictionary(id).ok()),
     );
     for resources in resource_dicts {
-        if let Ok(xobjects) = resources.get(b"XObject")
-            && let Some(xobjects) = dict_or_ref(doc, xobjects)
-            && let Ok(entry) = xobjects.get(name)
+        if let Ok(entries) = resources.get(category)
+            && let Some(entries) = dict_or_ref(doc, entries)
+            && let Ok(entry) = entries.get(name)
             && let Ok(id) = entry.as_reference()
         {
             return Some(id);

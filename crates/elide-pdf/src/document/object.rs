@@ -61,17 +61,6 @@ pub(crate) trait DocumentExt {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// `id` is not a stream.
     fn set_stream_content(&mut self, id: ObjectId, content: Vec<u8>) -> Result<()>;
-
-    /// The document serialized, first dropping every object it no longer
-    /// reaches: a superseded content stream, a replaced image's mask, a stale
-    /// cross-reference stream. lopdf serializes an unreachable object too, so
-    /// without the prune a redacted original would survive in the bytes.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
-    /// the document cannot be serialized.
-    fn save_pruned(&mut self) -> Result<Vec<u8>>;
 }
 
 impl DocumentExt for Document {
@@ -151,15 +140,6 @@ impl DocumentExt for Document {
                 "object {id:?} is not a stream to rewrite"
             ))),
         }
-    }
-
-    fn save_pruned(&mut self) -> Result<Vec<u8>> {
-        self.objects.retain(|_, object| !object.is_xref_stream());
-        self.prune_objects();
-        let mut out = Vec::new();
-        self.save_to(&mut out)
-            .map_err(|e| Error::malformed(format!("could not save PDF: {e}")))?;
-        Ok(out)
     }
 }
 
@@ -248,10 +228,6 @@ pub(crate) trait DictionaryExt {
     /// Whether the dictionary's `/Subtype` is `subtype`.
     fn has_subtype(&self, subtype: &[u8]) -> bool;
 
-    /// Remove `key`, returning 1 when it was present and 0 otherwise, for a
-    /// caller counting what it removed.
-    fn remove_counted(&mut self, key: &[u8]) -> usize;
-
     /// This file specification's file name: its Unicode `/UF`, else its `/F`.
     fn file_name(&self) -> Option<String>;
 }
@@ -261,10 +237,6 @@ impl DictionaryExt for Dictionary {
         self.get(b"Subtype")
             .and_then(Object::as_name)
             .is_ok_and(|name| name == subtype)
-    }
-
-    fn remove_counted(&mut self, key: &[u8]) -> usize {
-        usize::from(self.remove(key).is_some())
     }
 
     fn file_name(&self) -> Option<String> {

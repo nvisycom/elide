@@ -56,6 +56,9 @@ schemars = { workspace = true, features = [], optional = true }
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 
+# Text processing
+unicode-normalization = { workspace = true, features = [] }
+
 # Async runtime & parallelism
 rayon = { workspace = true, features = [], optional = true }
 async-trait = { workspace = true, features = [] }

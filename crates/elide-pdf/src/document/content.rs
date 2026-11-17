@@ -2,8 +2,7 @@
 //! once) and every form XObject's, planned against the unchanged document and
 //! then written back.
 //!
-//! The sanitizer cuts hidden layers and alternate text this way, and image
-//! removal cuts the drawing of an image.
+//! Image removal cuts the drawing of an image this way.
 
 use std::collections::{BTreeSet, HashSet};
 

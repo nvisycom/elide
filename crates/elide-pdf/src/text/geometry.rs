@@ -282,16 +282,6 @@ impl PageFrame {
         rotate: 0,
     };
 
-    /// The page's size as displayed, in points: its crop box, turned by its
-    /// rotation.
-    #[cfg(feature = "render")]
-    pub(crate) fn displayed_size(&self) -> (f64, f64) {
-        match self.rotate {
-            90 | 270 => (self.crop_h, self.crop_w),
-            _ => (self.crop_w, self.crop_h),
-        }
-    }
-
     /// Normalize a device-space box into a page-normalized, top-left-origin
     /// [`UnitBoundingBox`] in the as-displayed (rotated) frame.
     pub(super) fn normalize(&self, rect: DeviceRect) -> UnitBoundingBox {
@@ -378,20 +368,63 @@ impl SpaceRule {
     }
 }
 
-/// Read a page's visible rectangle and display rotation into a [`PageFrame`],
-/// or `None` when the page has no readable box.
+/// A page's boxes and how it is displayed, every inherited value resolved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PageBoxes {
+    /// The media box, `[x0, y0, x1, y1]` with low corners first.
+    pub(crate) media: [f64; 4],
+    /// The visible box: the crop box clipped to the media box.
+    pub(crate) crop: [f64; 4],
+    /// The display rotation: 0, 90, 180, or 270.
+    pub(crate) rotate: u32,
+    /// The size of one user-space unit, in points.
+    pub(crate) unit: f64,
+    /// The print production boxes the page sets itself (`/BleedBox`,
+    /// `/TrimBox`, `/ArtBox`), each clipped to the media box.
+    pub(crate) print: [Option<[f64; 4]>; 3],
+}
+
+/// The keys of the print production boxes, in [`PageBoxes::print`] order.
+pub(crate) const PRINT_BOXES: [&[u8]; 3] = [b"BleedBox", b"TrimBox", b"ArtBox"];
+
+impl PageBoxes {
+    /// The boxes of a page with none of its own, as a viewer draws it: US
+    /// Letter, unrotated.
+    pub(crate) const LETTER: Self = Self {
+        media: [0.0, 0.0, 612.0, 792.0],
+        crop: [0.0, 0.0, 612.0, 792.0],
+        rotate: 0,
+        unit: 1.0,
+        print: [None; 3],
+    };
+
+    /// The page's size as displayed, in points: its visible box turned by its
+    /// rotation, at its user unit.
+    #[cfg(feature = "render")]
+    pub(crate) fn displayed_size(&self) -> (f64, f64) {
+        let [x0, y0, x1, y1] = self.crop;
+        let (width, height) = ((x1 - x0) * self.unit, (y1 - y0) * self.unit);
+        match self.rotate {
+            90 | 270 => (height, width),
+            _ => (width, height),
+        }
+    }
+}
+
+/// Read a page's boxes, rotation, and user unit, or `None` when the page has
+/// no readable box.
 ///
-/// The visible rectangle is the `/CropBox` clipped to the `/MediaBox`, either
-/// one alone when the other is missing (or they do not overlap). Both and
+/// The visible box is the `/CropBox` clipped to the `/MediaBox`, either one
+/// alone when the other is missing (or they do not overlap). The boxes and
 /// `/Rotate` are inheritable, so this walks up `/Parent` for a value the page
 /// itself does not set, resolving references. A missing or junk rotation is
-/// zero.
-pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame> {
+/// zero, and a missing or non-positive unit is one point.
+pub(crate) fn page_boxes(doc: &Document, page_id: ObjectId) -> Option<PageBoxes> {
     let media = inherited_rect(doc, page_id, b"MediaBox").map(normalize_rect);
     let crop = inherited_rect(doc, page_id, b"CropBox").map(normalize_rect);
-    let [x0, y0, x1, y1] = match (crop, media) {
-        (Some(crop), Some(media)) => intersect(crop, media).unwrap_or(media),
-        (Some(rect), None) | (None, Some(rect)) => rect,
+    let (media, crop) = match (media, crop) {
+        (Some(media), Some(crop)) => (media, intersect(crop, media).unwrap_or(media)),
+        (Some(rect), None) | (None, Some(rect)) => (rect, rect),
         (None, None) => return None,
     };
     let rotate = doc
@@ -401,9 +434,42 @@ pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame>
         .unwrap_or(0);
     // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
     // defensive against junk).
-    let rotate = rotate.rem_euclid(360) as u32;
-    let rotate = (rotate / 90) * 90;
+    let rotate = (rotate.rem_euclid(360) as u32 / 90) * 90;
+    let unit = doc
+        .get_dictionary(page_id)
+        .ok()
+        .and_then(|page| page.get(b"UserUnit").ok())
+        .and_then(|unit| doc.resolve_number(unit))
+        .filter(|unit| *unit > 0.0)
+        .unwrap_or(1.0);
+    let print = PRINT_BOXES.map(|key| {
+        let page = doc.get_dictionary(page_id).ok()?;
+        let rect = doc.resolve_array(page.get(key).ok()?)?;
+        let [a, b, c, d] = rect.as_slice() else {
+            return None;
+        };
+        let rect = [
+            doc.resolve_number(a)?,
+            doc.resolve_number(b)?,
+            doc.resolve_number(c)?,
+            doc.resolve_number(d)?,
+        ];
+        intersect(normalize_rect(rect), media)
+    });
+    Some(PageBoxes {
+        media,
+        crop,
+        rotate,
+        unit,
+        print,
+    })
+}
 
+/// Read a page's visible rectangle and display rotation into a [`PageFrame`],
+/// or `None` when the page has no readable box (see [`page_boxes`]).
+pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame> {
+    let PageBoxes { crop, rotate, .. } = page_boxes(doc, page_id)?;
+    let [x0, y0, x1, y1] = crop;
     Some(PageFrame {
         crop_x0: x0,
         crop_y0: y0,

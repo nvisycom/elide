@@ -5,12 +5,13 @@
 //! is stored this way, as are the rasters this crate writes when it flattens a
 //! page. The supported samples are 1, 2, 4, or 8 bits per component in a gray,
 //! RGB, or CMYK space (device, calibrated, or ICC-based by its component
-//! count), or indexed into a gray or RGB palette. Anything else (a stencil
-//! mask, an unusual colour space, a non-default decode array other than an
-//! inverted gray) is not surfaceable, and the sanitizer strips it.
+//! count), or indexed into a gray or RGB palette, and stencil masks, read as
+//! 1-bit gray with the painted samples black. Anything else (an unusual colour
+//! space, a non-default decode array other than an inverted gray) is not
+//! surfaceable, and the rebuild removes it.
 //!
 //! Whether an image is supported is read from its dictionary alone, so the
-//! sanitizer's check costs no decompression; the samples are decoded once, when
+//! rebuild's check costs no decompression; the samples are decoded once, when
 //! the image is surfaced.
 
 use std::io::Cursor;
@@ -74,6 +75,14 @@ impl Layout {
     }
 }
 
+/// Whether the image XObject `dict` is a stencil mask: its samples say where
+/// to paint, not what colour.
+pub(crate) fn is_stencil(dict: &Dictionary) -> bool {
+    dict.get(b"ImageMask")
+        .and_then(Object::as_bool)
+        .unwrap_or(false)
+}
+
 /// Whether the raw-sample image XObject `dict` in `doc` describes samples this
 /// module decodes.
 pub(crate) fn is_supported(doc: &Document, dict: &Dictionary) -> bool {
@@ -83,28 +92,44 @@ pub(crate) fn is_supported(doc: &Document, dict: &Dictionary) -> bool {
 /// The layout `dict` describes, or `None` when its samples are of a kind this
 /// module does not decode or claim more than [`MAX_SAMPLE_BYTES`].
 fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
-    let mask = dict
-        .get(b"ImageMask")
-        .and_then(Object::as_bool)
-        .unwrap_or(false);
-    if mask {
-        return None;
-    }
     let width = u32::try_from(dict.get(b"Width").ok()?.as_i64().ok()?).ok()?;
     let height = u32::try_from(dict.get(b"Height").ok()?.as_i64().ok()?).ok()?;
-    let bits = dict.get(b"BitsPerComponent").ok()?.as_i64().ok()?;
-    if ![1, 2, 4, 8].contains(&bits) || width == 0 || height == 0 {
+    if width == 0 || height == 0 {
         return None;
     }
-    let layout = Layout {
-        width,
-        height,
-        bits: bits as usize,
-        space: space(
-            doc,
-            doc.resolve(dict.get(b"ColorSpace").ok()?)?,
-            decode_array(dict),
-        )?,
+    let layout = if is_stencil(dict) {
+        // A stencil mask's samples are 1 bit, a 0 painting under the default
+        // decode array (8.9.6.2): as gray, the painted samples are black.
+        let bits = dict
+            .get(b"BitsPerComponent")
+            .and_then(Object::as_i64)
+            .unwrap_or(1);
+        if bits != 1 {
+            return None;
+        }
+        Layout {
+            width,
+            height,
+            bits: 1,
+            space: Space::Gray {
+                inverted: decode_array(dict)?,
+            },
+        }
+    } else {
+        let bits = dict.get(b"BitsPerComponent").ok()?.as_i64().ok()?;
+        if ![1, 2, 4, 8].contains(&bits) {
+            return None;
+        }
+        Layout {
+            width,
+            height,
+            bits: bits as usize,
+            space: space(
+                doc,
+                doc.resolve(dict.get(b"ColorSpace").ok()?)?,
+                decode_array(dict),
+            )?,
+        }
     };
     let size = layout.row_bytes().checked_mul(height as usize)?;
     (size <= MAX_SAMPLE_BYTES).then_some(layout)
@@ -336,12 +361,29 @@ mod tests {
         assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 255, 0, 0]);
     }
 
+    /// A stencil mask reads as gray, its painted samples (0 under the
+    /// default decode array) black; an inverted decode array swaps them.
     #[test]
-    fn a_stencil_mask_is_not_supported() {
+    fn a_stencil_mask_reads_as_gray() {
         let doc = Document::new();
-        let mask = dictionary! { "Width" => 8, "Height" => 1, "ImageMask" => true, "BitsPerComponent" => 1 };
-        assert!(!is_supported(&doc, &mask));
-        assert!(decode(&doc, &image(mask, vec![0xFF])).is_err());
+        let mask = dictionary! { "Width" => 2, "Height" => 1, "ImageMask" => true };
+        assert!(is_supported(&doc, &mask));
+        assert_eq!(
+            decode(&doc, &image(mask, vec![0b0100_0000])).unwrap().data,
+            [0, 255]
+        );
+        let inverted = dictionary! {
+            "Width" => 2, "Height" => 1, "ImageMask" => true,
+            "Decode" => vec![1.into(), 0.into()],
+        };
+        assert_eq!(
+            decode(&doc, &image(inverted, vec![0b0100_0000]))
+                .unwrap()
+                .data,
+            [255, 0]
+        );
+        let wide = dictionary! { "Width" => 2, "Height" => 1, "ImageMask" => true, "BitsPerComponent" => 8 };
+        assert!(!is_supported(&doc, &wide));
     }
 
     #[test]

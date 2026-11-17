@@ -17,7 +17,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use super::raster::fill;
 use super::{PageReplacement, PixelRect, ScannedPage};
-use crate::text::{DeviceRect, GlyphRect};
+use crate::text::{DeviceRect, GlyphRect, readable};
 
 /// Most pages a document may have to be read or rendered: a page is rendered
 /// to a full bitmap, so an unbounded count is a memory denial of service.
@@ -100,18 +100,20 @@ pub(crate) fn observe(pdf_bytes: &[u8]) -> Result<Vec<(String, Vec<GlyphRect>)>>
             let mut text = String::new();
             let mut glyphs = Vec::new();
             if let Ok(page_text) = page.text() {
-                for (start, (c, ch)) in page_text
-                    .chars()
-                    .iter()
-                    .filter_map(|ch| Some((ch.unicode_char()?, ch)))
-                    .enumerate()
-                {
-                    text.push(c);
+                let mut next = 0;
+                for ch in page_text.chars().iter() {
+                    let Some(c) = ch.unicode_char() else {
+                        continue;
+                    };
+                    let read = readable(c.encode_utf8(&mut [0; 4]));
+                    let start = next;
+                    next += read.chars().count();
+                    text.push_str(&read);
                     let b = ch.loose_bounds().map_err(|e| {
                         Error::malformed(format!("page {number} glyph {start} has no box: {e}"))
                     })?;
                     glyphs.push(GlyphRect {
-                        chars: start..start + 1,
+                        chars: start..next,
                         rect: DeviceRect {
                             min_x: f64::from(b.left().value),
                             min_y: f64::from(b.bottom().value),

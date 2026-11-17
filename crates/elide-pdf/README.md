@@ -8,12 +8,17 @@ every detection redacted.
 ## Overview
 
 A PDF holds its text as content-stream drawing operators, and its images and
-attached files as streams of their own. Decoding first strips the document's
-hidden content (metadata, annotations, scripts, hidden layers, prior
-revisions), so detection reads only what will ship. It then yields each page's
-text, decoded glyph by glyph, and surfaces every embedded image, attached file,
-and (with `render`) scanned page as content of its own format for the registry
-to redact.
+attached files as streams of their own. Decoding first rebuilds the document,
+copying only what draws its pages, its internal links, and its attached files,
+each object with only the keys the PDF specification defines for it; whatever
+it leaves behind (metadata, annotations, scripts, hidden layers, prior
+revisions, private application data) is recorded, so detection reads only what
+will ship. It then yields each page's text, decoded glyph by glyph, and
+surfaces every embedded image, attached file, and (with `render`) scanned page
+as content of its own format for the registry to redact.
+
+The rebuilt document is untagged: its structure tree carries alternate text
+detection never reads. Embedded font programs are copied as stored.
 
 Encoding deletes the detected glyphs from the content streams, keeping a
 selectable text layer, and writes the redacted images, files, and pages back.

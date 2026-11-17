@@ -6,7 +6,7 @@
 //! keeping a real selectable text layer with the detected spans gone. The
 //! structures that would retain copies of the text (annotations, `/Info`,
 //! `/Metadata`) were already removed at decode by
-//! [`sanitize`](crate::document::sanitize).
+//! [`rebuild`](crate::document::rebuild).
 //!
 //! A detected character span resolves through the page's [`OffsetMap`] to the
 //! exact glyph byte ranges to delete, in whichever content stream drew them.

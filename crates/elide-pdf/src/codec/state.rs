@@ -141,28 +141,25 @@ impl PdfState {
         Ok(())
     }
 
-    /// `document` with the recorded redactions and `redaction`'s blobs
-    /// applied; the document itself when nothing changes.
+    /// The decoded `pdf` with the recorded redactions and `redaction`'s
+    /// blobs applied, as bytes; the document itself when nothing changes.
     ///
     /// # Errors
     ///
     /// As [`Pdf::apply`], and on the flatten path as `Pdf::flatten`.
-    pub(super) fn redact(&self, document: &Bytes, mut redaction: Redaction) -> Result<Bytes> {
+    pub(super) fn redact(&self, pdf: &Pdf, mut redaction: Redaction) -> Result<Bytes> {
         match &self.pages {
             Pages::Glyph(blocks) => {
                 redaction.text.clone_from(&self.detections);
                 if redaction.is_empty() {
-                    return Ok(document.clone());
+                    return Ok(pdf.bytes());
                 }
-                Ok(Bytes::from(Pdf::open(document)?.apply(blocks, &redaction)?))
+                Ok(pdf.apply(blocks, &redaction)?.bytes())
             }
             #[cfg(feature = "render")]
-            Pages::Flatten { pages, scale } => Ok(Bytes::from(Pdf::open(document)?.flatten(
-                pages,
-                *scale,
-                &self.detections,
-                redaction,
-            )?)),
+            Pages::Flatten { pages, scale } => Ok(pdf
+                .flatten(pages, *scale, &self.detections, redaction)?
+                .bytes()),
         }
     }
 }

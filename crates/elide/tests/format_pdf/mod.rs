@@ -1,7 +1,7 @@
 //! PDF scenarios: `text` (pure-Rust born-digital splice), `raster`
 //! (PDFium-rendered image-only redaction, `#[ignore]`d without PDFium), and,
 //! through the codec alone, `images` (embedded images surfaced, redacted, or
-//! removed) and `sanitize` (hidden content stripped at decode).
+//! removed) and `sanitize` (hidden content left behind by the rebuild at decode).
 #![allow(dead_code)]
 
 mod images;

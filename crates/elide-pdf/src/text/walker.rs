@@ -15,17 +15,15 @@ use std::slice;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
-use lopdf::{Document, Encoding, Object, ObjectId};
+use lopdf::{Document, Object, ObjectId, Stream};
 
 use super::geometry::{
     Cursor, DeviceRect, GlyphRect, Matrix, PageFrame, SpaceRule, TextState, page_frame,
 };
-use super::glyphs::decode_glyphs;
-use super::scope::{Scope, dict_or_ref, scope_fonts, scope_xobject_id};
+use super::glyphs::{FontText, decode_glyphs};
+use super::scope::{Scope, dict_or_ref, scope_entry_id, scope_fonts};
 use super::widths::{GlyphMetrics, WidthSource};
-use super::{
-    Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock, pattern,
-};
+use super::{Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::document::Store;
 use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt, StreamExt};
 
@@ -131,7 +129,7 @@ impl TextRun<'_> {
     /// is 0 when the whole operand list is passed.
     fn show(
         &mut self,
-        enc: &Encoding,
+        enc: &FontText<'_>,
         operands: &[Object],
         op: usize,
         operand_base: usize,
@@ -190,7 +188,7 @@ impl TextRun<'_> {
     /// works: its advance is taken as zero, leaving the pen at the glyph's origin,
     /// so a following glyph moved there by a `Td`/`TJ` positional jump still reads
     /// as a word break while glyphs packed at the same origin do not.
-    fn show_string(&mut self, enc: &Encoding, bytes: &[u8], address: Address) -> Result<()> {
+    fn show_string(&mut self, enc: &FontText<'_>, bytes: &[u8], address: Address) -> Result<()> {
         for glyph in decode_glyphs(enc, bytes)? {
             let origin = self.cursor.device_origin(self.state.ctm);
             // The gap threshold is a fraction of the font size *in device units*,
@@ -300,7 +298,6 @@ fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
     let doc = store.doc();
-    pattern::refuse_text(doc)?;
     let pages = doc.get_pages();
     let mut out = Vec::with_capacity(pages.len());
     for (&page, &page_id) in &pages {
@@ -398,7 +395,7 @@ struct Inherited<'a> {
 /// tables), since the font is part of the graphics state.
 struct SavedState<'a> {
     state: TextState,
-    current: Option<&'a Option<Encoding<'a>>>,
+    current: Option<&'a Option<FontText<'a>>>,
     font_slot: u16,
     widths: &'a WidthSource,
     metrics: GlyphMetrics,
@@ -410,7 +407,7 @@ struct InheritedFont<'a> {
     /// The font-table slot (routes a deleted glyph to the right `/ToUnicode`).
     slot: u16,
     /// The resolved encoding (`&Some` decodable, `&Some(None)` undecodable).
-    encoding: &'a Option<Encoding<'a>>,
+    encoding: &'a Option<FontText<'a>>,
     /// The font's advance widths, so glyph advances (and spacing) are right.
     widths: &'a WidthSource,
     /// The font's vertical metrics, so glyph box heights are right.
@@ -446,7 +443,7 @@ fn walk_stream(
     // `Tf` then needs to decode and position that font's glyphs.
     let font_dicts = scope_fonts(doc, scope);
     let mut font_slot: BTreeMap<Vec<u8>, u16> = BTreeMap::new();
-    let mut encodings: BTreeMap<Vec<u8>, Option<Encoding>> = BTreeMap::new();
+    let mut encodings: BTreeMap<Vec<u8>, Option<FontText>> = BTreeMap::new();
     let mut widths: BTreeMap<Vec<u8>, WidthSource> = BTreeMap::new();
     let mut metrics: BTreeMap<Vec<u8>, GlyphMetrics> = BTreeMap::new();
     for (name, font) in &font_dicts {
@@ -470,7 +467,7 @@ fn walk_stream(
         };
         ctx.accum.fonts.push(FontEntry { to_unicode });
         font_slot.insert(name.clone(), slot);
-        encodings.insert(name.clone(), font.get_font_encoding(doc).ok());
+        encodings.insert(name.clone(), FontText::of(doc, font)?);
         widths.insert(name.clone(), WidthSource::from_font(doc, font));
         metrics.insert(name.clone(), GlyphMetrics::from_font(doc, font));
     }
@@ -479,14 +476,14 @@ fn walk_stream(
     // font is inherited from the caller's graphics state, below), or `Some(None)`
     // when the selected font could not be decoded or names a font absent from
     // this scope's resources.
-    const UNRESOLVED: &Option<Encoding> = &None;
+    const UNRESOLVED: &Option<FontText> = &None;
     const NO_WIDTHS: &WidthSource = &WidthSource::Unknown;
     // A Form XObject inherits the caller's selected font — its encoding, advance
     // widths, and metrics — so text it draws before its own `Tf` is decoded and
     // positioned with that font. At page level there is nothing to inherit. A
     // local `Tf` later replaces all of these.
     let inherited_font = inherited.as_ref().and_then(|inh| inh.font.as_ref());
-    let (mut current, mut font_slot_current): (Option<&Option<Encoding>>, u16) =
+    let (mut current, mut font_slot_current): (Option<&Option<FontText>>, u16) =
         match inherited_font {
             Some(f) => (Some(f.encoding), f.slot),
             None => (None, 0),
@@ -660,6 +657,14 @@ fn walk_stream(
                     walk_xobject(doc, name, scope, depth, inherited, ctx)?;
                 }
             }
+
+            // A tiling pattern selected to paint with draws its cell's content,
+            // text included.
+            "scn" | "SCN" => {
+                if let Some(Object::Name(name)) = op.operands.last() {
+                    walk_pattern(doc, name, scope, depth, ctx)?;
+                }
+            }
             _ => {}
         }
     }
@@ -668,11 +673,10 @@ fn walk_stream(
 
 /// Resolve and recurse into the Form XObject named `name` in `scope`.
 ///
-/// Skips a non-form (e.g. image) XObject, a name absent from the scope, and a
-/// re-entrant reference (cycle guard), none of which draws text; a form nested
-/// past [`MAX_XOBJECT_DEPTH`] is an error. A form's own
-/// `/Resources` become the scope for its content; when it has none the parent
-/// scope stands in, as the spec allows.
+/// Skips a non-form (e.g. image) XObject and a name absent from the scope,
+/// neither of which draws text. A form's own `/Resources` become the scope for
+/// its content; when it has none the parent scope stands in, as the spec
+/// allows.
 fn walk_xobject<'a>(
     doc: &'a Document,
     name: &[u8],
@@ -681,85 +685,133 @@ fn walk_xobject<'a>(
     inherited: Inherited<'a>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
-    let Some(xobject_id) = scope_xobject_id(doc, scope, name) else {
+    let Some(id) = scope_entry_id(doc, scope, b"XObject", name) else {
         return Ok(());
     };
-    // Cycle guard: an XObject already on the stack (or that we cannot read as a
-    // stream) is skipped.
-    if ctx.active.contains(&xobject_id) {
-        return Ok(());
-    }
-    let Ok(Object::Stream(stream_obj)) = doc.get_object(xobject_id) else {
+    let Ok(Object::Stream(stream)) = doc.get_object(id) else {
         return Ok(());
     };
     // Only Form XObjects carry content to walk; images are not text.
-    if !stream_obj.dict.has_subtype(b"Form") {
+    if !stream.dict.has_subtype(b"Form") {
+        return Ok(());
+    }
+    walk_nested(doc, id, stream, scope, depth, inherited, ctx)
+}
+
+/// Resolve and recurse into the tiling pattern named `name` in `scope`, the
+/// pattern a `scn`/`SCN` selects to paint with.
+///
+/// A pattern's cell is drawn in its own graphics state, in the page's default
+/// space transformed by the pattern's `/Matrix` (8.7.3.1), so it inherits no
+/// font or transform. Its text is located once, however many times the cell is
+/// tiled, and deleting it from the one stream removes it from every tile. A
+/// shading pattern draws no text.
+fn walk_pattern<'a>(
+    doc: &'a Document,
+    name: &[u8],
+    scope: &Scope<'a>,
+    depth: u8,
+    ctx: &mut Walk<'_>,
+) -> Result<()> {
+    let Some(id) = scope_entry_id(doc, scope, b"Pattern", name) else {
+        return Ok(());
+    };
+    let Ok(Object::Stream(stream)) = doc.get_object(id) else {
+        return Ok(());
+    };
+    if stream
+        .dict
+        .get(b"PatternType")
+        .and_then(Object::as_i64)
+        .ok()
+        != Some(1)
+    {
+        return Ok(());
+    }
+    let inherited = Inherited {
+        font: None,
+        state: TextState::default(),
+    };
+    walk_nested(doc, id, stream, scope, depth, inherited, ctx)
+}
+
+/// Walk the content of the form or tiling pattern `stream` (object `id`),
+/// drawn from `scope` under the `inherited` state, its `/Matrix` composed onto
+/// that state's transform.
+///
+/// Skips a re-entrant reference (cycle guard); content nested past
+/// [`MAX_XOBJECT_DEPTH`], or more walks than [`MAX_XOBJECT_WALKS`], is an
+/// error.
+fn walk_nested<'a>(
+    doc: &'a Document,
+    id: ObjectId,
+    stream: &'a Stream,
+    scope: &Scope<'a>,
+    depth: u8,
+    mut inherited: Inherited<'a>,
+    ctx: &mut Walk<'_>,
+) -> Result<()> {
+    if ctx.active.contains(&id) {
         return Ok(());
     }
     if depth == 0 {
         return Err(Error::resource_limit(format!(
-            "page {} nests Form XObjects deeper than {MAX_XOBJECT_DEPTH} levels; \
+            "page {} nests forms and patterns deeper than {MAX_XOBJECT_DEPTH} levels; \
              its text cannot be walked",
             ctx.page
         )));
     }
-    let bytes = stream_obj.decoded()?;
-    let content = Content::decode(&bytes)
+    let content = Content::decode(&stream.decoded()?)
         .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
-    // The form's own resources, or the parent scope when it declares none.
-    let inner_resources = stream_obj
+    // Its own resources, or the parent scope when it declares none.
+    let inner_scope = match stream
         .dict
         .get(b"Resources")
         .ok()
-        .and_then(|r| dict_or_ref(doc, r));
-    let inner_scope = match inner_resources {
-        Some(res) => Scope {
-            inline: Some(res),
+        .and_then(|r| dict_or_ref(doc, r))
+    {
+        Some(resources) => Scope {
+            inline: Some(resources),
             referenced: &[],
         },
         None => *scope,
     };
 
-    // Charge the total-walk budget for this form (only now that it is a real form
-    // we will decode). Exhausting it means a page fans out to more walks than any
-    // legitimate document, so fail closed rather than let the walk run away.
+    // Charge the total-walk budget. Exhausting it means a page fans out to
+    // more walks than any legitimate document, so fail closed rather than let
+    // the walk run away.
     let Some(remaining) = ctx.walks_remaining.checked_sub(1) else {
         return Err(Error::resource_limit(format!(
-            "page {} draws more than {MAX_XOBJECT_WALKS} Form XObjects; \
-                 its text cannot be walked within the resource budget",
+            "page {} draws more than {MAX_XOBJECT_WALKS} forms and patterns; \
+             its text cannot be walked within the resource budget",
             ctx.page
         )));
     };
     ctx.walks_remaining = remaining;
 
-    // A Form XObject may carry its own `/Matrix`, applied to its content on top
-    // of the caller's CTM (ISO 32000-1 §8.10.1). Compose it so text the form
-    // draws lands in the page's coordinate space; absent/malformed `/Matrix` is
-    // the identity (no transform).
-    let form_matrix = stream_obj
+    // The `/Matrix` maps its content into the space it is drawn in (8.10.1,
+    // 8.7.3.1); absent or malformed, it is the identity.
+    let matrix = stream
         .dict
         .get(b"Matrix")
         .ok()
         .and_then(|o| o.as_array().ok())
         .and_then(|a| read_matrix(a, 0))
         .unwrap_or(Matrix::IDENTITY);
-    // Compose the form's `/Matrix` onto the inherited CTM, so text the form draws
-    // lands in the page's coordinate space.
-    let mut inherited = inherited;
-    inherited.state.ctm = form_matrix.then(inherited.state.ctm);
+    inherited.state.ctm = matrix.then(inherited.state.ctm);
 
-    ctx.active.insert(xobject_id);
+    ctx.active.insert(id);
     let result = walk_stream(
         doc,
         &content,
-        StreamTarget::XObject(xobject_id),
+        StreamTarget::XObject(id),
         &inner_scope,
         depth - 1,
         Some(inherited),
         ctx,
     );
-    ctx.active.remove(&xobject_id);
+    ctx.active.remove(&id);
     result
 }
 
@@ -799,7 +851,7 @@ struct Walk<'a> {
 mod tests {
     use elide_core::ErrorKind;
     use lopdf::content::Operation;
-    use lopdf::{Dictionary, Stream, dictionary};
+    use lopdf::{Dictionary, dictionary};
 
     use super::*;
 

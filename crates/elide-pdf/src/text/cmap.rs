@@ -1,4 +1,4 @@
-//! Scrub deleted glyph codes from a font's `/ToUnicode` CMap.
+//! Edits to a font's `/ToUnicode` CMap.
 //!
 //! A `/ToUnicode` CMap maps character codes to Unicode, so text can be recovered
 //! from it (copy, search, extraction) independently of the drawn glyphs. When
@@ -6,12 +6,20 @@
 //! be removed from this table, or the redacted text survives as a code->Unicode
 //! entry. The CMap is edited textually: a `bfchar` entry for a deleted code is
 //! dropped, and a `bfrange` covering one fails closed (its interior can't be
-//! partially removed without re-deriving the range).
+//! partially removed without re-deriving the range). The rebuild also writes
+//! each destination as [`readable`] text, so the text a viewer copies is the
+//! text detection read.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
+
+use super::glyphs::readable;
+
+/// The most codes a `bfrange` is rewritten across; a CMap's ranges span at
+/// most 256 (their bounds differ only in the last byte).
+const MAX_RANGE: u64 = 1 << 16;
 
 /// Remove `deleted` codes from each named `/ToUnicode` CMap stream.
 ///
@@ -52,6 +60,151 @@ pub(crate) fn scrub(
         stream.set_plain_content(edited);
     }
     Ok(())
+}
+
+/// `cmap` with each Unicode destination of its `bfchar` and `bfrange` sections
+/// written as [`readable`] text, or `None` when none changes.
+///
+/// A range whose destinations change is written as the array of them (a
+/// range's destinations step its first one's last UTF-16 unit, as
+/// [`lopdf`] reads them). A destination that is not UTF-16 stays as written.
+pub(crate) fn readable_cmap(cmap: &[u8]) -> Option<Vec<u8>> {
+    // Latin-1 maps each byte to one char and back, so tokens outside the
+    // destinations keep their exact bytes.
+    let text: String = cmap.iter().map(|&b| char::from(b)).collect();
+    let tokens = tokenize(&text);
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut section = "";
+    let mut i = 0;
+    while i < tokens.len() {
+        let word = tokens[i].word();
+        if matches!(
+            word,
+            "beginbfchar" | "beginbfrange" | "endbfchar" | "endbfrange"
+        ) {
+            section = if word.starts_with("begin") { word } else { "" };
+            out.push_str(tokens[i].text);
+            i += 1;
+            continue;
+        }
+        let entry = match section {
+            "beginbfchar" => readable_bfchar(&tokens[i..]),
+            "beginbfrange" => readable_bfrange(&tokens[i..]),
+            _ => None,
+        };
+        match entry {
+            Some((written, used)) => {
+                changed = true;
+                out.push_str(&written);
+                i += used;
+            }
+            None => {
+                out.push_str(tokens[i].text);
+                i += 1;
+            }
+        }
+    }
+    changed.then(|| out.chars().map(|c| c as u8).collect())
+}
+
+/// The `<src> <dst>` entry at the start of `tokens` with `dst` rewritten, and
+/// the tokens it spans; `None` when it is not one or does not change.
+fn readable_bfchar(tokens: &[Token<'_>]) -> Option<(String, usize)> {
+    let [src, dst, ..] = tokens else {
+        return None;
+    };
+    src.hex_bytes()?;
+    let units = utf16_units(&dst.hex_bytes()?)?;
+    let written = readable_units(&units)?;
+    Some((
+        format!("{}{}{}", src.text, leading(dst.text), hex(&written)),
+        2,
+    ))
+}
+
+/// The `<lo> <hi> dst` entry at the start of `tokens` with its destinations
+/// rewritten, and the tokens it spans; `None` when it is not one or none of
+/// its destinations changes.
+fn readable_bfrange(tokens: &[Token<'_>]) -> Option<(String, usize)> {
+    let [lo, hi, dst, ..] = tokens else {
+        return None;
+    };
+    let low = code(&lo.hex_bytes()?)?;
+    let high = code(&hi.hex_bytes()?)?;
+    let count = high.checked_sub(low)? + 1;
+    let prefix = format!("{}{}{}", lo.text, hi.text, leading(dst.text));
+    if let Some(bytes) = dst.hex_bytes() {
+        if count > MAX_RANGE {
+            return None;
+        }
+        let first = utf16_units(&bytes)?;
+        let mut changed = false;
+        let mut entries = Vec::new();
+        for step in 0..count {
+            let mut units = first.clone();
+            let last = units.last_mut()?;
+            *last = last.wrapping_add(step as u16);
+            match readable_units(&units) {
+                Some(written) => {
+                    changed = true;
+                    entries.push(hex(&written));
+                }
+                None => entries.push(hex(&units)),
+            }
+        }
+        return changed.then(|| (format!("{prefix}[{}]", entries.join(" ")), 3));
+    }
+    let inner = dst.word().strip_prefix('[')?.strip_suffix(']')?;
+    let mut changed = false;
+    let mut written = String::from("[");
+    for token in tokenize(inner) {
+        let rewritten = token
+            .hex_bytes()
+            .and_then(|bytes| utf16_units(&bytes))
+            .and_then(|units| readable_units(&units));
+        match rewritten {
+            Some(units) => {
+                changed = true;
+                written.push_str(leading(token.text));
+                written.push_str(&hex(&units));
+            }
+            None => written.push_str(token.text),
+        }
+    }
+    written.push(']');
+    changed.then(|| (format!("{prefix}{written}"), 3))
+}
+
+/// The UTF-16 `units` written as [`readable`] text, or `None` when that is
+/// what they already say or they are not UTF-16.
+fn readable_units(units: &[u16]) -> Option<Vec<u16>> {
+    let text = String::from_utf16(units).ok()?;
+    let written = readable(&text);
+    (written != text).then(|| written.encode_utf16().collect())
+}
+
+/// `bytes` as big-endian UTF-16 units, or `None` for an odd length.
+fn utf16_units(bytes: &[u8]) -> Option<Vec<u16>> {
+    let (pairs, rest) = bytes.as_chunks::<2>();
+    rest.is_empty()
+        .then(|| pairs.iter().map(|&pair| u16::from_be_bytes(pair)).collect())
+}
+
+/// A source code's bytes as a number, or `None` past four bytes.
+fn code(bytes: &[u8]) -> Option<u64> {
+    (bytes.len() <= 4).then(|| bytes.iter().fold(0, |code, &b| code << 8 | u64::from(b)))
+}
+
+/// UTF-16 `units` as a `<hex>` string.
+fn hex(units: &[u16]) -> String {
+    let digits: String = units.iter().map(|unit| format!("{unit:04X}")).collect();
+    format!("<{digits}>")
+}
+
+/// The whitespace a token's `text` starts with.
+fn leading(text: &str) -> &str {
+    &text[..text.len() - text.trim_start().len()]
 }
 
 /// Remove the `bfchar` entries whose source code is in `codes`, and fail closed
@@ -341,6 +494,51 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         assert!(!s.contains("<0041>"), "inline deleted pair leaked");
         assert!(s.contains("endcmap"), "surrounding structure lost");
+    }
+
+    #[test]
+    fn writes_bfchar_destinations_as_readable_text() {
+        // Chrome maps 山 to the Kangxi radical ⼭ (U+2F2D); Quartz maps fi to ﬁ.
+        let cmap = b"2 beginbfchar\n<0681> <2F2D>\n<0003> <FB01>\nendbfchar\n";
+        let out = String::from_utf8(readable_cmap(cmap).unwrap()).unwrap();
+        assert_eq!(
+            out,
+            "2 beginbfchar\n<0681> <5C71>\n<0003> <00660069>\nendbfchar\n"
+        );
+    }
+
+    #[test]
+    fn leaves_a_cmap_without_forms_alone() {
+        let cmap = b"1 beginbfchar\n<0041> <0041>\nendbfchar\n1 beginbfrange\n<01> <03> <0061>\nendbfrange\n";
+        assert_eq!(readable_cmap(cmap), None);
+    }
+
+    #[test]
+    fn writes_a_changed_range_as_its_destinations() {
+        // <2F2B>..<2F2D> are the radicals for 尸, 屮 and 山.
+        let cmap = b"1 beginbfrange\n<10> <12> <2F2B>\nendbfrange\n";
+        let out = String::from_utf8(readable_cmap(cmap).unwrap()).unwrap();
+        assert_eq!(
+            out,
+            "1 beginbfrange\n<10> <12> [<5C38> <5C6E> <5C71>]\nendbfrange\n"
+        );
+    }
+
+    #[test]
+    fn writes_a_range_array_entry_by_entry() {
+        let cmap = b"beginbfrange <10> <11> [<0041> <2F2D>] endbfrange";
+        let out = String::from_utf8(readable_cmap(cmap).unwrap()).unwrap();
+        assert_eq!(out, "beginbfrange <10> <11> [<0041> <5C71>] endbfrange");
+    }
+
+    #[test]
+    fn keeps_bytes_outside_the_destinations() {
+        let cmap = b"/CMapName /\xE9 def\nbeginbfchar <01> <2F2D> endbfchar";
+        let out = readable_cmap(cmap).unwrap();
+        assert_eq!(
+            out,
+            b"/CMapName /\xE9 def\nbeginbfchar <01> <5C71> endbfchar"
+        );
     }
 
     #[test]

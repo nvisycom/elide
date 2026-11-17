@@ -41,7 +41,7 @@ pub(crate) fn render_pages(
     numbers: BTreeSet<u32>,
     scale: f32,
 ) -> Result<BTreeMap<u32, Bytes>> {
-    pdfium::render_pages(&store.source_bytes(), &numbers, scale)
+    pdfium::render_pages(&store.bytes(), &numbers, scale)
 }
 
 /// Every page's text as PDFium reads it, with each glyph's box and the
@@ -56,7 +56,7 @@ pub(crate) fn render_pages(
 pub(crate) fn observe(store: &Store) -> Result<Vec<PageObservation>> {
     let doc = store.doc();
     let pages = doc.get_pages();
-    let observed = pdfium::observe(&store.source_bytes())?;
+    let observed = pdfium::observe(&store.bytes())?;
     if observed.len() != pages.len() {
         return Err(Error::malformed(format!(
             "PDFium reads {} pages where the document has {}",
@@ -90,7 +90,7 @@ pub(crate) fn flatten(
     scale: f32,
     fill: &BTreeMap<u32, Vec<DeviceRect>>,
 ) -> Result<Vec<PageReplacement>> {
-    pdfium::flatten(&store.source_bytes(), &numbers, scale, fill)
+    pdfium::flatten(&store.bytes(), &numbers, scale, fill)
 }
 
 /// Each of the `scanned` pages rendered at `scale` with its redaction laid
@@ -106,5 +106,5 @@ pub(crate) fn composite(
     scanned: &[ScannedPage],
     scale: f32,
 ) -> Result<Vec<PageReplacement>> {
-    pdfium::composite(&store.source_bytes(), scanned, scale)
+    pdfium::composite(&store.bytes(), scanned, scale)
 }
