@@ -34,7 +34,7 @@ impl Rebuild<'_> {
         let tree = Tree::read(self.source)?;
         let mut pairs = Vec::new();
         for entry in &tree.entries {
-            if let Some((spec, name)) = self.attach(entry.stream, &entry.name, &entry.spec)? {
+            if let Some((spec, name)) = self.attach(entry.stream, &entry.name, entry.spec)? {
                 pairs.push((name, spec));
             }
         }

@@ -95,24 +95,32 @@ impl<'a> Rebuild<'a> {
         if !matches!(object, Object::Dictionary(_) | Object::Stream(_)) {
             return self.copy(kind, object, scope, depth + 1);
         }
-        // Content without resources of its own resolves its names in the
-        // scope it is drawn in, so it is copied once for each scope whose
-        // resources differ; any other object is copied once.
+        // Content that resolves its names in the scope it is drawn in is
+        // copied once for each scope whose resources differ; any other
+        // object is copied once.
         let drawn_in: &[&Dictionary] = if self.borrows_scope(kind, object) {
             scope
         } else {
             &[]
         };
-        let copies = self.copies.entry((target, kind)).or_default();
+        let scopes = &self.scopes;
         let same_scope =
-            |(resources, _): &&ScopedCopy| resources.iter().eq(drawn_in.iter().copied());
-        if let Some((_, copy)) = copies.iter().find(same_scope) {
+            |(index, _): &&ScopedCopy| scopes[*index].iter().eq(drawn_in.iter().copied());
+        if let Some((_, copy)) = self
+            .copies
+            .get(&(target, kind))
+            .and_then(|copies| copies.iter().find(same_scope))
+        {
             return Ok(Some(Object::Reference(*copy)));
         }
         // The copy's id is taken first, so an object that refers back to
         // itself (a form drawing a pattern drawing the form) refers to it.
+        let index = self.scope_index(drawn_in);
         let copy = self.out.new_object_id();
-        copies.push((drawn_in.iter().map(|dict| (*dict).clone()).collect(), copy));
+        self.copies
+            .entry((target, kind))
+            .or_default()
+            .push((index, copy));
         match self.copy_object(kind, Some(target), object, scope, depth + 1)? {
             Some(object) => {
                 self.out.objects.insert(copy, object);
@@ -125,6 +133,18 @@ impl<'a> Rebuild<'a> {
                 Ok(None)
             }
         }
+    }
+
+    /// The index in [`Rebuild::scopes`] of the scope `resources`, kept there
+    /// the first time it is seen. It is looked up only when a copy is made,
+    /// so the scan is paid once per copy, not once per reference.
+    fn scope_index(&mut self, resources: &[&Dictionary]) -> usize {
+        let same = |scope: &Vec<Dictionary>| scope.iter().eq(resources.iter().copied());
+        self.scopes.iter().position(same).unwrap_or_else(|| {
+            self.scopes
+                .push(resources.iter().map(|dict| (*dict).clone()).collect());
+            self.scopes.len() - 1
+        })
     }
 
     /// Whether `object`, copied as `kind`, is content that resolves its names
@@ -292,7 +312,8 @@ impl<'a> Rebuild<'a> {
         self.keys(dict, &fields, &handled, scope, depth)
     }
 
-    /// A font, a Type3 font's glyph procedures rebuilt as content.
+    /// A font, a Type3 font's glyph procedures rebuilt as content with names
+    /// resolved in its own resources, else in `scope`.
     fn font<'s>(
         &mut self,
         dict: &'s Dictionary,
@@ -325,7 +346,10 @@ impl<'a> Rebuild<'a> {
             .get(b"Resources")
             .ok()
             .and_then(|r| source.resolve_dict(r));
-        let inner: Vec<&Dictionary> = own.into_iter().chain(scope.iter().copied()).collect();
+        let inner: Vec<&Dictionary> = match own {
+            Some(own) => vec![own],
+            None => scope.to_vec(),
+        };
         let mut resources = Dictionary::new();
         let mut procs = Dictionary::new();
         let glyphs = dict

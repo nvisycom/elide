@@ -101,51 +101,73 @@ pub(crate) fn readable_cmap(cmap: &[u8], budget: &mut usize) -> Result<Option<Ve
             "beginbfrange" => readable_bfrange(&tokens[i..]),
             _ => None,
         };
-        match entry {
-            Some((written, used)) => {
-                let replaced: usize = tokens[i..i + used]
-                    .iter()
-                    .map(|token| token.text.chars().count())
-                    .sum();
-                let growth = written.chars().count().saturating_sub(replaced);
-                *budget = budget.checked_sub(growth).ok_or_else(|| {
-                    Error::resource_limit("the /ToUnicode CMaps rewrite past their size limit")
-                })?;
-                changed = true;
-                out.push_str(&written);
-                i += used;
-            }
-            None => {
-                out.push_str(tokens[i].text);
-                i += 1;
-            }
-        }
+        let Some(Entry { used, written }) = entry else {
+            out.push_str(tokens[i].text);
+            i += 1;
+            continue;
+        };
+        let spanned = &tokens[i..i + used];
+        i += used;
+        let Some(written) = written else {
+            spanned.iter().for_each(|token| out.push_str(token.text));
+            continue;
+        };
+        let replaced: usize = spanned.iter().map(|token| token.text.chars().count()).sum();
+        let growth = written.chars().count().saturating_sub(replaced);
+        *budget = budget.checked_sub(growth).ok_or_else(|| {
+            Error::resource_limit("the /ToUnicode CMaps rewrite past their size limit")
+        })?;
+        changed = true;
+        out.push_str(&written);
     }
     Ok(changed.then(|| out.chars().map(|c| c as u8).collect()))
 }
 
-/// The `<src> <dst>` entry at the start of `tokens` with `dst` rewritten, and
-/// the tokens it spans; `None` when it is not one or does not change.
-fn readable_bfchar(tokens: &[Token<'_>]) -> Option<(String, usize)> {
+/// One `bfchar` or `bfrange` entry: the tokens it spans, and what it is
+/// rewritten as when any of its destinations changes.
+struct Entry {
+    used: usize,
+    written: Option<String>,
+}
+
+/// The `<src> <dst>` entry at the start of `tokens`, its `dst` rewritten when
+/// that changes it; `None` when it is not one.
+fn readable_bfchar(tokens: &[Token<'_>]) -> Option<Entry> {
     let [src, dst, ..] = tokens else {
         return None;
     };
     src.hex_bytes()?;
-    let units = utf16_units(&dst.hex_bytes()?)?;
-    let written = readable_units(&units)?;
-    Some((
-        format!("{}{}{}", src.text, leading(dst.text), hex(&written)),
-        2,
-    ))
+    if !dst.is_destination() {
+        return None;
+    }
+    let written = dst
+        .hex_bytes()
+        .and_then(|bytes| utf16_units(&bytes))
+        .and_then(|units| readable_units(&units))
+        .map(|written| format!("{}{}{}", src.text, leading(dst.text), hex(&written)));
+    Some(Entry { used: 2, written })
 }
 
-/// The `<lo> <hi> dst` entry at the start of `tokens` with its destinations
-/// rewritten, and the tokens it spans; `None` when it is not one or none of
-/// its destinations changes.
-fn readable_bfrange(tokens: &[Token<'_>]) -> Option<(String, usize)> {
+/// The `<lo> <hi> dst` entry at the start of `tokens`, rewritten when any of
+/// its destinations changes; `None` when it is not one.
+fn readable_bfrange(tokens: &[Token<'_>]) -> Option<Entry> {
     let [lo, hi, dst, ..] = tokens else {
         return None;
     };
+    lo.hex_bytes()?;
+    hi.hex_bytes()?;
+    if !dst.is_destination() {
+        return None;
+    }
+    Some(Entry {
+        used: 3,
+        written: readable_range(lo, hi, dst),
+    })
+}
+
+/// The range `lo`..=`hi` mapped from `dst` with its destinations rewritten,
+/// or `None` when none of them changes.
+fn readable_range(lo: &Token<'_>, hi: &Token<'_>, dst: &Token<'_>) -> Option<String> {
     let low = code(&lo.hex_bytes()?)?;
     let high = code(&hi.hex_bytes()?)?;
     let count = high.checked_sub(low)? + 1;
@@ -169,7 +191,7 @@ fn readable_bfrange(tokens: &[Token<'_>]) -> Option<(String, usize)> {
                 None => entries.push(hex(&units)),
             }
         }
-        return changed.then(|| (format!("{prefix}[{}]", entries.join(" ")), 3));
+        return changed.then(|| format!("{prefix}[{}]", entries.join(" ")));
     }
     let inner = dst.word().strip_prefix('[')?.strip_suffix(']')?;
     let mut changed = false;
@@ -189,7 +211,7 @@ fn readable_bfrange(tokens: &[Token<'_>]) -> Option<(String, usize)> {
         }
     }
     written.push(']');
-    changed.then(|| (format!("{prefix}{written}"), 3))
+    changed.then(|| format!("{prefix}{written}"))
 }
 
 /// The UTF-16 `units` written as [`readable`] text, or `None` when that is
@@ -308,19 +330,26 @@ fn copy_bfrange_section(
         // A `bfrange` entry is `<lo> <hi> <dst-or-array>`. Inspect lo/hi.
         let lo = tokens[i].hex_bytes();
         let hi = tokens.get(i + 1).and_then(Token::hex_bytes);
+        let dst = tokens.get(i + 2).filter(|dst| dst.is_destination());
         if let (Some(lo), Some(hi)) = (lo, hi) {
-            let hit = codes.iter().any(|c| *c >= lo && *c <= hi);
-            if hit {
-                if lo == hi && codes.contains(&lo) {
+            if codes.iter().any(|c| *c >= lo && *c <= hi) {
+                if lo == hi && codes.contains(&lo) && dst.is_some() {
                     // Degenerate single-code range: drop lo, hi, and the target
                     // token that follows.
-                    i += if tokens.get(i + 2).is_some() { 3 } else { 2 };
+                    i += 3;
                     continue;
                 }
                 return Err(Error::redaction(
                     "a deleted glyph's code falls inside a /ToUnicode bfrange; \
                      the code->Unicode mapping cannot be scrubbed safely",
                 ));
+            }
+            if dst.is_some() {
+                tokens[i..i + 3]
+                    .iter()
+                    .for_each(|token| out.push_str(token.text));
+                i += 3;
+                continue;
             }
         }
         out.push_str(tokens[i].text);
@@ -356,6 +385,12 @@ impl Token<'_> {
     /// keywords (`beginbfchar`, `endbfchar`, ...).
     fn word(&self) -> &str {
         self.text.trim()
+    }
+
+    /// Whether the token can be an entry's destination: a `<hex>` string, a
+    /// name, or an array.
+    fn is_destination(&self) -> bool {
+        matches!(self.kind, TokenKind::Hex) || self.word().starts_with(['/', '['])
     }
 
     /// The decoded bytes of a `<hex>` token, or `None` for any other kind.
@@ -489,6 +524,32 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
+    /// An entry missing its destination is not one, so the section still
+    /// ends at its end keyword.
+    #[test]
+    fn an_entry_without_a_destination_leaves_the_section_end() {
+        let cmap = b"1 beginbfchar <01> <2F2D> <02> endbfchar <03> <2F2D>";
+        let out =
+            String::from_utf8(readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap()).unwrap();
+        assert_eq!(out, "1 beginbfchar <01> <5C71> <02> endbfchar <03> <2F2D>");
+
+        let cmap = b"1 beginbfrange <01> <02> endbfrange 1 beginbfchar <05> <0041> endbfchar";
+        let out = strip_codes(cmap, &codes(&[b"\x05"])).unwrap();
+        assert_eq!(
+            out,
+            b"1 beginbfrange <01> <02> endbfrange 1 beginbfchar endbfchar"
+        );
+    }
+
+    /// A kept range is passed over whole, so its destination is not read as
+    /// the start of another range.
+    #[test]
+    fn a_kept_range_keeps_the_next_aligned() {
+        let cmap = b"2 beginbfrange <01> <02> <0005> <05> <05> <0042> endbfrange";
+        let out = strip_codes(cmap, &codes(&[b"\x05"])).unwrap();
+        assert_eq!(out, b"2 beginbfrange <01> <02> <0005> endbfrange");
+    }
+
     #[test]
     fn drops_the_right_pair_when_several_share_a_line() {
         // Three pairs on ONE line; the deleted code is the middle one. A
@@ -542,6 +603,21 @@ mod tests {
         assert_eq!(
             out,
             "2 beginbfchar\n<0681> <5C71>\n<0003> <00660069>\nendbfchar\n"
+        );
+    }
+
+    /// An unchanged entry is passed over whole, so the next one keeps its
+    /// own boundaries.
+    #[test]
+    fn an_unchanged_entry_keeps_the_next_aligned() {
+        let cmap = b"2 beginbfchar <0001> <0041> <2F2D> <0042> endbfchar \
+            2 beginbfrange <01> <02> <0041> <2F2D> <2F2D> <2F2D> endbfrange";
+        let out =
+            String::from_utf8(readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap()).unwrap();
+        assert_eq!(
+            out,
+            "2 beginbfchar <0001> <0041> <2F2D> <0042> endbfchar \
+            2 beginbfrange <01> <02> <0041> <2F2D> <2F2D> [<5C71>] endbfrange"
         );
     }
 

@@ -25,23 +25,23 @@ pub(crate) enum Node {
 
 /// One file in the tree: its name and its embedded-file stream.
 #[derive(Debug)]
-pub(crate) struct Entry {
+pub(crate) struct Entry<'a> {
     pub(crate) name: String,
     pub(crate) stream: ObjectId,
     /// The file specification that names it.
-    pub(crate) spec: Dictionary,
+    pub(crate) spec: &'a Dictionary,
 }
 
 /// The `/EmbeddedFiles` name tree, read once: its nodes (so entries can be
 /// dropped in place) and its file entries.
-pub(crate) struct Tree {
+pub(crate) struct Tree<'a> {
     pub(crate) nodes: Vec<Node>,
-    pub(crate) entries: Vec<Entry>,
+    pub(crate) entries: Vec<Entry<'a>>,
 }
 
-impl Tree {
+impl<'a> Tree<'a> {
     /// Read the tree of `doc`, empty when the document attaches no file.
-    pub(crate) fn read(doc: &Document) -> Result<Self> {
+    pub(crate) fn read(doc: &'a Document) -> Result<Self> {
         let mut tree = Self {
             nodes: Vec::new(),
             entries: Vec::new(),
@@ -69,7 +69,7 @@ impl Tree {
     /// Record `node` and its entries, then walk its kids.
     fn walk(
         &mut self,
-        doc: &Document,
+        doc: &'a Document,
         node: Node,
         visited: &mut BTreeSet<ObjectId>,
         depth: usize,
@@ -107,54 +107,53 @@ impl Tree {
         }
         Ok(())
     }
+}
 
-    /// Drop every entry whose embedded-file stream is in `removed` from the tree
-    /// in `doc`.
-    pub(crate) fn drop_entries(&self, doc: &mut Document, removed: &BTreeSet<ObjectId>) {
-        // Decide which pairs each node keeps while the tree is still readable: a
-        // value resolves to its stream through a (possibly referenced) file
-        // specification, which a mutable borrow of the node would block.
-        let kept_by_node: Vec<(Node, Vec<bool>)> = self
-            .nodes
-            .iter()
-            .filter_map(|&node| {
-                let names = node_dict(doc, node)?
-                    .get(b"Names")
-                    .and_then(Object::as_array)
-                    .ok()?;
-                let keep = names
-                    .chunks(2)
-                    .map(|pair| match pair {
-                        [key, value] => {
-                            entry(doc, key, value).is_none_or(|e| !removed.contains(&e.stream))
-                        }
-                        _ => true,
-                    })
-                    .collect();
-                Some((node, keep))
-            })
-            .collect();
-        for (node, keep) in kept_by_node {
-            let Some(dict) = node_dict_mut(doc, node) else {
-                continue;
-            };
-            let Ok(Object::Array(names)) = dict.get_mut(b"Names") else {
-                continue;
-            };
-            let kept: Vec<Object> = names
+/// Drop every entry whose embedded-file stream is in `removed` from the tree
+/// `nodes` of `doc`.
+pub(crate) fn drop_entries(doc: &mut Document, nodes: &[Node], removed: &BTreeSet<ObjectId>) {
+    // Decide which pairs each node keeps while the tree is still readable: a
+    // value resolves to its stream through a (possibly referenced) file
+    // specification, which a mutable borrow of the node would block.
+    let kept_by_node: Vec<(Node, Vec<bool>)> = nodes
+        .iter()
+        .filter_map(|&node| {
+            let names = node_dict(doc, node)?
+                .get(b"Names")
+                .and_then(Object::as_array)
+                .ok()?;
+            let keep = names
                 .chunks(2)
-                .zip(&keep)
-                .filter(|(_, keep)| **keep)
-                .flat_map(|(pair, _)| pair.iter().cloned())
+                .map(|pair| match pair {
+                    [key, value] => {
+                        entry(doc, key, value).is_none_or(|e| !removed.contains(&e.stream))
+                    }
+                    _ => true,
+                })
                 .collect();
-            *names = kept;
-        }
+            Some((node, keep))
+        })
+        .collect();
+    for (node, keep) in kept_by_node {
+        let Some(dict) = node_dict_mut(doc, node) else {
+            continue;
+        };
+        let Ok(Object::Array(names)) = dict.get_mut(b"Names") else {
+            continue;
+        };
+        let kept: Vec<Object> = names
+            .chunks(2)
+            .zip(&keep)
+            .filter(|(_, keep)| **keep)
+            .flat_map(|(pair, _)| pair.iter().cloned())
+            .collect();
+        *names = kept;
     }
 }
 
 /// The file entry a name-tree `key` / `value` pair describes, or `None` when the
 /// value is not a file specification with an embedded file.
-fn entry(doc: &Document, key: &Object, value: &Object) -> Option<Entry> {
+fn entry<'a>(doc: &'a Document, key: &Object, value: &'a Object) -> Option<Entry<'a>> {
     let spec = match value {
         Object::Reference(id) => doc.get_dictionary(*id).ok()?,
         Object::Dictionary(dict) => dict,
@@ -170,11 +169,7 @@ fn entry(doc: &Document, key: &Object, value: &Object) -> Option<Entry> {
         .file_name()
         .or_else(|| decode_text_string(key).ok())
         .unwrap_or_default();
-    Some(Entry {
-        name,
-        stream,
-        spec: spec.clone(),
-    })
+    Some(Entry { name, stream, spec })
 }
 
 /// The dictionary of the tree node `node` in `doc`.
@@ -222,7 +217,7 @@ fn names_dict(doc: &Document, names: Option<ObjectId>) -> Option<&Dictionary> {
 
 /// Every file associated through an `/AF` array, on any object of `doc`, in
 /// object order.
-pub(crate) fn associated(doc: &Document) -> Vec<Entry> {
+pub(crate) fn associated(doc: &Document) -> Vec<Entry<'_>> {
     doc.objects
         .values()
         .filter_map(ObjectExt::dict)

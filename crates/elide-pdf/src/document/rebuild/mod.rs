@@ -111,19 +111,21 @@ pub(crate) fn check(doc: &Document) -> Result<()> {
     )))
 }
 
-/// One copy of a source object: the resource dictionaries of the scope it
-/// was copied for (none when it does not borrow its scope), and its id.
-type ScopedCopy = (Vec<Dictionary>, ObjectId);
+/// One copy of a source object: the index in [`Rebuild::scopes`] of the
+/// scope it was copied for, and its id.
+type ScopedCopy = (usize, ObjectId);
 
 /// The state of one rebuild.
 struct Rebuild<'a> {
     source: &'a Document,
     out: Document,
     /// The copies of each source object, by the kind it was copied as: one
-    /// per scope for content that borrows the scope it is drawn in, keyed by
-    /// that scope's resource dictionaries (equal resources resolve every name
-    /// alike), and one for anything else, keyed by no scope.
+    /// per scope for content that borrows the scope it is drawn in, and one
+    /// for anything else, copied for the empty scope.
     copies: HashMap<(ObjectId, Kind), Vec<ScopedCopy>>,
+    /// Each scope a copy was made for, its resource dictionaries kept once:
+    /// equal resources resolve every name alike, so they share copies.
+    scopes: Vec<Vec<Dictionary>>,
     /// The id each source page's copy takes.
     pages: BTreeMap<ObjectId, ObjectId>,
     /// The source XObjects cut and recorded, so they are not also recorded as
@@ -148,6 +150,9 @@ impl<'a> Rebuild<'a> {
             source,
             out: Document::with_version(version(source)),
             copies: HashMap::new(),
+            // The empty scope first, so the copies of everything that does
+            // not borrow its scope find it at once.
+            scopes: vec![Vec::new()],
             pages: BTreeMap::new(),
             cut: HashSet::new(),
             files: BTreeMap::new(),
@@ -1608,6 +1613,97 @@ mod tests {
             })
             .collect();
         assert_eq!(fonts, ["Helvetica", "Courier"]);
+    }
+
+    /// The Type3 fonts in a rebuild of two pages sharing one Type3 font
+    /// whose glyph draws `/Fm`, each page naming a different form `/Fm`. The
+    /// font's own resources, if any, are made by `resources` from its id.
+    fn type3_copies(
+        resources: impl FnOnce(&mut Document, ObjectId) -> Option<Dictionary>,
+    ) -> usize {
+        let mut doc = Document::with_version("1.7");
+        let glyph = doc.add_object(Stream::new(dictionary! {}, b"0 0 d0 /Fm Do".to_vec()));
+        let font = doc.new_object_id();
+        let mut dict = dictionary! {
+            "Type" => "Font", "Subtype" => "Type3",
+            "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+            "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
+            "CharProcs" => dictionary! { "a" => glyph },
+            "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::Name(b"a".to_vec())] },
+            "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
+        };
+        if let Some(resources) = resources(&mut doc, font) {
+            dict.set("Resources", resources);
+        }
+        doc.objects.insert(font, Object::Dictionary(dict));
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /T3 1 Tf (a) Tj ET".to_vec(),
+        ));
+        let pages = doc.new_object_id();
+        let kids: Vec<Object> = [&b"0 0 1 1 re f"[..], b"0 0 2 2 re f"]
+            .into_iter()
+            .map(|drawing| {
+                let form = doc.add_object(Stream::new(
+                    dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+                    drawing.to_vec(),
+                ));
+                Object::Reference(doc.add_object(dictionary! {
+                    "Type" => "Page", "Parent" => pages, "Contents" => content,
+                    "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+                    "Resources" => dictionary! {
+                        "Font" => dictionary! { "T3" => font },
+                        "XObject" => dictionary! { "Fm" => form },
+                    },
+                }))
+            })
+            .collect();
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => 2 }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        let (out, _) = rebuilt(&doc);
+        out.objects
+            .values()
+            .filter(|object| {
+                object
+                    .as_dict()
+                    .is_ok_and(|dict| dict.has_subtype(b"Type3"))
+            })
+            .count()
+    }
+
+    /// A Type3 font with no resources of its own resolves its glyphs' names
+    /// in the scope it is drawn in, so it is copied for each.
+    #[test]
+    fn a_type3_font_without_resources_is_copied_per_scope() {
+        assert_eq!(type3_copies(|_, _| None), 2);
+    }
+
+    /// A Type3 font with resources of its own resolves its glyphs' names in
+    /// them alone, so it is copied once, however many scopes draw it.
+    #[test]
+    fn a_type3_font_with_resources_is_copied_once() {
+        assert_eq!(type3_copies(|_, _| Some(Dictionary::new())), 1);
+    }
+
+    /// A Type3 font whose glyph draws a form selecting the font again is
+    /// copied once, the form's copy referring back to it.
+    #[test]
+    fn a_type3_font_drawn_by_its_own_glyph_is_copied_once() {
+        let copies = type3_copies(|doc, font| {
+            let form = doc.add_object(Stream::new(
+                dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+                b"BT /T3 1 Tf (a) Tj ET".to_vec(),
+            ));
+            Some(dictionary! {
+                "Font" => dictionary! { "T3" => font },
+                "XObject" => dictionary! { "Fm" => form },
+            })
+        });
+        assert_eq!(copies, 1);
     }
 
     /// A form's answers are drawn into the page: a visible widget's

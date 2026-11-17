@@ -19,7 +19,7 @@ use lopdf::{Document, Object, ObjectId};
 #[cfg(test)]
 use lopdf::{Stream, dictionary};
 
-use self::tree::{Tree, associated, drop_associated};
+use self::tree::{Tree, associated, drop_associated, drop_entries};
 use crate::document::Store;
 
 /// The largest an attached file may decompress to. An attachment's stream may
@@ -122,9 +122,8 @@ pub(crate) fn replace(
     replacements: &[AttachmentReplacement],
     removed: &[AttachmentId],
 ) -> Result<()> {
-    let tree = Tree::read(doc)?;
-    let known: BTreeSet<ObjectId> = tree
-        .entries
+    let Tree { nodes, entries } = Tree::read(doc)?;
+    let known: BTreeSet<ObjectId> = entries
         .iter()
         .chain(associated(doc).iter())
         .map(|entry| entry.stream)
@@ -158,7 +157,7 @@ pub(crate) fn replace(
 
     let removed: BTreeSet<ObjectId> = removed.iter().map(|id| id.object()).collect();
     if !removed.is_empty() {
-        tree.drop_entries(doc, &removed);
+        drop_entries(doc, &nodes, &removed);
         drop_associated(doc, &removed);
     }
     Ok(())
