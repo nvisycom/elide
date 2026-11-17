@@ -16,10 +16,12 @@ use super::BODY_PART_ID;
 use super::blob_id::BlobId;
 #[cfg(feature = "render")]
 use super::page::PageStream;
+use super::plan::Plan;
 use super::stream::PdfStream;
-use crate::document::attachment::AttachmentReplacement;
-use crate::document::image::ImageReplacement;
-use crate::document::{Pdf, Redaction};
+use crate::content::attachment::AttachmentReplacement;
+use crate::content::image::ImageReplacement;
+use crate::pdf::Pdf;
+use crate::sanitize::Check;
 
 /// A decoded PDF: its page-text body stream over the rebuilt document, and
 /// (feature `render`) an image stream per scanned page, with the
@@ -55,12 +57,11 @@ impl Native for PdfDocument {
     }
 
     fn encode(&self, blobs: &[Blob], removed: &[LocalId]) -> Result<ContentData> {
-        let mut redaction = Redaction::default();
+        let mut plan = Plan::default();
         #[cfg(feature = "render")]
         {
-            redaction.scan_scale = self.body.state.scan_scale();
-            redaction
-                .scanned
+            plan.scan_scale = self.body.state.scan_scale();
+            plan.scanned
                 .extend(self.pages.iter().filter_map(PageStream::scanned));
         }
         for part in blobs {
@@ -71,12 +72,10 @@ impl Native for PdfDocument {
             let bytes = part.bytes.to_vec();
             match BlobId::parse(part.id.as_str())? {
                 BlobId::Image(id) => {
-                    redaction.images.push(ImageReplacement { id, image: bytes });
+                    plan.images.push(ImageReplacement { id, image: bytes });
                 }
                 BlobId::Attachment(id) => {
-                    redaction
-                        .attachments
-                        .push(AttachmentReplacement { id, bytes });
+                    plan.attachments.push(AttachmentReplacement { id, bytes });
                 }
             }
         }
@@ -84,16 +83,16 @@ impl Native for PdfDocument {
         // dropped and an image removed, so it never ships unredacted.
         for id in removed {
             match BlobId::parse(id.as_str())? {
-                BlobId::Image(id) => redaction.removed_images.push(id),
-                BlobId::Attachment(id) => redaction.removed_attachments.push(id),
+                BlobId::Image(id) => plan.removed_images.push(id),
+                BlobId::Attachment(id) => plan.removed_attachments.push(id),
             }
         }
 
-        let bytes = self.body.state.redact(&self.pdf, redaction)?;
+        let bytes = self.body.state.redact(&self.pdf, plan)?;
         Ok(ContentData::new(bytes))
     }
 
     fn validate(&self, output: &ContentData) -> Result<()> {
-        Pdf::open(output.as_bytes())?.check_rebuilt()
+        Pdf::open(output.as_bytes())?.read(Check)
     }
 }

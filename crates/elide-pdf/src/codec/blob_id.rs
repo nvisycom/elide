@@ -5,8 +5,8 @@ use std::fmt;
 
 use elide_core::{Error, Result};
 
-use crate::document::attachment::AttachmentId;
-use crate::document::image::ImageId;
+use crate::content::attachment::AttachmentId;
+use crate::content::image::ImageId;
 
 /// What a blob of a decoded PDF is: an embedded image (`img-N-G`) or an
 /// attachment (`att-N-G`).

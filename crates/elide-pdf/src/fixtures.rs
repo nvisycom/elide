@@ -13,7 +13,7 @@ use bytes::Bytes;
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 
-use crate::document::object::DictionaryExt;
+use crate::pdf::reader::DictionaryExt;
 
 /// A one-page PDF drawing one 8x8 JPEG image (`DCTDecode`).
 ///

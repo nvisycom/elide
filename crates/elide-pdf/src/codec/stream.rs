@@ -179,12 +179,13 @@ mod tests {
 
     use super::*;
     use crate::codec::state::Pages;
-    use crate::document::Pdf;
+    use crate::content::text::Text;
     use crate::fixtures::with_pages;
+    use crate::pdf::Pdf;
     #[cfg(feature = "render")]
-    use crate::render::PageObservation;
+    use crate::pdf::reader::{DeviceRect, GlyphRect, PageFrame};
     #[cfg(feature = "render")]
-    use crate::text::{DeviceRect, GlyphRect, PageFrame};
+    use crate::pdf::render::PageObservation;
 
     /// The body stream of a one-page document showing `Jane Roe`.
     fn body() -> PdfStream {
@@ -211,7 +212,7 @@ mod tests {
         );
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
-        let blocks = Pdf::open(&bytes).unwrap().text().unwrap();
+        let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
         PdfStream {
             state: PdfState::new(Pages::Glyph(blocks)),
         }

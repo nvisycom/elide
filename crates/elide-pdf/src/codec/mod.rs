@@ -23,6 +23,7 @@ mod document;
 mod loader;
 #[cfg(feature = "render")]
 mod page;
+mod plan;
 mod state;
 mod stream;
 

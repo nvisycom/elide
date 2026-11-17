@@ -19,9 +19,15 @@ use super::document::PdfDocument;
 use super::page::PageStream;
 use super::state::{Pages, PdfState};
 use super::stream::PdfStream;
-use crate::document::Pdf;
+use crate::content::attachment::Attachments;
+use crate::content::image::Images;
+use crate::content::text::Text;
+use crate::pdf::Pdf;
+#[cfg(feature = "render")]
+use crate::pdf::render::{Observation, Renders};
 #[cfg(feature = "render")]
 use crate::primitive::RasterMode;
+use crate::sanitize::{Rebuild, Rebuilt};
 
 /// A [`DocumentLoader`] that decodes a PDF into a [`Document`]: the page-text
 /// body stream, (feature `render`) an image stream per scanned page, and a
@@ -68,13 +74,13 @@ impl DocumentLoader for PdfDocumentLoader {
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
         // Hidden content goes first, so everything below (the text, the
         // rendering, the surfaced images) reads only what will ship.
-        let (pdf, stripped) = Pdf::open(content.as_bytes())?.rebuild()?;
+        let Rebuilt { pdf, stripped } = Pdf::open(content.as_bytes())?.read(Rebuild)?;
 
         // Every embedded image and attached file is content of its own format,
         // decoded and redacted through the registry; one no codec reads is
         // removed on encode.
         let mut blobs: Vec<Blob> = pdf
-            .images()?
+            .read(Images)?
             .into_iter()
             .map(|image| Blob {
                 id: LocalId::new(BlobId::Image(image.id).to_string()),
@@ -82,7 +88,7 @@ impl DocumentLoader for PdfDocumentLoader {
                 hint: image.hint.to_owned(),
             })
             .collect();
-        blobs.extend(pdf.attachments()?.into_iter().map(|attachment| Blob {
+        blobs.extend(pdf.read(Attachments)?.into_iter().map(|attachment| Blob {
             id: LocalId::new(BlobId::Attachment(attachment.id).to_string()),
             hint: attachment_hint(&attachment.name),
             bytes: attachment.bytes,
@@ -91,7 +97,7 @@ impl DocumentLoader for PdfDocumentLoader {
         #[cfg(feature = "render")]
         let (pages, scanned) = self.pages(&pdf)?;
         #[cfg(not(feature = "render"))]
-        let pages = Pages::Glyph(pdf.text()?);
+        let pages = Pages::Glyph(pdf.read(Text)?);
         let state = PdfState::new(pages);
         #[cfg(feature = "render")]
         let document = Self::document(pdf, state, scanned, blobs);
@@ -113,23 +119,26 @@ impl PdfDocumentLoader {
     fn pages(&self, pdf: &Pdf) -> Result<(Pages, Vec<PageStream>)> {
         let (pages, scanned, dpi) = match self.raster {
             RasterMode::Always { dpi } => {
-                let pages = pdf.observe()?;
+                let pages = pdf.read(Observation)?;
                 let scanned = scanned(pages.iter().map(|p| (p.page, p.text.as_str())));
                 let scale = dpi.scale_factor();
                 (Pages::Flatten { pages, scale }, scanned, dpi)
             }
             RasterMode::Auto => {
-                let blocks = pdf.text()?;
+                let blocks = pdf.read(Text)?;
                 let scanned = scanned(blocks.iter().map(|b| (b.page, b.text.as_str())));
                 (Pages::Glyph(blocks), scanned, SCAN_DPI)
             }
-            RasterMode::Never => return Ok((Pages::Glyph(pdf.text()?), Vec::new())),
+            RasterMode::Never => return Ok((Pages::Glyph(pdf.read(Text)?), Vec::new())),
         };
         if scanned.is_empty() {
             return Ok((pages, Vec::new()));
         }
         let renders = pdf
-            .render_pages(scanned, dpi.scale_factor())?
+            .read(Renders {
+                pages: scanned,
+                scale: dpi.scale_factor(),
+            })?
             .into_iter()
             .map(|(number, png)| PageStream::new(number, png))
             .collect();
@@ -174,8 +183,9 @@ mod tests {
     use crate::codec::blob_id::BlobId;
     use crate::codec::page::PageStream;
     use crate::codec::state::{Pages, PdfState};
-    use crate::document::Pdf;
+    use crate::content::image::Images;
     use crate::fixtures::with_pages;
+    use crate::pdf::Pdf;
 
     /// A solid-colour PNG of `w`x`h`.
     fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
@@ -347,7 +357,7 @@ mod tests {
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         let bytes = Bytes::from(bytes);
-        let surfaced = Pdf::open(&bytes).unwrap().images().unwrap().remove(0);
+        let surfaced = Pdf::open(&bytes).unwrap().read(Images).unwrap().remove(0);
         let image = Blob {
             id: LocalId::new(BlobId::Image(surfaced.id).to_string()),
             bytes: surfaced.bytes,
@@ -367,7 +377,7 @@ mod tests {
             .unwrap();
 
         let out = doc.encode().unwrap().to_bytes();
-        let images = Pdf::open(&out).unwrap().images().unwrap();
+        let images = Pdf::open(&out).unwrap().read(Images).unwrap();
         assert_eq!(images.len(), 1, "the page was reflattened");
         let pixels = load_from_memory(&images[0].bytes).unwrap().into_rgb8();
         assert!(

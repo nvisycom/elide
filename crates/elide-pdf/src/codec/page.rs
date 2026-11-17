@@ -10,7 +10,7 @@ use elide_image::modality::{Image, ImageData, ImageFormat, ImageLocation, ImageR
 use elide_image::primitive::BoundingBox;
 
 use super::FORMAT_ID;
-use crate::render::ScannedPage;
+use crate::content::page::ScannedPage;
 
 /// A scanned page's render: the image pipeline reads it for OCR and redacts
 /// it in place, and each region it redacts is kept so encode can paint it

@@ -8,10 +8,12 @@ use elide_core::{Error, Result};
 
 #[cfg(feature = "render")]
 use super::SCAN_DPI;
-use crate::document::{Pdf, Redaction};
+use super::plan::Plan;
+use crate::content::text::{Detection, TextBlock};
+use crate::pdf::Pdf;
+use crate::pdf::reader::PageGeometry;
 #[cfg(feature = "render")]
-use crate::render::PageObservation;
-use crate::text::{Detection, PageGeometry, TextBlock};
+use crate::pdf::render::PageObservation;
 
 /// A decoded PDF's pages, as the redaction mode reads them.
 #[derive(Debug)]
@@ -141,25 +143,24 @@ impl PdfState {
         Ok(())
     }
 
-    /// The decoded `pdf` with the recorded redactions and `redaction`'s
+    /// The decoded `pdf` with the recorded redactions and `plan`'s
     /// blobs applied, as bytes; the document itself when nothing changes.
     ///
     /// # Errors
     ///
-    /// As [`Pdf::apply`], and on the flatten path as `Pdf::flatten`.
-    pub(super) fn redact(&self, pdf: &Pdf, mut redaction: Redaction) -> Result<Bytes> {
+    /// As [`Plan::apply`], and on the flatten path as
+    /// `Plan::flatten`.
+    pub(super) fn redact(&self, pdf: &Pdf, mut plan: Plan) -> Result<Bytes> {
+        plan.text.clone_from(&self.detections);
         match &self.pages {
             Pages::Glyph(blocks) => {
-                redaction.text.clone_from(&self.detections);
-                if redaction.is_empty() {
+                if plan.is_empty() {
                     return Ok(pdf.bytes());
                 }
-                Ok(pdf.apply(blocks, &redaction)?.bytes())
+                Ok(plan.apply(pdf, blocks)?.bytes())
             }
             #[cfg(feature = "render")]
-            Pages::Flatten { pages, scale } => Ok(pdf
-                .flatten(pages, *scale, &self.detections, redaction)?
-                .bytes()),
+            Pages::Flatten { pages, scale } => Ok(plan.flatten(pdf, pages, *scale)?.bytes()),
         }
     }
 }
