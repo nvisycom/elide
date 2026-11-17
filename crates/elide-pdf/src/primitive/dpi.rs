@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Dots-per-inch resolution for rasterizing vector content.
 ///
-/// Used e.g. for rendering PDF pages to images for OCR.
+/// The resolution PDF pages are rendered at, for OCR and for flattening.
 ///
 /// PDF coordinates are in points (1 pt = 1/72 in), so
 /// [`scale_factor`] gives the multiplier from points to

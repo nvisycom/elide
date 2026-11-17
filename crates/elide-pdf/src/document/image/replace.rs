@@ -8,6 +8,7 @@
 //! filter) stay consistent, the redacted pixels genuinely replace the original.
 
 use elide_core::{Error, Result};
+use lopdf::xobject::image_from;
 use lopdf::{Document, Object, ObjectId};
 
 use super::ImageId;
@@ -19,11 +20,11 @@ use crate::document::object::DictionaryExt;
 /// The `image` bytes are a self-contained encoded image (PNG or JPEG), the same
 /// form a caller extracts, redacts, and re-encodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImageReplacement {
+pub(crate) struct ImageReplacement {
     /// The image to replace.
-    pub id: ImageId,
+    pub(crate) id: ImageId,
     /// The redacted image, encoded as PNG or JPEG.
-    pub image: Vec<u8>,
+    pub(crate) image: Vec<u8>,
 }
 
 /// Replace the embedded images named in `replacements` in `doc` with redacted
@@ -60,7 +61,7 @@ pub(crate) fn replace(doc: &mut Document, replacements: &[ImageReplacement]) -> 
 
         // Rebuild a valid image XObject from the encoded bytes (lopdf sets
         // the dictionary, dimensions, colour space, filter, to match).
-        let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
+        let stream = image_from(replacement.image.clone()).map_err(|e| {
             Error::redaction(format!(
                 "could not build image ({}, {}): {e}",
                 replacement.id.number, replacement.id.generation

@@ -1,61 +1,54 @@
-//! The PDF [`DocumentLoader`]: decode page text and, on the glyph path,
-//! surface the embedded images, attachments, and scanned pages as blobs.
+//! The PDF [`DocumentLoader`]: sanitize the document, read its page text, and
+//! surface its embedded images, attachments, and scanned pages as blobs.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+#[cfg(feature = "render")]
+use std::collections::BTreeSet;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{Blob, Document, DocumentLoader, LocalId, StrippedContent};
+use elide_codec::{Blob, Document, DocumentLoader, LocalId};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
+use super::FORMAT_ID;
+#[cfg(feature = "render")]
+use super::SCAN_DPI;
 use super::document::PdfDocument;
 use super::part_id::PartId;
-use super::state::{PdfInner, PdfState};
+use super::state::{Pages, PdfState};
 use super::stream::PdfStream;
-use super::{FORMAT_ID, PdfPage, RedactMode};
 use crate::document::Pdf;
-use crate::document::extract::Block;
 #[cfg(feature = "render")]
 use crate::primitive::RasterMode;
-#[cfg(feature = "render")]
-use crate::render::PageObservation;
-use crate::text::PageGeometry;
 
 /// A [`DocumentLoader`] that decodes a PDF into a [`Document`]: the page-text
-/// body [`Stream`] plus, on the glyph-deletion path, a
-/// [`Blob`] per redactable embedded image and (feature
-/// `render`) per textless scanned page.
+/// body stream, and a [`Blob`] per embedded image, attachment, and (feature
+/// `render`) scanned page.
 #[derive(Debug, Default)]
 pub(crate) struct PdfDocumentLoader {
-    /// Whether redaction flattens pages to images (raster) instead of the
-    /// default glyph deletion. Only meaningful with the `render` feature.
+    /// Whether and how pages are rendered.
     #[cfg(feature = "render")]
     raster: RasterMode,
 }
 
 impl PdfDocumentLoader {
-    /// A loader on the born-digital text path (no page rendering).
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    /// A loader with an explicit [`RasterMode`] (feature `render`).
-    ///
-    /// [`RasterMode`]: crate::primitive::RasterMode
+    /// A loader under `raster`.
     #[cfg(feature = "render")]
-    pub(crate) fn with_raster(raster: RasterMode) -> Self {
+    pub(crate) fn new(raster: RasterMode) -> Self {
         Self { raster }
     }
 
-    /// Build a [`Document`] from the decoded `state`, the (sanitized)
-    /// `document` bytes, and `blobs` (the surfaced embedded-image / scanned-page
-    /// / attachment files).
-    pub(super) fn document(document: Bytes, state: PdfState, blobs: Vec<Blob>) -> Document {
+    /// The [`Document`] of the sanitized `document` bytes, its decoded
+    /// `state`, and its `blobs`.
+    fn document(document: Bytes, state: PdfState, blobs: Vec<Blob>) -> Document {
+        let surfaced = blobs
+            .iter()
+            .map(|blob| (blob.id.as_str().to_owned(), blob.bytes.clone()))
+            .collect();
         let native = PdfDocument {
             body: PdfStream { state },
             document,
+            surfaced,
         };
         Document::new(FORMAT_ID, native, blobs)
     }
@@ -64,170 +57,86 @@ impl PdfDocumentLoader {
 #[async_trait::async_trait]
 impl DocumentLoader for PdfDocumentLoader {
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
-        // Hidden content goes first, so everything below (extraction, rendering,
-        // the surfaced images) reads only what will ship.
-        let opened = Pdf::open(content.as_bytes())?;
-        let (document, pdf, stripped) = match opened.sanitize()? {
-            Some((bytes, stripped)) => {
-                let pdf = Pdf::open(&bytes)?;
-                (Bytes::from(bytes), pdf, stripped)
-            }
-            None => (content.to_bytes(), opened, StrippedContent::new()),
-        };
+        // Hidden content goes first, so everything below (the text, the
+        // rendering, the surfaced images) reads only what will ship.
+        let (document, stripped) = Pdf::open(content.as_bytes())?.sanitize()?;
+        let document = Bytes::from(document);
+        let pdf = Pdf::open(&document)?;
 
-        // `RasterMode::Always` (feature `render`): observe each page, its text
-        // comes from the renderer alongside its glyph geometry, so redaction on
-        // encode fills the detected pixels and emits a fresh image-only PDF (the
-        // flatten guarantee, no selectable text). No blobs are surfaced: the whole
-        // page is flattened, so per-image redaction is redundant.
-        #[cfg(feature = "render")]
-        if self.raster.render_dpi().is_some() {
-            let observations = observe_pages(&document)?;
-            // The raster path flattens every page to an image, so per-entity
-            // highlight geometry on the text location is not surfaced here.
-            let pages = pages_from_blocks(
-                observations
-                    .iter()
-                    .map(|o| Block::new(o.page, o.text.clone())),
-                Vec::new(),
-            );
-            let state = PdfState::new(PdfInner {
-                pages,
-                deletions: Vec::new(),
-                mode: RedactMode::Raster {
-                    observations,
-                    detections: Vec::new(),
-                },
-            });
-            return Ok(Self::document(document, state, Vec::new()).with_stripped(stripped));
-        }
-
-        // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
-        // deletion. The page text comes from `extract`, the same content walk
-        // `redact_text` uses, so a detection's character span maps to the glyphs
-        // it drew. On encode the glyphs are deleted, keeping a selectable text
-        // layer.
-        //
-        // Extract once: `blocks` drive glyph deletion, `embeddings` become image
-        // blobs, and (in `Auto`) `issues` name the textless pages to render. A
-        // second `extract()` would re-walk every page and re-copy the embedded
-        // image bytes for nothing, so move each field out of this one result.
-        let (extraction, geometry) = pdf.extract();
-        let pages = pages_from_blocks(extraction.blocks, geometry);
-
-        // Surface each embedded image XObject as an image blob for the image
-        // pipeline. Only images the pipeline can read remain (the sanitizer
-        // removed the rest, see `image::surface`); one no codec can read is
+        // Every embedded image and attached file is content of its own format,
+        // decoded and redacted through the registry; one no codec reads is
         // removed on encode.
-        let mut blobs = Vec::new();
-        for embedding in extraction.embeddings {
-            let Some((bytes, hint)) =
-                pdf.surface_image(embedding.id, embedding.kind, embedding.bytes)?
-            else {
-                continue;
-            };
-            blobs.push(Blob {
-                id: LocalId::new(PartId::Image(embedding.id).to_string()),
-                bytes,
-                hint: hint.to_owned(),
-            });
-        }
-
-        // Each attached file is content of its own format, decoded and redacted
-        // through the registry like any embedding.
+        let mut blobs: Vec<Blob> = pdf
+            .images()?
+            .into_iter()
+            .map(|image| Blob {
+                id: LocalId::new(PartId::Image(image.id).to_string()),
+                bytes: image.bytes,
+                hint: image.hint.to_owned(),
+            })
+            .collect();
         blobs.extend(pdf.attachments()?.into_iter().map(|attachment| Blob {
             id: LocalId::new(PartId::Attachment(attachment.id).to_string()),
             hint: attachment_hint(&attachment.name),
             bytes: attachment.bytes,
         }));
 
-        // `RasterMode::Auto` (feature `render` + an image codec): a textless
-        // (scanned) page has no glyphs to delete, so render it and surface it as
-        // an image blob for the image pipeline to OCR and redact, while
-        // born-digital pages keep glyph deletion. This is the Auto promise: text
-        // where present, image where absent.
-        #[cfg(feature = "render")]
-        if matches!(self.raster, RasterMode::Auto) {
-            for (number, png) in scanned_pages(&pdf, &extraction.issues)? {
-                blobs.push(Blob {
-                    id: LocalId::new(PartId::Page(number).to_string()),
-                    bytes: png,
-                    hint: "png".to_string(),
-                });
+        let pages = self.pages(&pdf, &mut blobs)?;
+        Ok(Self::document(document, PdfState::new(pages), blobs).with_stripped(stripped))
+    }
+}
+
+impl PdfDocumentLoader {
+    /// The pages of `pdf` as the raster mode reads them, surfacing each
+    /// scanned page into `blobs` as a rendered image for OCR.
+    ///
+    /// Under [`RasterMode::Always`] the text and glyph boxes come from PDFium,
+    /// and every page is replaced by a redacted image of it on encode;
+    /// otherwise they come from the content walk, for glyph deletion, and
+    /// under [`RasterMode::Auto`] a scanned page is rendered at [`SCAN_DPI`].
+    #[cfg(feature = "render")]
+    fn pages(&self, pdf: &Pdf, blobs: &mut Vec<Blob>) -> Result<Pages> {
+        let (pages, scanned, dpi) = match self.raster {
+            RasterMode::Always { dpi } => {
+                let pages = pdf.observe()?;
+                let scanned = scanned(pages.iter().map(|p| (p.page, p.text.as_str())));
+                let scale = dpi.scale_factor();
+                (Pages::Flatten { pages, scale }, scanned, dpi)
             }
+            RasterMode::Auto => {
+                let blocks = pdf.text()?;
+                let scanned = scanned(blocks.iter().map(|b| (b.page, b.text.as_str())));
+                (Pages::Glyph(blocks), scanned, SCAN_DPI)
+            }
+            RasterMode::Never => return Ok(Pages::Glyph(pdf.text()?)),
+        };
+        if scanned.is_empty() {
+            return Ok(pages);
         }
+        for (number, png) in pdf.render_pages(scanned, dpi.scale_factor())? {
+            blobs.push(Blob {
+                id: LocalId::new(PartId::Page(number).to_string()),
+                bytes: png,
+                hint: "png".to_owned(),
+            });
+        }
+        Ok(pages)
+    }
 
-        let state = PdfState::new(PdfInner {
-            pages,
-            deletions: Vec::new(),
-            mode: RedactMode::GlyphDelete,
-        });
-        Ok(Self::document(document, state, blobs).with_stripped(stripped))
+    /// The pages of `pdf`, read by the content walk for glyph deletion.
+    #[cfg(not(feature = "render"))]
+    fn pages(&self, pdf: &Pdf, _blobs: &mut Vec<Blob>) -> Result<Pages> {
+        Ok(Pages::Glyph(pdf.text()?))
     }
 }
 
-/// Render each textless (`NeedsOcr`) page to a PNG, keyed by page number, to be
-/// surfaced as an image blob.
+/// The numbers of the pages with no text: scanned, or drawn as outlines.
 #[cfg(feature = "render")]
-fn scanned_pages(
-    pdf: &Pdf,
-    issues: &[crate::document::extract::Issue],
-) -> Result<std::collections::BTreeMap<u32, Bytes>> {
-    use crate::document::extract::IssueKind;
-
-    // Which 1-based pages have no text layer.
-    let textless: std::collections::BTreeSet<u32> = issues
-        .iter()
-        .filter(|issue| matches!(issue.kind, IssueKind::NeedsOcr))
-        .map(|issue| issue.page)
-        .collect();
-    if textless.is_empty() {
-        return Ok(std::collections::BTreeMap::new());
-    }
-
-    // Render only the textless pages, not the whole document: a mostly
-    // born-digital PDF with a few scanned pages pays to rasterise just those.
-    const RASTER_SCALE: f32 = 2.0;
-    let rendered = pdf.render_pages(textless, RASTER_SCALE)?;
-    Ok(rendered
-        .into_iter()
-        .map(|(number, page)| (number, Bytes::from(page.png)))
-        .collect())
-}
-
-/// Assemble [`PdfPage`]s from the engine's per-page text [`Block`]s, attaching
-/// each page's rendered glyph geometry (matched by page number).
-///
-/// Each page is addressed in its own page-local byte space (a located entity
-/// carries the page number), so there is no cross-page offset and a detected
-/// span cannot straddle two pages.
-fn pages_from_blocks(
-    blocks: impl IntoIterator<Item = Block>,
-    geometry: Vec<PageGeometry>,
-) -> Vec<PdfPage> {
-    let mut by_page: BTreeMap<u32, Arc<PageGeometry>> = geometry
-        .into_iter()
-        .map(|g| (g.page, Arc::new(g)))
-        .collect();
-    let mut pages = Vec::new();
-    for block in blocks {
-        pages.push(PdfPage {
-            number: block.page,
-            text: block.text.to_string(),
-            geometry: by_page.remove(&block.page),
-        });
-    }
-    pages
-}
-
-/// Observe every page for raster redaction: render it to pixels and extract its
-/// text-layer glyph geometry, so the page text and glyph boxes share one
-/// coordinate system.
-#[cfg(feature = "render")]
-fn observe_pages(document: &[u8]) -> Result<Vec<PageObservation>> {
-    // A default render scale; higher scales trade output size for fidelity.
-    const RASTER_SCALE: f32 = 2.0;
-    Pdf::open(document).and_then(|pdf| pdf.observe(RASTER_SCALE))
+fn scanned<'a>(texts: impl Iterator<Item = (u32, &'a str)>) -> BTreeSet<u32> {
+    texts
+        .filter(|(_, text)| text.trim().is_empty())
+        .map(|(number, _)| number)
+        .collect()
 }
 
 /// The registry hint for an attachment named `name`: its lowercased file
@@ -238,158 +147,172 @@ fn attachment_hint(name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The document a decode assembles, built directly from a hand-made state with
-/// a pre-rendered raster (as the render step would produce), so these need no
-/// PDFium.
+/// The scanned-page blob path, built directly with a pre-rendered page (as the
+/// loader's render step would produce), so it needs no PDFium.
 #[cfg(all(test, feature = "render"))]
 mod tests {
-    /// Raster mode through the codec: every page flattened to a redacted image.
-    mod raster {
-        use bytes::Bytes;
-        use elide_codec::LocalId;
+    use std::io::Cursor;
 
-        use super::super::PdfDocumentLoader;
-        use crate::codec::RedactMode;
-        use crate::codec::state::{PdfInner, PdfState};
+    use bytes::Bytes;
+    use elide_codec::{Blob, Document, LocalId};
+    use elide_core::ErrorKind;
+    use image::{DynamicImage, ImageFormat, Rgb, RgbImage, load_from_memory};
+    use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
 
-        /// A raster document flattens every page, so it surfaces no blobs and
-        /// `replace_blob` rejects any id (the raster path never accepts a per-image
-        /// replacement). Built directly with empty observations, so it needs no
-        /// PDFium (the observe step runs only in the loader's decode).
-        #[test]
-        fn raster_surfaces_no_blob_parts_and_rejects_replacement() {
-            let state = PdfState::new(PdfInner {
-                pages: Vec::new(),
-                deletions: Vec::new(),
-                mode: RedactMode::Raster {
-                    observations: Vec::new(),
-                    detections: Vec::new(),
-                },
-            });
-            let mut doc = PdfDocumentLoader::document(Bytes::new(), state, Vec::new());
+    use super::PdfDocumentLoader;
+    use crate::codec::part_id::PartId;
+    use crate::codec::state::{Pages, PdfState};
+    use crate::document::Pdf;
 
-            // No blobs: only the body stream.
-            assert!(doc.blobs().is_empty(), "raster mode surfaced a blob");
-
-            // `replace_blob` rejects any id (no blob to replace).
-            let err = doc
-                .replace_blob(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
-                .unwrap_err();
-            assert_eq!(err.kind(), elide_core::ErrorKind::NotFound);
-        }
+    /// A solid-colour PNG of `w`x`h`.
+    fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
+        let image = RgbImage::from_pixel(w, h, Rgb(colour));
+        let mut out = Vec::new();
+        DynamicImage::ImageRgb8(image)
+            .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+            .unwrap();
+        out
     }
 
-    /// The scanned-page image-part path (`RasterMode::Auto`): the document surfaces a
-    /// textless page as an image blob, accepts a redacted replacement, and reflattens
-    /// it on encode. Built directly with a pre-rendered raster (as the loader's render
-    /// step would produce), so it needs no PDFium.
-    mod scanned {
-        use std::io::Cursor;
+    /// A one-page textless 100x100pt PDF whose content stream carries a marker,
+    /// to tell whether the original page content survives a reflatten.
+    fn scanned_doc() -> Bytes {
+        let mut doc = PdfDocument::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"q 1 0 0 1 0 0 cm % SCANNED-PAGE-MARKER".to_vec(),
+        ));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => content,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+        });
+        let pages = dictionary! {
+            "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        Bytes::from(out)
+    }
 
-        use bytes::Bytes;
-        use elide_codec::{Blob, LocalId};
+    /// The glyph-deletion document of `document`, with each scanned page's
+    /// raster as a `page-N` blob.
+    fn scanned_document(document: Bytes, scanned: &[(u32, Vec<u8>)]) -> Document {
+        let blobs = scanned
+            .iter()
+            .map(|(number, png)| Blob {
+                id: LocalId::new(format!("page-{number}")),
+                bytes: Bytes::from(png.clone()),
+                hint: "png".to_owned(),
+            })
+            .collect();
+        let state = PdfState::new(Pages::Glyph(Vec::new()));
+        PdfDocumentLoader::document(document, state, blobs)
+    }
 
-        use super::super::PdfDocumentLoader;
-        use crate::codec::RedactMode;
-        use crate::codec::state::{PdfInner, PdfState};
+    #[test]
+    fn a_scanned_page_is_reflattened_at_its_own_size() {
+        // Rendered at 3x: the raster is 300px, the page stays 100pt.
+        let mut doc = scanned_document(scanned_doc(), &[(1, png(300, 300, [200, 200, 200]))]);
+        let redacted = Bytes::from(png(300, 300, [0, 0, 0]));
+        doc.replace_blob(&LocalId::new("page-1"), redacted)
+            .expect("page-1 accepted");
 
-        /// A solid-colour PNG of `w`x`h`.
-        fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
-            let img = image::RgbImage::from_pixel(w, h, image::Rgb(colour));
-            let mut out = Vec::new();
-            image::DynamicImage::ImageRgb8(img)
-                .write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)
-                .unwrap();
-            out
-        }
+        let out = doc.encode().unwrap().to_bytes();
+        assert!(
+            !String::from_utf8_lossy(&out).contains("SCANNED-PAGE-MARKER"),
+            "original scanned page content survived reflatten"
+        );
+        let reopened = PdfDocument::load_mem(&out).unwrap();
+        let page = *reopened.get_pages().get(&1).unwrap();
+        let media_box: Vec<f32> = reopened
+            .get_dictionary(page)
+            .unwrap()
+            .get(b"MediaBox")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_float().unwrap())
+            .collect();
+        assert_eq!(media_box, [0.0, 0.0, 100.0, 100.0]);
+    }
 
-        /// A one-page image-only (textless) PDF whose content stream carries a marker
-        /// so we can tell whether the original page content survives a reflatten.
-        fn scanned_doc() -> Bytes {
-            use lopdf::{Document, Object, Stream, dictionary};
-            let mut doc = Document::with_version("1.5");
-            let pages_id = doc.new_object_id();
-            let content = doc.add_object(Stream::new(
-                dictionary! {},
-                b"q 1 0 0 1 0 0 cm % SCANNED-PAGE-MARKER".to_vec(),
-            ));
-            let page = doc.add_object(dictionary! {
-                "Type" => "Page", "Parent" => pages_id, "Contents" => content,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-            });
-            let pages = dictionary! {
+    #[test]
+    fn rejects_a_page_id_the_document_did_not_surface() {
+        let mut doc = scanned_document(scanned_doc(), &[]);
+        let err = doc
+            .replace_blob(&LocalId::new("page-1"), Bytes::from_static(b"x"))
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    /// A scanned page drawing one 2x2 gray image, its image surfaced as the
+    /// pipeline reads it, and its surfaced page render.
+    fn scanned_with_image() -> (Bytes, Blob, Blob) {
+        let mut doc = PdfDocument::with_version("1.5");
+        let image = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => 2, "Height" => 2,
+                "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
+            },
+            vec![200; 4],
+        ));
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"q 100 0 0 100 0 0 cm /Im1 Do Q".to_vec(),
+        ));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => dictionary! { "XObject" => dictionary! { "Im1" => image } },
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
                 "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            };
-            doc.objects.insert(pages_id, Object::Dictionary(pages));
-            let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
-            doc.trailer.set("Root", catalog);
-            let mut out = Vec::new();
-            doc.save_to(&mut out).unwrap();
-            Bytes::from(out)
-        }
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let bytes = Bytes::from(bytes);
+        let surfaced = Pdf::open(&bytes).unwrap().images().unwrap().remove(0);
+        let image = Blob {
+            id: LocalId::new(PartId::Image(surfaced.id).to_string()),
+            bytes: surfaced.bytes,
+            hint: surfaced.hint.to_owned(),
+        };
+        let page = Blob {
+            id: LocalId::new("page-1"),
+            bytes: Bytes::from(png(100, 100, [200, 200, 200])),
+            hint: "png".to_owned(),
+        };
+        (bytes, image, page)
+    }
 
-        /// Build the `Auto`-path document directly, standing in for the loader's
-        /// render step by handing the scanned page's raster as a `page-N` blob, so no
-        /// PDFium is needed.
-        fn scanned_document(document: Bytes, scanned: &[(u32, Vec<u8>)]) -> elide_codec::Document {
-            let state = PdfState::new(PdfInner {
-                pages: Vec::new(),
-                deletions: Vec::new(),
-                mode: RedactMode::GlyphDelete,
-            });
-            let blobs = scanned
-                .iter()
-                .map(|(number, png)| Blob {
-                    id: LocalId::new(format!("page-{number}")),
-                    bytes: Bytes::from(png.clone()),
-                    hint: "png".to_owned(),
-                })
-                .collect();
-            PdfDocumentLoader::document(document, state, blobs)
-        }
+    /// A redacted image on a scanned page whose render came back unchanged
+    /// stays redacted: the page is not replaced by its original render.
+    #[test]
+    fn an_unchanged_page_render_keeps_its_redacted_image() {
+        let (bytes, image, page) = scanned_with_image();
+        let state = PdfState::new(Pages::Glyph(Vec::new()));
+        let mut doc = PdfDocumentLoader::document(bytes, state, vec![image.clone(), page]);
+        doc.replace_blob(&image.id, Bytes::from(png(2, 2, [0, 0, 0])))
+            .unwrap();
 
-        #[test]
-        fn surfaces_a_scanned_page_and_reflattens_it_on_encode() {
-            let mut doc = scanned_document(scanned_doc(), &[(1, png(100, 100, [200, 200, 200]))]);
-
-            // The document surfaces the scanned page as a `page-1` image blob.
-            let page_blob = doc
-                .blobs()
-                .iter()
-                .find(|blob| blob.id == "page-1")
-                .map(|blob| blob.hint.clone());
-            assert_eq!(
-                page_blob.as_deref(),
-                Some("png"),
-                "scanned page not surfaced"
-            );
-
-            // Feed back a redacted (black) raster for that page.
-            let redacted = Bytes::from(png(100, 100, [0, 0, 0]));
-            doc.replace_blob(&LocalId::new("page-1"), redacted)
-                .expect("page-1 accepted");
-
-            // Encode reflattens the page: the original page content is gone.
-            let out = doc.encode().unwrap();
-            let bytes = out.to_bytes();
-            assert!(
-                !String::from_utf8_lossy(&bytes).contains("SCANNED-PAGE-MARKER"),
-                "original scanned page content survived reflatten"
-            );
-            // The output still opens as a one-page PDF (the reflattened page is
-            // image-only, so it carries no text blocks).
-            let reopened = lopdf::Document::load_mem(&bytes).unwrap();
-            assert_eq!(reopened.get_pages().len(), 1);
-        }
-
-        #[test]
-        fn rejects_a_page_id_the_document_did_not_surface() {
-            // No scanned pages were surfaced, so `page-1` is not accepted.
-            let mut doc = scanned_document(scanned_doc(), &[]);
-            let err = doc
-                .replace_blob(&LocalId::new("page-1"), Bytes::from_static(b"x"))
-                .unwrap_err();
-            assert_eq!(err.kind(), elide_core::ErrorKind::NotFound);
-        }
+        let out = doc.encode().unwrap().to_bytes();
+        let images = Pdf::open(&out).unwrap().images().unwrap();
+        assert_eq!(images.len(), 1, "the page was reflattened");
+        let pixels = load_from_memory(&images[0].bytes).unwrap().into_rgb8();
+        assert!(
+            pixels.pixels().all(|p| p.0 == [0, 0, 0]),
+            "original pixels returned"
+        );
     }
 }

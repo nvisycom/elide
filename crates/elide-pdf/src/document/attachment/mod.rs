@@ -16,8 +16,8 @@ use std::collections::BTreeSet;
 use bytes::Bytes;
 use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use lopdf::{Stream, dictionary};
 
 use self::tree::{Tree, associated, drop_associated};
 use crate::document::Store;
@@ -29,18 +29,16 @@ const MAX_ATTACHMENT_BYTES: usize = 512 * 1024 * 1024;
 /// The identity of an attached file within a PDF: the indirect-object id of its
 /// embedded-file stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct AttachmentId {
+pub(crate) struct AttachmentId {
     /// The indirect object number.
-    pub number: u32,
+    pub(crate) number: u32,
     /// The object generation.
-    pub generation: u16,
+    pub(crate) generation: u16,
 }
 
 impl AttachmentId {
     /// The attachment whose stream is object `(number, generation)`.
-    #[must_use]
-    pub fn new(number: u32, generation: u16) -> Self {
+    pub(crate) fn new(number: u32, generation: u16) -> Self {
         Self { number, generation }
     }
 
@@ -66,11 +64,11 @@ pub(crate) struct Attachment {
 
 /// A redacted attached file: the attachment it replaces and its new bytes.
 #[derive(Debug, Clone)]
-pub struct AttachmentReplacement {
+pub(crate) struct AttachmentReplacement {
     /// The attachment to replace.
-    pub id: AttachmentId,
+    pub(crate) id: AttachmentId,
     /// The redacted file's bytes.
-    pub bytes: Vec<u8>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// Every embedded file of the document in `store`: the name tree's in tree
@@ -84,7 +82,8 @@ pub(crate) fn attachments(store: &Store) -> Result<Vec<Attachment>> {
     let doc = store.doc();
     let tree = Tree::read(doc)?;
     let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
-    tree.entries
+    let attachments = tree
+        .entries
         .iter()
         .chain(associated(doc).iter())
         .filter(|entry| seen.insert(entry.stream))
@@ -107,7 +106,60 @@ pub(crate) fn attachments(store: &Store) -> Result<Vec<Attachment>> {
                 bytes: Bytes::from(bytes),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+
+    // An embedded file reached some other way would ship unscanned: one typed
+    // as such, or one a file specification's `/EF` names (the type is
+    // optional).
+    let mut embedded: BTreeSet<ObjectId> = doc
+        .objects
+        .iter()
+        .filter(|(_, object)| {
+            matches!(object, Object::Stream(stream) if stream.dict.has_type(b"EmbeddedFile"))
+        })
+        .map(|(&id, _)| id)
+        .collect();
+    for object in doc.objects.values() {
+        embedded_files(object, 0, &mut embedded);
+    }
+    if let Some(id) = embedded.difference(&seen).next() {
+        return Err(Error::malformed(format!(
+            "embedded file {id:?} is outside the attachment tree and associated files"
+        )));
+    }
+    Ok(attachments)
+}
+
+/// How deep a value nests dictionaries and arrays before the `/EF` search
+/// stops looking.
+const MAX_EF_DEPTH: usize = 32;
+
+/// Collect into `out` every stream an `/EF` dictionary within `object` names.
+fn embedded_files(object: &Object, depth: usize, out: &mut BTreeSet<ObjectId>) {
+    if depth > MAX_EF_DEPTH {
+        return;
+    }
+    let dict = match object {
+        Object::Dictionary(dict) => dict,
+        Object::Stream(stream) => &stream.dict,
+        Object::Array(items) => {
+            for item in items {
+                embedded_files(item, depth + 1, out);
+            }
+            return;
+        }
+        _ => return,
+    };
+    if let Ok(Object::Dictionary(files)) = dict.get(b"EF") {
+        out.extend(
+            files
+                .iter()
+                .filter_map(|(_, file)| file.as_reference().ok()),
+        );
+    }
+    for (_, value) in dict.iter() {
+        embedded_files(value, depth + 1, out);
+    }
 }
 
 /// Write each replacement's bytes into its attachment's stream and drop every
@@ -169,8 +221,6 @@ pub(crate) fn replace(
 /// A test fixture: a one-page PDF attaching `files`, each `(name, bytes)`.
 #[cfg(test)]
 pub(crate) fn with_attachments(files: &[(&str, &[u8])]) -> Vec<u8> {
-    use lopdf::{Stream, dictionary};
-
     let mut doc = Document::with_version("1.7");
     let pages = doc.new_object_id();
     let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
@@ -211,8 +261,6 @@ pub(crate) fn with_attachments(files: &[(&str, &[u8])]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Stream, dictionary};
-
     use super::*;
     use crate::document::{Pdf, Redaction};
 
@@ -261,13 +309,16 @@ mod tests {
         .unwrap();
         let [a, b] = pdf.attachments().unwrap().try_into().unwrap();
         let out = pdf
-            .apply(&attachments_redaction(
-                &[AttachmentReplacement {
-                    id: a.id,
-                    bytes: b"[NAME]".to_vec(),
-                }],
-                &[b.id],
-            ))
+            .apply(
+                &[],
+                &attachments_redaction(
+                    &[AttachmentReplacement {
+                        id: a.id,
+                        bytes: b"[NAME]".to_vec(),
+                    }],
+                    &[b.id],
+                ),
+            )
             .unwrap();
         let redacted = Pdf::open(&out).unwrap();
         assert_eq!(names(&redacted), [("a.txt".to_owned(), b"[NAME]".to_vec())]);
@@ -324,13 +375,16 @@ mod tests {
         assert_eq!(invoice.name, "invoice.xml");
 
         let out = pdf
-            .apply(&attachments_redaction(
-                &[AttachmentReplacement {
-                    id: invoice.id,
-                    bytes: b"<buyer>[NAME]</buyer>".to_vec(),
-                }],
-                &[source.id],
-            ))
+            .apply(
+                &[],
+                &attachments_redaction(
+                    &[AttachmentReplacement {
+                        id: invoice.id,
+                        bytes: b"<buyer>[NAME]</buyer>".to_vec(),
+                    }],
+                    &[source.id],
+                ),
+            )
             .unwrap();
         let redacted = Pdf::open(&out).unwrap();
         assert_eq!(
@@ -349,6 +403,41 @@ mod tests {
     fn refuses_an_unknown_attachment() {
         let pdf = Pdf::open(&with_attachments(&[("a.txt", b"x")])).unwrap();
         let unknown = AttachmentId::new(999, 0);
-        assert!(pdf.apply(&attachments_redaction(&[], &[unknown])).is_err());
+        assert!(
+            pdf.apply(&[], &attachments_redaction(&[], &[unknown]))
+                .is_err()
+        );
+    }
+
+    /// An embedded file outside the tree and the associations would ship
+    /// unscanned, so the document is refused.
+    #[test]
+    fn an_embedded_file_outside_the_tree_is_an_error() {
+        let mut doc = Document::load_mem(&with_attachments(&[("a.txt", b"x")])).unwrap();
+        let stray = doc.add_object(Stream::new(
+            dictionary! { "Type" => "EmbeddedFile" },
+            b"Jane Roe".to_vec(),
+        ));
+        doc.catalog_mut().unwrap().set("Private", stray);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        assert!(Pdf::open(&bytes).unwrap().attachments().is_err());
+    }
+
+    /// An untyped embedded file a file specification names outside the tree
+    /// is refused too.
+    #[test]
+    fn an_untyped_embedded_file_outside_the_tree_is_an_error() {
+        let mut doc = Document::load_mem(&with_attachments(&[("a.txt", b"x")])).unwrap();
+        let stray = doc.add_object(Stream::new(dictionary! {}, b"Jane Roe".to_vec()));
+        let spec = doc.add_object(dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::string_literal("b.txt"),
+            "EF" => dictionary! { "F" => stray },
+        });
+        doc.catalog_mut().unwrap().set("Private", spec);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        assert!(Pdf::open(&bytes).unwrap().attachments().is_err());
     }
 }

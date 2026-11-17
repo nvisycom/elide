@@ -13,7 +13,8 @@ use crate::document::object::DocumentExt;
 /// Remove the image XObjects `images` from `doc`'s pages and form XObjects,
 /// and (when `inline` holds) every inline image, returning how many drawing
 /// operations were cut. Each removed XObject is dropped from every resource
-/// dictionary too, so the next prune deletes it from the file.
+/// dictionary, and from every image it masks, so the next prune deletes it
+/// from the file.
 ///
 /// A page positions everything it draws, so cutting an image leaves its area
 /// empty without moving anything else.
@@ -51,7 +52,27 @@ pub(crate) fn remove(
     })?;
     let cut = apply(doc, edits)?.into_iter().sum();
     drop_xobjects(doc, images);
+    drop_masks(doc, images);
     Ok(cut)
+}
+
+/// Drop every `/SMask` and `/Mask` entry naming one of `images`.
+fn drop_masks(doc: &mut Document, images: &HashSet<ObjectId>) {
+    for object in doc.objects.values_mut() {
+        let Object::Stream(stream) = object else {
+            continue;
+        };
+        for key in [b"SMask".as_slice(), b"Mask"] {
+            if stream
+                .dict
+                .get(key)
+                .and_then(Object::as_reference)
+                .is_ok_and(|id| images.contains(&id))
+            {
+                stream.dict.remove(key);
+            }
+        }
+    }
 }
 
 /// Whether the `Do` `operation` draws one of `images`, by its name in

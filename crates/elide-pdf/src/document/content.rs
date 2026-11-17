@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashSet};
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
-use crate::document::object::{DictionaryExt, DocumentExt};
+use crate::document::object::{DictionaryExt, DocumentExt, StreamExt};
 
 /// Where a content stream is written back: a page's content, or a form
 /// XObject's.
@@ -35,7 +35,7 @@ pub(crate) fn plan<C>(
             continue;
         }
         let resources = doc.page_resources(page);
-        let bytes = doc.get_page_content(page);
+        let bytes = doc.page_content(page)?;
         if let Some((content, cut)) = rewrite(&bytes, &resources)? {
             edits.push((Target::Page(page), content, cut));
         }
@@ -47,9 +47,7 @@ pub(crate) fn plan<C>(
         if !stream.dict.has_subtype(b"Form") {
             continue;
         }
-        let bytes = stream
-            .decompressed_content()
-            .map_err(|e| Error::malformed(format!("form content: {e}")))?;
+        let bytes = stream.decoded()?;
         let resources: Vec<Dictionary> = stream
             .dict
             .get(b"Resources")

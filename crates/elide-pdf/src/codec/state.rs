@@ -1,133 +1,168 @@
-//! The redaction state: [`PdfInner`] (pages + recorded detections + mode)
-//! behind [`PdfState`], which the body stream owns.
+//! [`PdfState`]: a decoded PDF's pages and the redactions recorded on them,
+//! which the body stream owns and the document applies on encode.
 
 use std::ops::Range;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
 
-use super::{PdfPage, RedactMode};
+#[cfg(feature = "render")]
+use super::SCAN_DPI;
 use crate::document::{Pdf, Redaction};
-use crate::text::{Detection, PageGeometry};
+#[cfg(feature = "render")]
+use crate::render::PageObservation;
+use crate::text::{Detection, PageGeometry, TextBlock};
 
-/// The document's editable redaction state, behind [`PdfState`].
-#[derive(Debug, Default)]
-pub(super) struct PdfInner {
-    /// Extracted pages, in page order, with stream offsets for `chunks`.
-    pub(super) pages: Vec<PdfPage>,
-    /// Recorded glyph-deletion detections (per-page character spans), applied at
-    /// encode in [`RedactMode::GlyphDelete`].
-    pub(super) deletions: Vec<Detection>,
-    /// How recorded redactions are applied on encode.
-    pub(super) mode: RedactMode,
+/// A decoded PDF's pages, as the redaction mode reads them.
+#[derive(Debug)]
+pub(super) enum Pages {
+    /// Glyph deletion: each page's text with the map back to the glyphs that
+    /// drew it.
+    Glyph(Vec<TextBlock>),
+    /// Flatten (feature `render`): every page's text as PDFium reads it, with
+    /// each glyph's box; encode renders the pages at `scale`.
+    #[cfg(feature = "render")]
+    Flatten {
+        pages: Vec<PageObservation>,
+        scale: f32,
+    },
 }
 
-impl PdfInner {
-    /// Record a redaction at page-local byte `range` on the page numbered
-    /// `number`, as a per-page character-span [`Detection`] routed to the
-    /// glyph-delete or raster accumulator per `mode`.
+/// A decoded PDF's pages and the redactions recorded on them.
+#[derive(Debug)]
+pub(super) struct PdfState {
+    pages: Pages,
+    /// Recorded detections (page + character span), applied at encode.
+    detections: Vec<Detection>,
+}
+
+impl PdfState {
+    /// The state of `pages`, with nothing recorded.
+    pub(super) fn new(pages: Pages) -> Self {
+        Self {
+            pages,
+            detections: Vec::new(),
+        }
+    }
+
+    /// Each page's number and text, in page order, leaving out a page with no
+    /// text (a scanned page, surfaced as an image instead).
+    pub(super) fn texts(&self) -> Vec<(u32, &str)> {
+        let texts: Vec<(u32, &str)> = match &self.pages {
+            Pages::Glyph(blocks) => blocks.iter().map(|b| (b.page, b.text.as_str())).collect(),
+            #[cfg(feature = "render")]
+            Pages::Flatten { pages, .. } => {
+                pages.iter().map(|p| (p.page, p.text.as_str())).collect()
+            }
+        };
+        texts
+            .into_iter()
+            .filter(|(_, text)| !text.trim().is_empty())
+            .collect()
+    }
+
+    /// The text of the page numbered `number`.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a page that has no text.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(super) fn text(&self, number: u32) -> Result<&str> {
+        self.texts()
+            .into_iter()
+            .find_map(|(page, text)| (page == number).then_some(text))
+            .ok_or_else(|| Error::malformed(format!("no page {number}")))
+    }
+
+    /// The glyph boxes and frame of the page numbered `number`.
+    pub(super) fn geometry(&self, number: u32) -> Option<PageGeometry<'_>> {
+        match &self.pages {
+            Pages::Glyph(blocks) => blocks
+                .iter()
+                .find(|b| b.page == number)
+                .map(TextBlock::geometry),
+            #[cfg(feature = "render")]
+            Pages::Flatten { pages, .. } => pages
+                .iter()
+                .find(|p| p.page == number)
+                .map(PageObservation::geometry),
+        }
+    }
+
+    /// The scale a scanned page was rendered at.
+    #[cfg(feature = "render")]
+    pub(super) fn scan_scale(&self) -> f32 {
+        match &self.pages {
+            Pages::Glyph(_) => SCAN_DPI.scale_factor(),
+            Pages::Flatten { scale, .. } => *scale,
+        }
+    }
+
+    /// The detections recorded so far.
+    #[cfg(test)]
+    pub(super) fn detections(&self) -> &[Detection] {
+        &self.detections
+    }
+
+    /// Record a redaction of each page-local byte `range` on its page, all or
+    /// none.
     ///
     /// # Errors
     ///
     /// [`MalformedInput`] for a page the document doesn't have, or a range
     /// outside its text or off a character boundary: a redaction is never
-    /// dropped.
+    /// dropped, and none of the batch is recorded.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    fn record(&mut self, number: u32, range: &Range<usize>) -> Result<()> {
-        let page = self
-            .pages
-            .iter()
-            .find(|p| p.number == number)
-            .ok_or_else(|| Error::malformed(format!("no page {number}")))?;
-        if page.text.get(range.clone()).is_none() {
-            return Err(Error::malformed(format!(
-                "range {}..{} is outside page {number}'s text or splits a character",
-                range.start, range.end
-            )));
-        }
-        // Both paths address glyphs by a character span into the page text, so
-        // the byte range is measured as character offsets.
-        let start = page.text[..range.start].chars().count();
-        let end = page.text[..range.end].chars().count();
-        let detection = Detection::new(page.number, start, end);
-        match &mut self.mode {
-            #[cfg(feature = "render")]
-            RedactMode::Raster { detections, .. } => detections.push(detection),
-            _ => self.deletions.push(detection),
-        }
+    pub(super) fn record(
+        &mut self,
+        spans: impl IntoIterator<Item = (u32, Range<usize>)>,
+    ) -> Result<()> {
+        let detections = spans
+            .into_iter()
+            .map(|(number, range)| {
+                let text = self.text(number)?;
+                let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone()))
+                else {
+                    return Err(Error::malformed(format!(
+                        "range {}..{} is outside page {number}'s text or splits a character",
+                        range.start, range.end
+                    )));
+                };
+                // Glyphs address characters, so the byte range is measured in
+                // character offsets.
+                let start = before.chars().count();
+                let end = start + text[range].chars().count();
+                Ok(Detection::new(number, start, end))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.detections.extend(detections);
         Ok(())
     }
-}
 
-/// The document's editable redaction state, owned by the body
-/// [`PdfStream`](super::stream::PdfStream): it records each redaction, and the
-/// [`PdfDocument`](super::document::PdfDocument) reads it back to
-/// re-serialise.
-pub(crate) struct PdfState(PdfInner);
-
-impl PdfState {
-    /// Wrap the decoded redaction state.
-    pub(super) fn new(inner: PdfInner) -> Self {
-        Self(inner)
-    }
-
-    /// The extracted pages, in page order.
-    pub(super) fn pages(&self) -> &[PdfPage] {
-        &self.0.pages
-    }
-
-    /// The rendered glyph geometry of the page numbered `number`, for resolving a
-    /// detected span to page-normalized highlight rectangles.
-    pub(super) fn geometry_for(&self, number: u32) -> Option<&PageGeometry> {
-        self.page_by_number(number)?.geometry.as_deref()
-    }
-
-    /// The page numbered `number`.
-    pub(super) fn page_by_number(&self, number: u32) -> Option<&PdfPage> {
-        self.0.pages.iter().find(|p| p.number == number)
-    }
-
-    /// Record a redaction at page-local `range` on page `number` (see
-    /// [`PdfInner::record`]).
+    /// `document` with the recorded redactions and `redaction`'s blobs
+    /// applied; the document itself when nothing changes.
     ///
     /// # Errors
     ///
-    /// [`MalformedInput`] for a page or range the document doesn't have.
-    ///
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(super) fn record(&mut self, number: u32, range: &Range<usize>) -> Result<()> {
-        self.0.record(number, range)
-    }
-
-    /// Apply the recorded redactions to `document` per the [`RedactMode`]; on
-    /// the glyph path, with the redacted and removed blobs in `redaction`,
-    /// all in one pass. Returns the original bytes when nothing changes.
+    /// As [`Pdf::apply`], and on the flatten path as `Pdf::flatten`.
     pub(super) fn redact(&self, document: &Bytes, mut redaction: Redaction) -> Result<Bytes> {
-        let inner = &self.0;
-        match &inner.mode {
-            RedactMode::GlyphDelete => {
-                redaction.text.clone_from(&inner.deletions);
+        match &self.pages {
+            Pages::Glyph(blocks) => {
+                redaction.text.clone_from(&self.detections);
                 if redaction.is_empty() {
                     return Ok(document.clone());
                 }
-                let out = Pdf::open(document)?.apply(&redaction)?;
-                Ok(Bytes::from(out))
+                Ok(Bytes::from(Pdf::open(document)?.apply(blocks, &redaction)?))
             }
             #[cfg(feature = "render")]
-            RedactMode::Raster {
-                observations,
-                detections,
-            } => {
-                if detections.is_empty() {
-                    return Ok(document.clone());
-                }
-                // Fill the detected glyph boxes and emit a fresh image-only PDF,
-                // the strong redaction guarantee. Black fill.
-                let (out, _certificate) = Pdf::open(document)
-                    .and_then(|pdf| pdf.redact_raster(observations, detections, [0, 0, 0]))?;
-                Ok(Bytes::from(out))
-            }
+            Pages::Flatten { pages, scale } => Ok(Bytes::from(Pdf::open(document)?.flatten(
+                pages,
+                *scale,
+                &self.detections,
+                redaction,
+            )?)),
         }
     }
 }

@@ -16,7 +16,7 @@ use lopdf::ObjectId;
 /// text drawn through a `Do`-invoked Form XObject be located and redacted like
 /// page-level text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum StreamTarget {
+pub(crate) enum StreamTarget {
     /// The page's concatenated content stream.
     PageContent,
     /// A Form XObject's content stream, addressed by its object id.
@@ -30,14 +30,14 @@ pub enum StreamTarget {
 /// Ordered so it can key a `BTreeMap` of pending edits; the byte range within
 /// the addressed string is carried separately (see [`OffsetRun`](super::OffsetRun)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Address {
+pub(crate) struct Address {
     /// The stream the glyph's operator lives in.
-    pub stream: StreamTarget,
+    pub(crate) stream: StreamTarget,
     /// Index of the operation within the decoded content stream.
-    pub op: usize,
+    pub(crate) op: usize,
     /// Index of the operand within that operation.
-    pub operand: usize,
+    pub(crate) operand: usize,
     /// Index of the string within a `TJ` array operand, or `None` for a plain
     /// `Tj`/`'`/`"` string operand.
-    pub item: Option<usize>,
+    pub(crate) item: Option<usize>,
 }

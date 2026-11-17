@@ -5,7 +5,8 @@
 //! glyphs; a scanned one is image-only and must be rendered to images first
 //! (for OCR, and to redact by flattening). `RasterMode` selects that policy,
 //! mirroring what established tools converge on, OCRmyPDF (`--skip-text` /
-//! `--force-ocr`), Docling (`do_ocr` / `force_full_page_ocr`).
+//! `--force-ocr`), Docling (`do_ocr` / `force_full_page_ocr`). Rendering needs
+//! the `render` feature; without it every mode deletes glyphs only.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -15,9 +16,10 @@ use super::Dpi;
 /// Whether to render a document's pages to images: never, auto, or always.
 ///
 /// [`Auto`] is the default: use the text layer where it exists (redact by
-/// deleting glyphs) and render only where it is absent. [`Always`] renders
-/// every page regardless of the text layer, for documents whose text is
-/// missing, garbled, or a watermark. [`Never`] relies on the text layer only.
+/// deleting glyphs) and render only the pages without one, for OCR.
+/// [`Always`] replaces every page by a redacted image of it, whatever its text
+/// layer, so nothing drawn on a page survives underneath. [`Never`] relies on
+/// the text layer only.
 ///
 /// Serializes with an internal `kind` tag (`{"kind": "auto"}`,
 /// `{"kind": "always", "dpi": 300}`, `{"kind": "never"}`).
@@ -30,22 +32,20 @@ use super::Dpi;
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum RasterMode {
-    /// Use the text layer where it exists and render pages only where it is
-    /// absent. The default. (The text-layer-vs-scanned decision defers to the
-    /// text path today; per-page rendering of scanned pages lands with OCR.)
+    /// Delete the detected glyphs from the text layer, and render each page
+    /// without one at [`Dpi::OCR`] for OCR, replacing it by its redacted
+    /// image. The default.
     #[default]
     Auto,
-    /// Always render pages to images at the given [`Dpi`], ignoring any text
-    /// layer. For documents whose text layer is missing, garbled, or a
-    /// watermark.
-    // `alias = "force"` accepts config persisted under this type's former name
-    // (`OcrMode`), whose variant serialised as `{"kind": "force"}`.
-    #[cfg_attr(feature = "serde", serde(alias = "force"))]
+    /// Render every page at the given [`Dpi`] and replace it by an image with
+    /// the detected text painted over, keeping no text layer: the strongest
+    /// redaction, for documents whose text layer is garbled or untrusted.
     Always {
         /// Resolution to render pages at; [`Dpi::OCR`] (300) is typical.
         dpi: Dpi,
     },
-    /// Never render: rely on the text layer only, even if it is absent.
+    /// Never render: delete glyphs from the text layer only, leaving a page
+    /// without one to its embedded images' redaction.
     Never,
 }
 
@@ -106,13 +106,5 @@ mod tests {
             assert_eq!(serde_json::to_string(&mode).unwrap(), wire);
             assert_eq!(serde_json::from_str::<RasterMode>(wire).unwrap(), mode);
         }
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn deserializes_the_former_force_tag() {
-        // Config persisted under the old `OcrMode` name used `"force"`.
-        let mode: RasterMode = serde_json::from_str(r#"{"kind":"force","dpi":300}"#).unwrap();
-        assert_eq!(mode, RasterMode::always());
     }
 }

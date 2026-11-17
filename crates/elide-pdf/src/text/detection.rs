@@ -9,19 +9,18 @@
 /// [`OffsetMap`](crate::text::OffsetMap), and the raster path resolves the same
 /// range to glyph pixel boxes. A caller never picks a coordinate unit per path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Detection {
+pub(crate) struct Detection {
     /// 1-based page number the span is on.
-    pub page: u32,
+    pub(crate) page: u32,
     /// Start character offset into the page text (inclusive).
-    pub start: usize,
+    pub(crate) start: usize,
     /// End character offset into the page text (exclusive).
-    pub end: usize,
+    pub(crate) end: usize,
 }
 
 impl Detection {
     /// A detection of `[start, end)` (character offsets) on `page`.
-    #[must_use]
-    pub fn new(page: u32, start: usize, end: usize) -> Self {
+    pub(crate) fn new(page: u32, start: usize, end: usize) -> Self {
         Self { page, start, end }
     }
 }

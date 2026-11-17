@@ -1,21 +1,15 @@
 //! PDF page rendering via PDFium, and raster redaction built on it, behind the
 //! `render` feature.
 //!
-//! Rendering rasterises whole pages to images (for OCR of scanned or image-only
-//! PDFs, and for the raster redaction that flattens a page to a sanitised
-//! image). The glyph geometry here, in rendered-pixel space, is the bridge
-//! between a detected text span and the pixels the redaction overwrites. It all
-//! requires the PDFium shared library at runtime (see
-//! `scripts/install-pdfium.sh`); the module is behind the `render` feature so
-//! the default build needs no native library.
-//!
-//! A scanned page redacted through the image pipeline is written back as one
-//! image over the whole page ([`reflatten`](fn@reflatten)), and one no codec could read is
-//! cleared.
-//!
-//! The geometry types carry no elide dependency, so the crate stays standalone.
+//! A page is rendered to pixels for two things: a scanned page (no text layer)
+//! goes to the image pipeline for OCR and comes back redacted (laid over a
+//! fresh render, so the page's redacted images show through), and under
+//! [`RasterMode::Always`](crate::primitive::RasterMode::Always) every page is
+//! rendered with its detected glyphs painted over. Either way the page is then
+//! written back as that one image ([`reflatten`](fn@reflatten)), and one no codec
+//! could read is cleared. It all requires the PDFium shared library at runtime
+//! (see `scripts/install-pdfium.sh`).
 
-mod emit;
 mod geometry;
 mod pdfium;
 mod raster;
@@ -23,61 +17,94 @@ mod reflatten;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use elide_core::Result;
+use bytes::Bytes;
+use elide_core::{Error, Result};
 
-pub use self::emit::Certificate;
-pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
-pub(crate) use self::raster::redact_raster;
-pub use self::reflatten::PageReplacement;
-pub(crate) use self::reflatten::{clear, reflatten};
+pub(crate) use self::geometry::{PageObservation, PixelRect};
+pub(crate) use self::raster::glyph_boxes;
+pub(crate) use self::reflatten::{PageReplacement, ScannedPage, clear, reflatten};
 use crate::document::Store;
+use crate::text::{DeviceRect, PageFrame, page_frame};
 
-/// A page rendered to a PNG image, with its pixel dimensions.
-///
-/// Deliberately free of any elide type so the crate stays self-contained; a
-/// caller wraps `png` into its own image representation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenderedPage {
-    /// PNG-encoded page image.
-    pub png: Vec<u8>,
-    /// Rendered width in pixels.
-    pub width: u32,
-    /// Rendered height in pixels.
-    pub height: u32,
-}
-
-/// Render only the 1-based pages in `numbers` at `scale`, returning each keyed
-/// by its page number.
-///
-/// Pages not named are not rasterised, so a pass that needs only a few pages
-/// (e.g. the scanned pages of a mostly born-digital document) does not pay to
-/// render the whole document.
+/// The 1-based pages `numbers` of the document in `store`, rendered at `scale`
+/// to PNG images keyed by page number.
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if PDFium
-/// cannot load or render the document (or the native library is unavailable).
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// PDFium cannot load or render the document (or the native library is
+/// unavailable), or
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if it has
+/// too many pages or they render too large.
 pub(crate) fn render_pages(
     store: &Store,
     numbers: BTreeSet<u32>,
     scale: f32,
-) -> Result<BTreeMap<u32, RenderedPage>> {
-    pdfium::render_pages(store.source_bytes().to_vec(), numbers, scale)
+) -> Result<BTreeMap<u32, Bytes>> {
+    pdfium::render_pages(&store.source_bytes(), &numbers, scale)
 }
 
-/// Observe every page at `scale`: render it to RGB8 pixels and extract its
-/// text-layer glyphs in rendered-pixel space.
-///
-/// This is the input to raster redaction: each [`PageObservation`] carries the
-/// pixels to overwrite, the page text detection runs over, and the glyph boxes
-/// that map a detected character span back to pixels. A page with no text layer
-/// yields an observation with pixels but no glyphs, a caller supplies OCR glyphs
-/// for those.
+/// Every page's text as PDFium reads it, with each glyph's box and the
+/// page's frame: the input to raster redaction.
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if PDFium
-/// cannot load or render the document (or the native library is unavailable).
-pub(crate) fn observe(store: &Store, scale: f32) -> Result<Vec<PageObservation>> {
-    pdfium::observe(store.source_bytes().to_vec(), scale)
+/// As [`render_pages`], and
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) for a
+/// glyph whose box cannot be read, or a page count PDFium and the parser
+/// disagree on.
+pub(crate) fn observe(store: &Store) -> Result<Vec<PageObservation>> {
+    let doc = store.doc();
+    let pages = doc.get_pages();
+    let observed = pdfium::observe(&store.source_bytes())?;
+    if observed.len() != pages.len() {
+        return Err(Error::malformed(format!(
+            "PDFium reads {} pages where the document has {}",
+            observed.len(),
+            pages.len()
+        )));
+    }
+    Ok(pages
+        .into_iter()
+        .zip(observed)
+        .map(|((page, id), (text, glyphs))| PageObservation {
+            page,
+            text,
+            glyphs,
+            frame: page_frame(doc, id).unwrap_or(PageFrame::LETTER),
+        })
+        .collect())
+}
+
+/// The 1-based pages `numbers` rendered at `scale` with the glyph boxes `fill`
+/// names painted over, each as the image that replaces its page.
+///
+/// # Errors
+///
+/// As [`render_pages`], and
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a glyph box
+/// that cannot be placed on its rendered page.
+pub(crate) fn flatten(
+    store: &Store,
+    numbers: BTreeSet<u32>,
+    scale: f32,
+    fill: &BTreeMap<u32, Vec<DeviceRect>>,
+) -> Result<Vec<PageReplacement>> {
+    pdfium::flatten(&store.source_bytes(), &numbers, scale, fill)
+}
+
+/// Each of the `scanned` pages rendered at `scale` with its redaction laid
+/// over, as the image that replaces it.
+///
+/// # Errors
+///
+/// As [`render_pages`], and
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a redacted
+/// image is not the size of its page.
+pub(crate) fn composite(
+    store: &Store,
+    scanned: &[ScannedPage],
+    scale: f32,
+) -> Result<Vec<PageReplacement>> {
+    pdfium::composite(&store.source_bytes(), scanned, scale)
 }

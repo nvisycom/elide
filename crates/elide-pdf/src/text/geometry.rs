@@ -17,7 +17,12 @@
 //! *not* part of that state (they reset at `BT` and are set by the text-
 //! positioning operators), so [`Cursor`] holds them separately.
 
+use std::ops::Range;
+
 use elide_core::primitive::UnitBoundingBox;
+use lopdf::{Document, ObjectId};
+
+use crate::document::object::DocumentExt;
 
 /// A 2×3 affine transform `[a b c d e f]`, mapping a point `(x, y)` to
 /// `(a·x + c·y + e, b·x + d·y + f)`. Row-vector convention, as PDF uses.
@@ -181,19 +186,40 @@ impl Cursor {
     }
 }
 
+/// One glyph's box and the decoded character range it drew, so a detected
+/// character span can be resolved back to the page rectangles it covers.
+#[derive(Debug, Clone)]
+pub(crate) struct GlyphRect {
+    /// The page-local decoded character range this glyph produced.
+    pub(crate) chars: Range<usize>,
+    /// The glyph's box in default user space, bottom-left origin.
+    pub(crate) rect: DeviceRect,
+}
+
 /// An axis-aligned box in device (page) space, as the glyph quad projects to.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DeviceRect {
-    pub(super) min_x: f64,
-    pub(super) min_y: f64,
-    pub(super) max_x: f64,
-    pub(super) max_y: f64,
+    pub(crate) min_x: f64,
+    pub(crate) min_y: f64,
+    pub(crate) max_x: f64,
+    pub(crate) max_y: f64,
 }
 
 impl DeviceRect {
+    /// The box's four corners, as `(x, y)` points.
+    #[cfg(feature = "render")]
+    pub(crate) fn corners(&self) -> [(f64, f64); 4] {
+        [
+            (self.min_x, self.min_y),
+            (self.max_x, self.min_y),
+            (self.max_x, self.max_y),
+            (self.min_x, self.max_y),
+        ]
+    }
+
     /// The axis-aligned bounds of four device-space corners (a glyph quad mapped
     /// through a possibly-rotated matrix is not axis-aligned; take its extent).
-    pub(super) fn of_corners(corners: [(f64, f64); 4]) -> DeviceRect {
+    pub(crate) fn of_corners(corners: [(f64, f64); 4]) -> DeviceRect {
         let xs = corners.map(|(x, _)| x);
         let ys = corners.map(|(_, y)| y);
         DeviceRect {
@@ -236,6 +262,36 @@ pub(crate) struct PageFrame {
 }
 
 impl PageFrame {
+    /// The frame of a page with no readable box, as a viewer draws it: US
+    /// Letter, unrotated.
+    #[cfg(feature = "render")]
+    pub(crate) const LETTER: Self = Self {
+        crop_x0: 0.0,
+        crop_y0: 0.0,
+        crop_w: 612.0,
+        crop_h: 792.0,
+        rotate: 0,
+    };
+    /// The frame of a page with no readable box: the unit square, unrotated,
+    /// so geometry on it stays unnormalized rather than failing.
+    pub(super) const UNIT: Self = Self {
+        crop_x0: 0.0,
+        crop_y0: 0.0,
+        crop_w: 1.0,
+        crop_h: 1.0,
+        rotate: 0,
+    };
+
+    /// The page's size as displayed, in points: its crop box, turned by its
+    /// rotation.
+    #[cfg(feature = "render")]
+    pub(crate) fn displayed_size(&self) -> (f64, f64) {
+        match self.rotate {
+            90 | 270 => (self.crop_h, self.crop_w),
+            _ => (self.crop_w, self.crop_h),
+        }
+    }
+
     /// Normalize a device-space box into a page-normalized, top-left-origin
     /// [`UnitBoundingBox`] in the as-displayed (rotated) frame.
     pub(super) fn normalize(&self, rect: DeviceRect) -> UnitBoundingBox {
@@ -322,8 +378,88 @@ impl SpaceRule {
     }
 }
 
+/// Read a page's visible rectangle and display rotation into a [`PageFrame`],
+/// or `None` when the page has no readable box.
+///
+/// The visible rectangle is the `/CropBox` clipped to the `/MediaBox`, either
+/// one alone when the other is missing (or they do not overlap). Both and
+/// `/Rotate` are inheritable, so this walks up `/Parent` for a value the page
+/// itself does not set, resolving references. A missing or junk rotation is
+/// zero.
+pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame> {
+    let media = inherited_rect(doc, page_id, b"MediaBox").map(normalize_rect);
+    let crop = inherited_rect(doc, page_id, b"CropBox").map(normalize_rect);
+    let [x0, y0, x1, y1] = match (crop, media) {
+        (Some(crop), Some(media)) => intersect(crop, media).unwrap_or(media),
+        (Some(rect), None) | (None, Some(rect)) => rect,
+        (None, None) => return None,
+    };
+    let rotate = doc
+        .inherited(page_id, b"Rotate", |value| {
+            doc.resolve(value)?.as_i64().ok()
+        })
+        .unwrap_or(0);
+    // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
+    // defensive against junk).
+    let rotate = rotate.rem_euclid(360) as u32;
+    let rotate = (rotate / 90) * 90;
+
+    Some(PageFrame {
+        crop_x0: x0,
+        crop_y0: y0,
+        crop_w: x1 - x0,
+        crop_h: y1 - y0,
+        rotate,
+    })
+}
+
+/// `[x0, y0, x1, y1]` with its corners ordered low to high.
+fn normalize_rect([x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
+    [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)]
+}
+
+/// The overlap of two normalized rectangles, or `None` when they share no
+/// area.
+fn intersect(a: [f64; 4], b: [f64; 4]) -> Option<[f64; 4]> {
+    let overlap = [
+        a[0].max(b[0]),
+        a[1].max(b[1]),
+        a[2].min(b[2]),
+        a[3].min(b[3]),
+    ];
+    (overlap[0] < overlap[2] && overlap[1] < overlap[3]).then_some(overlap)
+}
+
+/// Resolve a 4-number rectangle attribute (`MediaBox`/`CropBox`) on a page,
+/// walking up `/Parent` for an inherited value. `None` if absent or malformed.
+///
+/// The attribute value, and each of its four elements, may be an indirect
+/// reference (`/MediaBox 3 0 R`, with `3 0 obj [ 0 0 612 792 ]`) — a valid and
+/// common encoding — so both are dereferenced before being read as numbers. A
+/// box with any element that is not a resolvable number is rejected (returns
+/// `None`), so the caller's fallback chain (CropBox → MediaBox → unit frame)
+/// stays available rather than accepting a distorted box.
+fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
+    doc.inherited(page_id, key, |value| {
+        let array = doc.resolve_array(value)?;
+        let [a, b, c, d] = array.as_slice() else {
+            return None;
+        };
+        // All four elements must resolve to numbers; a single unresolvable one
+        // fails the whole box rather than defaulting to 0.
+        Some([
+            doc.resolve_number(a)?,
+            doc.resolve_number(b)?,
+            doc.resolve_number(c)?,
+            doc.resolve_number(d)?,
+        ])
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use lopdf::{Object, dictionary};
+
     use super::*;
 
     fn close(a: f64, b: f64) -> bool {
@@ -406,5 +542,134 @@ mod tests {
         assert!(close(u.width, 0.1), "{u:?}");
         assert!(close(u.y, 0.1), "{u:?}");
         assert!(close(u.height, 0.1), "{u:?}");
+    }
+
+    #[test]
+    fn inherited_rect_reads_a_direct_array() {
+        let mut doc = Document::with_version("1.7");
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        assert_eq!(
+            inherited_rect(&doc, page, b"MediaBox"),
+            Some([0.0, 0.0, 612.0, 792.0]),
+        );
+    }
+
+    #[test]
+    fn inherited_rect_dereferences_an_indirect_box() {
+        // `/MediaBox 3 0 R` with `3 0 obj [ 0 0 612 792 ]` — a valid, common
+        // encoding that the direct `.as_array()` could not read, so the page
+        // frame fell back to a unit square and geometry stayed in raw points.
+        let mut doc = Document::with_version("1.7");
+        let box_id = doc.add_object(Object::Array(vec![
+            0.into(),
+            0.into(),
+            612.into(),
+            792.into(),
+        ]));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "MediaBox" => Object::Reference(box_id),
+        });
+        assert_eq!(
+            inherited_rect(&doc, page, b"MediaBox"),
+            Some([0.0, 0.0, 612.0, 792.0]),
+            "an indirect MediaBox must dereference to its array",
+        );
+    }
+
+    #[test]
+    fn inherited_rect_rejects_a_box_with_an_unresolvable_element() {
+        // An element that is a dangling reference must fail the whole box (so the
+        // caller falls back to MediaBox), not silently resolve to 0.
+        let mut doc = Document::with_version("1.7");
+        let dangling = doc.new_object_id(); // never inserted
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "CropBox" => vec![
+                0.into(),
+                0.into(),
+                Object::Reference(dangling),
+                792.into(),
+            ],
+        });
+        assert_eq!(inherited_rect(&doc, page, b"CropBox"), None);
+    }
+
+    #[test]
+    fn inherited_rect_rejects_a_non_numeric_element() {
+        let mut doc = Document::with_version("1.7");
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "CropBox" => vec![
+                0.into(),
+                0.into(),
+                Object::Name(b"oops".to_vec()),
+                792.into(),
+            ],
+        });
+        assert_eq!(inherited_rect(&doc, page, b"CropBox"), None);
+    }
+
+    #[test]
+    fn inherited_rect_walks_up_to_an_inherited_box() {
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages,
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            }),
+        );
+        assert_eq!(
+            inherited_rect(&doc, page, b"MediaBox"),
+            Some([0.0, 0.0, 595.0, 842.0]),
+        );
+    }
+
+    /// A page with `boxes` set on it directly, and its id.
+    fn page_with(boxes: Vec<(&str, Object)>) -> (Document, ObjectId) {
+        let mut doc = Document::with_version("1.7");
+        let mut page = dictionary! { "Type" => "Page" };
+        for (key, value) in boxes {
+            page.set(key, value);
+        }
+        let id = doc.add_object(page);
+        (doc, id)
+    }
+
+    fn rect(values: [i64; 4]) -> Object {
+        Object::Array(values.into_iter().map(Object::Integer).collect())
+    }
+
+    /// The visible page is the crop box clipped to the media box.
+    #[test]
+    fn the_crop_box_is_clipped_to_the_media_box() {
+        let (doc, page) = page_with(vec![
+            ("MediaBox", rect([0, 0, 600, 800])),
+            ("CropBox", rect([-100, 0, 600, 800])),
+        ]);
+        let frame = page_frame(&doc, page).unwrap();
+        assert!(
+            close(frame.crop_x0, 0.0) && close(frame.crop_w, 600.0),
+            "{frame:?}"
+        );
+    }
+
+    #[test]
+    fn an_indirect_rotation_is_read() {
+        let (mut doc, page) = page_with(vec![("MediaBox", rect([0, 0, 600, 800]))]);
+        let rotation = doc.add_object(Object::Integer(90));
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .set("Rotate", rotation);
+        assert_eq!(page_frame(&doc, page).unwrap().rotate, 90);
     }
 }

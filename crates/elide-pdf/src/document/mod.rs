@@ -1,7 +1,6 @@
 //! The PDF engine: an opened document ([`Pdf`], over its [`Store`]) and what
 //! the crate does with one.
 //!
-//! - [`extract`] reads its pages' text and embedded images;
 //! - [`sanitize`] removes its hidden content, and checks an encoded one carries
 //!   none;
 //! - [`image`] and [`attachment`] surface, replace, and remove its embedded
@@ -11,53 +10,41 @@
 //!
 //! A redaction is applied in one pass over one copy of the document and saved
 //! once ([`Redaction`]). Text extraction and glyph deletion live beside the
-//! engine in [`text`], and page rendering in `render` behind the
-//! `render` feature.
+//! engine in [`text`], and page rendering in `render` behind the `render`
+//! feature.
 
 pub(crate) mod attachment;
 pub(crate) mod content;
-pub(crate) mod extract;
 pub(crate) mod image;
 pub(crate) mod object;
 pub(crate) mod sanitize;
 mod store;
 
 use std::collections::HashSet;
-use std::num::NonZeroUsize;
+#[cfg(feature = "render")]
+use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(feature = "render")]
 use bytes::Bytes;
 use elide_codec::StrippedContent;
 use elide_core::Result;
 use lopdf::ObjectId;
 
 use self::attachment::{Attachment, AttachmentId, AttachmentReplacement};
-use self::extract::Extraction;
-use self::image::{EmbeddingKind, ImageId, ImageReplacement};
+use self::image::{ImageId, ImageReplacement, SurfacedImage};
 use self::object::DocumentExt;
 use self::sanitize::SanitizeDocumentExt;
 pub(crate) use self::store::Store;
 #[cfg(feature = "render")]
-use crate::render::{self, PageObservation, PageReplacement, RenderedPage};
-use crate::text::{self, Detection};
+use crate::render::{self, PageObservation, PageReplacement, ScannedPage};
+use crate::text::{self, Detection, TextBlock};
 
 /// An opened PDF document: parsed once, then reused across operations.
-///
-/// Open with [`open`](Pdf::open), then extract its text
-/// ([`extract`](Pdf::extract)), sanitize it ([`sanitize`](Pdf::sanitize)), or
-/// redact it: [`apply`](Pdf::apply) deletes glyphs keeping a selectable layer
-/// and writes redacted images, pages, and attachments back, and with the
-/// `render` feature [`redact_raster`](Pdf::redact_raster) flattens pages to
-/// images.
 #[derive(Debug, Clone)]
-pub struct Pdf(Store);
+pub(crate) struct Pdf(Store);
 
 impl Pdf {
-    /// Default bound on a single page's decompressed content, guarding against a
-    /// decompression bomb. Override with [`open_with_limit`](Pdf::open_with_limit).
-    pub const DEFAULT_MAX_PAGE_BYTES: NonZeroUsize = Store::DEFAULT_MAX_PAGE_BYTES;
-
-    /// Open a PDF from its bytes, using the
-    /// [default page bound](Pdf::DEFAULT_MAX_PAGE_BYTES).
+    /// Open a PDF from its bytes.
     ///
     /// # Errors
     ///
@@ -67,54 +54,29 @@ impl Pdf {
     /// bytes are not a readable PDF, or
     /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
     /// if it is encrypted with a user password.
-    pub fn open(document: &[u8]) -> Result<Self> {
-        Self::open_with_limit(document, Self::DEFAULT_MAX_PAGE_BYTES)
-    }
-
-    /// Open a PDF with an explicit per-page decompressed-size bound.
-    ///
-    /// # Errors
-    ///
-    /// As [`open`](Pdf::open).
-    pub fn open_with_limit(document: &[u8], max_page_bytes: NonZeroUsize) -> Result<Self> {
-        Store::open(document, max_page_bytes).map(Self)
-    }
-
-    /// Extract the document's text and embedded images, with a per-page
-    /// [`issue`](crate::document::extract::Extraction::issues) for any page that yielded no
-    /// text (scanned, needs OCR) or could not be decoded, and each readable page's
-    /// rendered glyph [`geometry`](crate::text::PageGeometry) from the *same*
-    /// content walk (so per-entity page rectangles cost no second walk).
-    ///
-    /// This is the text surface a caller runs detection over: a
-    /// [`Block`](crate::document::extract::Block)'s character offsets into its text are what
-    /// [`apply`](Pdf::apply) expects in its [`Detection`]s, since both
-    /// use the same content walk. The geometry maps a detected character span back
-    /// to the page rectangles it covers.
-    pub(crate) fn extract(&self) -> (Extraction, Vec<crate::text::PageGeometry>) {
-        Extraction::from_store_with_geometry(&self.0)
+    pub(crate) fn open(document: &[u8]) -> Result<Self> {
+        Store::open(document).map(Self)
     }
 
     /// The document with its hidden content removed, as new bytes with the
-    /// record of what was removed, or `None` when it carries none: metadata,
-    /// annotations other than internal links, actions and scripts, form values,
-    /// the outline and structure tree, optional-content layers, thumbnails, and
-    /// every object no longer reachable from the document.
+    /// record of what was removed: metadata, annotations other than internal
+    /// links, actions and scripts, form values, the outline and structure
+    /// tree, optional-content layers, thumbnails, and every object no longer
+    /// reachable from the document.
     ///
-    /// The codec runs this at decode, so the text extracted for detection is the
-    /// text that ships.
+    /// The document is always re-serialized, so what the source file carries
+    /// outside its object graph (a prior revision's superseded objects, bytes
+    /// after the end marker) never reaches the output.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
-    /// sanitized document cannot be saved.
-    pub fn sanitize(&self) -> Result<Option<(Vec<u8>, StrippedContent)>> {
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
+    /// content stream cannot be rewritten or the sanitized document cannot be
+    /// saved.
+    pub(crate) fn sanitize(&self) -> Result<(Vec<u8>, StrippedContent)> {
         let mut doc = self.0.clone_doc();
         let stripped = doc.sanitize()?;
-        if stripped.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some((doc.save_pruned()?, stripped)))
+        Ok((doc.save_pruned()?, stripped))
     }
 
     /// Check that the document carries no hidden content: what the codec runs
@@ -124,43 +86,60 @@ impl Pdf {
     ///
     /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) naming what
     /// survived.
-    pub fn check_sanitized(&self) -> Result<()> {
+    pub(crate) fn check_sanitized(&self) -> Result<()> {
         self.0.doc().check_sanitized()
     }
 
-    /// The embedded image `id` of `kind`, stored as `bytes`, as the image
-    /// pipeline reads it, with its file-extension hint (see
-    /// [`image::surface`]).
+    /// Every page's text, with the map from each character back to the glyph
+    /// that drew it and that glyph's box.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if raw
-    /// samples the sanitizer kept cannot be decoded.
-    pub(crate) fn surface_image(
-        &self,
-        id: ImageId,
-        kind: EmbeddingKind,
-        bytes: Bytes,
-    ) -> Result<Option<(Bytes, &'static str)>> {
-        image::surface(self.0.doc(), id, kind, bytes)
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) or
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) for a
+    /// page whose content cannot be read, and
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for text that
+    /// cannot be located: a page that cannot be read is never treated as one
+    /// with nothing to redact.
+    pub(crate) fn text(&self) -> Result<Vec<TextBlock>> {
+        text::text_blocks(&self.0)
+    }
+
+    /// Every embedded image, as the image pipeline reads it.
+    ///
+    /// # Errors
+    ///
+    /// As [`image::surfaced`].
+    pub(crate) fn images(&self) -> Result<Vec<SurfacedImage>> {
+        image::surfaced(self.0.doc())
+    }
+
+    /// Every attached file, decoded, in tree order.
+    ///
+    /// # Errors
+    ///
+    /// As [`attachment::attachments`].
+    pub(crate) fn attachments(&self) -> Result<Vec<Attachment>> {
+        attachment::attachments(&self.0)
     }
 
     /// The document with `redaction` applied, every step on one copy of the
-    /// document and saved once: the glyphs of the detected text deleted, the
-    /// redacted images and scanned pages written back, the unreadable ones
-    /// removed or cleared, and the attachments replaced or dropped.
+    /// document and saved once: the glyphs of the detected text deleted
+    /// (located through `blocks`, this document's [`text`](Pdf::text)), the
+    /// redacted images and pages written back, the unreadable ones removed or
+    /// cleared, and the attachments replaced or dropped.
     ///
     /// # Errors
     ///
     /// As each step: [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a
-    /// replacement or removal names nothing in the document, or a page draws
-    /// text with an undecodable font;
+    /// replacement or removal names nothing in the document, or a detected
+    /// glyph cannot be found;
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
     /// content stream cannot be rewritten or the document cannot be saved.
-    pub(crate) fn apply(&self, redaction: &Redaction) -> Result<Vec<u8>> {
+    pub(crate) fn apply(&self, blocks: &[TextBlock], redaction: &Redaction) -> Result<Vec<u8>> {
         let mut doc = self.0.clone_doc();
         if !redaction.text.is_empty() {
-            text::redact::delete(&self.0, &mut doc, &redaction.text)?;
+            text::redact::delete(&self.0, blocks, &mut doc, &redaction.text)?;
         }
         image::replace(&mut doc, &redaction.images)?;
         if !redaction.removed_images.is_empty() {
@@ -173,6 +152,18 @@ impl Pdf {
         }
         #[cfg(feature = "render")]
         {
+            if !redaction.scanned.is_empty() {
+                let redraws = redaction.redraws_images();
+                let staged;
+                let drawn = if redraws {
+                    staged = Pdf::open(&doc.clone().save_pruned()?)?;
+                    &staged
+                } else {
+                    self
+                };
+                let pages = drawn.scanned(&redaction.scanned, redaction.scan_scale, redraws)?;
+                render::reflatten(&mut doc, &pages)?;
+            }
             render::reflatten(&mut doc, &redaction.pages)?;
             render::clear(&mut doc, &redaction.cleared_pages)?;
         }
@@ -184,67 +175,112 @@ impl Pdf {
         doc.save_pruned()
     }
 
-    /// Every attached file (the `/EmbeddedFiles` name tree), decoded, in tree
-    /// order.
+    /// The 1-based pages `numbers` rendered at `scale` to PNG images, keyed by
+    /// page number.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
-    /// tree or a file cannot be read, or
-    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if a file
-    /// decompresses past the bound.
-    pub(crate) fn attachments(&self) -> Result<Vec<Attachment>> {
-        attachment::attachments(&self.0)
-    }
-
-    /// Render only the 1-based pages in `numbers` at `scale`, keyed by page
-    /// number, so a pass needing a few pages does not rasterise the whole
-    /// document.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if PDFium
-    /// cannot load or render the document (or the native library is unavailable).
+    /// As [`render::render_pages`].
     #[cfg(feature = "render")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn render_pages(
+    pub(crate) fn render_pages(
         &self,
-        numbers: std::collections::BTreeSet<u32>,
+        numbers: BTreeSet<u32>,
         scale: f32,
-    ) -> Result<std::collections::BTreeMap<u32, RenderedPage>> {
-        crate::render::render_pages(&self.0, numbers, scale)
+    ) -> Result<BTreeMap<u32, Bytes>> {
+        render::render_pages(&self.0, numbers, scale)
     }
 
-    /// Observe every page at `scale`: render it to pixels and extract its
-    /// text-layer glyphs in rendered-pixel space, the input to raster redaction.
+    /// Every page's text as PDFium reads it, with each glyph's box.
     ///
     /// # Errors
     ///
-    /// As [`render_pages`](Pdf::render_pages).
+    /// As [`render::observe`].
     #[cfg(feature = "render")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn observe(&self, scale: f32) -> Result<Vec<PageObservation>> {
-        crate::render::observe(&self.0, scale)
+    pub(crate) fn observe(&self) -> Result<Vec<PageObservation>> {
+        render::observe(&self.0)
     }
 
-    /// Redact `detections` by overwriting their pixels and emitting a fresh
-    /// image-only PDF (flatten), with a provenance certificate.
+    /// The document with every page replaced by a redacted image of it: a
+    /// scanned page by its redacted blob in `redaction`, every other page
+    /// rendered at `scale` with the glyphs `detections` cover in `pages`
+    /// painted over. The embedded images are redacted first, so the render
+    /// shows them redacted, and the attachments are replaced or dropped.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) for a
-    /// malformed observation, or
-    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the redacted PDF
-    /// cannot be emitted.
+    /// As [`render::glyph_boxes`], [`render::flatten`], and
+    /// [`apply`](Pdf::apply).
     #[cfg(feature = "render")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn redact_raster(
+    pub(crate) fn flatten(
         &self,
         pages: &[PageObservation],
+        scale: f32,
         detections: &[Detection],
-        fill: [u8; 3],
-    ) -> Result<(Vec<u8>, crate::render::Certificate)> {
-        crate::render::redact_raster(&self.0, pages, detections, fill)
+        redaction: Redaction,
+    ) -> Result<Vec<u8>> {
+        let redraws = redaction.redraws_images();
+        let images = Redaction {
+            images: redaction.images,
+            removed_images: redaction.removed_images,
+            ..Redaction::default()
+        };
+        let redacted;
+        let pdf = if redraws {
+            redacted = Pdf::open(&self.apply(&[], &images)?)?;
+            &redacted
+        } else {
+            self
+        };
+
+        let scanned: BTreeSet<u32> = redaction
+            .scanned
+            .iter()
+            .map(|page| page.number)
+            .chain(redaction.cleared_pages.iter().copied())
+            .collect();
+        let rendered: BTreeSet<u32> = pages
+            .iter()
+            .map(|page| page.page)
+            .filter(|number| !scanned.contains(number))
+            .collect();
+        let boxes = render::glyph_boxes(pages, detections)?;
+        let mut flat = render::flatten(&pdf.0, rendered, scale, &boxes)?;
+        flat.extend(pdf.scanned(&redaction.scanned, scale, redraws)?);
+        let pages = Redaction {
+            pages: flat,
+            cleared_pages: redaction.cleared_pages,
+            attachments: redaction.attachments,
+            removed_attachments: redaction.removed_attachments,
+            ..Redaction::default()
+        };
+        pdf.apply(&[], &pages)
+    }
+
+    /// The images that replace the redacted `scanned` pages, rendered at
+    /// `scale`. When `redrawn`, this document draws embedded images other than
+    /// the render the pipeline was given, so each redaction is laid over a
+    /// fresh render of the page (see [`render::composite`]); otherwise the
+    /// redacted image is the page as it is.
+    ///
+    /// # Errors
+    ///
+    /// As [`render::composite`], and
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a
+    /// redacted image lopdf cannot embed.
+    #[cfg(feature = "render")]
+    fn scanned(
+        &self,
+        scanned: &[ScannedPage],
+        scale: f32,
+        redrawn: bool,
+    ) -> Result<Vec<PageReplacement>> {
+        if redrawn {
+            return render::composite(&self.0, scanned, scale);
+        }
+        scanned
+            .iter()
+            .map(|page| PageReplacement::encoded(page.number, page.redacted.to_vec()))
+            .collect()
     }
 }
 
@@ -258,9 +294,16 @@ pub(crate) struct Redaction {
     pub(crate) images: Vec<ImageReplacement>,
     /// Embedded images no codec could read, removed.
     pub(crate) removed_images: Vec<ImageId>,
-    /// Scanned pages reflattened to their redacted raster.
+    /// Pages replaced by a single redacted image.
     #[cfg(feature = "render")]
     pub(crate) pages: Vec<PageReplacement>,
+    /// Scanned pages the image pipeline changed, each replaced by its redacted
+    /// image.
+    #[cfg(feature = "render")]
+    pub(crate) scanned: Vec<ScannedPage>,
+    /// The scale the scanned pages were rendered at.
+    #[cfg(feature = "render")]
+    pub(crate) scan_scale: f32,
     /// Scanned pages no codec could read, cleared.
     #[cfg(feature = "render")]
     pub(crate) cleared_pages: Vec<u32>,
@@ -271,10 +314,18 @@ pub(crate) struct Redaction {
 }
 
 impl Redaction {
+    /// Whether the redaction changes what an embedded image draws, so a page
+    /// rendered before it no longer shows what the document draws.
+    #[cfg(feature = "render")]
+    fn redraws_images(&self) -> bool {
+        !self.images.is_empty() || !self.removed_images.is_empty()
+    }
+
     /// Whether the redaction changes nothing.
     pub(crate) fn is_empty(&self) -> bool {
         #[cfg(feature = "render")]
-        let pages = self.pages.is_empty() && self.cleared_pages.is_empty();
+        let pages =
+            self.pages.is_empty() && self.scanned.is_empty() && self.cleared_pages.is_empty();
         #[cfg(not(feature = "render"))]
         let pages = true;
         self.text.is_empty()
@@ -283,5 +334,79 @@ impl Redaction {
             && pages
             && self.attachments.is_empty()
             && self.removed_attachments.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, IncrementalDocument, Object, Stream, dictionary};
+
+    use super::*;
+
+    /// A one-page document whose page shows `text`, and its content id.
+    fn showing(text: &str) -> (Document, ObjectId) {
+        let mut doc = Document::with_version("1.5");
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Tj", vec![Object::string_literal(text)]),
+            Operation::new("ET", vec![]),
+        ];
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            Content { operations }.encode().unwrap(),
+        ));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        (doc, content)
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    /// An incremental update leaves the superseded content in the file, outside
+    /// the object graph; the sanitized document never carries it.
+    #[test]
+    fn a_superseded_revision_never_ships() {
+        let (mut doc, content) = showing("Jane Roe");
+        let mut first = Vec::new();
+        doc.save_to(&mut first).unwrap();
+
+        let mut update =
+            IncrementalDocument::create_from(first.clone(), Document::load_mem(&first).unwrap());
+        update.opt_clone_object_to_new_document(content).unwrap();
+        let stream = update
+            .new_document
+            .get_object_mut(content)
+            .and_then(Object::as_stream_mut)
+            .unwrap();
+        stream.set_plain_content(b"BT /F1 12 Tf (public) Tj ET".to_vec());
+        let mut updated = Vec::new();
+        update.save_to(&mut updated).unwrap();
+        assert!(
+            contains(&updated, b"Jane Roe"),
+            "the fixture keeps the old revision"
+        );
+
+        let (sanitized, _) = Pdf::open(&updated).unwrap().sanitize().unwrap();
+        assert!(!contains(&sanitized, b"Jane Roe"));
+        assert!(contains(&sanitized, b"public"));
     }
 }

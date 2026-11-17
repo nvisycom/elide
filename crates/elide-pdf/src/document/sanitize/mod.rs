@@ -44,6 +44,7 @@
 
 mod annotations;
 mod check;
+mod direct;
 mod ext;
 mod layers;
 mod names;
@@ -89,6 +90,8 @@ impl SanitizeDocumentExt for Document {
         // counted. What is unreachable now is a prior revision's content; what the
         // removals below leave unreachable is counted with the removal itself.
         self.objects.retain(|_, object| !object.is_xref_stream());
+        // Every later check reads what an object is from a direct value.
+        direct::resolve(self);
         stripped.record(
             HiddenContent::PriorRevision,
             None,

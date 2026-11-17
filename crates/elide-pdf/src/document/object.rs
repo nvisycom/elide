@@ -2,7 +2,15 @@
 //! crate's modules share, as methods on the types they read.
 
 use elide_core::{Error, Result};
-use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
+use lopdf::{
+    DecompressError, Dictionary, Document, Error as PdfError, Object, ObjectId, Stream,
+    decode_text_string,
+};
+
+/// The most any one content stream, page, or embedded image may decode to: a
+/// compressed stream may claim any size, so its decode is bounded to refuse a
+/// decompression bomb.
+pub(crate) const MAX_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 
 /// How far a `/Parent` inheritance walk goes, against a cyclic page tree.
 const MAX_PARENT_WALK: u32 = 64;
@@ -33,6 +41,17 @@ pub(crate) trait DocumentExt {
     /// The resource dictionaries `page`'s content resolves names against: its
     /// own and those it inherits.
     fn page_resources(&self, page: ObjectId) -> Vec<Dictionary>;
+
+    /// The decoded content of `page`, its content streams concatenated, at
+    /// most [`MAX_CONTENT_BYTES`].
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if the
+    /// content decodes past the bound, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
+    /// content stream is missing or cannot be decoded.
+    fn page_content(&self, page: ObjectId) -> Result<Vec<u8>>;
 
     /// Write `content` as the decompressed body of the stream `id`, leaving its
     /// other keys intact.
@@ -106,6 +125,22 @@ impl DocumentExt for Document {
             .collect()
     }
 
+    fn page_content(&self, page: ObjectId) -> Result<Vec<u8>> {
+        let mut content = Vec::new();
+        for id in self.get_page_contents(page) {
+            let stream = self
+                .get_object(id)
+                .and_then(Object::as_stream)
+                .map_err(|e| Error::malformed(format!("page content stream {id:?}: {e}")))?;
+            content.extend(decode(
+                stream,
+                MAX_CONTENT_BYTES.saturating_sub(content.len()),
+            )?);
+            content.push(b'\n');
+        }
+        Ok(content)
+    }
+
     fn set_stream_content(&mut self, id: ObjectId, content: Vec<u8>) -> Result<()> {
         match self.get_object_mut(id) {
             Ok(Object::Stream(stream)) => {
@@ -126,6 +161,40 @@ impl DocumentExt for Document {
             .map_err(|e| Error::malformed(format!("could not save PDF: {e}")))?;
         Ok(out)
     }
+}
+
+/// Reads of one [`Stream`].
+pub(crate) trait StreamExt {
+    /// The stream's content with its filters decoded, at most
+    /// [`MAX_CONTENT_BYTES`].
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if the
+    /// content decodes past the bound, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// it cannot be decoded.
+    fn decoded(&self) -> Result<Vec<u8>>;
+}
+
+impl StreamExt for Stream {
+    fn decoded(&self) -> Result<Vec<u8>> {
+        decode(self, MAX_CONTENT_BYTES)
+    }
+}
+
+/// `stream`'s content with its filters decoded, at most `limit` bytes.
+fn decode(stream: &Stream, limit: usize) -> Result<Vec<u8>> {
+    stream
+        .get_plain_content_with_limit(limit)
+        .map_err(|e| match e {
+            PdfError::Decompress(DecompressError::MemoryLimitExceeded { .. }) => {
+                Error::resource_limit(format!(
+                    "content decodes past the {MAX_CONTENT_BYTES}-byte limit"
+                ))
+            }
+            e => Error::malformed(format!("content stream: {e}")),
+        })
 }
 
 /// Reads of one [`Object`].

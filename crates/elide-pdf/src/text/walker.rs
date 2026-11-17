@@ -11,17 +11,23 @@
 //! glyphs, so this is what recovers the logical text a caller runs detection over.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::slice;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, Encoding, Object, ObjectId};
 
-use super::geometry::{Cursor, DeviceRect, Matrix, PageFrame, SpaceRule, TextState};
+use super::geometry::{
+    Cursor, DeviceRect, GlyphRect, Matrix, PageFrame, SpaceRule, TextState, page_frame,
+};
 use super::glyphs::decode_glyphs;
+use super::scope::{Scope, dict_or_ref, scope_fonts, scope_xobject_id};
 use super::widths::{GlyphMetrics, WidthSource};
-use super::{Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock};
+use super::{
+    Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock, pattern,
+};
 use crate::document::Store;
-use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt, StreamExt};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (ISO 32000-1 §9.3.3).
@@ -30,14 +36,14 @@ const SPACE_CODE: u32 = 32;
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
 /// legitimately deep nesting).
-const MAX_XOBJECT_DEPTH: u8 = 12;
+pub(super) const MAX_XOBJECT_DEPTH: u8 = 12;
 
 /// Total Form-XObject walks permitted per page. Depth and the cycle guard bound
 /// how *deep* and how re-entrant the walk is, but a form reached through many
 /// distinct paths is re-walked on each, so a small document can still fan out to
 /// an enormous number of decodes. This caps the total; a genuine page draws far
 /// fewer forms than this, so it only bites pathological fan-out.
-const MAX_XOBJECT_WALKS: u32 = 4_096;
+pub(super) const MAX_XOBJECT_WALKS: u32 = 4_096;
 
 /// A page's text and glyph map under construction, driven by the text geometry.
 ///
@@ -76,16 +82,6 @@ struct TextRun<'a> {
     /// The font-table index of the currently selected font, stamped onto every
     /// glyph pushed so a deletion can later reach that font's `/ToUnicode`.
     font: u16,
-}
-
-/// One glyph's device-space box and the decoded character range it drew, so a
-/// detected char span can be resolved back to the page rectangles it covers.
-#[derive(Debug, Clone)]
-pub(crate) struct GlyphRect {
-    /// The page-local decoded character range this glyph produced.
-    pub(crate) chars: std::ops::Range<usize>,
-    /// The glyph's box in device (user) space, bottom-left origin.
-    pub(crate) rect: DeviceRect,
 }
 
 impl TextRun<'_> {
@@ -291,69 +287,6 @@ fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
     })
 }
 
-/// Read a page's visible rectangle and display rotation into a [`PageFrame`],
-/// for normalizing glyph device boxes to page fractions.
-///
-/// `/CropBox` (the displayed region) is preferred, falling back to `/MediaBox`;
-/// both and `/Rotate` are inheritable, so this walks up `/Parent` for a value the
-/// page itself does not set. Any missing piece defaults (a unit crop, zero
-/// rotation), so a malformed page yields an unnormalized-but-valid frame rather
-/// than failing — geometry is best-effort and never blocks redaction.
-fn page_frame(doc: &Document, page_id: ObjectId) -> PageFrame {
-    let crop = inherited_rect(doc, page_id, b"CropBox")
-        .or_else(|| inherited_rect(doc, page_id, b"MediaBox"));
-    let rotate = doc
-        .inherited(page_id, b"Rotate", |value| value.as_i64().ok())
-        .unwrap_or(0);
-    // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
-    // defensive against junk).
-    let rotate = rotate.rem_euclid(360) as u32;
-    let rotate = (rotate / 90) * 90;
-
-    match crop {
-        Some([x0, y0, x1, y1]) => PageFrame {
-            crop_x0: x0.min(x1),
-            crop_y0: y0.min(y1),
-            crop_w: (x1 - x0).abs(),
-            crop_h: (y1 - y0).abs(),
-            rotate,
-        },
-        None => PageFrame {
-            crop_x0: 0.0,
-            crop_y0: 0.0,
-            crop_w: 1.0,
-            crop_h: 1.0,
-            rotate,
-        },
-    }
-}
-
-/// Resolve a 4-number rectangle attribute (`MediaBox`/`CropBox`) on a page,
-/// walking up `/Parent` for an inherited value. `None` if absent or malformed.
-///
-/// The attribute value, and each of its four elements, may be an indirect
-/// reference (`/MediaBox 3 0 R`, with `3 0 obj [ 0 0 612 792 ]`) — a valid and
-/// common encoding — so both are dereferenced before being read as numbers. A
-/// box with any element that is not a resolvable number is rejected (returns
-/// `None`), so the caller's fallback chain (CropBox → MediaBox → unit frame)
-/// stays available rather than accepting a distorted box.
-fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
-    doc.inherited(page_id, key, |value| {
-        let array = doc.resolve_array(value)?;
-        let [a, b, c, d] = array.as_slice() else {
-            return None;
-        };
-        // All four elements must resolve to numbers; a single unresolvable one
-        // fails the whole box rather than defaulting to 0.
-        Some([
-            doc.resolve_number(a)?,
-            doc.resolve_number(b)?,
-            doc.resolve_number(c)?,
-            doc.resolve_number(d)?,
-        ])
-    })
-}
-
 /// Build one [`TextBlock`] per page by walking its content in operator order,
 /// the same order lopdf's text extraction uses, so a character offset maps to
 /// the glyph that drew it. Text drawn through a `Do`-invoked Form XObject is
@@ -367,11 +300,11 @@ fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64;
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
     let doc = store.doc();
-    let max_page_bytes = store.max_page_bytes().get();
+    pattern::refuse_text(doc)?;
     let pages = doc.get_pages();
     let mut out = Vec::with_capacity(pages.len());
     for (&page, &page_id) in &pages {
-        out.push(text_block_for_page(doc, page, page_id, max_page_bytes)?);
+        out.push(text_block_for_page(doc, page, page_id)?);
     }
     Ok(out)
 }
@@ -380,9 +313,7 @@ pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
 /// XObjects it draws) in operator order, so a character offset maps to the glyph
 /// that drew it.
 ///
-/// The per-page primitive [`text_blocks`] loops over. Extraction calls it too,
-/// classifying a page it cannot decode as an issue rather than failing the whole
-/// document, so its error policy differs from the redactor's fail-closed one.
+/// The per-page primitive [`text_blocks`] loops over.
 ///
 /// # Errors
 ///
@@ -390,21 +321,8 @@ pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
 /// content, resources, or an XObject stream cannot be read;
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the page draws text
 /// with a font whose encoding cannot be decoded.
-pub(crate) fn text_block_for_page(
-    doc: &Document,
-    page: u32,
-    page_id: ObjectId,
-    max_page_bytes: usize,
-) -> Result<TextBlock> {
-    let content_data = doc.get_page_content(page_id);
-    // Guard against a decompression bomb: refuse a page whose (already
-    // decompressed) content stream exceeds the bound rather than walking it.
-    if content_data.len() > max_page_bytes {
-        return Err(Error::resource_limit(format!(
-            "page {page} content is {} bytes, over the {max_page_bytes}-byte limit",
-            content_data.len()
-        )));
-    }
+fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<TextBlock> {
+    let content_data = doc.page_content(page_id)?;
     let content = Content::decode(&content_data)
         .map_err(|e| Error::malformed(format!("page {page} content: {e}")))?;
 
@@ -429,7 +347,6 @@ pub(crate) fn text_block_for_page(
         pen: None,
         active: BTreeSet::new(),
         page,
-        max_page_bytes,
         walks_remaining: MAX_XOBJECT_WALKS,
     };
 
@@ -447,10 +364,9 @@ pub(crate) fn text_block_for_page(
     )?;
 
     // The page's visible rectangle and rotation, for normalizing glyph device
-    // boxes to page fractions. Read once per page (best-effort: a page missing
-    // its boxes falls back to a unit frame, leaving geometry unnormalized rather
-    // than failing — geometry never blocks extraction/redaction).
-    let frame = page_frame(doc, page_id);
+    // boxes to page fractions. A page missing its boxes falls back to a unit
+    // frame, leaving geometry unnormalized rather than failing.
+    let frame = page_frame(doc, page_id).unwrap_or(PageFrame::UNIT);
 
     Ok(TextBlock {
         page,
@@ -463,14 +379,6 @@ pub(crate) fn text_block_for_page(
     })
 }
 
-/// Walk one content stream in operator order, appending its text and glyph map
-/// to `accum`, and recursing into each Form XObject drawn with `Do`.
-///
-/// `scope` is the resource dictionary a `Tf`/`Do` resolves names in. `stream` is
-/// stamped onto every glyph so a deletion edits the correct stream. `active`
-/// holds the XObjects currently on the recursion stack (cycle guard); `depth`
-/// bounds nesting. Text under an undecodable font fails closed, as at page level.
-///
 /// The caller's graphics state passed into a `Do`-invoked Form XObject: the
 /// font it had selected, its parametric text state (with the form's `/Matrix`
 /// already composed onto the CTM), and the pen position, so the form's text is
@@ -509,6 +417,14 @@ struct InheritedFont<'a> {
     metrics: GlyphMetrics,
 }
 
+/// Walk one content stream in operator order, appending its text and glyph map
+/// to `accum`, and recursing into each Form XObject drawn with `Do`.
+///
+/// `scope` is the resource dictionary a `Tf`/`Do` resolves names in. `stream` is
+/// stamped onto every glyph so a deletion edits the correct stream. `active`
+/// holds the XObjects currently on the recursion stack (cycle guard); `depth`
+/// bounds nesting. Text under an undecodable font fails closed, as at page level.
+///
 /// `inherited` is the caller's graphics state at the `Do` that invoked this
 /// stream: a Form XObject inherits the graphics state, so text it draws before
 /// its own operators uses the caller's font *and* transform. It carries the
@@ -681,7 +597,7 @@ fn walk_stream(
                     Some(Some(enc)) => {
                         let (operands, base): (&[Object], usize) = if op.operator == "\"" {
                             match op.operands.get(2) {
-                                Some(s) => (std::slice::from_ref(s), 2),
+                                Some(s) => (slice::from_ref(s), 2),
                                 None => (&[], 0),
                             }
                         } else {
@@ -712,7 +628,13 @@ fn walk_stream(
                             ctx.page
                         )));
                     }
-                    None => {}
+                    None => {
+                        return Err(Error::redaction(format!(
+                            "page {} draws text before selecting a font; \
+                             its text cannot be decoded for redaction",
+                            ctx.page
+                        )));
+                    }
                 }
             }
 
@@ -747,7 +669,8 @@ fn walk_stream(
 /// Resolve and recurse into the Form XObject named `name` in `scope`.
 ///
 /// Skips a non-form (e.g. image) XObject, a name absent from the scope, and a
-/// re-entrant or too-deep reference (cycle/limit guard). A form's own
+/// re-entrant reference (cycle guard), none of which draws text; a form nested
+/// past [`MAX_XOBJECT_DEPTH`] is an error. A form's own
 /// `/Resources` become the scope for its content; when it has none the parent
 /// scope stands in, as the spec allows.
 fn walk_xobject<'a>(
@@ -758,9 +681,6 @@ fn walk_xobject<'a>(
     inherited: Inherited<'a>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
-    if depth == 0 {
-        return Ok(());
-    }
     let Some(xobject_id) = scope_xobject_id(doc, scope, name) else {
         return Ok(());
     };
@@ -776,18 +696,14 @@ fn walk_xobject<'a>(
     if !stream_obj.dict.has_subtype(b"Form") {
         return Ok(());
     }
-    let bytes = stream_obj
-        .decompressed_content()
-        .map_err(|e| Error::malformed(format!("XObject content: {e}")))?;
-    // Bound the decompressed XObject stream, as for page content: a Form XObject
-    // is another place a decompression bomb could hide.
-    if bytes.len() > ctx.max_page_bytes {
+    if depth == 0 {
         return Err(Error::resource_limit(format!(
-            "XObject content is {} bytes, over the {}-byte limit",
-            bytes.len(),
-            ctx.max_page_bytes
+            "page {} nests Form XObjects deeper than {MAX_XOBJECT_DEPTH} levels; \
+             its text cannot be walked",
+            ctx.page
         )));
     }
+    let bytes = stream_obj.decoded()?;
     let content = Content::decode(&bytes)
         .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
@@ -847,79 +763,6 @@ fn walk_xobject<'a>(
     result
 }
 
-/// Collect the `/Font` entries of a resource scope (inline plus any referenced
-/// resource dictionaries), name -> font dictionary.
-fn scope_fonts<'a>(
-    doc: &'a Document,
-    scope: &Scope<'a>,
-) -> BTreeMap<Vec<u8>, &'a lopdf::Dictionary> {
-    let mut out = BTreeMap::new();
-    let mut add = |resources: &'a lopdf::Dictionary| {
-        if let Ok(font) = resources.get(b"Font")
-            && let Some(font_dict) = dict_or_ref(doc, font)
-        {
-            for (name, value) in font_dict.iter() {
-                let font = match value {
-                    Object::Reference(id) => doc.get_dictionary(*id).ok(),
-                    Object::Dictionary(dict) => Some(dict),
-                    _ => None,
-                };
-                if let Some(font) = font {
-                    out.entry(name.clone()).or_insert(font);
-                }
-            }
-        }
-    };
-    if let Some(inline) = scope.inline {
-        add(inline);
-    }
-    for &id in scope.referenced {
-        if let Ok(resources) = doc.get_dictionary(id) {
-            add(resources);
-        }
-    }
-    out
-}
-
-/// Resolve the object id of the XObject named `name` in `scope`'s `/XObject`
-/// dictionary, if it is an indirect reference.
-fn scope_xobject_id(doc: &Document, scope: &Scope<'_>, name: &[u8]) -> Option<ObjectId> {
-    let resource_dicts = scope.inline.into_iter().chain(
-        scope
-            .referenced
-            .iter()
-            .filter_map(|&id| doc.get_dictionary(id).ok()),
-    );
-    for resources in resource_dicts {
-        if let Ok(xobjects) = resources.get(b"XObject")
-            && let Some(xobjects) = dict_or_ref(doc, xobjects)
-            && let Ok(entry) = xobjects.get(name)
-            && let Ok(id) = entry.as_reference()
-        {
-            return Some(id);
-        }
-    }
-    None
-}
-
-/// Resolve an object that is a dictionary, inline or by reference.
-fn dict_or_ref<'a>(doc: &'a Document, object: &'a Object) -> Option<&'a lopdf::Dictionary> {
-    match object {
-        Object::Dictionary(dict) => Some(dict),
-        Object::Reference(id) => doc.get_dictionary(*id).ok(),
-        _ => None,
-    }
-}
-
-/// A resource dictionary scope a stream's `Tf`/`Do` names resolve in: an inline
-/// dictionary and any referenced resource dictionaries (a page can inherit
-/// several through its tree).
-#[derive(Clone, Copy)]
-struct Scope<'a> {
-    inline: Option<&'a lopdf::Dictionary>,
-    referenced: &'a [ObjectId],
-}
-
 /// The growing text, glyph map, and font table a walk appends to. Borrowed so a
 /// single accumulation spans the page content and every Form XObject it draws.
 struct TextAccum<'a> {
@@ -934,8 +777,8 @@ struct TextAccum<'a> {
 /// recurses into Form XObjects: the accumulating text/glyph/font output, the pen
 /// position shared across the page and every form it draws (so a word gap is
 /// judged consistently across a `Do` boundary), the XObjects currently on the
-/// recursion stack (cycle guard), the 1-based page number for diagnostics, the
-/// per-stream decompression-bomb bound, and the remaining total-walk budget.
+/// recursion stack (cycle guard), the 1-based page number for diagnostics, and the
+/// remaining total-walk budget.
 struct Walk<'a> {
     accum: TextAccum<'a>,
     /// Where the last shown glyph left the pen, in device space, shared across
@@ -943,9 +786,6 @@ struct Walk<'a> {
     pen: Option<(f64, f64)>,
     active: BTreeSet<ObjectId>,
     page: u32,
-    /// Maximum decompressed size of any single content stream (page or XObject),
-    /// refusing a decompression bomb.
-    max_page_bytes: usize,
     /// Form XObject walks still permitted on this page. The stack-based `active`
     /// guard stops re-entry (cycles) but not re-walks: a form reached through
     /// several distinct paths is walked once per path, so a shallow tree that
@@ -957,8 +797,9 @@ struct Walk<'a> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use lopdf::content::Operation;
-    use lopdf::dictionary;
+    use lopdf::{Dictionary, Stream, dictionary};
 
     use super::*;
 
@@ -998,10 +839,7 @@ mod tests {
             "Font" => dictionary! { "F1" => font_id },
         });
         let content = Content { operations: ops };
-        let content_id = doc.add_object(lopdf::Stream::new(
-            dictionary! {},
-            content.encode().unwrap(),
-        ));
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
         let pages_id = doc.new_object_id();
         let page_id = doc.add_object(dictionary! {
             "Type" => "Page",
@@ -1023,7 +861,7 @@ mod tests {
             "Pages" => pages_id,
         });
 
-        text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap()
+        text_block_for_page(&doc, 1, page_id).unwrap()
     }
 
     /// The extracted page text for `ops`.
@@ -1055,11 +893,7 @@ mod tests {
         );
         // Resolve the whole span's rects through the page geometry, as the codec
         // does.
-        let geometry = super::super::PageGeometry {
-            page: block.page,
-            rects: block.rects.clone(),
-            frame: block.frame,
-        };
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line → one rect: {rects:?}");
         let r = rects[0];
@@ -1086,11 +920,7 @@ mod tests {
             ],
             true,
         );
-        let geometry = super::super::PageGeometry {
-            page: block.page,
-            rects: block.rects.clone(),
-            frame: block.frame,
-        };
+        let geometry = block.geometry();
         let regions: Vec<_> = [0..4, 9..12]
             .into_iter()
             .flat_map(|chars| geometry.rects_for(chars))
@@ -1256,7 +1086,7 @@ mod tests {
             ],
         };
         // The form carries a /Matrix translating it to (20, 180) on the page.
-        let form_id = doc.add_object(lopdf::Stream::new(
+        let form_id = doc.add_object(Stream::new(
             dictionary! {
                 "Type" => "XObject",
                 "Subtype" => "Form",
@@ -1270,10 +1100,8 @@ mod tests {
         let page_content = Content {
             operations: vec![Operation::new("Do", vec!["Fm".into()])],
         };
-        let content_id = doc.add_object(lopdf::Stream::new(
-            dictionary! {},
-            page_content.encode().unwrap(),
-        ));
+        let content_id =
+            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
         let resources = doc.add_object(dictionary! {
             "XObject" => dictionary! { "Fm" => form_id },
         });
@@ -1293,17 +1121,13 @@ mod tests {
         );
         doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
 
-        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        let block = text_block_for_page(&doc, 1, page_id).unwrap();
         // The form's text is extracted (inheritance did not drop it).
         assert_eq!(block.text, "Hi");
         // And it is positioned by the inherited transform: the glyph box sits
         // near the form's translated origin x = 20/100 = 0.2, not the content's
         // local x = 0.
-        let geometry = super::super::PageGeometry {
-            page: block.page,
-            rects: block.rects.clone(),
-            frame: block.frame,
-        };
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
         assert!(
@@ -1380,7 +1204,7 @@ mod tests {
                 Operation::new("ET", vec![]),
             ],
         };
-        let form_id = doc.add_object(lopdf::Stream::new(
+        let form_id = doc.add_object(Stream::new(
             dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
             form_ops.encode().unwrap(),
         ));
@@ -1394,10 +1218,8 @@ mod tests {
                 Operation::new("Do", vec!["Fm".into()]),
             ],
         };
-        let content_id = doc.add_object(lopdf::Stream::new(
-            dictionary! {},
-            page_content.encode().unwrap(),
-        ));
+        let content_id =
+            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
         let resources = doc.add_object(dictionary! {
             "Font" => dictionary! { "F1" => font_id },
             "XObject" => dictionary! { "Fm" => form_id },
@@ -1416,13 +1238,9 @@ mod tests {
         );
         doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
 
-        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        let block = text_block_for_page(&doc, 1, page_id).unwrap();
         assert_eq!(block.text, "Hi");
-        let geometry = super::super::PageGeometry {
-            page: block.page,
-            rects: block.rects.clone(),
-            frame: block.frame,
-        };
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
         // Width > 0 proves the inherited font's widths advanced the pen; with no
@@ -1466,7 +1284,7 @@ mod tests {
                 Operation::new("ET", vec![]),
             ],
         };
-        let form_id = doc.add_object(lopdf::Stream::new(
+        let form_id = doc.add_object(Stream::new(
             dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
             form_ops.encode().unwrap(),
         ));
@@ -1508,10 +1326,8 @@ mod tests {
                 Operation::new("ET", vec![]),
             ],
         };
-        let content_id = doc.add_object(lopdf::Stream::new(
-            dictionary! {},
-            page_content.encode().unwrap(),
-        ));
+        let content_id =
+            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
         let resources = doc.add_object(dictionary! {
             "Font" => dictionary! { "F1" => font_id },
             "XObject" => dictionary! { "Fm" => form_id },
@@ -1530,7 +1346,7 @@ mod tests {
         );
         doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
 
-        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        let block = text_block_for_page(&doc, 1, page_id).unwrap();
         // A gap entering the form (Alpha→Beta) and leaving it (Beta→Gamma) are
         // both seen: the three words are space-separated.
         assert_eq!(block.text, "Alpha Beta Gamma");
@@ -1576,10 +1392,8 @@ mod tests {
                 Operation::new("ET", vec![]),
             ],
         };
-        let content_id = doc.add_object(lopdf::Stream::new(
-            dictionary! {},
-            page_content.encode().unwrap(),
-        ));
+        let content_id =
+            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
         let resources = doc.add_object(dictionary! {
             "Font" => dictionary! { "F1" => wide, "F2" => narrow },
         });
@@ -1597,12 +1411,8 @@ mod tests {
         );
         doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
 
-        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
-        let geometry = super::super::PageGeometry {
-            page: block.page,
-            rects: block.rects.clone(),
-            frame: block.frame,
-        };
+        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
         // "AB" at F1's 900/1000 × 10pt × 2 glyphs = 18pt wide, /100-pt page =
@@ -1614,93 +1424,104 @@ mod tests {
         );
     }
 
-    #[test]
-    fn inherited_rect_reads_a_direct_array() {
-        let mut doc = Document::with_version("1.7");
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+    /// A one-page document whose page draws `ops` with Helvetica as `/F1` and
+    /// the XObjects `/X0`, `/X1`, … that `xobjects` adds to it, returning the
+    /// document and its page id.
+    fn page_drawing(
+        ops: Vec<Operation>,
+        xobjects: impl FnOnce(&mut Document) -> Vec<ObjectId>,
+    ) -> (Document, ObjectId) {
+        let mut doc = Document::with_version("1.5");
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        assert_eq!(
-            inherited_rect(&doc, page, b"MediaBox"),
-            Some([0.0, 0.0, 612.0, 792.0]),
-        );
-    }
-
-    #[test]
-    fn inherited_rect_dereferences_an_indirect_box() {
-        // `/MediaBox 3 0 R` with `3 0 obj [ 0 0 612 792 ]` — a valid, common
-        // encoding that the direct `.as_array()` could not read, so the page
-        // frame fell back to a unit square and geometry stayed in raw points.
-        let mut doc = Document::with_version("1.7");
-        let box_id = doc.add_object(Object::Array(vec![
-            0.into(),
-            0.into(),
-            612.into(),
-            792.into(),
-        ]));
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "MediaBox" => Object::Reference(box_id),
+        let mut entries = Dictionary::new();
+        for (i, id) in xobjects(&mut doc).into_iter().enumerate() {
+            entries.set(format!("X{i}"), id);
+        }
+        let resources = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font },
+            "XObject" => entries,
         });
-        assert_eq!(
-            inherited_rect(&doc, page, b"MediaBox"),
-            Some([0.0, 0.0, 612.0, 792.0]),
-            "an indirect MediaBox must dereference to its array",
-        );
-    }
-
-    #[test]
-    fn inherited_rect_rejects_a_box_with_an_unresolvable_element() {
-        // An element that is a dangling reference must fail the whole box (so the
-        // caller falls back to MediaBox), not silently resolve to 0.
-        let mut doc = Document::with_version("1.7");
-        let dangling = doc.new_object_id(); // never inserted
-        let page = doc.add_object(dictionary! {
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            Content { operations: ops }.encode().unwrap(),
+        ));
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
             "Type" => "Page",
-            "CropBox" => vec![
-                0.into(),
-                0.into(),
-                Object::Reference(dangling),
-                792.into(),
-            ],
-        });
-        assert_eq!(inherited_rect(&doc, page, b"CropBox"), None);
-    }
-
-    #[test]
-    fn inherited_rect_rejects_a_non_numeric_element() {
-        let mut doc = Document::with_version("1.7");
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "CropBox" => vec![
-                0.into(),
-                0.into(),
-                Object::Name(b"oops".to_vec()),
-                792.into(),
-            ],
-        });
-        assert_eq!(inherited_rect(&doc, page, b"CropBox"), None);
-    }
-
-    #[test]
-    fn inherited_rect_walks_up_to_an_inherited_box() {
-        let mut doc = Document::with_version("1.7");
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages,
+            "Parent" => pages_id,
+            "Contents" => content,
+            "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
         });
         doc.objects.insert(
-            pages,
+            pages_id,
             Object::Dictionary(dictionary! {
-                "Type" => "Pages",
-                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
             }),
         );
-        assert_eq!(
-            inherited_rect(&doc, page, b"MediaBox"),
-            Some([0.0, 0.0, 595.0, 842.0]),
-        );
+        (doc, page_id)
+    }
+
+    /// Text shown with `/F1`, the font the page resources name.
+    fn hello() -> Vec<Operation> {
+        vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Tj", vec![Object::string_literal("Hello")]),
+            Operation::new("ET", vec![]),
+        ]
+    }
+
+    /// A form XObject drawing `ops`, its names resolved in `resources`.
+    fn form(ops: Vec<Operation>, resources: Dictionary) -> Stream {
+        Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => resources },
+            Content { operations: ops }.encode().unwrap(),
+        )
+    }
+
+    #[test]
+    fn text_shown_before_a_font_is_an_error() {
+        let ops = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tj", vec![Object::string_literal("Jane")]),
+            Operation::new("ET", vec![]),
+        ];
+        let (doc, page_id) = page_drawing(ops, |_| Vec::new());
+        let err = text_block_for_page(&doc, 1, page_id).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
+
+    /// Text in a form nested past the depth limit is never skipped.
+    #[test]
+    fn a_form_nested_too_deep_is_an_error() {
+        let (doc, page_id) = page_drawing(vec![Operation::new("Do", vec!["X0".into()])], |doc| {
+            let font = doc.add_object(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+            });
+            let mut inner = doc.add_object(form(
+                hello(),
+                dictionary! { "Font" => dictionary! { "F1" => font } },
+            ));
+            for _ in 0..=MAX_XOBJECT_DEPTH {
+                inner = doc.add_object(form(
+                    vec![Operation::new("Do", vec!["In".into()])],
+                    dictionary! { "XObject" => dictionary! { "In" => inner } },
+                ));
+            }
+            vec![inner]
+        });
+        let err = text_block_for_page(&doc, 1, page_id).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ResourceLimit);
+    }
+
+    #[test]
+    fn a_missing_content_stream_is_an_error() {
+        let (mut doc, page_id) = page_drawing(hello(), |_| Vec::new());
+        let content = doc.get_page_contents(page_id)[0];
+        doc.objects.remove(&content);
+        assert!(text_block_for_page(&doc, 1, page_id).is_err());
     }
 }

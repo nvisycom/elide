@@ -21,8 +21,8 @@ use lopdf::{Document, Object, ObjectId};
 use super::OffsetMap;
 use super::detection::Detection;
 use crate::document::Store;
-use crate::document::object::DocumentExt;
-use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub, text_blocks};
+use crate::document::object::{DocumentExt, StreamExt};
+use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub};
 
 /// The physical content stream a deletion edits, distinguishing streams an
 /// [`Address`] alone cannot.
@@ -49,8 +49,9 @@ enum StreamKey {
 /// of byte ranges (`(start, end)`) within that operand's string to drain.
 type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 
-/// Redact `detections` in `doc` by deleting the glyphs that drew them, read
-/// from the pristine document in `store`.
+/// Redact `detections` in `doc` by deleting the glyphs that drew them, located
+/// through `blocks`, the walk of the pristine document in `store` that the
+/// detections index.
 ///
 /// The output keeps a selectable text layer: only the detected glyphs are
 /// removed, with the original fonts and remaining text intact. Because it
@@ -60,12 +61,15 @@ type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 ///
 /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
 ///   document cannot be read or re-saved;
-/// - [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page draws text
-///   with an undecodable font, redaction is refused rather than silently leaving
-///   that text in place.
-pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]) -> Result<()> {
-    let blocks = text_blocks(store)?;
-
+/// - [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a detected
+///   glyph cannot be found in its content stream: redaction is refused rather
+///   than silently leaving that text in place.
+pub(crate) fn delete(
+    store: &Store,
+    blocks: &[TextBlock],
+    doc: &mut Document,
+    detections: &[Detection],
+) -> Result<()> {
     // Raw glyph codes deleted from each font, keyed by that font's
     // `/ToUnicode` stream object id, gathered across pages so a shared CMap is
     // scrubbed once after the content edits. Fonts without a `/ToUnicode`
@@ -81,7 +85,7 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
 
     // First pass over every page: record the codes of glyphs that will
     // survive, so the scrub can spare any code still in use.
-    for block in &blocks {
+    for block in blocks {
         let deleted_here: BTreeSet<usize> = detections
             .iter()
             .filter(|d| d.page == block.page)
@@ -95,7 +99,7 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
             .filter_map(|run| run.source)
             .collect();
         let streams = decode_glyph_streams(store, &survivors, block.page_id)?;
-        collect_deleted_codes(&streams, block, &survivors, &mut surviving_codes);
+        collect_codes(&streams, block, &survivors, &mut surviving_codes)?;
     }
 
     // Aggregate every block's deletions before touching any stream. A Form
@@ -116,7 +120,7 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
     let mut edited_pages: BTreeSet<ObjectId> = BTreeSet::new();
     let mut edited_xobjects: BTreeSet<ObjectId> = BTreeSet::new();
 
-    for block in &blocks {
+    for block in blocks {
         let dels = detections.iter().filter(|d| d.page == block.page);
         // The page's own content-object id set, this block's key for
         // `PageContent` glyphs (computed once; constant within the block).
@@ -147,7 +151,7 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
         // glyph's font slot indexes *this* block's font table, so codes must be
         // collected per block even for a stream shared across pages.
         let streams = decode_glyph_streams(store, &deleted_glyphs, block.page_id)?;
-        collect_deleted_codes(&streams, block, &deleted_glyphs, &mut deleted_codes);
+        collect_codes(&streams, block, &deleted_glyphs, &mut deleted_codes)?;
         for g in &deleted_glyphs {
             match g.address.stream {
                 StreamTarget::PageContent => {
@@ -175,10 +179,10 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
         if !written_contents.insert(content_ids.clone()) {
             continue;
         }
-        let bytes = pristine.get_page_content(page_id);
+        let bytes = pristine.page_content(page_id)?;
         let mut content = Content::decode(&bytes)
             .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
-        apply_deletions(&mut content, &to_delete, &StreamKey::Page(content_ids));
+        apply_deletions(&mut content, &to_delete, &StreamKey::Page(content_ids))?;
         let new_content = content
             .encode()
             .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
@@ -186,15 +190,10 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
             .map_err(|e| Error::malformed(format!("write page content: {e}")))?;
     }
     for id in edited_xobjects {
-        let bytes = match pristine.get_object(id) {
-            Ok(Object::Stream(s)) => s
-                .decompressed_content()
-                .map_err(|e| Error::malformed(format!("XObject content: {e}")))?,
-            _ => continue,
-        };
+        let bytes = xobject_content(pristine, id)?;
         let mut content = Content::decode(&bytes)
             .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
-        apply_deletions(&mut content, &to_delete, &StreamKey::XObject(id));
+        apply_deletions(&mut content, &to_delete, &StreamKey::XObject(id))?;
         let new_content = content
             .encode()
             .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
@@ -222,13 +221,8 @@ fn decode_glyph_streams(
             continue;
         }
         let bytes = match g.address.stream {
-            StreamTarget::PageContent => doc.get_page_content(page_id),
-            StreamTarget::XObject(id) => match doc.get_object(id) {
-                Ok(Object::Stream(s)) => s
-                    .decompressed_content()
-                    .map_err(|e| Error::malformed(format!("XObject content: {e}")))?,
-                _ => continue,
-            },
+            StreamTarget::PageContent => doc.page_content(page_id)?,
+            StreamTarget::XObject(id) => xobject_content(doc, id)?,
         };
         let content = Content::decode(&bytes)
             .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
@@ -237,48 +231,70 @@ fn decode_glyph_streams(
     Ok(out)
 }
 
+/// The decoded content of the Form XObject `id`.
+fn xobject_content(doc: &Document, id: ObjectId) -> Result<Vec<u8>> {
+    doc.get_object(id)
+        .and_then(Object::as_stream)
+        .map_err(|e| Error::malformed(format!("XObject {id:?}: {e}")))?
+        .decoded()
+}
+
 /// Read the raw glyph-code bytes of each glyph out of its (still unmutated)
 /// decoded stream, and record them against the object id of the glyph's font
 /// `/ToUnicode` CMap in `out`. Glyphs whose font has no CMap are skipped. These
 /// codes drive the `/ToUnicode` scrub (as both the deleted and surviving sets).
-fn collect_deleted_codes(
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a glyph's
+/// font or bytes are not where the walk recorded them.
+fn collect_codes(
     streams: &BTreeMap<StreamTarget, Content>,
     block: &TextBlock,
     glyphs: &[GlyphBytes],
     out: &mut BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
-) {
+) -> Result<()> {
     for g in glyphs {
-        let Some(entry) = block.fonts.get(g.font as usize) else {
-            continue;
-        };
+        let entry = block
+            .fonts
+            .get(usize::from(g.font))
+            .ok_or_else(|| Error::redaction(format!("page {} glyph names no font", block.page)))?;
         let Some(cmap_id) = entry.to_unicode else {
             continue;
         };
-        let Some(content) = streams.get(&g.address.stream) else {
-            continue;
-        };
-        let Some(op) = content.operations.get(g.address.op) else {
-            continue;
-        };
-        // Resolve the string operand the glyph lives in (plain `Tj` string, or
-        // an element of a `TJ` array).
-        let bytes: Option<&Vec<u8>> = match (op.operands.get(g.address.operand), g.address.item) {
-            (Some(Object::String(b, _)), None) => Some(b),
-            (Some(Object::Array(arr)), Some(k)) => match arr.get(k) {
-                Some(Object::String(b, _)) => Some(b),
-                _ => None,
-            },
-            _ => None,
-        };
-        if let Some(b) = bytes
-            && g.byte_end <= b.len()
-            && g.byte_start < g.byte_end
-        {
-            out.entry(cmap_id)
-                .or_default()
-                .insert(b[g.byte_start..g.byte_end].to_vec());
-        }
+        let content = streams
+            .get(&g.address.stream)
+            .ok_or_else(|| Error::redaction(format!("page {} glyph stream unread", block.page)))?;
+        let string = operand_string(content, &g.address)
+            .and_then(|bytes| bytes.get(g.byte_start..g.byte_end))
+            .filter(|code| !code.is_empty())
+            .ok_or_else(|| missing_glyph(&g.address))?;
+        out.entry(cmap_id).or_default().insert(string.to_vec());
     }
+    Ok(())
+}
+
+/// The string operand at `address` in `content`: a plain `Tj` string, or an
+/// element of a `TJ` array.
+fn operand_string<'a>(content: &'a Content, address: &Address) -> Option<&'a Vec<u8>> {
+    let op = content.operations.get(address.op)?;
+    match (op.operands.get(address.operand)?, address.item) {
+        (Object::String(bytes, _), None) => Some(bytes),
+        (Object::Array(items), Some(k)) => match items.get(k)? {
+            Object::String(bytes, _) => Some(bytes),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The error for a glyph whose bytes are not at the `address` the walk
+/// recorded.
+fn missing_glyph(address: &Address) -> Error {
+    Error::redaction(format!(
+        "no glyph at operation {} operand {} of {:?}; its text cannot be deleted",
+        address.op, address.operand, address.stream
+    ))
 }
 
 /// Remove the marked glyph byte ranges from each exact string, high-to-low so
@@ -293,33 +309,28 @@ fn collect_deleted_codes(
 /// the positional residue. The surviving text reflows (there are no font metrics
 /// here to preserve exact layout); a caller needing pixel-faithful layout uses
 /// the raster path instead.
-fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: &StreamKey) {
+fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: &StreamKey) -> Result<()> {
     // Only this physical stream's deletions; other streams are rewritten in their
     // own passes.
     let Some(sites) = to_delete.get(stream) else {
-        return;
+        return Ok(());
     };
-    for (
-        &Address {
+    for (address, ranges) in sites {
+        let Address {
             op, operand, item, ..
-        },
-        ranges,
-    ) in sites
-    {
-        let Some(op) = content.operations.get_mut(op) else {
-            continue;
-        };
-        let target: Option<&mut Vec<u8>> = match (op.operands.get_mut(operand), item) {
-            (Some(Object::String(bytes, _)), None) => Some(bytes),
-            (Some(Object::Array(arr)), Some(k)) => match arr.get_mut(k) {
-                Some(Object::String(bytes, _)) => Some(bytes),
+        } = *address;
+        let bytes = content
+            .operations
+            .get_mut(op)
+            .and_then(|op| match (op.operands.get_mut(operand)?, item) {
+                (Object::String(bytes, _), None) => Some(bytes),
+                (Object::Array(items), Some(k)) => match items.get_mut(k)? {
+                    Object::String(bytes, _) => Some(bytes),
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
-        };
-        let Some(bytes) = target else {
-            continue;
-        };
+            })
+            .ok_or_else(|| missing_glyph(address))?;
         // The same glyph range can be collected more than once (a ligature
         // whose one code spans several detected characters, or overlapping
         // detections). Merge overlapping/adjacent ranges so each byte span
@@ -335,23 +346,25 @@ fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: &Stream
                 _ => coalesced.push((s, e)),
             }
         }
+        if coalesced.last().is_some_and(|&(_, end)| end > bytes.len()) {
+            return Err(missing_glyph(address));
+        }
         // Drain high-to-low so earlier offsets stay valid.
         for &(s, e) in coalesced.iter().rev() {
-            if e <= bytes.len() && s < e {
-                bytes.drain(s..e);
-            }
+            bytes.drain(s..e);
         }
 
         // If this emptied a `TJ` string element, zero the numeric position
         // adjustments around it so no positional residue of the removed glyphs
-        // survives. Re-borrow the array (the `bytes` borrow has ended) to reach
-        // the sibling numbers.
-        if let (Some(Object::Array(arr)), Some(k)) = (op.operands.get_mut(operand), item)
-            && matches!(arr.get(k), Some(Object::String(b, _)) if b.is_empty())
+        // survives.
+        if let Some(k) = item
+            && let Some(Object::Array(items)) = content.operations[op].operands.get_mut(operand)
+            && matches!(items.get(k), Some(Object::String(b, _)) if b.is_empty())
         {
-            neutralize_kern_neighbors(arr, k);
+            neutralize_kern_neighbors(items, k);
         }
     }
+    Ok(())
 }
 
 /// Zero the numeric position adjustments contiguous to `arr[k]` (an emptied
@@ -447,7 +460,7 @@ mod tests {
             Object::string_literal(" Agent"),
         ]);
         let to_delete = deletions(2, vec![(0, 3)]);
-        apply_deletions(&mut content, &to_delete, &page_key());
+        apply_deletions(&mut content, &to_delete, &page_key()).unwrap();
 
         let arr = tj_array(&content);
         // "ret" is now empty; both adjacent kerns (-40 before, -55 after) zeroed.
@@ -470,7 +483,7 @@ mod tests {
             Object::string_literal("Agent"),
         ]);
         let to_delete = deletions(0, vec![(0, 3)]);
-        apply_deletions(&mut content, &to_delete, &page_key());
+        apply_deletions(&mut content, &to_delete, &page_key()).unwrap();
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("ret"), "survivors mangled");
@@ -492,7 +505,7 @@ mod tests {
             Object::string_literal("c"),
         ]);
         let to_delete = deletions(2, vec![(0, 2)]);
-        apply_deletions(&mut content, &to_delete, &page_key());
+        apply_deletions(&mut content, &to_delete, &page_key()).unwrap();
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("a"));
