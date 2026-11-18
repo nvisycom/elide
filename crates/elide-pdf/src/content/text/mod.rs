@@ -267,6 +267,7 @@ mod tests {
 
     use super::*;
     use crate::fixtures::with_pages;
+    use crate::pdf::reader::GlyphRect;
     use crate::sanitize::{Check, Rebuild};
 
     /// Every stream of the PDF `bytes`, decoded, as text.
@@ -329,6 +330,35 @@ mod tests {
     #[test]
     fn a_pattern_selected_many_times_is_walked_once() {
         tiling_text(Object::Integer(1), 5_000);
+    }
+
+    /// The glyph boxes of the text a tiling pattern draws, its page painting
+    /// with it as `content` draws.
+    fn tiled_rects(content: &[u8]) -> Vec<GlyphRect> {
+        let bytes = tiling_document(Object::Integer(1), content.to_vec());
+        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        pdf.read(Text).unwrap().remove(0).rects
+    }
+
+    /// A pattern's text shows on every tile it paints: its glyph boxes are
+    /// placed on each, from its cell (50 by 20 points) out.
+    #[test]
+    fn pattern_text_is_placed_on_each_tile_painted() {
+        let one = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re f");
+        assert!(!one.is_empty());
+        let four = tiled_rects(b"/Pattern cs /P0 scn 0 0 100 40 re f");
+        assert_eq!(four.len(), 4 * one.len());
+        assert!(
+            four.iter()
+                .any(|glyph| glyph.rect.min_x >= 50.0 && glyph.rect.min_y > 15.0),
+            "no box on the far tile: {four:?}"
+        );
+    }
+
+    /// A pattern selected but never painted shows its text nowhere.
+    #[test]
+    fn an_unpainted_pattern_places_no_box() {
+        assert!(tiled_rects(b"/Pattern cs /P0 scn").is_empty());
     }
 
     /// Selecting a pattern paints nothing, so its cell's text is read apart

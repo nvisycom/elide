@@ -61,6 +61,24 @@ impl Matrix {
         )
     }
 
+    /// The matrix undoing this one, or `None` when it flattens the plane
+    /// and has none.
+    pub(crate) fn inverse(self) -> Option<Matrix> {
+        let det = self.a * self.d - self.b * self.c;
+        if det.abs() < f64::EPSILON {
+            return None;
+        }
+        let (a, b, c, d) = (self.d / det, -self.b / det, -self.c / det, self.a / det);
+        Some(Matrix {
+            a,
+            b,
+            c,
+            d,
+            e: -(self.e * a + self.f * c),
+            f: -(self.e * b + self.f * d),
+        })
+    }
+
     /// The matrix as the six values `[a b c d e f]` an operator takes.
     pub(crate) fn values(self) -> [f64; 6] {
         [self.a, self.b, self.c, self.d, self.e, self.f]
@@ -70,5 +88,25 @@ impl Matrix {
 impl From<[f64; 6]> for Matrix {
     fn from([a, b, c, d, e, f]: [f64; 6]) -> Self {
         Self { a, b, c, d, e, f }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_inverse_undoes_its_matrix() {
+        let m = Matrix::from([2.0, 1.0, -1.0, 3.0, 5.0, -7.0]);
+        let (x, y) = m
+            .inverse()
+            .unwrap()
+            .apply(m.apply(4.0, 6.0).0, m.apply(4.0, 6.0).1);
+        assert!((x - 4.0).abs() < 1e-9 && (y - 6.0).abs() < 1e-9);
+        assert!(
+            Matrix::from([1.0, 2.0, 2.0, 4.0, 0.0, 0.0])
+                .inverse()
+                .is_none()
+        );
     }
 }

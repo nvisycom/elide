@@ -54,7 +54,7 @@ impl DeviceRect {
     }
 
     /// The union covering both boxes, for merging a line's glyphs into one rect.
-    fn union(self, other: DeviceRect) -> DeviceRect {
+    pub(crate) fn union(self, other: DeviceRect) -> DeviceRect {
         DeviceRect {
             min_x: self.min_x.min(other.min_x),
             min_y: self.min_y.min(other.min_y),

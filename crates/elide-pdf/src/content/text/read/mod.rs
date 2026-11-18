@@ -12,10 +12,11 @@
 
 mod geometry;
 mod nested;
+mod paint;
 mod run;
 mod stream;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
 use elide_core::{Error, Result};
@@ -27,7 +28,7 @@ use self::run::TextRun;
 use self::stream::{Inherited, walk_stream};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
-use crate::pdf::reader::{DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
+use crate::pdf::reader::{DeviceRect, DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
 
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
@@ -96,6 +97,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         active: BTreeSet::new(),
         patterns: BTreeSet::new(),
         selected: Vec::new(),
+        painted: BTreeMap::new(),
         page,
         walks_remaining: MAX_XOBJECT_WALKS,
     };
@@ -163,6 +165,8 @@ struct Walk<'a, 'd> {
     /// The tiling patterns selected and not yet walked: each is walked once
     /// the page's own text is, so its text never falls inside the page's.
     selected: Vec<Selected<'d>>,
+    /// The device-space regions each tiling pattern paints on this page.
+    painted: BTreeMap<ObjectId, Vec<DeviceRect>>,
     page: u32,
     /// Form XObject walks still permitted on this page. The stack-based `active`
     /// guard stops re-entry (cycles) but not re-walks: a form reached through

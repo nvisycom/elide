@@ -13,6 +13,8 @@ pub(crate) mod writer;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
+use lopdf::content::Content;
+use lopdf::xref::XrefEntry;
 use lopdf::{Document, Object};
 
 use self::reader::{DictionaryExt, DocumentExt, ObjectExt};
@@ -84,7 +86,7 @@ impl Pdf {
                 "PDF is encrypted with a user password, so its content cannot be read",
             ));
         }
-        if own_file_filter(&doc) {
+        if own_file_filter(&doc, document) {
             return Err(Error::capability_unavailable(
                 "PDF encrypts its attached files under a crypt filter of their own, \
                  which cannot be read",
@@ -175,29 +177,67 @@ fn inline(doc: &Document, value: &Object, depth: usize) -> Object {
     }
 }
 
-/// Whether the decrypted `doc` may hold embedded files encrypted under a
-/// crypt filter of their own (`/EFF`, 7.6.2), which lopdf does not apply, so
-/// their data is still ciphertext: it defines a crypt filter that is neither
-/// its stream nor its string default, and has an embedded file.
+/// Whether the decrypted `doc`, parsed from `bytes`, holds embedded files
+/// encrypted under a crypt filter of their own (`/EFF`, 7.6.2), which lopdf
+/// does not apply, so their data is still ciphertext: it has an embedded
+/// file, and its encryption dictionary selects for them a filter other than
+/// its stream default.
 ///
-/// lopdf drops the encryption dictionary on load and keeps no `/EFF`, so the
-/// filter the files use cannot be read: a document that defines such a filter
-/// without selecting it is refused too.
-fn own_file_filter(doc: &Document) -> bool {
+/// lopdf drops the encryption dictionary on load, so `/EFF` is read from the
+/// dictionary's own bytes. When that can't be read, a document that defines
+/// a filter other than its defaults is refused, whether or not it selects it.
+fn own_file_filter(doc: &Document, bytes: &[u8]) -> bool {
     let Some(state) = &doc.encryption_state else {
         return false;
     };
-    let defaults = [state.default_stream_filter(), state.default_string_filter()];
-    let other = state
-        .crypt_filters()
-        .keys()
-        .any(|name| !defaults.contains(&name.as_slice()));
-    other
-        && doc
-            .objects
-            .values()
-            .filter_map(ObjectExt::dict)
-            .any(|dict| dict.get(b"EF").is_ok() || dict.is_type(doc, b"EmbeddedFile"))
+    let has_files = doc
+        .objects
+        .values()
+        .filter_map(ObjectExt::dict)
+        .any(|dict| dict.get(b"EF").is_ok() || dict.is_type(doc, b"EmbeddedFile"));
+    if !has_files {
+        return false;
+    }
+    match file_filter(doc, bytes) {
+        Some(Some(filter)) => filter != state.default_stream_filter(),
+        Some(None) => false,
+        None => {
+            let defaults = [state.default_stream_filter(), state.default_string_filter()];
+            state
+                .crypt_filters()
+                .keys()
+                .any(|name| !defaults.contains(&name.as_slice()))
+        }
+    }
+}
+
+/// The `/EFF` of `doc`'s encryption dictionary, read from `bytes` with
+/// lopdf's content parser (which reads a dictionary as an operand):
+/// `Some(None)` when it has none, `None` when the dictionary, or an `/EFF`
+/// that is not a name, cannot be read.
+fn file_filter(doc: &Document, bytes: &[u8]) -> Option<Option<Vec<u8>>> {
+    let id = doc.encryption_state.as_ref()?.encrypt_object_id()?;
+    let Some(XrefEntry::Normal { offset, .. }) = doc.reference_table.get(id.0) else {
+        return None;
+    };
+    let object = bytes.get(usize::try_from(*offset).ok()?..)?;
+    let end = object
+        .windows(b"endobj".len())
+        .position(|window| window == b"endobj")?;
+    let content = Content::decode(&object[..end + b"endobj".len()]).ok()?;
+    let dict = content
+        .operations
+        .iter()
+        .find(|operation| operation.operator == "endobj")?
+        .operands
+        .first()?
+        .as_dict()
+        .ok()?;
+    match dict.get(b"EFF") {
+        Err(_) => Some(None),
+        Ok(Object::Name(name)) => Some(Some(name.clone())),
+        Ok(_) => None,
+    }
 }
 
 #[cfg(test)]
@@ -229,9 +269,23 @@ mod tests {
     }
 
     /// `doc` encrypted under `version`, as bytes.
-    fn saved(mut doc: Document, version: EncryptionVersion<'_>) -> Vec<u8> {
+    fn saved(doc: Document, version: EncryptionVersion<'_>) -> Vec<u8> {
+        saved_selecting(doc, version, None)
+    }
+
+    /// `doc` encrypted under `version`, its encryption dictionary selecting
+    /// `files` for attached files when given, as bytes.
+    fn saved_selecting(
+        mut doc: Document,
+        version: EncryptionVersion<'_>,
+        files: Option<&str>,
+    ) -> Vec<u8> {
         let state = EncryptionState::try_from(version).unwrap();
         doc.encrypt(&state).unwrap();
+        if let Some(files) = files {
+            let id = doc.trailer.get(b"Encrypt").unwrap().as_reference().unwrap();
+            doc.get_dictionary_mut(id).unwrap().set("EFF", files);
+        }
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         out
@@ -263,7 +317,9 @@ mod tests {
     }
 
     /// Attached files under a crypt filter of their own are still ciphertext
-    /// once lopdf decrypts the rest, so the document is refused.
+    /// once lopdf decrypts the rest, so the document is refused; one that
+    /// only defines such a filter, or selects the stream default for them,
+    /// is read.
     #[test]
     fn a_pdf_whose_files_have_their_own_crypt_filter_is_refused() {
         let mut doc = document();
@@ -276,7 +332,7 @@ mod tests {
             "EF" => dictionary! { "F" => data },
         });
         let aes: Arc<dyn CryptFilter> = Arc::new(Aes128CryptFilter);
-        let with = |names: &[&[u8]]| {
+        let with = |names: &[&[u8]], files: Option<&str>| {
             let filters = names
                 .iter()
                 .map(|name| (name.to_vec(), aes.clone()))
@@ -291,10 +347,13 @@ mod tests {
                 user_password: "",
                 permissions: Permissions::all(),
             };
-            saved(doc.clone(), version)
+            saved_selecting(doc.clone(), version, files)
         };
-        Pdf::open(&with(&[b"StdCF"])).expect("files under the stream default open");
-        let error = Pdf::open(&with(&[b"StdCF", b"FileCF"])).expect_err("their own filter");
+        Pdf::open(&with(&[b"StdCF"], None)).expect("files under the stream default open");
+        Pdf::open(&with(&[b"StdCF", b"FileCF"], None)).expect("a filter defined, not selected");
+        Pdf::open(&with(&[b"StdCF", b"FileCF"], Some("StdCF"))).expect("the default selected");
+        let error =
+            Pdf::open(&with(&[b"StdCF", b"FileCF"], Some("FileCF"))).expect_err("their own filter");
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
         assert!(error.to_string().contains("attached files"), "{error}");
     }

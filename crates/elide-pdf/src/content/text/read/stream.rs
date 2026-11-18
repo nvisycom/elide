@@ -11,10 +11,11 @@ use lopdf::{Dictionary, Document, Object};
 
 use super::geometry::{Cursor, TextState};
 use super::nested::{select_pattern, walk_xobject};
+use super::paint::Painting;
 use super::{TextRun, Walk};
 use crate::content::text::{FontEntry, StreamTarget};
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
-use crate::pdf::reader::{DocumentExt, Matrix, ObjectExt, Scope};
+use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, ObjectExt, Scope};
 
 /// The numeric operand at `index` as `f64`, or `0.0` when absent or non-numeric
 /// (a malformed operator reads as its zero, never a hard error — positioning is
@@ -52,6 +53,7 @@ pub(super) struct Inherited<'a> {
 /// tables), since the font is part of the graphics state.
 pub(super) struct SavedState<'a> {
     pub(super) state: TextState,
+    pub(super) painting: Painting,
     pub(super) current: Option<&'a Option<FontText<'a>>>,
     pub(super) font_slot: u16,
     pub(super) widths: &'a WidthSource,
@@ -168,13 +170,22 @@ pub(super) fn walk_stream<'a>(
     // parametric `TextState`. The text matrix is *not* graphics state (it resets
     // at `BT`), so it is not saved.
     let mut gs_stack: Vec<SavedState<'_>> = Vec::new();
+    // The patterns fills and strokes paint with, and the path being built, so
+    // the region each pattern paints is known; and the space a pattern this
+    // stream selects is laid out in (8.7.3.1).
+    let mut painting = Painting::default();
+    let pattern_space = state.ctm;
 
     for (op_idx, op) in content.operations.iter().enumerate() {
+        if painting.path(op, state.ctm, &mut ctx.painted) {
+            continue;
+        }
         match op.operator.as_str() {
             // Graphics-state save/restore. A `Q` with an empty stack is a
             // malformed balance we ignore.
             "q" => gs_stack.push(SavedState {
                 state,
+                painting,
                 current,
                 font_slot: font_slot_current,
                 widths: width_current,
@@ -183,6 +194,7 @@ pub(super) fn walk_stream<'a>(
             "Q" => {
                 if let Some(saved) = gs_stack.pop() {
                     state = saved.state;
+                    painting.restore(saved.painting);
                     current = saved.current;
                     font_slot_current = saved.font_slot;
                     width_current = saved.widths;
@@ -261,6 +273,7 @@ pub(super) fn walk_stream<'a>(
                         } else {
                             (&op.operands, 0)
                         };
+                        let shown = ctx.accum.rects.len();
                         // A short-lived run so its borrow of `accum` ends before
                         // the `Do` arm needs `accum` again.
                         let mut run = TextRun {
@@ -277,6 +290,15 @@ pub(super) fn walk_stream<'a>(
                             font: font_slot_current,
                         };
                         run.show(enc, operands, op_idx, base)?;
+                        // Text filled with a pattern paints it where it shows.
+                        if let Some(pattern) = painting.fill
+                            && let Some(region) = ctx.accum.rects[shown..]
+                                .iter()
+                                .map(|glyph| glyph.rect)
+                                .reduce(DeviceRect::union)
+                        {
+                            ctx.painted.entry(pattern).or_default().push(region);
+                        }
                     }
                     Some(None) => {
                         return Err(Error::redaction(format!(
@@ -321,12 +343,23 @@ pub(super) fn walk_stream<'a>(
 
             // A tiling pattern selected to paint with draws its cell's content,
             // text included, wherever it paints. Selecting it paints nothing,
-            // so its text is read once the page's is, never inside it.
+            // so its text is read once the page's is, never inside it; any
+            // other colour paints with no pattern.
             "scn" | "SCN" => {
-                if let Some(Object::Name(name)) = op.operands.last() {
-                    select_pattern(doc, name, scope, depth, ctx);
+                let pattern = match op.operands.last() {
+                    Some(Object::Name(name)) => {
+                        select_pattern(doc, name, scope, depth, pattern_space, ctx)
+                    }
+                    _ => None,
+                };
+                if op.operator == "scn" {
+                    painting.fill = pattern;
+                } else {
+                    painting.stroke = pattern;
                 }
             }
+            "sc" | "g" | "rg" | "k" | "cs" => painting.fill = None,
+            "SC" | "G" | "RG" | "K" | "CS" => painting.stroke = None,
             _ => {}
         }
     }

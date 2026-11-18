@@ -3,15 +3,17 @@
 //!
 //! A detected character span must map to *exact* glyph byte ranges so deletion
 //! removes whole glyph codes, never a partial code. Decoding matches how the PDF
-//! text machinery consumes codes: a composite (Type0) font's `/ToUnicode` CMap
-//! resolves variable-length codes (1–4 bytes) one at a time, while a simple font
-//! decodes one byte per glyph. A glyph's text is what a viewer copies: its
-//! code's `/ToUnicode` mapping, else its encoding's character (9.10.2).
+//! text machinery consumes codes: a composite (Type0) font's encoding CMap
+//! splits variable-length codes (1–4 bytes), read with `hayro-cmap`, which
+//! carries the predefined CMaps; a simple font decodes one byte per glyph. A
+//! glyph's text is what a viewer copies: its code's `/ToUnicode` mapping, else
+//! its encoding's character (9.10.2).
 
 use std::iter;
 use std::sync::LazyLock;
 
 use elide_core::{Error, ErrorKind, Result};
+use hayro_cmap::{CMap, CMapName, load_embedded};
 use lopdf::{Dictionary, Document, Encoding, Object, Stream, dictionary};
 use unicode_normalization::UnicodeNormalization;
 
@@ -71,13 +73,13 @@ const MAX_DESTINATION_UNITS: usize = 256;
 
 /// How a font's codes split into glyphs and read as text (9.10.2).
 pub(crate) enum FontText<'a> {
-    /// A composite (Type0) font: codes of the lengths its codespace gives
-    /// them, each read through its `/ToUnicode`, else, under a Unicode
-    /// encoding, as the UTF-16 it is.
+    /// A composite (Type0) font: codes split by its encoding CMap, each read
+    /// through its `/ToUnicode`, else, under a Unicode encoding, as the
+    /// UTF-16 it is.
     Composite {
-        /// The length of a code, by its first byte; 0 for a byte no code
-        /// starts with.
-        lengths: Box<[u8; 256]>,
+        /// The encoding: `Identity-H`/`-V`, a predefined CMap, or one the font
+        /// embeds.
+        encoding: CMap,
         to_unicode: Option<Encoding<'static>>,
         /// Whether the encoding is a predefined Unicode CMap, its codes the
         /// UTF-16 of their text.
@@ -93,8 +95,8 @@ pub(crate) enum FontText<'a> {
 
 impl<'a> FontText<'a> {
     /// The text decoding of `font`, or `None` when its codes can't be read:
-    /// a simple font's encoding can't be, or a composite font's code
-    /// boundaries can't be established (see [`composite_lengths`]).
+    /// a simple font's encoding can't be, or a composite font's encoding
+    /// CMap can't be read (see [`encoding_cmap`]).
     ///
     /// # Errors
     ///
@@ -105,13 +107,12 @@ impl<'a> FontText<'a> {
             _ => None,
         };
         if font.is_subtype(doc, b"Type0") {
-            let encoding = font.name(doc, b"Encoding");
-            let unicode = encoding.is_some_and(is_unicode_cmap);
-            let Some(lengths) = composite_lengths(encoding, to_unicode.as_ref()) else {
+            let unicode = font.name(doc, b"Encoding").is_some_and(is_unicode_cmap);
+            let Some(encoding) = encoding_cmap(doc, font)? else {
                 return Ok(None);
             };
             return Ok(Some(Self::Composite {
-                lengths,
+                encoding,
                 to_unicode,
                 unicode,
             }));
@@ -133,44 +134,32 @@ impl<'a> FontText<'a> {
     }
 }
 
-/// The lengths of a composite font's codes by their first byte: two bytes
-/// under `Identity-H`/`-V` and a UCS-2 CMap, two or four (a surrogate pair)
-/// under a UTF-16 one; under any other encoding, the lengths of the codes its
-/// `/ToUnicode` maps, whose codespace is the encoding's (9.10.3). `None` when
-/// they can't be established: no `/ToUnicode`, or one whose codes of
-/// different lengths start with the same byte.
-fn composite_lengths(
-    encoding: Option<&[u8]>,
-    to_unicode: Option<&Encoding<'_>>,
-) -> Option<Box<[u8; 256]>> {
-    let mut lengths = Box::new([0u8; 256]);
-    match encoding {
-        Some(b"Identity-H" | b"Identity-V") => *lengths = [2; 256],
-        Some(name) if is_unicode_cmap(name) => {
-            *lengths = [2; 256];
-            if contains(name, b"-UTF16-") {
-                lengths[0xD8..=0xDB].fill(4);
-            }
-        }
-        _ => {
-            let Some(Encoding::UnicodeMapEncoding(cmap)) = to_unicode else {
-                return None;
-            };
-            for (len, ranges) in (1u8..).zip(&cmap.bf_ranges) {
-                let shift = 8 * (u32::from(len) - 1);
-                for (range, _) in ranges.iter() {
-                    for lead in (range.start() >> shift)..=(range.end() >> shift) {
-                        let slot = &mut lengths[(lead & 0xFF) as usize];
-                        if *slot != 0 && *slot != len {
-                            return None;
-                        }
-                        *slot = len;
-                    }
-                }
-            }
-        }
-    }
-    Some(lengths)
+/// The encoding CMap of the composite `font`: `Identity-H`/`-V`, a
+/// predefined CMap by its name, or a CMap the font embeds (following any
+/// `usecmap` to a predefined base); `None` when it names no CMap known or
+/// cannot be read.
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if an
+/// embedded CMap decodes past the content limit.
+fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<CMap>> {
+    Ok(
+        match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
+            Some(Object::Name(name)) => match name.as_slice() {
+                b"Identity-H" => Some(CMap::identity_h()),
+                b"Identity-V" => Some(CMap::identity_v()),
+                name => load_embedded(CMapName::from_bytes(name))
+                    .and_then(|data| CMap::parse(data, load_embedded)),
+            },
+            Some(Object::Stream(stream)) => match stream.decoded() {
+                Ok(data) => CMap::parse(&data, load_embedded),
+                Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
+                Err(_) => None,
+            },
+            _ => None,
+        },
+    )
 }
 
 /// The standard encoding, which lopdf reads a font with no other by.
@@ -352,33 +341,40 @@ fn mapped_text(units: &[u16]) -> Result<String> {
 /// refused rather than leaving that text silently in place.
 pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Glyph>> {
     match font {
-        // Codes of the lengths their first bytes give them, each read
-        // through `/ToUnicode`, else as UTF-16 under a Unicode encoding.
+        // Codes split by the encoding: each the shortest run of bytes its
+        // ranges map, read through `/ToUnicode`, else as UTF-16 under a
+        // Unicode encoding.
         FontText::Composite {
-            lengths,
+            encoding,
             to_unicode,
             unicode,
         } => {
             let mut glyphs = Vec::new();
             let mut i = 0;
             while i < bytes.len() {
-                let len = usize::from(lengths[usize::from(bytes[i])]);
-                let Some(code_bytes) = bytes.get(i..i + len).filter(|_| len > 0) else {
+                let split = (1..=4u8).find_map(|len| {
+                    let code_bytes = bytes.get(i..i + usize::from(len))?;
+                    let code = code_bytes
+                        .iter()
+                        .fold(0, |code, &b| code << 8 | u32::from(b));
+                    encoding
+                        .lookup_cid_code(code, len)
+                        .map(|_| (code_bytes, code))
+                });
+                let Some((code_bytes, code)) = split else {
                     return Err(Error::redaction(
-                        "text drawn with a code outside its font's codespace; its glyph \
-                         cannot be located for redaction",
+                        "text drawn with a code its font's encoding does not map; its \
+                         glyph cannot be located for redaction",
                     ));
                 };
-                let code = code_bytes
-                    .iter()
-                    .fold(0, |code, &b| code << 8 | u32::from(b));
+                let len = code_bytes.len();
                 let mapped = match to_unicode {
                     Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(code, len as u8),
                     _ => None,
                 };
                 let units = match mapped {
                     Some(units) => units,
-                    None if *unicode => code_bytes
+                    None if *unicode && len.is_multiple_of(2) => code_bytes
                         .as_chunks::<2>()
                         .0
                         .iter()
@@ -442,13 +438,13 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
 mod tests {
     use super::*;
 
-    /// A one-byte-and-two-byte `/ToUnicode` CMap mapping `<41>` to `J` and
-    /// `<8140>` to `a`, as a Shift-JIS font's would.
+    /// A one-byte-and-two-byte `/ToUnicode` CMap mapping `<41>` to `J`,
+    /// `<8140>` to `a` (as a Shift-JIS font's would), and `<5C71>` to `x`.
     const TO_UNICODE: &[u8] = b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
         /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
         /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
         2 begincodespacerange\n<00> <80>\n<8140> <9FFC>\nendcodespacerange\n\
-        2 beginbfchar\n<41> <004A>\n<8140> <0061>\nendbfchar\n\
+        3 beginbfchar\n<41> <004A>\n<8140> <0061>\n<5C71> <0078>\nendbfchar\n\
         endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
 
     /// The glyphs `bytes` draw in a composite font of `encoding`, with the
@@ -476,7 +472,14 @@ mod tests {
     /// font embeds.
     #[test]
     fn a_composite_font_reads_through_its_to_unicode() {
-        let embedded = Object::Stream(Stream::new(dictionary! { "Type" => "CMap" }, Vec::new()));
+        let embedded = Object::Stream(Stream::new(
+            dictionary! { "Type" => "CMap" },
+            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
+              2 begincodespacerange\n<00> <80>\n<8140> <9FFC>\nendcodespacerange\n\
+              2 begincidrange\n<41> <41> 34\n<8140> <8140> 633\nendcidrange\n\
+              endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
+                .to_vec(),
+        ));
         for encoding in [Object::Name(b"90ms-RKSJ-H".to_vec()), embedded] {
             let glyphs = composite(encoding, true, b"\x41\x81\x40").unwrap().unwrap();
             assert_eq!(glyphs, ["J", "a"]);
@@ -493,14 +496,15 @@ mod tests {
     }
 
     /// A composite font under a predefined Unicode CMap and no `/ToUnicode`
-    /// reads its codes as UTF-16, a surrogate pair as one glyph.
+    /// reads its codes as UTF-16, a surrogate pair (here 𠮟, in the Japanese
+    /// collection) as one glyph.
     #[test]
     fn a_unicode_cmap_reads_as_utf16() {
         let name = Object::Name(b"UniJIS-UTF16-H".to_vec());
-        let glyphs = composite(name, false, b"\x00J\xD8\x3D\xDE\x00")
+        let glyphs = composite(name, false, b"\x00J\xD8\x42\xDF\x9F")
             .unwrap()
             .unwrap();
-        assert_eq!(glyphs, ["J", "\u{1F600}"]);
+        assert_eq!(glyphs, ["J", "\u{20B9F}"]);
     }
 
     /// Ranges are counted before lopdf expands them: a CMap spanning too
@@ -534,13 +538,25 @@ mod tests {
     }
 
     /// A composite font with no `/ToUnicode` and an encoding that is not
-    /// Unicode has no text to read: under `Identity-H` its codes split but
-    /// read as nothing, and under any other encoding they don't split.
+    /// Unicode has no text to read: its codes split by the encoding, but read
+    /// as nothing. One whose encoding names no CMap can't even be split.
     #[test]
     fn a_composite_font_with_nothing_to_read_is_refused() {
-        let identity = composite(Object::Name(b"Identity-H".to_vec()), false, b"\x00\x01");
-        assert!(identity.unwrap().is_err());
-        assert!(composite(Object::Name(b"90ms-RKSJ-H".to_vec()), false, b"\x41").is_none());
+        for name in [&b"Identity-H"[..], b"90ms-RKSJ-H"] {
+            let refused = composite(Object::Name(name.to_vec()), false, b"\x00\x41");
+            assert!(refused.unwrap().is_err());
+        }
+        assert!(composite(Object::Name(b"No-Such-CMap".to_vec()), true, b"\x41").is_none());
+    }
+
+    /// Codes split by the encoding's ranges, whatever the `/ToUnicode` maps:
+    /// under Shift-JIS a lead byte starts a two-byte code even where the map
+    /// has a one-byte code of that value.
+    #[test]
+    fn codes_split_by_the_encoding_not_the_map() {
+        let name = Object::Name(b"90ms-RKSJ-H".to_vec());
+        let glyphs = composite(name, true, b"\x81\x40\x41").unwrap().unwrap();
+        assert_eq!(glyphs, ["a", "J"]);
     }
 
     /// Under a Unicode encoding, a code the `/ToUnicode` does not map reads
@@ -548,8 +564,8 @@ mod tests {
     #[test]
     fn a_unicode_encoding_reads_a_code_its_to_unicode_lacks() {
         let name = Object::Name(b"UniJIS-UCS2-H".to_vec());
-        let glyphs = composite(name, true, b"\x81\x40\x00\x62").unwrap().unwrap();
-        assert_eq!(glyphs, ["a", "b"]);
+        let glyphs = composite(name, true, b"\x5C\x71\x00\x62").unwrap().unwrap();
+        assert_eq!(glyphs, ["x", "b"]);
     }
 
     /// Codes split by the encoding, not by what the `/ToUnicode` maps: under

@@ -45,7 +45,9 @@ See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
 
 ## License
 
-Apache 2.0 License, see [LICENSE](../../LICENSE)
+Apache 2.0 License, see [LICENSE](../../LICENSE). It bundles Adobe's CMap
+resources through `hayro-cmap`, whose notice is in
+[THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md).
 
 ## Support
 
