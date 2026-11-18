@@ -101,20 +101,23 @@ fn rebuild(source: &Document) -> Result<(Document, StrippedContent)> {
 }
 
 /// One copy of a source object: the index in [`Builder::scopes`] of the
-/// scope it was copied for, and its id.
-type ScopedCopy = (usize, ObjectId);
+/// scope it was copied for, when it depends on that scope, and its id.
+type ScopedCopy = (Option<usize>, ObjectId);
 
 /// The state of one rebuild.
 struct Builder<'a> {
     source: &'a Document,
     out: Document,
     /// The copies of each source object, by the kind it was copied as: one
-    /// per scope for content that borrows the scope it is drawn in, and one
-    /// for anything else, copied for the empty scope.
+    /// per scope for an object whose copy depends on the scope it is drawn
+    /// in, and one for anything else.
     copies: HashMap<(ObjectId, Kind), Vec<ScopedCopy>>,
-    /// Each scope a copy was made for, its resource dictionaries kept once:
+    /// Each scope a copy depends on, its resource dictionaries kept once:
     /// equal resources resolve every name alike, so they share copies.
     scopes: Vec<Vec<Dictionary>>,
+    /// Whether the copy being made depends on the scope it is copied in: it,
+    /// or an object it holds, is content that borrows that scope.
+    scoped: bool,
     /// The id each source page's copy takes.
     pages: BTreeMap<ObjectId, ObjectId>,
     /// The source XObjects cut and recorded, so they are not also recorded as
@@ -123,6 +126,8 @@ struct Builder<'a> {
     /// The attached files copied: each source file stream's file
     /// specification, and its neutral name.
     files: BTreeMap<ObjectId, (ObjectId, String)>,
+    /// The neutral names of the attached files copied.
+    file_names: HashSet<String>,
     layers: Layers<'a>,
     /// The `/Names` tree of destinations, read once: each name's first
     /// destination.
@@ -142,12 +147,12 @@ impl<'a> Builder<'a> {
             source,
             out: Document::with_version(version(source)),
             copies: HashMap::new(),
-            // The empty scope first, so the copies of everything that does
-            // not borrow its scope find it at once.
-            scopes: vec![Vec::new()],
+            scopes: Vec::new(),
+            scoped: false,
             pages: BTreeMap::new(),
             cut: HashSet::new(),
             files: BTreeMap::new(),
+            file_names: HashSet::new(),
             layers: Layers::read(source),
             destinations: destinations(source),
             stripped: StrippedContent::new(),
@@ -1436,6 +1441,159 @@ mod tests {
         assert_eq!(copies, 1);
     }
 
+    /// Glyph procedures of one Type3 font whose graphics states select
+    /// different fonts each get a name of their own in the font's shared
+    /// resources, and each selects its own font.
+    #[test]
+    fn type3_glyphs_selecting_different_state_fonts_keep_them_apart() {
+        let mut doc = Document::with_version("1.7");
+        let state = |doc: &mut Document, base: &str| {
+            let font = doc.add_object(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
+            });
+            dictionary! { "Font" => vec![font.into(), 1.into()] }
+        };
+        let (helvetica, courier) = (state(&mut doc, "Helvetica"), state(&mut doc, "Courier"));
+        let glyph = |doc: &mut Document, gs: &str| {
+            doc.add_object(Stream::new(
+                dictionary! {},
+                format!("0 0 d0 /{gs} gs BT (x) Tj ET").into_bytes(),
+            ))
+        };
+        let (a, b) = (glyph(&mut doc, "GA"), glyph(&mut doc, "GB"));
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type3",
+            "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+            "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
+            "CharProcs" => dictionary! { "a" => a, "b" => b },
+            "Encoding" => dictionary! {
+                "Differences" => vec![97.into(), Object::Name(b"a".to_vec()), Object::Name(b"b".to_vec())],
+            },
+            "FirstChar" => 97, "LastChar" => 98, "Widths" => vec![1.into(), 1.into()],
+            "Resources" => dictionary! {
+                "ExtGState" => dictionary! { "GA" => helvetica, "GB" => courier },
+            },
+        });
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /T3 1 Tf (ab) Tj ET".to_vec(),
+        ));
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "T3" => font } },
+            }],
+        );
+
+        let (out, _) = rebuilt(&doc);
+        check(&out).unwrap();
+        let font = out
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find(|dict| dict.is_subtype(&out, b"Type3"))
+            .unwrap();
+        let fonts = out
+            .resolve_dict(font.get(b"Resources").unwrap())
+            .and_then(|resources| resources.get(b"Font").ok())
+            .and_then(|fonts| out.resolve_dict(fonts))
+            .unwrap();
+        let procs = out.resolve_dict(font.get(b"CharProcs").unwrap()).unwrap();
+        let selected: Vec<String> = [&b"a"[..], b"b"]
+            .into_iter()
+            .map(|glyph| {
+                let proc = out.resolve(procs.get(glyph).unwrap()).unwrap();
+                let content = proc.as_stream().unwrap().decompressed_content().unwrap();
+                let content = Content::decode(&content).unwrap();
+                let tf = content
+                    .operations
+                    .iter()
+                    .find(|op| op.operator == "Tf")
+                    .unwrap();
+                let name = tf.operands[0].as_name().unwrap();
+                let selected = out.resolve_dict(fonts.get(name).unwrap()).unwrap();
+                String::from_utf8_lossy(
+                    selected.get(b"BaseFont").and_then(Object::as_name).unwrap(),
+                )
+                .into_owned()
+            })
+            .collect();
+        assert_eq!(selected, ["Helvetica", "Courier"]);
+    }
+
+    /// A graphics state shared by two pages whose soft mask draws a form
+    /// with no resources of its own is copied for each page, the form's
+    /// names resolved in that page's resources.
+    #[test]
+    fn a_state_holding_a_borrowing_form_is_copied_per_scope() {
+        let mut doc = Document::with_version("1.7");
+        let form = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            },
+            Content {
+                operations: show("Hello"),
+            }
+            .encode()
+            .unwrap(),
+        ));
+        let state = doc.add_object(dictionary! {
+            "Type" => "ExtGState",
+            "SMask" => dictionary! { "Type" => "Mask", "S" => "Luminosity", "G" => form },
+        });
+        let content = doc.add_object(Stream::new(dictionary! {}, b"/S gs".to_vec()));
+        let pages: Vec<Dictionary> = ["Helvetica", "Courier"]
+            .into_iter()
+            .map(|base| {
+                let font = doc.add_object(dictionary! {
+                    "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
+                });
+                dictionary! {
+                    "Contents" => content,
+                    "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+                    "Resources" => dictionary! {
+                        "Font" => dictionary! { "F1" => font },
+                        "ExtGState" => dictionary! { "S" => state },
+                    },
+                }
+            })
+            .collect();
+        with_pages(&mut doc, pages);
+
+        let (out, _) = rebuilt(&doc);
+        let fonts: Vec<String> = out
+            .get_pages()
+            .into_values()
+            .map(|page| {
+                let resources = out
+                    .resolve_dict(out.get_dictionary(page).unwrap().get(b"Resources").unwrap())
+                    .unwrap();
+                let state = resources
+                    .get(b"ExtGState")
+                    .and_then(Object::as_dict)
+                    .unwrap()
+                    .get(b"S")
+                    .unwrap();
+                let mask = out
+                    .resolve_dict(out.resolve_dict(state).unwrap().get(b"SMask").unwrap())
+                    .unwrap();
+                let form = out.resolve(mask.get(b"G").unwrap()).unwrap();
+                let font = out
+                    .resolve_dict(form.as_stream().unwrap().dict.get(b"Resources").unwrap())
+                    .and_then(|resources| resources.get(b"Font").ok())
+                    .and_then(|fonts| out.resolve_dict(fonts))
+                    .and_then(|fonts| out.resolve_dict(fonts.get(b"F1").unwrap()))
+                    .unwrap();
+                String::from_utf8_lossy(font.get(b"BaseFont").and_then(Object::as_name).unwrap())
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(fonts, ["Helvetica", "Courier"]);
+    }
+
     /// A form's answers are drawn into the page: a visible widget's
     /// appearance (a checkbox's by its state) is flattened and its text
     /// found and deleted like the page's; a hidden widget is not drawn.
@@ -1560,6 +1718,38 @@ mod tests {
         assert!(resources_of(&out).get(b"XObject").is_err());
         assert_eq!(count(&stripped, HiddenContent::FormField), 0);
         assert!(count(&stripped, HiddenContent::Layer) >= 1);
+    }
+
+    /// A visible widget whose appearance alone is in a layer hidden by
+    /// default is not drawn into the page either.
+    #[test]
+    fn an_appearance_in_a_hidden_layer_stays_hidden() {
+        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
+        let answer = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form", "OC" => layer,
+                "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+            },
+            b"0 0 10 10 re f".to_vec(),
+        ));
+        doc.get_dictionary_mut(page).unwrap().set(
+            "Annots",
+            vec![Object::Dictionary(dictionary! {
+                "Subtype" => "Widget",
+                "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+                "AP" => dictionary! { "N" => answer },
+            })],
+        );
+        doc.catalog_mut().unwrap().set(
+            "OCProperties",
+            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+        );
+        let (out, stripped) = rebuilt(&doc);
+        assert!(resources_of(&out).get(b"XObject").is_err());
+        assert!(count(&stripped, HiddenContent::Layer) >= 1);
+        assert_eq!(count(&stripped, HiddenContent::FormField), 0);
+        check(&out).unwrap();
     }
 
     /// A page with no box anywhere is written with US Letter's, which a

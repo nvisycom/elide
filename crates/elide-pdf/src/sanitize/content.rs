@@ -50,8 +50,8 @@ const STATE_FONT_PREFIX: &str = "GSFont";
 const ALTERNATE_TEXT_KEYS: [&[u8]; 3] = [b"ActualText", b"Alt", b"E"];
 
 impl<'a> Builder<'a> {
-    /// The content `bytes` rebuilt, with names resolved in `scope`: the new
-    /// content, and the resources it names, copied.
+    /// The content `bytes` rebuilt, with names resolved in `scope`, and the
+    /// resources it names copied into `resources`.
     ///
     /// # Errors
     ///
@@ -61,8 +61,9 @@ impl<'a> Builder<'a> {
         &mut self,
         bytes: &[u8],
         scope: &Scope<'s>,
+        resources: &mut Dictionary,
         depth: usize,
-    ) -> Result<(Vec<u8>, Dictionary)>
+    ) -> Result<Vec<u8>>
     where
         'a: 's,
     {
@@ -74,7 +75,6 @@ impl<'a> Builder<'a> {
         let content =
             Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let mut kept: Vec<Operation> = Vec::with_capacity(content.operations.len());
-        let mut resources = Dictionary::new();
         // One entry per open marked-content sequence: whether it hides.
         let mut open: Vec<bool> = Vec::new();
         // The open `q` saves and whether a text object is open, so the
@@ -154,18 +154,18 @@ impl<'a> Builder<'a> {
                     b"Font",
                     Kind::Font,
                     scope,
-                    &mut resources,
+                    resources,
                     &mut kept,
                     depth,
                 )?,
                 "gs" => {
-                    let font = self.state_font(&operation, scope, &mut resources, depth)?;
+                    let font = self.state_font(&operation, scope, resources, depth)?;
                     self.resource(
                         operation,
                         b"ExtGState",
                         Kind::ExtGState,
                         scope,
-                        &mut resources,
+                        resources,
                         &mut kept,
                         depth,
                     )?;
@@ -176,7 +176,7 @@ impl<'a> Builder<'a> {
                     b"Shading",
                     Kind::Shading,
                     scope,
-                    &mut resources,
+                    resources,
                     &mut kept,
                     depth,
                 )?,
@@ -189,7 +189,7 @@ impl<'a> Builder<'a> {
                         b"ColorSpace",
                         Kind::ColorSpace,
                         scope,
-                        &mut resources,
+                        resources,
                         &mut kept,
                         depth,
                     )?,
@@ -200,13 +200,13 @@ impl<'a> Builder<'a> {
                         b"Pattern",
                         Kind::Pattern,
                         scope,
-                        &mut resources,
+                        resources,
                         &mut kept,
                         depth,
                     )?,
                     _ => kept.push(operation),
                 },
-                "Do" => self.draw(operation, scope, &mut resources, &mut kept, depth)?,
+                "Do" => self.draw(operation, scope, resources, &mut kept, depth)?,
                 "BX" | "EX" => {}
                 "q" => {
                     saved += 1;
@@ -253,17 +253,17 @@ impl<'a> Builder<'a> {
         // A default colour space remaps the device space of that name for
         // everything this content draws in it.
         for name in DEFAULT_SPACES {
-            if !has(&resources, b"ColorSpace", name)
+            if !has(resources, b"ColorSpace", name)
                 && let Some(space) = scope.lookup(self.source, b"ColorSpace", name)
                 && let Some(space) = self.copy(Kind::ColorSpace, space, scope, depth + 1)?
             {
-                insert(&mut resources, b"ColorSpace", name, space);
+                insert(resources, b"ColorSpace", name, space);
             }
         }
         let encoded = Content { operations: kept }
             .encode()
             .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
-        Ok((encoded, resources))
+        Ok(encoded)
     }
 
     /// Keep `operation`, which names a `category` resource by its first name

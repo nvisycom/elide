@@ -65,6 +65,17 @@ impl<'a> Builder<'a> {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
+        // The appearance is a form, and a form in a hidden layer is not drawn
+        // whatever shows it.
+        if stream
+            .dict
+            .get(b"OC")
+            .is_ok_and(|membership| self.layers.is_hidden(membership, 0))
+        {
+            self.record(HiddenContent::Layer);
+            self.cut.extend(appearance.as_reference().ok());
+            return Ok(None);
+        }
         let Some(bbox) = stream.dict.get(b"BBox").ok().and_then(|b| self.rect(b)) else {
             self.record(HiddenContent::FormField);
             return Ok(None);

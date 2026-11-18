@@ -98,7 +98,7 @@ pub(crate) fn readable_cmap(cmap: &[u8], budget: &mut usize) -> Result<Option<Ve
         }
         let entry = match section {
             "beginbfchar" => readable_bfchar(&tokens[i..]),
-            "beginbfrange" => readable_bfrange(&tokens[i..]),
+            "beginbfrange" => readable_bfrange(&tokens[i..], *budget)?,
             _ => None,
         };
         let Some(Entry { used, written }) = entry else {
@@ -150,50 +150,87 @@ fn readable_bfchar(tokens: &[Token<'_>]) -> Option<Entry> {
 
 /// The `<lo> <hi> dst` entry at the start of `tokens`, rewritten when any of
 /// its destinations changes; `None` when it is not one.
-fn readable_bfrange(tokens: &[Token<'_>]) -> Option<Entry> {
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if the
+/// rewrite grows the entry by more than `budget` bytes.
+fn readable_bfrange(tokens: &[Token<'_>], budget: usize) -> Result<Option<Entry>> {
     let [lo, hi, dst, ..] = tokens else {
-        return None;
+        return Ok(None);
     };
-    lo.hex_bytes()?;
-    hi.hex_bytes()?;
-    if !dst.is_destination() {
-        return None;
+    if lo.hex_bytes().is_none() || hi.hex_bytes().is_none() || !dst.is_destination() {
+        return Ok(None);
     }
-    Some(Entry {
+    let replaced: usize = [lo, hi, dst].iter().map(|t| t.text.chars().count()).sum();
+    Ok(Some(Entry {
         used: 3,
-        written: readable_range(lo, hi, dst),
-    })
+        written: readable_range(lo, hi, dst, replaced.saturating_add(budget))?,
+    }))
 }
 
 /// The range `lo`..=`hi` mapped from `dst` with its destinations rewritten,
 /// or `None` when none of them changes.
-fn readable_range(lo: &Token<'_>, hi: &Token<'_>, dst: &Token<'_>) -> Option<String> {
-    let low = code(&lo.hex_bytes()?)?;
-    let high = code(&hi.hex_bytes()?)?;
-    let count = high.checked_sub(low)? + 1;
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) once the
+/// destinations it expands to pass `limit` bytes, before more are held.
+fn readable_range(
+    lo: &Token<'_>,
+    hi: &Token<'_>,
+    dst: &Token<'_>,
+    limit: usize,
+) -> Result<Option<String>> {
+    let (Some(low), Some(high)) = (
+        lo.hex_bytes().and_then(|b| code(&b)),
+        hi.hex_bytes().and_then(|b| code(&b)),
+    ) else {
+        return Ok(None);
+    };
+    let Some(count) = high.checked_sub(low).map(|span| span + 1) else {
+        return Ok(None);
+    };
     let prefix = format!("{}{}{}", lo.text, hi.text, leading(dst.text));
     if let Some(bytes) = dst.hex_bytes() {
+        let Some(first) = utf16_units(&bytes).filter(|units| !units.is_empty()) else {
+            return Ok(None);
+        };
         if count > MAX_RANGE {
-            return None;
+            return Ok(None);
         }
-        let first = utf16_units(&bytes)?;
-        let mut changed = false;
+        let units = |step: u64| {
+            let mut units = first.clone();
+            if let Some(last) = units.last_mut() {
+                *last = last.wrapping_add(step as u16);
+            }
+            units
+        };
+        if !(0..count).any(|step| readable_units(&units(step)).is_some()) {
+            return Ok(None);
+        }
+        let mut size = prefix.chars().count() + 2;
         let mut entries = Vec::new();
         for step in 0..count {
-            let mut units = first.clone();
-            let last = units.last_mut()?;
-            *last = last.wrapping_add(step as u16);
-            match readable_units(&units) {
-                Some(written) => {
-                    changed = true;
-                    entries.push(hex(&written));
-                }
-                None => entries.push(hex(&units)),
+            let units = units(step);
+            let entry = hex(&readable_units(&units).unwrap_or(units));
+            size += entry.len() + 1;
+            if size > limit {
+                return Err(Error::resource_limit(
+                    "the /ToUnicode CMaps rewrite past their size limit",
+                ));
             }
+            entries.push(entry);
         }
-        return changed.then(|| format!("{prefix}[{}]", entries.join(" ")));
+        return Ok(Some(format!("{prefix}[{}]", entries.join(" "))));
     }
-    let inner = dst.word().strip_prefix('[')?.strip_suffix(']')?;
+    let Some(inner) = dst
+        .word()
+        .strip_prefix('[')
+        .and_then(|d| d.strip_suffix(']'))
+    else {
+        return Ok(None);
+    };
     let mut changed = false;
     let mut written = String::from("[");
     for token in tokenize(inner) {
@@ -211,7 +248,7 @@ fn readable_range(lo: &Token<'_>, hi: &Token<'_>, dst: &Token<'_>) -> Option<Str
         }
     }
     written.push(']');
-    changed.then(|| format!("{prefix}{written}"))
+    Ok(changed.then(|| format!("{prefix}{written}")))
 }
 
 /// The UTF-16 `units` written as [`readable`] text, or `None` when that is
@@ -240,9 +277,26 @@ fn hex(units: &[u16]) -> String {
     format!("<{digits}>")
 }
 
-/// The whitespace a token's `text` starts with.
+/// The whitespace and comments a token's `text` starts with.
 fn leading(text: &str) -> &str {
-    &text[..text.len() - text.trim_start().len()]
+    &text[..trivia(text.as_bytes(), 0)]
+}
+
+/// The index past the whitespace and comments (`%` to the end of the line)
+/// starting at `i` in `bytes`.
+fn trivia(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() {
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+        } else if bytes[i] == b'%' {
+            while i < bytes.len() && !matches!(bytes[i], b'\n' | b'\r') {
+                i += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    i
 }
 
 /// Remove the `bfchar` entries whose source code is in `codes`, and fail closed
@@ -365,8 +419,9 @@ fn copy_bfrange_section(
 /// One lexical token of a CMap stream, carrying its exact source slice (so
 /// re-emitting a token preserves the original bytes and whitespace).
 struct Token<'a> {
-    /// The token's source text, including any leading whitespace, so the tokens
-    /// concatenated reproduce the input minus the dropped ones.
+    /// The token's source text, including any leading whitespace and
+    /// comments, so the tokens concatenated reproduce the input minus the
+    /// dropped ones.
     text: &'a str,
     /// The token kind, so consumers can recognize hex strings.
     kind: TokenKind,
@@ -376,15 +431,16 @@ struct Token<'a> {
 enum TokenKind {
     /// A `<hex>` string.
     Hex,
-    /// Anything else (keyword, name, integer, array, delimiter, whitespace run).
+    /// Anything else (keyword, name, integer, string, array, or the
+    /// whitespace and comments the input ends with).
     Other,
 }
 
 impl Token<'_> {
-    /// The token's text with its leading whitespace trimmed, for matching
-    /// keywords (`beginbfchar`, `endbfchar`, ...).
+    /// The token's text past its leading whitespace and comments, for
+    /// matching keywords (`beginbfchar`, `endbfchar`, ...).
     fn word(&self) -> &str {
-        self.text.trim()
+        &self.text[leading(self.text).len()..]
     }
 
     /// Whether the token can be an entry's destination: a `<hex>` string, a
@@ -398,26 +454,24 @@ impl Token<'_> {
         if !matches!(self.kind, TokenKind::Hex) {
             return None;
         }
-        let inner = self.text.trim().strip_prefix('<')?.strip_suffix('>')?;
+        let inner = self.word().strip_prefix('<')?.strip_suffix('>')?;
         hex_to_bytes(inner)
     }
 }
 
 /// Tokenize a CMap stream into tokens whose concatenated `text` reproduces the
-/// input exactly. Leading whitespace is attached to the token that follows it,
-/// so re-emitting the kept tokens preserves layout. A `<hex>` string is one
-/// token; an array `[...]` is kept whole; everything else is a whitespace-
-/// delimited word.
+/// input exactly. Leading whitespace and comments are attached to the token
+/// that follows them, so re-emitting the kept tokens preserves layout and no
+/// comment is read as an entry. A `<hex>` string is one token; a `(string)`
+/// and an array `[...]` are kept whole; everything else is a word.
 fn tokenize(text: &str) -> Vec<Token<'_>> {
     let bytes = text.as_bytes();
     let mut tokens = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         let start = i;
-        // Attach the leading whitespace run to the next token.
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
+        // Attach the leading whitespace and comments to the next token.
+        i = trivia(bytes, i);
         if i >= bytes.len() {
             // Trailing whitespace: emit it as an `Other` token so it survives.
             tokens.push(Token {
@@ -437,10 +491,36 @@ fn tokenize(text: &str) -> Vec<Token<'_>> {
                 }
                 TokenKind::Hex
             }
-            b'[' => {
-                // An array runs to the closing `]`.
-                while i < bytes.len() && bytes[i] != b']' {
+            b'(' => {
+                // A string runs to its balancing `)`, past escaped bytes.
+                let mut open = 0usize;
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'\\' => i += 1,
+                        b'(' => open += 1,
+                        b')' => {
+                            open -= 1;
+                            if open == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
                     i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1; // include `)`
+                }
+                TokenKind::Other
+            }
+            b'[' => {
+                // An array runs to the closing `]`, past any comment.
+                while i < bytes.len() && bytes[i] != b']' {
+                    i = if bytes[i] == b'%' {
+                        trivia(bytes, i)
+                    } else {
+                        i + 1
+                    };
                 }
                 if i < bytes.len() {
                     i += 1; // include `]`
@@ -451,8 +531,7 @@ fn tokenize(text: &str) -> Vec<Token<'_>> {
                 // A word runs to the next whitespace or delimiter.
                 while i < bytes.len()
                     && !bytes[i].is_ascii_whitespace()
-                    && bytes[i] != b'<'
-                    && bytes[i] != b'['
+                    && !matches!(bytes[i], b'<' | b'[' | b'(' | b'%')
                 {
                     i += 1;
                 }
@@ -583,6 +662,48 @@ mod tests {
         let mut budget = 10_000;
         let out = readable_cmap(cmap, &mut budget).unwrap().unwrap();
         assert_eq!(10_000 - budget, out.len() - cmap.len());
+    }
+
+    /// A range expanding past the budget is refused as it expands, before
+    /// its destinations are all held.
+    #[test]
+    fn a_wide_range_is_refused_within_its_budget() {
+        let dst = format!("<{}>", "2F00".repeat(8_192));
+        let cmap = format!("1 beginbfrange\n<0000> <FFFF> {dst}\nendbfrange\n");
+        let err = readable_cmap(cmap.as_bytes(), &mut 0).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ResourceLimit);
+    }
+
+    /// An entry in a comment is not one: a viewer never reads it, so it is
+    /// neither rewritten nor charged to the budget.
+    #[test]
+    fn an_entry_in_a_comment_is_left_alone() {
+        let cmap = b"1 beginbfrange\n% <0000> <FFFF> <2F00>\n<01> <01> <0041>\nendbfrange\n";
+        assert_eq!(readable_cmap(cmap, &mut 0).unwrap(), None);
+        let cmap = b"1 beginbfchar % <01> <2F2D>\n<02> <2F2D> endbfchar";
+        let out = readable_cmap(cmap, &mut { usize::MAX }).unwrap().unwrap();
+        assert_eq!(out, b"1 beginbfchar % <01> <2F2D>\n<02> <5C71> endbfchar");
+    }
+
+    /// A comment and a string are whole tokens, so the tokens still
+    /// reproduce the input.
+    #[test]
+    fn tokenize_keeps_comments_and_strings() {
+        let cmap = "/Registry (Adobe % not a comment) def % a [comment\n<01> <0041>";
+        let tokens = tokenize(cmap);
+        let joined: String = tokens.iter().map(|t| t.text).collect();
+        assert_eq!(joined, cmap);
+        let words: Vec<&str> = tokens.iter().map(Token::word).collect();
+        assert_eq!(
+            words,
+            [
+                "/Registry",
+                "(Adobe % not a comment)",
+                "def",
+                "<01>",
+                "<0041>"
+            ]
+        );
     }
 
     /// A CMap nothing in is rewritten takes nothing from the budget, however

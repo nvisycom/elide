@@ -177,6 +177,8 @@ pub(super) fn walk_stream<'a>(
     // parametric `TextState`. The text matrix is *not* graphics state (it resets
     // at `BT`), so it is not saved.
     let mut gs_stack: Vec<SavedState<'_>> = Vec::new();
+    // The tiling patterns selected to paint with, walked once the stream is.
+    let mut selected: Vec<&[u8]> = Vec::new();
 
     for (op_idx, op) in content.operations.iter().enumerate() {
         match op.operator.as_str() {
@@ -329,14 +331,18 @@ pub(super) fn walk_stream<'a>(
             }
 
             // A tiling pattern selected to paint with draws its cell's content,
-            // text included.
+            // text included, wherever it paints. Selecting it paints nothing,
+            // so its text is read after the stream's, never inside it.
             "scn" | "SCN" => {
                 if let Some(Object::Name(name)) = op.operands.last() {
-                    walk_pattern(doc, name, scope, depth, ctx)?;
+                    selected.push(name);
                 }
             }
             _ => {}
         }
+    }
+    for name in selected {
+        walk_pattern(doc, name, scope, depth, ctx)?;
     }
     Ok(())
 }

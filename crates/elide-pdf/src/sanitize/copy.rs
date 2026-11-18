@@ -1,6 +1,8 @@
 //! Copying an object as its [`Kind`]: only the keys the kind keeps, every
 //! value resolved, every child copied as the kind its key holds.
 
+use std::mem;
+
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Object, ObjectId, Stream};
@@ -61,8 +63,9 @@ impl<'a> Builder<'a> {
     }
 
     /// The object `id` refers to copied as `kind`: a dictionary or stream as
-    /// its own object, copied once per kind (and per scope, for content that
-    /// borrows the scope it is drawn in); anything else in place.
+    /// its own object, copied once per kind (and per scope, for an object
+    /// whose copy depends on the scope it is drawn in); anything else in
+    /// place.
     fn copy_reference<'s>(
         &mut self,
         kind: Kind,
@@ -96,33 +99,47 @@ impl<'a> Builder<'a> {
         if !matches!(object, Object::Dictionary(_) | Object::Stream(_)) {
             return self.copy(kind, object, scope, depth + 1);
         }
-        // Content that resolves its names in the scope it is drawn in is
-        // copied once for each scope whose resources differ; any other
+        // An object whose copy depends on the scope it is drawn in (content
+        // that resolves its names there, or an object holding such content)
+        // is copied once for each scope whose resources differ; any other
         // object is copied once.
-        let drawn_in: &[&Dictionary] = if self.borrows_scope(kind, object) {
-            scope.dictionaries()
-        } else {
-            &[]
-        };
+        let drawn_in = scope.dictionaries();
         let scopes = &self.scopes;
-        let same_scope =
-            |(index, _): &&ScopedCopy| scopes[*index].iter().eq(drawn_in.iter().copied());
-        if let Some((_, copy)) = self
+        let fits = |(index, _): &&ScopedCopy| {
+            index.is_none_or(|index| scopes[index].iter().eq(drawn_in.iter().copied()))
+        };
+        if let Some(&(index, copy)) = self
             .copies
             .get(&(target, kind))
-            .and_then(|copies| copies.iter().find(same_scope))
+            .and_then(|copies| copies.iter().find(fits))
         {
-            return Ok(Some(Object::Reference(*copy)));
+            self.scoped |= index.is_some();
+            return Ok(Some(Object::Reference(copy)));
         }
         // The copy's id is taken first, so an object that refers back to
         // itself (a form drawing a pattern drawing the form) refers to it.
-        let index = self.scope_index(drawn_in);
+        let borrows = self.borrows_scope(kind, object);
+        let index = borrows.then(|| self.scope_index(drawn_in));
         let copy = self.out.new_object_id();
         self.copies
             .entry((target, kind))
             .or_default()
             .push((index, copy));
-        match self.copy_object(kind, Some(target), object, scope, depth + 1)? {
+        let outer = mem::take(&mut self.scoped);
+        let copied = self.copy_object(kind, Some(target), object, scope, depth + 1)?;
+        let scoped = borrows || self.scoped;
+        self.scoped = outer || scoped;
+        if scoped && index.is_none() {
+            let index = self.scope_index(drawn_in);
+            if let Some(entry) = self
+                .copies
+                .get_mut(&(target, kind))
+                .and_then(|copies| copies.iter_mut().find(|(_, id)| *id == copy))
+            {
+                entry.0 = Some(index);
+            }
+        }
+        match copied {
             Some(object) => {
                 self.out.objects.insert(copy, object);
                 Ok(Some(Object::Reference(copy)))
@@ -137,8 +154,8 @@ impl<'a> Builder<'a> {
     }
 
     /// The index in [`Builder::scopes`] of the scope `resources`, kept there
-    /// the first time it is seen. It is looked up only when a copy is made,
-    /// so the scan is paid once per copy, not once per reference.
+    /// the first time it is seen. It is looked up only when a scoped copy is
+    /// made, so the scan is paid once per copy, not once per reference.
     fn scope_index(&mut self, resources: &[&Dictionary]) -> usize {
         let same = |scope: &Vec<Dictionary>| scope.iter().eq(resources.iter().copied());
         self.scopes.iter().position(same).unwrap_or_else(|| {
@@ -206,6 +223,16 @@ impl<'a> Builder<'a> {
                     Ok(None)
                 }
             },
+        }
+    }
+
+    /// After the content `dict` is rebuilt: when it has resources of its own,
+    /// what it draws resolved its names there, not in the scope it is drawn
+    /// in, so whether its copy depends on that scope is as it was before,
+    /// `scoped`.
+    fn own_scope(&mut self, dict: &Dictionary, scoped: bool) {
+        if Scope::own(self.source, dict).is_some() {
+            self.scoped = scoped;
         }
     }
 
@@ -337,6 +364,9 @@ impl<'a> Builder<'a> {
             return Ok(Object::Dictionary(out));
         }
         let inner = scope.inner(source, dict);
+        let scoped = self.scoped;
+        // The glyph procedures share one resource dictionary, so the names
+        // they are rebuilt with are given across all of them.
         let mut resources = Dictionary::new();
         let mut procs = Dictionary::new();
         let glyphs = dict
@@ -348,10 +378,10 @@ impl<'a> Builder<'a> {
                 self.residue += 1;
                 continue;
             };
-            let (content, used) = self.content(&glyph.decoded()?, &inner, depth + 1)?;
-            merge(&mut resources, used);
+            let content = self.content(&glyph.decoded()?, &inner, &mut resources, depth + 1)?;
             procs.set(name.clone(), self.out.add_object(compressed(content)?));
         }
+        self.own_scope(dict, scoped);
         out.set("CharProcs", procs);
         out.set("Resources", resources);
         Ok(Object::Dictionary(out))
@@ -370,7 +400,10 @@ impl<'a> Builder<'a> {
         'a: 's,
     {
         let inner = scope.inner(self.source, &stream.dict);
-        let (content, resources) = self.content(&stream.decoded()?, &inner, depth + 1)?;
+        let scoped = self.scoped;
+        let mut resources = Dictionary::new();
+        let content = self.content(&stream.decoded()?, &inner, &mut resources, depth + 1)?;
+        self.own_scope(&stream.dict, scoped);
         let mut dict = self.stream_keys(
             &stream.dict,
             fields,
@@ -526,23 +559,4 @@ pub(super) fn compressed(content: Vec<u8>) -> Result<Stream> {
         .compress()
         .map_err(|e| Error::malformed(format!("could not compress content: {e}")))?;
     Ok(stream)
-}
-
-/// Merge the resource dictionary `from` into `into`, category by category.
-pub(super) fn merge(into: &mut Dictionary, from: Dictionary) {
-    for (category, entries) in from {
-        let Object::Dictionary(entries) = entries else {
-            continue;
-        };
-        match into.get_mut(&category) {
-            Ok(Object::Dictionary(existing)) => {
-                for (name, value) in entries {
-                    if existing.get(&name).is_err() {
-                        existing.set(name, value);
-                    }
-                }
-            }
-            _ => into.set(category, entries),
-        }
-    }
 }

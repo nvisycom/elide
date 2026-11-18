@@ -6,6 +6,7 @@ use lopdf::content::Content;
 use lopdf::{Document, Object, ObjectId, Stream};
 
 use super::geometry::{Matrix, TextState};
+use super::run::gap;
 use super::stream::{read_matrix, walk_stream};
 use super::{Inherited, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
 use crate::content::text::StreamTarget;
@@ -48,7 +49,8 @@ pub(super) fn walk_xobject<'a>(
 /// space transformed by the pattern's `/Matrix` (8.7.3.1), so it inherits no
 /// font or transform. Its text is located once, however many times the cell is
 /// tiled or the pattern selected, and deleting it from the one stream removes
-/// it from every tile. A shading pattern draws no text.
+/// it from every tile; a gap sets it apart from the text around it. A shading
+/// pattern draws no text.
 pub(super) fn walk_pattern<'a>(
     doc: &'a Document,
     name: &[u8],
@@ -79,7 +81,12 @@ pub(super) fn walk_pattern<'a>(
         font: None,
         state: TextState::default(),
     };
-    walk_nested(doc, id, stream, scope, depth, inherited, ctx)
+    let accum = &mut ctx.accum;
+    gap(accum.text, accum.next_char, accum.runs);
+    walk_nested(doc, id, stream, scope, depth, inherited, ctx)?;
+    let accum = &mut ctx.accum;
+    gap(accum.text, accum.next_char, accum.runs);
+    Ok(())
 }
 
 /// Walk the content of the form or tiling pattern `stream` (object `id`),

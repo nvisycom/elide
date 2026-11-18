@@ -304,9 +304,44 @@ mod tests {
         tiling_text(Object::Integer(1), 5_000);
     }
 
+    /// Selecting a pattern paints nothing, so its cell's text is read apart
+    /// from the text the page shows around the selection, never inside it.
+    #[test]
+    fn a_selected_pattern_reads_apart_from_the_text_around_it() {
+        let bytes = tiling_document(
+            Object::Integer(1),
+            b"BT /F1 12 Tf 10 50 Td (alice@) Tj /Pattern cs /P0 scn (example.com) Tj ET".to_vec(),
+        );
+        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let text = &pdf.read(Text).unwrap()[0].text;
+        assert_eq!(text, "alice@example.com Jane Roe ");
+    }
+
     /// Find and delete the text a tiling pattern of `/PatternType` `kind`
     /// draws, the page selecting it `selections` times.
     fn tiling_text(kind: Object, selections: usize) {
+        let bytes = tiling_document(
+            kind,
+            b"/Pattern cs /P0 scn 0 0 100 100 re f\n".repeat(selections),
+        );
+        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let blocks = pdf.read(Text).unwrap();
+        assert_eq!(blocks[0].text.trim_end(), "Jane Roe");
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &blocks,
+            detections: &[Detection::new(1, 0, 8)],
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        assert!(!streams_of(&out.bytes()).contains("Jane Roe"));
+        out.read(Check).unwrap();
+    }
+
+    /// A one-page document drawing `content`, its `/F1` Helvetica and its
+    /// `/P0` a tiling pattern of `/PatternType` `kind` showing "Jane Roe".
+    fn tiling_document(kind: Object, content: Vec<u8>) -> Vec<u8> {
         let mut doc = Document::with_version("1.5");
         let font = doc.add_object(dictionary! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
@@ -328,34 +363,21 @@ mod tests {
             },
             cell.encode().unwrap(),
         ));
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"/Pattern cs /P0 scn 0 0 100 100 re f\n".repeat(selections),
-        ));
+        let content = doc.add_object(Stream::new(dictionary! {}, content));
         with_pages(
             &mut doc,
             [dictionary! {
                 "Contents" => content,
-                "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+                "Resources" => dictionary! {
+                    "Font" => dictionary! { "F1" => font },
+                    "Pattern" => dictionary! { "P0" => pattern },
+                },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
-
-        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
-        let blocks = pdf.read(Text).unwrap();
-        assert_eq!(blocks[0].text, "Jane Roe");
-        let mut edit = pdf.edit();
-        edit.redact(TextRedaction {
-            source: &pdf,
-            blocks: &blocks,
-            detections: &[Detection::new(1, 0, 8)],
-        })
-        .unwrap();
-        let out = edit.finish().unwrap();
-        assert!(!streams_of(&out.bytes()).contains("Jane Roe"));
-        out.read(Check).unwrap();
+        bytes
     }
 
     /// A stream another redaction changed no longer holds the glyphs where the

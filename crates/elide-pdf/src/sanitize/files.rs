@@ -115,7 +115,7 @@ impl Builder<'_> {
         else {
             return Ok(None);
         };
-        let taken = |candidate: &str| self.files.values().any(|(_, name)| name == candidate);
+        let taken = |candidate: &str| self.file_names.contains(candidate);
         let kept = is_neutral(name) && !taken(name);
         let neutral = if kept {
             name.to_owned()
@@ -146,6 +146,7 @@ impl Builder<'_> {
             copy.set("AFRelationship", relationship.clone());
         }
         let copy = self.out.add_object(copy);
+        self.file_names.insert(neutral.clone());
         self.files.insert(stream, (copy, neutral.clone()));
         Ok(Some((copy, neutral)))
     }

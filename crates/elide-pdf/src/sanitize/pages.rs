@@ -68,7 +68,8 @@ impl Builder<'_> {
             .map_err(|e| Error::malformed(format!("page {id:?}: {e}")))?;
         let scope = Scope::page(source, id);
         let bytes = source.page_content(id)?;
-        let (mut content, mut resources) = self.content(&bytes, &scope, 0)?;
+        let mut resources = Dictionary::new();
+        let mut content = self.content(&bytes, &scope, &mut resources, 0)?;
 
         // Internal links are kept; a form field is flattened into the page,
         // drawn after its content in the initial graphics state (the content

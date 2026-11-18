@@ -13,6 +13,22 @@ use crate::pdf::reader::{DeviceRect, GlyphRect, ObjectExt};
 /// applies to (ISO 32000-1 §9.3.3).
 pub(super) const SPACE_CODE: u32 = 32;
 
+/// Append a synthetic space no glyph drew to `text`, its run to `runs`: one
+/// char of gap with no glyph source (a redaction leaves it alone). Coalesces:
+/// never two gaps in a row, and never a leading gap.
+pub(super) fn gap(text: &mut String, next_char: &mut usize, runs: &mut Vec<OffsetRun>) {
+    if text.is_empty() || text.ends_with(' ') {
+        return;
+    }
+    let start = *next_char;
+    text.push(' ');
+    *next_char += 1;
+    runs.push(OffsetRun {
+        chars: start..*next_char,
+        source: None,
+    });
+}
+
 /// A page's text and glyph map under construction, driven by the text geometry.
 ///
 /// [`show`](TextRun::show) decodes a `Tj`/`TJ` operand list, appending each
@@ -84,16 +100,7 @@ impl TextRun<'_> {
     /// source (a redaction leaves it alone). Coalesces: never two gaps in a row,
     /// and never a leading gap.
     pub(super) fn push_gap(&mut self) {
-        if self.text.is_empty() || self.text.ends_with(' ') {
-            return;
-        }
-        let start = *self.next_char;
-        self.text.push(' ');
-        *self.next_char += 1;
-        self.runs.push(OffsetRun {
-            chars: start..*self.next_char,
-            source: None,
-        });
+        gap(self.text, self.next_char, self.runs);
     }
 
     /// Draw a `Tj`/`TJ` operand list, decoding glyphs, recording their bytes, and
