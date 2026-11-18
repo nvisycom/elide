@@ -146,7 +146,7 @@ struct Builder<'a> {
     /// The neutral names of the attached files copied.
     file_names: HashSet<String>,
     /// The copy of each embedded file made for a name of each extension.
-    file_copies: HashMap<(ObjectId, Option<String>), Object>,
+    file_copies: HashMap<ObjectId, HashMap<Option<String>, Object>>,
     /// The number the next attached file renamed is tried with: one tried
     /// is never tried again, so naming every file takes one pass.
     next_file: usize,
@@ -600,7 +600,9 @@ mod tests {
 
     /// A copied image or mask is an image XObject, so the image pipeline
     /// sees it, whatever its source said; a JPEG's one filter, given as an
-    /// array, is written as its name, as the normal form holds.
+    /// array, is written as its name, as the normal form holds, and its
+    /// parameters, given as an array referred to, as their dictionary, with
+    /// the colour transform that decodes it.
     #[test]
     fn copied_images_are_image_xobjects_with_named_filters() {
         let (mut doc, page) = document(
@@ -612,12 +614,16 @@ mod tests {
             dictionary! { "Width" => 8, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
             vec![0; 8],
         ));
+        let parameters = doc.add_object(vec![Object::Dictionary(dictionary! {
+            "ColorTransform" => 0,
+        })]);
         let jpeg = doc.add_object(
             Stream::new(
                 dictionary! {
                     "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 8,
                     "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB",
                     "Filter" => vec![Object::Name(b"DCTDecode".to_vec())],
+                    "DecodeParms" => parameters,
                     "SMask" => mask,
                 },
                 b"jpeg".to_vec(),
@@ -637,6 +643,15 @@ mod tests {
         assert_eq!(
             image.dict.get(b"Filter").unwrap(),
             &Object::Name(b"DCTDecode".to_vec())
+        );
+        let parameters = image
+            .dict
+            .get(b"DecodeParms")
+            .and_then(Object::as_dict)
+            .unwrap();
+        assert_eq!(
+            parameters.get(b"ColorTransform").unwrap(),
+            &Object::Integer(0)
         );
         let mask = out.get_object(image.dict.get(b"SMask").unwrap().as_reference().unwrap());
         let Ok(Object::Stream(mask)) = mask else {
@@ -1462,6 +1477,25 @@ mod tests {
         assert!(text.contains("Page") && !text.contains("Before"), "{text}");
     }
 
+    /// A page transition the rebuild does not copy is recorded, so the
+    /// check refuses a document still carrying one.
+    #[test]
+    fn a_page_transition_is_recorded() {
+        let (doc, _) = document(
+            show("Hello"),
+            Dictionary::new(),
+            dictionary! { "Dur" => 5, "Trans" => dictionary! { "S" => "Dissolve" } },
+        );
+        let (mut out, stripped) = rebuilt(&doc);
+        assert_eq!(count(&stripped, HiddenContent::Properties), 2);
+        let page = out.get_pages().into_values().next().unwrap();
+        out.get_dictionary_mut(page)
+            .unwrap()
+            .set("Trans", dictionary! { "S" => "Dissolve" });
+        let error = check(&out).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Sanitization);
+    }
+
     /// A font a page lists but no content uses is dropped and recorded, so
     /// the check refuses a document that still carries one.
     #[test]
@@ -2207,10 +2241,27 @@ mod tests {
     }
 
     /// An appearance without resources of its own resolves names in the
-    /// page's resources first, the form's default resources only after.
+    /// page's resources first, the form's default resources only after, and
+    /// a null page entry is none.
     #[test]
     fn a_widget_resolves_names_in_the_page_before_the_form_defaults() {
+        assert_eq!(widget_font(false), b"Helvetica");
+        assert_eq!(widget_font(true), b"Courier");
+    }
+
+    /// The font a widget appearance without resources draws `/F1` in, the
+    /// page's `/F1` Helvetica, or null when `null_on_page`, and the form's
+    /// default resources' Courier.
+    fn widget_font(null_on_page: bool) -> Vec<u8> {
         let (mut doc, page) = document(Vec::new(), Dictionary::new(), Dictionary::new());
+        if null_on_page {
+            doc.get_dictionary_mut(page)
+                .unwrap()
+                .get_mut(b"Resources")
+                .and_then(Object::as_dict_mut)
+                .unwrap()
+                .set("Font", dictionary! { "F1" => Object::Null });
+        }
         let courier = doc.add_object(dictionary! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
         });
@@ -2258,10 +2309,10 @@ mod tests {
         let font = out
             .get_dictionary(fonts.get(b"F1").unwrap().as_reference().unwrap())
             .unwrap();
-        assert_eq!(
-            font.get(b"BaseFont").unwrap(),
-            &Object::Name(b"Helvetica".to_vec())
-        );
+        font.get(b"BaseFont")
+            .and_then(Object::as_name)
+            .unwrap()
+            .to_vec()
     }
 
     /// A translucent widget is composited as its annotation would be: as a
@@ -2611,6 +2662,72 @@ mod tests {
         // a clip it would set still holds.
         assert_eq!(operators, ["BMC", "re", "EMC"]);
         check(&out).unwrap();
+    }
+
+    /// A page whose content is `ops`, with `/L` an optional content group
+    /// hidden by default, rebuilt; its content's operators and text.
+    fn hidden_layer_rebuild(ops: Vec<Operation>) -> (Vec<String>, String) {
+        let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
+        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
+        let page = doc.get_pages().into_values().next().unwrap();
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("Properties", dictionary! { "L" => layer });
+        doc.catalog_mut().unwrap().set(
+            "OCProperties",
+            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+        );
+        let (out, _) = rebuilt(&doc);
+        check(&out).unwrap();
+        let page = out.get_pages().into_values().next().unwrap();
+        let operators = Content::decode(&out.get_page_content(page))
+            .unwrap()
+            .operations
+            .into_iter()
+            .map(|op| op.operator)
+            .collect();
+        (operators, text_of(&out))
+    }
+
+    /// A hidden `"` whose spacing operand is a string is cut whole, so the
+    /// string does not ride along as spacing.
+    #[test]
+    fn a_malformed_hidden_quote_is_cut() {
+        let (operators, text) = hidden_layer_rebuild(vec![
+            Operation::new("BT", vec![]),
+            Operation::new("BDC", vec!["OC".into(), "L".into()]),
+            Operation::new(
+                "\"",
+                vec![
+                    Object::string_literal("Jane Roe"),
+                    0.into(),
+                    Object::string_literal("x"),
+                ],
+            ),
+            Operation::new("EMC", vec![]),
+            Operation::new("ET", vec![]),
+        ]);
+        assert_eq!(operators, ["BT", "ET"]);
+        assert!(!text.contains("Jane Roe"));
+    }
+
+    /// An `ET` closing a text object in which a written sequence and, inside
+    /// it, a hidden one were opened closes both: the written one with one
+    /// `EMC`, and what follows is drawn again.
+    #[test]
+    fn a_text_object_closes_the_hidden_sequences_begun_in_it() {
+        let (operators, _) = hidden_layer_rebuild(vec![
+            Operation::new("BT", vec![]),
+            Operation::new("BMC", vec!["Span".into()]),
+            Operation::new("BDC", vec!["OC".into(), "L".into()]),
+            Operation::new("ET", vec![]),
+            Operation::new("re", vec![0.into(), 0.into(), 1.into(), 1.into()]),
+            Operation::new("f", vec![]),
+        ]);
+        assert_eq!(operators, ["BT", "BMC", "EMC", "ET", "re", "f"]);
     }
 
     /// What a hidden sequence draws is cut, but the state it sets holds

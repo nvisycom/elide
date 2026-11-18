@@ -108,9 +108,8 @@ pub(super) fn entry<'a>(doc: &'a Document, key: &Object, value: &'a Object) -> O
         Object::Dictionary(dict) => dict,
         _ => return None,
     };
-    let stream = spec.embedded_file(doc)?;
-    let name = spec
-        .file_name(doc)
+    let (stream, name) = spec.embedded_file(doc)?;
+    let name = name
         .or_else(|| decode_text_string(key).ok())
         .unwrap_or_default();
     Some(Entry {

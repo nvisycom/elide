@@ -48,7 +48,8 @@ impl<'a> Scope<'a> {
     }
 
     /// The entry `name` of the `category` sub-dictionary (`/Font`,
-    /// `/XObject`, ...) of the nearest resource dictionary that has it.
+    /// `/XObject`, ...) of the nearest resource dictionary that has it. A
+    /// null entry, or one referring to nothing, is no entry (7.3.9).
     pub(crate) fn lookup(
         &self,
         doc: &'a Document,
@@ -60,12 +61,15 @@ impl<'a> Scope<'a> {
                 .get(category)
                 .ok()
                 .and_then(|entries| doc.resolve_dict(entries))?;
-            entries.get(name).ok()
+            entries
+                .get(name)
+                .ok()
+                .filter(|entry| !matches!(doc.resolve(entry), None | Some(Object::Null)))
         })
     }
 
     /// Every entry of the `category` sub-dictionaries, by name, each the
-    /// nearest of its name.
+    /// nearest of its name; a null entry is none.
     pub(crate) fn entries(
         &self,
         doc: &'a Document,
@@ -78,7 +82,9 @@ impl<'a> Scope<'a> {
                 .ok()
                 .and_then(|entries| doc.resolve_dict(entries));
             for (name, value) in entries.into_iter().flat_map(Dictionary::iter) {
-                out.entry(name.as_slice()).or_insert(value);
+                if !matches!(doc.resolve(value), None | Some(Object::Null)) {
+                    out.entry(name.as_slice()).or_insert(value);
+                }
             }
         }
         out

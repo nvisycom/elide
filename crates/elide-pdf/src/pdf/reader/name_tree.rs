@@ -95,9 +95,10 @@ impl<'a> Reader<'a, '_> {
             return;
         };
         self.out.nodes.push(node);
-        // A null entry is no entry.
+        // A null entry, or one referring to null, is no entry.
+        let present = |value: &Object| !matches!(self.doc.resolve(value), Some(Object::Null));
         if let Ok(names) = dict.get(b"Names")
-            && !matches!(names, Object::Null)
+            && present(names)
         {
             let Some(names) = self.array(names) else {
                 return;
@@ -109,7 +110,7 @@ impl<'a> Reader<'a, '_> {
                 .extend(pairs.iter().map(|[key, value]| (key, value)));
         }
         if let Ok(kids) = dict.get(b"Kids")
-            && !matches!(kids, Object::Null)
+            && present(kids)
         {
             let Some(kids) = self.array(kids) else {
                 return;
@@ -255,7 +256,8 @@ mod tests {
         assert_eq!(tree.pairs.len(), 1);
     }
 
-    /// A null `/Names` is no entry: the node's kids are still read.
+    /// A null `/Names`, held in place or referred to, is no entry: the
+    /// node's kids are still read.
     #[test]
     fn a_null_names_entry_is_skipped() {
         let mut doc = Document::with_version("1.7");
@@ -263,10 +265,11 @@ mod tests {
         let leaf = doc.add_object(dictionary! {
             "Names" => vec![Object::string_literal("a"), 1.into()],
         });
+        let null = doc.add_object(Object::Null);
         doc.catalog_mut().unwrap().set(
             "Names",
             dictionary! {
-                "Dests" => dictionary! { "Names" => Object::Null, "Kids" => vec![leaf.into()] },
+                "Dests" => dictionary! { "Names" => null, "Kids" => vec![leaf.into()] },
             },
         );
         let tree = NameTree::read(&doc, b"Dests");

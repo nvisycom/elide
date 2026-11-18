@@ -325,14 +325,13 @@ impl<'d> Walk<'_, 'd> {
                         font: selected.slot,
                     };
                     run.show(text, operands, op_idx, base)?;
-                    // Text filled with a pattern paints it where it shows.
-                    if let Some(painted) = self.accum.rects[shown..]
+                    // Text drawn with a pattern paints it where it shows.
+                    if let Some(extent) = self.accum.rects[shown..]
                         .iter()
                         .map(|glyph| glyph.rect)
                         .reduce(DeviceRect::union)
-                        .and_then(|extent| painting.text(extent))
                     {
-                        self.paint(vec![painted]);
+                        self.paint(painting.text(extent));
                     }
                 }
 
@@ -357,9 +356,7 @@ impl<'d> Walk<'_, 'd> {
                 // inside it; any other colour paints with no pattern.
                 "scn" | "SCN" => {
                     let pattern = match op.operands.last() {
-                        Some(Object::Name(name)) => {
-                            self.select_pattern(name, scope, depth, pattern_space)
-                        }
+                        Some(Object::Name(name)) => self.select_pattern(name, scope, depth),
                         _ => None,
                     };
                     let paint = pattern.map(|pattern| Paint {

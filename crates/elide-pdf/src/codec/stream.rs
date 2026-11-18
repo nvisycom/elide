@@ -246,8 +246,9 @@ mod tests {
         let mut body = body();
         let missing = Redactions::from([redaction(1, 0..4), redaction(2, 0..0)]);
         assert!(body.write_at(missing).await.is_err());
+        assert!(body.state.detections().is_empty());
         #[allow(clippy::reversed_empty_ranges)]
-        let reversed = Redactions::from([redaction(1, 4..2)]);
+        let reversed = Redactions::from([redaction(1, 0..4), redaction(1, 4..2)]);
         assert!(body.write_at(reversed).await.is_err());
         assert!(body.state.detections().is_empty());
 

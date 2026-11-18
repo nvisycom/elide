@@ -85,6 +85,13 @@ pub(super) struct Painting {
     pub(super) stroke: Option<Paint>,
     clip: Clip,
     line: Line,
+    /// The text rendering mode (`Tr`, 9.3.6): whether text fills, strokes,
+    /// both, or neither.
+    render: u8,
+    /// Whether fills, and strokes, are fully transparent (`/ca 0`, `/CA 0`),
+    /// so paint nothing.
+    fill_clear: bool,
+    stroke_clear: bool,
     /// The device-space extent of the path being built.
     path: Option<DeviceRect>,
     /// Whether the path, once ended, clips (`W`, `W*`).
@@ -143,6 +150,10 @@ impl Painting {
                 self.line.projecting = operand_f64(&operation.operands, 0) == 2.0;
                 return Some(Vec::new());
             }
+            "Tr" => {
+                self.render = u8::try_from(operation.operands.first()?.as_i64().ok()?).ok()?;
+                return Some(Vec::new());
+            }
             "n" => (false, false),
             "f" | "F" | "f*" => (true, false),
             "S" | "s" => (false, true),
@@ -152,6 +163,8 @@ impl Painting {
         let mut painted = Vec::new();
         if let Some(path) = self.path.take() {
             let stroked = self.stroke_extent(path, ctm);
+            let fills = fills && !self.fill_clear;
+            let strokes = strokes && !self.stroke_clear;
             for (paints, paint, extent) in
                 [(fills, self.fill, path), (strokes, self.stroke, stroked)]
             {
@@ -171,17 +184,39 @@ impl Painting {
         Some(painted)
     }
 
-    /// Where text shown in `extent` paints, filled with this painting's
-    /// pattern, within the clip.
-    pub(super) fn text(&self, extent: DeviceRect) -> Option<Painted> {
+    /// Clip what is painted to `area` too, as a form's `/BBox` does.
+    pub(super) fn clip_to(&mut self, area: DeviceRect) {
+        self.clip = self.clipped(area).map_or(Clip::Nothing, Clip::Within);
+    }
+
+    /// Where text shown in `extent` paints with a pattern, within the clip:
+    /// filled, stroked, or both, as the rendering mode draws it; text the
+    /// mode does not draw paints nothing.
+    pub(super) fn text(&self, extent: DeviceRect) -> Vec<Painted> {
+        let fills = matches!(self.render, 0 | 2 | 4 | 6) && !self.fill_clear;
+        let strokes = matches!(self.render, 1 | 2 | 5 | 6) && !self.stroke_clear;
+        [(fills, self.fill), (strokes, self.stroke)]
+            .into_iter()
+            .filter_map(|(paints, paint)| {
+                Some(Painted {
+                    paint: paint.filter(|_| paints)?,
+                    region: self.clipped(extent)?,
+                })
+            })
+            .collect()
+    }
+
+    /// Where a fill of `extent` paints with a pattern, within the clip: a
+    /// stencil mask's, which paints with the fill colour.
+    pub(super) fn fill_area(&self, extent: DeviceRect) -> Option<Painted> {
         Some(Painted {
-            paint: self.fill?,
+            paint: self.fill.filter(|_| !self.fill_clear)?,
             region: self.clipped(extent)?,
         })
     }
 
     /// Take the line style the graphics state `state` sets (`/LW`, `/ML`,
-    /// `/LJ`, `/LC`).
+    /// `/LJ`, `/LC`), and its opacities (`/ca`, `/CA`).
     pub(super) fn state(&mut self, doc: &Document, state: &Dictionary) {
         let number = |key: &[u8]| doc.resolve_number(state.get(key).ok()?);
         if let Some(width) = number(b"LW") {
@@ -195,6 +230,12 @@ impl Painting {
         }
         if let Some(cap) = number(b"LC") {
             self.line.projecting = cap == 2.0;
+        }
+        if let Some(alpha) = number(b"ca") {
+            self.fill_clear = alpha <= 0.0;
+        }
+        if let Some(alpha) = number(b"CA") {
+            self.stroke_clear = alpha <= 0.0;
         }
     }
 

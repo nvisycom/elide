@@ -7,6 +7,7 @@ use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Object, ObjectId};
 
+use super::content::Fresh;
 use super::copy::At;
 use super::keys::Kind;
 use super::{Builder, content, record};
@@ -100,15 +101,14 @@ impl Builder<'_> {
         }
         if !appearances.is_empty() {
             let mut drawn = Vec::with_capacity(appearances.len() * 5);
+            let (mut forms, mut states) = (Fresh::new("Annot"), Fresh::new("AnnotGS"));
             for flattened in appearances {
-                let name =
-                    content::fresh("Annot", |name| content::has(&resources, b"XObject", name));
+                let name = forms.name(|name| content::has(&resources, b"XObject", name));
                 content::insert(&mut resources, b"XObject", &name, flattened.form);
                 drawn.push(Operation::new("q", Vec::new()));
                 if let Some(state) = flattened.state {
-                    let state_name = content::fresh("AnnotGS", |name| {
-                        content::has(&resources, b"ExtGState", name)
-                    });
+                    let state_name =
+                        states.name(|name| content::has(&resources, b"ExtGState", name));
                     content::insert(
                         &mut resources,
                         b"ExtGState",

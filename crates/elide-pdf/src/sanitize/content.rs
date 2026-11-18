@@ -17,10 +17,12 @@
 //! is left open (a save, a text object, a marked-content sequence) is closed
 //! at the end, so the content leaves the graphics state as it found it.
 
+use std::collections::BTreeMap;
+
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Object};
+use lopdf::{Dictionary, Object, ObjectId};
 
 use super::copy::At;
 use super::keys::Kind;
@@ -43,6 +45,14 @@ enum Marked {
     Written,
     Hiding,
     Within,
+}
+
+/// An open marked-content sequence, and whether it began inside a text
+/// object, so it closes inside it.
+#[derive(Debug, Clone, Copy)]
+struct Open {
+    marked: Marked,
+    in_text: bool,
 }
 
 /// The colour space families a `cs`/`CS` operand names directly (8.6.8).
@@ -142,7 +152,9 @@ impl<'a> Builder<'a> {
             font_lost: at.no_font,
             font_saves: Vec::new(),
             in_text: false,
-            marked_in_text: 0,
+            state_fonts: Fresh::new(STATE_FONT_PREFIX),
+            drawn: Fresh::new(DRAWN_PREFIX),
+            drawn_names: BTreeMap::new(),
         };
         for operation in content.operations {
             copy.operation(operation)?;
@@ -171,7 +183,7 @@ struct ContentCopy<'c, 'a, 's> {
     resources: &'c mut Dictionary,
     kept: Vec<Operation>,
     /// One entry per open marked-content sequence.
-    open: Vec<Marked>,
+    open: Vec<Open>,
     /// How many of the open sequences hide, so whether content is hidden is
     /// known at once.
     hiding: usize,
@@ -185,9 +197,13 @@ struct ContentCopy<'c, 'a, 's> {
     font_saves: Vec<bool>,
     /// Whether a text object is open.
     in_text: bool,
-    /// How many of the open sequences began inside the open text object, so
-    /// they are closed inside it.
-    marked_in_text: usize,
+    /// The names fonts graphics states select are given.
+    state_fonts: Fresh,
+    /// The names a second copy of a form drawn under one name is given.
+    drawn: Fresh,
+    /// The name each XObject name and copy drawn is written under, so a
+    /// name drawn again with the same copy is not named anew.
+    drawn_names: BTreeMap<(Vec<u8>, ObjectId), Vec<u8>>,
 }
 
 impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
@@ -204,12 +220,17 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         // text operator keeps its line move and spacing.
         if self.hiding > 0 {
             match operator {
-                "BDC" | "BMC" => self.open.push(Marked::Within),
-                "EMC" => self.hiding -= usize::from(self.open.pop() == Some(Marked::Hiding)),
+                "BDC" | "BMC" => self.push(Marked::Within),
+                "EMC" => {
+                    self.pop();
+                }
                 "f" | "F" | "f*" | "S" | "s" | "B" | "B*" | "b" | "b*" => {
                     self.kept.push(Operation::new("n", Vec::new()));
                 }
-                "Tj" | "TJ" | "'" | "\"" => self.text_state(&operation),
+                "Tj" | "TJ" | "'" | "\"" if operands_fit(operator, &operation.operands) => {
+                    self.text_state(&operation);
+                }
+                "Tj" | "TJ" | "'" | "\"" => self.builder.residue += 1,
                 "sh" | "Do" | "BI" | "MP" | "DP" => {}
                 _ => return self.visible(operation),
             }
@@ -240,10 +261,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 self.kept.push(operation);
             }
             "EMC" => {
-                if self.open.pop().is_some() {
-                    self.marked_in_text = self
-                        .marked_in_text
-                        .saturating_sub(usize::from(self.in_text));
+                if self.pop().is_some() {
                     self.kept.push(operation);
                 } else {
                     self.builder.residue += 1;
@@ -302,13 +320,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             }
             "ET" if !self.in_text => self.builder.residue += 1,
             "ET" => {
-                // A sequence still open inside the text object closes first.
-                for _ in 0..self.marked_in_text {
-                    self.open.pop();
-                    self.kept.push(Operation::new("EMC", Vec::new()));
-                }
-                self.marked_in_text = 0;
-                self.in_text = false;
+                self.close_text();
                 self.kept.push(operation);
             }
             _ if OPERATORS.contains(&operator) => self.kept.push(operation),
@@ -319,8 +331,34 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
 
     /// Open a marked-content sequence written as `BMC`.
     fn open_written(&mut self) {
-        self.open.push(Marked::Written);
-        self.marked_in_text += usize::from(self.in_text);
+        self.push(Marked::Written);
+    }
+
+    /// Open a marked-content sequence of kind `marked`.
+    fn push(&mut self, marked: Marked) {
+        self.hiding += usize::from(marked == Marked::Hiding);
+        self.open.push(Open {
+            marked,
+            in_text: self.in_text,
+        });
+    }
+
+    /// Close the innermost marked-content sequence open, returning its kind.
+    fn pop(&mut self) -> Option<Marked> {
+        let marked = self.open.pop()?.marked;
+        self.hiding -= usize::from(marked == Marked::Hiding);
+        Some(marked)
+    }
+
+    /// End the open text object: each sequence begun inside it closes first,
+    /// with an `EMC` for each one written.
+    fn close_text(&mut self) {
+        while self.open.last().is_some_and(|open| open.in_text) {
+            if self.pop() == Some(Marked::Written) {
+                self.kept.push(Operation::new("EMC", Vec::new()));
+            }
+        }
+        self.in_text = false;
     }
 
     /// A `BDC` or `DP` `operation`: its property list dropped (`BDC` becomes
@@ -344,8 +382,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         };
         if is_sequence && tag == b"OC" && properties.is_some_and(|p| builder.layers.is_hidden(p)) {
             builder.record(HiddenContent::Layer);
-            self.open.push(Marked::Hiding);
-            self.hiding += 1;
+            self.push(Marked::Hiding);
             return;
         }
         if properties
@@ -464,22 +501,34 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         let Some(copy) = builder.copy(kind, value, at)? else {
             return Ok(());
         };
-        let existing = self
-            .resources
-            .get(b"XObject")
-            .and_then(Object::as_dict)
-            .ok()
-            .and_then(|entries| entries.get(name).ok());
-        let name = match existing {
-            None => name.clone(),
-            Some(existing) if *existing == copy => name.clone(),
-            Some(_) => {
-                let resources = &*self.resources;
-                let scope = self.at.scope;
-                fresh(DRAWN_PREFIX, |name| {
-                    has(resources, b"XObject", name)
-                        || scope.lookup(source, b"XObject", name).is_some()
-                })
+        let Ok(copied) = copy.as_reference() else {
+            builder.residue += 1;
+            return Ok(());
+        };
+        let key = (name.clone(), copied);
+        let name = match self.drawn_names.get(&key) {
+            Some(given) => given.clone(),
+            None => {
+                let existing = self
+                    .resources
+                    .get(b"XObject")
+                    .and_then(Object::as_dict)
+                    .ok()
+                    .and_then(|entries| entries.get(name).ok());
+                let given = match existing {
+                    None => name.clone(),
+                    Some(existing) if *existing == copy => name.clone(),
+                    Some(_) => {
+                        let resources = &*self.resources;
+                        let scope = self.at.scope;
+                        self.drawn.name(|name| {
+                            has(resources, b"XObject", name)
+                                || scope.lookup(source, b"XObject", name).is_some()
+                        })
+                    }
+                };
+                self.drawn_names.insert(key, given.clone());
+                given
             }
         };
         insert(self.resources, b"XObject", &name, copy);
@@ -535,7 +584,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             .ok()
             .and_then(|fonts| fonts.iter().find(|(_, value)| **value == font))
             .map(|(name, _)| name.clone())
-            .unwrap_or_else(|| fresh(STATE_FONT_PREFIX, taken));
+            .unwrap_or_else(|| self.state_fonts.name(taken));
         insert(self.resources, b"Font", &name, font);
         Ok(StateFont::Selected(Operation::new(
             "Tf",
@@ -554,20 +603,14 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         // Only the sequences written are closed: one hidden to the end, and
         // any inside it, wrote no opener. Those begun in the open text object
         // close inside it.
-        let written = self
-            .open
-            .iter()
-            .filter(|&&marked| marked == Marked::Written)
-            .count();
-        let in_text = usize::from(self.in_text) * self.marked_in_text;
         if self.in_text {
-            for _ in 0..self.marked_in_text {
-                self.kept.push(Operation::new("EMC", Vec::new()));
-            }
+            self.close_text();
             self.kept.push(Operation::new("ET", Vec::new()));
         }
-        for _ in 0..written - in_text {
-            self.kept.push(Operation::new("EMC", Vec::new()));
+        while let Some(marked) = self.pop() {
+            if marked == Marked::Written {
+                self.kept.push(Operation::new("EMC", Vec::new()));
+            }
         }
         for _ in 0..self.saved {
             self.kept.push(Operation::new("Q", Vec::new()));
@@ -636,12 +679,30 @@ fn operands_fit(operator: &str, operands: &[Object]) -> bool {
     }
 }
 
-/// The first of the names `prefix1`, `prefix2`, ... not `taken`.
-pub(super) fn fresh(prefix: &str, taken: impl Fn(&[u8]) -> bool) -> Vec<u8> {
-    (1..)
-        .map(|index| format!("{prefix}{index}").into_bytes())
-        .find(|name| !taken(name))
-        .unwrap_or_default()
+/// The names `prefix1`, `prefix2`, ..., handed out in turn: each index is
+/// tried once, so naming many resources takes one pass, not one per name.
+#[derive(Debug)]
+pub(super) struct Fresh {
+    prefix: &'static str,
+    next: usize,
+}
+
+impl Fresh {
+    /// Names starting from `prefix1`.
+    pub(super) const fn new(prefix: &'static str) -> Self {
+        Self { prefix, next: 1 }
+    }
+
+    /// The next name not `taken`.
+    pub(super) fn name(&mut self, taken: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+        loop {
+            let name = format!("{}{}", self.prefix, self.next).into_bytes();
+            self.next += 1;
+            if !taken(&name) {
+                return name;
+            }
+        }
+    }
 }
 
 /// Whether `resources` already holds `name` under `category`.

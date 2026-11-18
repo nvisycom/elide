@@ -90,31 +90,40 @@ impl<'a> Layers<'a> {
 
     /// Whether the visibility expression `expression` (`[/And …]`, `[/Or …]`,
     /// `[/Not …]` over groups) evaluates visible. An expression too deep or
-    /// malformed to evaluate counts as visible: its content then stays in
-    /// place and is extracted and redacted like any other.
+    /// malformed to evaluate, anywhere in it, counts as visible as a whole:
+    /// its content then stays in place and is extracted and redacted like
+    /// any other.
     fn expression_visible(&self, expression: &Object, depth: usize) -> bool {
+        self.evaluate(expression, depth).unwrap_or(true)
+    }
+
+    /// The visibility `expression` evaluates to, or `None` when it is too
+    /// deep or malformed to evaluate.
+    fn evaluate(&self, expression: &Object, depth: usize) -> Option<bool> {
         if depth > MAX_EXPRESSION_DEPTH {
-            return true;
+            return None;
         }
         let expression = match expression {
-            Object::Reference(id) => match self.doc.get_object(*id) {
-                Ok(Object::Array(array)) => array.clone(),
-                _ => return !self.group_hidden(expression),
+            Object::Reference(id) => match self.doc.get_object(*id).ok()? {
+                Object::Array(array) => array,
+                Object::Dictionary(_) => return Some(!self.group_hidden(expression)),
+                _ => return None,
             },
-            Object::Array(array) => array.clone(),
-            _ => return true,
+            Object::Array(array) => array,
+            _ => return None,
         };
-        let Some((Object::Name(operator), operands)) = expression.split_first() else {
-            return true;
+        let (Object::Name(operator), operands) = expression.split_first()? else {
+            return None;
         };
-        let mut visible = operands
+        let visible = operands
             .iter()
-            .map(|o| self.expression_visible(o, depth + 1));
-        match operator.as_slice() {
-            b"And" => visible.all(|v| v),
-            b"Or" => visible.any(|v| v),
-            b"Not" => !visible.next().unwrap_or(true),
-            _ => true,
+            .map(|o| self.evaluate(o, depth + 1))
+            .collect::<Option<Vec<bool>>>()?;
+        match (operator.as_slice(), visible.as_slice()) {
+            (b"And", [_, ..]) => Some(visible.iter().all(|&v| v)),
+            (b"Or", [_, ..]) => Some(visible.iter().any(|&v| v)),
+            (b"Not", [one]) => Some(!one),
+            _ => None,
         }
     }
 }
@@ -141,7 +150,7 @@ fn hidden_groups(doc: &Document) -> HashSet<ObjectId> {
             .map(|array| array.iter().filter_map(|o| o.as_reference().ok()).collect())
             .unwrap_or_default()
     };
-    if config.name(doc, b"BaseState") == Some(b"OFF") {
+    let off = if config.name(doc, b"BaseState") == Some(b"OFF") {
         let on = ids(b"ON", config);
         ids(b"OCGs", properties)
             .into_iter()
@@ -149,5 +158,97 @@ fn hidden_groups(doc: &Document) -> HashSet<ObjectId> {
             .collect()
     } else {
         ids(b"OFF", config)
+    };
+    // A group whose intent the configuration does not share has no effect
+    // on visibility (8.11.2.1), so it hides nothing.
+    let viewing = intents(doc, config);
+    off.into_iter()
+        .filter(|&id| {
+            let group = doc.get_dictionary(id).ok();
+            let intended = group.map(|group| intents(doc, group)).unwrap_or_default();
+            viewing.contains(&b"All"[..].to_vec())
+                || intended.contains(&b"All"[..].to_vec())
+                || intended.iter().any(|intent| viewing.contains(intent))
+        })
+        .collect()
+}
+
+/// The intents `dict` (a group or a configuration) names in `/Intent`: a
+/// name or an array of names, `/View` when it names none.
+fn intents(doc: &Document, dict: &Dictionary) -> Vec<Vec<u8>> {
+    let named = match dict
+        .get(b"Intent")
+        .ok()
+        .and_then(|intent| doc.resolve(intent))
+    {
+        Some(Object::Name(name)) => vec![name.clone()],
+        Some(Object::Array(names)) => names
+            .iter()
+            .filter_map(|name| doc.resolve(name)?.as_name().ok().map(<[u8]>::to_vec))
+            .collect(),
+        _ => Vec::new(),
+    };
+    if named.is_empty() {
+        vec![b"View".to_vec()]
+    } else {
+        named
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::dictionary;
+
+    use super::*;
+
+    /// A document whose default configuration turns `layer` off, with the
+    /// group's and the configuration's intents as given.
+    fn document(group: Dictionary, config: Dictionary) -> (Document, ObjectId) {
+        let mut doc = Document::with_version("1.7");
+        let layer = doc.add_object(group);
+        let mut default = dictionary! { "OFF" => vec![layer.into()] };
+        default.extend(&config);
+        let catalog = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "OCProperties" => dictionary! { "OCGs" => vec![layer.into()], "D" => default },
+        });
+        doc.trailer.set("Root", catalog);
+        (doc, layer)
+    }
+
+    /// A malformed operand makes the whole expression count as visible: a
+    /// `/Not` does not turn its fallback into hidden.
+    #[test]
+    fn a_malformed_expression_is_visible_as_a_whole() {
+        let (doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
+        let layers = Layers::read(&doc);
+        let membership = |expression: Object| {
+            Object::Dictionary(dictionary! { "Type" => "OCMD", "VE" => expression })
+        };
+        let not = |operand: Object| Object::Array(vec![Object::Name(b"Not".to_vec()), operand]);
+        assert!(!layers.is_hidden(&membership(not(5.into()))));
+        assert!(!layers.is_hidden(&membership(not(layer.into()))));
+        assert!(layers.is_hidden(&membership(not(not(layer.into())))));
+    }
+
+    /// A group meant only for design has no effect on viewing, so being off
+    /// hides nothing; one meant for viewing does.
+    #[test]
+    fn a_group_of_another_intent_hides_nothing() {
+        let (doc, layer) = document(
+            dictionary! { "Type" => "OCG", "Intent" => "Design" },
+            Dictionary::new(),
+        );
+        assert!(!Layers::read(&doc).is_hidden(&Object::Reference(layer)));
+        let (doc, layer) = document(
+            dictionary! { "Type" => "OCG", "Intent" => vec!["Design".into(), "View".into()] },
+            Dictionary::new(),
+        );
+        assert!(Layers::read(&doc).is_hidden(&Object::Reference(layer)));
+        let (doc, layer) = document(
+            dictionary! { "Type" => "OCG", "Intent" => "Design" },
+            dictionary! { "Intent" => "All" },
+        );
+        assert!(Layers::read(&doc).is_hidden(&Object::Reference(layer)));
     }
 }

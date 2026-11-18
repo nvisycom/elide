@@ -65,6 +65,19 @@ impl DeviceRect {
         (out.min_x < out.max_x && out.min_y < out.max_y).then_some(out)
     }
 
+    /// The part of the box within `clip`, edges included, or `None` when it
+    /// lies outside: a box of no width or height (a glyph whose advance is
+    /// unknown) on or inside `clip` is kept.
+    pub(crate) fn within(self, clip: DeviceRect) -> Option<DeviceRect> {
+        let out = DeviceRect {
+            min_x: self.min_x.max(clip.min_x),
+            min_y: self.min_y.max(clip.min_y),
+            max_x: self.max_x.min(clip.max_x),
+            max_y: self.max_y.min(clip.max_y),
+        };
+        (out.min_x <= out.max_x && out.min_y <= out.max_y).then_some(out)
+    }
+
     /// The box covering this one once `matrix` maps it.
     pub(crate) fn mapped(self, matrix: Matrix) -> DeviceRect {
         DeviceRect::of_corners(

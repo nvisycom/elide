@@ -421,6 +421,50 @@ mod tests {
         assert_eq!(restored.len(), 4 * one.len());
     }
 
+    /// Pattern text shows on a tile only where it is painted: a fill of the
+    /// tile's far edge shows none of the text at its near edge.
+    #[test]
+    fn a_tile_shows_only_where_it_is_painted() {
+        assert!(tiled_rects(b"/Pattern cs /P0 scn 40 0 10 20 re f").is_empty());
+    }
+
+    /// Text paints with a pattern as its rendering mode draws it: filled,
+    /// stroked, or, invisible, not at all; and nothing paints at zero
+    /// alpha.
+    #[test]
+    fn text_and_alpha_paint_as_drawn() {
+        let shown = |mode: &str| {
+            tiled_rects(
+                format!(
+                    "BT /F2 12 Tf 0 5 Td {mode} Tr /Pattern cs /P0 scn /Pattern CS /P0 SCN \
+                     (xxxxx) Tj ET"
+                )
+                .as_bytes(),
+            )
+            .len()
+        };
+        let text = tiled_block(b"BT /F2 12 Tf 0 5 Td (xxxxx) Tj ET")
+            .rects
+            .len();
+        assert!(shown("0") > text && shown("1") > text);
+        assert_eq!(shown("3"), text);
+        assert!(tiled_rects(b"/Clear gs /Pattern cs /P0 scn 0 0 50 20 re f").is_empty());
+    }
+
+    /// A stencil mask paints its unit square with the fill pattern.
+    #[test]
+    fn a_stencil_mask_paints_with_the_pattern() {
+        let one = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re f");
+        let stencil = tiled_rects(b"q 50 0 0 20 0 0 cm /Pattern cs /P0 scn /Sm Do Q");
+        assert_eq!(stencil.len(), one.len());
+    }
+
+    /// A pattern drawing no text needs no tiles, however tiny they are.
+    #[test]
+    fn a_pattern_of_no_text_is_not_tiled() {
+        tiled_block(b"/Pattern cs /G0 scn 0 0 100 100 re f");
+    }
+
     /// A stroke paints past its path by its width: a line along a row
     /// boundary paints the tiles on either side.
     #[test]
@@ -435,6 +479,8 @@ mod tests {
     fn patterns_follow_forms_and_other_patterns() {
         let one = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re f");
         assert_eq!(tiled_rects(b"/Pattern cs /P0 scn /Fm Do").len(), one.len());
+        // A fill a form's `/BBox` clips away paints nothing.
+        assert!(tiled_rects(b"/Pattern cs /P0 scn /Fo Do").is_empty());
 
         let twice = tiled_rects(b"q /Fs Do Q q 1 0 0 1 25 0 cm /Fs Do Q");
         assert_eq!(twice.len(), 2 * one.len());
@@ -530,7 +576,10 @@ mod tests {
     /// a tiling pattern of `/PatternType` `kind` showing "Jane Roe", its
     /// `/Q0` a pattern of the same cell filled with `/P0`, its `/Fm` a form
     /// filling that cell with whatever it is drawn with, and its `/Fs` a form
-    /// filling it with `/P0`.
+    /// filling it with `/P0`, and its `/Fo` a form filling outside its `/BBox`;
+    /// its `/F2` a Helvetica with widths, its `/Sm` a stencil mask, its `/G0`
+    /// a pattern of tiny tiles drawing no text, and its `/Clear` a graphics
+    /// state painting nothing.
     fn tiling_document(kind: Object, content: Vec<u8>) -> Vec<u8> {
         let mut doc = Document::with_version("1.5");
         let font = doc.add_object(dictionary! {
@@ -573,15 +622,40 @@ mod tests {
         };
         let fills = form(&mut doc, b"0 0 50 20 re f");
         let selects = form(&mut doc, b"/Pattern cs /P0 scn 0 0 50 20 re f");
+        let outside = form(&mut doc, b"0 40 50 20 re f");
+        let wide = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+            "FirstChar" => 32, "LastChar" => 126,
+            "Widths" => vec![Object::Integer(500); 95],
+        });
+        let stencil = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
+                "ImageMask" => true,
+            },
+            vec![0],
+        ));
+        let hatch = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                "BBox" => vec![0.into(), 0.into(), Object::Real(0.01), Object::Real(0.01)],
+                "XStep" => Object::Real(0.01), "YStep" => Object::Real(0.01),
+                "Resources" => dictionary! {},
+            },
+            b"0 0 0.005 0.005 re f".to_vec(),
+        ));
         let content = doc.add_object(Stream::new(dictionary! {}, content));
         with_pages(
             &mut doc,
             [dictionary! {
                 "Contents" => content,
                 "Resources" => dictionary! {
-                    "Font" => dictionary! { "F1" => font },
-                    "Pattern" => dictionary! { "P0" => pattern, "Q0" => filled },
-                    "XObject" => dictionary! { "Fm" => fills, "Fs" => selects },
+                    "Font" => dictionary! { "F1" => font, "F2" => wide },
+                    "Pattern" => dictionary! { "P0" => pattern, "Q0" => filled, "G0" => hatch },
+                    "XObject" => dictionary! {
+                        "Fm" => fills, "Fs" => selects, "Fo" => outside, "Sm" => stencil,
+                    },
+                    "ExtGState" => dictionary! { "Clear" => dictionary! { "ca" => 0, "CA" => 0 } },
                 },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],

@@ -47,19 +47,16 @@ pub(super) fn page(key: &[u8]) -> Option<HiddenContent> {
     Some(match key {
         b"Type" | b"Parent" | b"Kids" | b"Count" | b"Resources" | b"MediaBox" | b"CropBox"
         | b"Rotate" | b"UserUnit" | b"Contents" | b"Group" | b"Annots" | b"AF" => return None,
-        b"BleedBox"
-        | b"TrimBox"
-        | b"ArtBox"
-        | b"OutputIntents"
-        | b"BoxColorInfo"
+        b"BleedBox" | b"TrimBox" | b"ArtBox" | b"OutputIntents" => return None,
+        b"BoxColorInfo" | b"SeparationInfo" => HiddenContent::PrinterSettings,
+        b"LastModified"
+        | b"Metadata"
+        | b"VP"
+        | b"DPart"
         | b"Tabs"
         | b"Dur"
         | b"Trans"
-        | b"TemplateInstantiated"
-        | b"SeparationInfo" => {
-            return None;
-        }
-        b"LastModified" | b"Metadata" | b"VP" | b"DPart" => HiddenContent::Properties,
+        | b"TemplateInstantiated" => HiddenContent::Properties,
         b"Thumb" => HiddenContent::Thumbnail,
         b"AA" | b"PresSteps" => HiddenContent::Action,
         b"B" => HiddenContent::Outline,

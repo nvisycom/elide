@@ -7,6 +7,8 @@
 //! by. A name that is already neutral stays, so a rebuild of a rebuild renames
 //! nothing.
 
+use std::collections::HashMap;
+
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use lopdf::{Dictionary, Object, ObjectId};
@@ -80,7 +82,7 @@ impl Builder<'_> {
     /// file each name says it is is a file of its own, decoded as that.
     pub(super) fn file_spec(&mut self, spec: &Dictionary) -> Result<Option<Object>> {
         let source = self.source;
-        let Some(stream) = spec.embedded_file(source) else {
+        let Some((stream, name)) = spec.embedded_file(source) else {
             self.residue += 1;
             return Ok(None);
         };
@@ -89,7 +91,7 @@ impl Builder<'_> {
                 self.drop_key(key, record::entry);
             }
         }
-        let name = spec.file_name(source).unwrap_or_default();
+        let name = name.unwrap_or_default();
         let Some(file) = self.embedded_file(stream, extension(&name))? else {
             return Ok(None);
         };
@@ -126,12 +128,12 @@ impl Builder<'_> {
         stream: ObjectId,
         extension: Option<String>,
     ) -> Result<Option<Object>> {
-        let key = (stream, extension);
-        if let Some(file) = self.file_copies.get(&key) {
+        let copies = self.file_copies.get(&stream);
+        if let Some(file) = copies.and_then(|copies| copies.get(&extension)) {
             return Ok(Some(file.clone()));
         }
         let scope = Scope::default();
-        let first = !self.file_copies.keys().any(|(copied, _)| *copied == stream);
+        let first = copies.is_none_or(HashMap::is_empty);
         let file = if first {
             self.copy(
                 Kind::EmbeddedFile,
@@ -146,7 +148,10 @@ impl Builder<'_> {
             self.copy(Kind::EmbeddedFile, data, At::top(&scope))?
         };
         if let Some(file) = &file {
-            self.file_copies.insert(key, file.clone());
+            self.file_copies
+                .entry(stream)
+                .or_default()
+                .insert(extension, file.clone());
         }
         Ok(file)
     }

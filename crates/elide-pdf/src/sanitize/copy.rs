@@ -351,12 +351,20 @@ impl<'a> Builder<'a> {
             return Ok(None);
         };
         dict.set("Filter", Object::Name(filter.to_vec()));
-        let parameters = match stream.dict.get(b"DecodeParms") {
-            Ok(Object::Array(parameters)) => parameters.first(),
-            parameters => parameters.ok(),
+        // The one filter's parameters: a dictionary, or the one in a
+        // one-item array; a null is none.
+        let source = self.source;
+        let parameters = match stream
+            .dict
+            .get(b"DecodeParms")
+            .ok()
+            .and_then(|p| source.resolve(p))
+        {
+            Some(Object::Array(parameters)) => parameters.first().and_then(|p| source.resolve(p)),
+            parameters => parameters,
         };
-        if let Some(parameters) = parameters
-            && let Some(parameters) = self.copy(Kind::Value, parameters, at.deeper())?
+        if let Some(parameters @ Object::Dictionary(_)) = parameters
+            && let Some(parameters) = self.copy(Kind::DecodeParms, parameters, at.deeper())?
         {
             dict.set("DecodeParms", parameters);
         }

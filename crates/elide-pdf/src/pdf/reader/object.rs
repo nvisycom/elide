@@ -259,8 +259,9 @@ pub(crate) trait DictionaryExt {
     fn file_name(&self, doc: &Document) -> Option<String>;
 
     /// The embedded-file stream this file specification names in its `/EF`,
-    /// under the same keys in the same order as its name.
-    fn embedded_file(&self, doc: &Document) -> Option<ObjectId>;
+    /// under the first of the keys its name is read under that holds one,
+    /// and the file's name: its name under that same key, else its name.
+    fn embedded_file(&self, doc: &Document) -> Option<(ObjectId, Option<String>)>;
 }
 
 impl DictionaryExt for Dictionary {
@@ -284,10 +285,16 @@ impl DictionaryExt for Dictionary {
         })
     }
 
-    fn embedded_file(&self, doc: &Document) -> Option<ObjectId> {
+    fn embedded_file(&self, doc: &Document) -> Option<(ObjectId, Option<String>)> {
         let files = doc.resolve_dict(self.get(b"EF").ok()?)?;
-        FILE_KEYS
+        let (key, stream) = FILE_KEYS
             .iter()
-            .find_map(|key| files.get(key).ok()?.as_reference().ok())
+            .find_map(|&key| Some((key, files.get(key).ok()?.as_reference().ok()?)))?;
+        let named = self
+            .get(key)
+            .ok()
+            .and_then(|name| doc.resolve(name))
+            .and_then(|name| decode_text_string(name).ok());
+        Some((stream, named.or_else(|| self.file_name(doc))))
     }
 }

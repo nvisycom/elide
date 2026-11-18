@@ -28,31 +28,39 @@ pub(super) const MAX_TILED_GLYPHS: usize = 1 << 20;
 const MAX_TILE_CANDIDATES: f64 = (1u64 << 22) as f64;
 
 /// A tiling pattern selected to paint with, to be walked once the page's own
-/// text is: the pattern, the space of the stream that first selected it,
-/// which its `/Matrix` maps its cell into as it is walked (8.7.3.1), and the
-/// nesting depth left there.
+/// text is: the pattern, and the nesting depth left where it was first
+/// selected.
 pub(super) struct Selected<'d> {
     id: ObjectId,
     stream: &'d Stream,
-    space: Matrix,
     depth: u8,
 }
 
 /// A tiling pattern's cell, walked: the pattern as selected, and the glyph
-/// boxes its text has as walked, placed on its tiles once every cell is.
+/// boxes its text has as walked in pattern space (through its `/Matrix`
+/// alone), placed on its tiles once every cell is.
 pub(super) struct Cell<'d> {
     pattern: Selected<'d>,
     glyphs: Vec<GlyphRect>,
 }
 
-/// The placements found so far: each pattern's tile transforms, the
-/// patterns being placed (so one painted in its own cell stops there), and
-/// the tiles counted.
+/// The placements found so far: each pattern's tiles, the patterns being
+/// placed (so one painted in its own cell stops there), and the tiles
+/// counted.
 #[derive(Default)]
 struct Placements {
-    done: BTreeMap<ObjectId, Vec<Matrix>>,
+    done: BTreeMap<ObjectId, Vec<Tile>>,
     active: BTreeSet<ObjectId>,
     candidates: f64,
+}
+
+/// One tile a pattern paints: the transform taking its cell, as walked, onto
+/// it, and the device-space extent the regions painting it cover there,
+/// which bounds what of the cell shows.
+#[derive(Debug, Clone, Copy)]
+struct Tile {
+    transform: Matrix,
+    coverage: DeviceRect,
 }
 
 /// How a tiling pattern lays its tiles out: its `/Matrix`, its cell
@@ -95,17 +103,18 @@ impl Selected<'_> {
 
 impl Layout {
     /// The tiles, laid out in `space`, whose cell overlaps one of `regions`,
-    /// each once, by column and row; `None` past `limit` tiles, when the
-    /// regions name more than [`MAX_TILE_CANDIDATES`] together with those
-    /// counted in `candidates` already, or tiles too far out to place.
+    /// each once, by column and row, with the extent of the regions that
+    /// overlap it; `None` past `limit` tiles, when the regions name more
+    /// than [`MAX_TILE_CANDIDATES`] together with those counted in
+    /// `candidates` already, or tiles too far out to place.
     fn tiles<'r>(
         &self,
         space: Matrix,
         regions: impl IntoIterator<Item = &'r DeviceRect>,
         limit: usize,
         candidates: &mut f64,
-    ) -> Option<BTreeSet<(i64, i64)>> {
-        let mut placed = BTreeSet::new();
+    ) -> Option<BTreeMap<(i64, i64), DeviceRect>> {
+        let mut placed: BTreeMap<(i64, i64), DeviceRect> = BTreeMap::new();
         // A space that flattens the pattern shows no tile.
         let Some(to_cell) = self.matrix.then(space).inverse() else {
             return Some(placed);
@@ -139,8 +148,14 @@ impl Layout {
             }
             for column in first_column as i64..=last_column as i64 {
                 for row in first_row as i64..=last_row as i64 {
-                    if placed.insert((column, row)) && placed.len() > limit {
-                        return None;
+                    match placed.get_mut(&(column, row)) {
+                        Some(coverage) => *coverage = coverage.union(*region),
+                        None => {
+                            placed.insert((column, row), *region);
+                            if placed.len() > limit {
+                                return None;
+                            }
+                        }
                     }
                 }
             }
@@ -148,15 +163,11 @@ impl Layout {
         Some(placed)
     }
 
-    /// The transform taking the cell as walked in the space `walked` onto
-    /// the tile at `column` and `row` of the pattern laid out in `space`.
-    fn placement(
-        &self,
-        walked: Matrix,
-        space: Matrix,
-        (column, row): (i64, i64),
-    ) -> Option<Matrix> {
-        let to_cell = self.matrix.then(walked).inverse()?;
+    /// The transform taking the cell as walked (in pattern space, through
+    /// its `/Matrix`) onto the tile at `column` and `row` of the pattern laid
+    /// out in `space`.
+    fn placement(&self, space: Matrix, (column, row): (i64, i64)) -> Option<Matrix> {
+        let to_cell = self.matrix.inverse()?;
         let step = Matrix::translation(column as f64 * self.x_step, row as f64 * self.y_step);
         Some(to_cell.then(step).then(self.matrix.then(space)))
     }
@@ -185,7 +196,31 @@ impl<'d> Walk<'_, 'd> {
         let Ok(Object::Stream(stream)) = doc.get_object(id) else {
             return Ok(());
         };
-        // Only Form XObjects carry content to walk; images are not text.
+        // Only Form XObjects carry content to walk; an image is no text, but
+        // a stencil mask paints its unit square with the fill colour, which
+        // may be a pattern whose text it then shows (8.9.6.2).
+        if stream.dict.is_subtype(doc, b"Image") {
+            let stencil = stream
+                .dict
+                .get(b"ImageMask")
+                .ok()
+                .and_then(|mask| doc.resolve(mask))
+                .is_some_and(|mask| matches!(mask.as_bool(), Ok(true)));
+            let unit = DeviceRect {
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 1.0,
+                max_y: 1.0,
+            };
+            if stencil
+                && let Some(painted) = inherited
+                    .painting
+                    .fill_area(unit.mapped(inherited.state.ctm))
+            {
+                self.paint(vec![painted]);
+            }
+            return Ok(());
+        }
         if !stream.dict.is_subtype(doc, b"Form") {
             return Ok(());
         }
@@ -193,15 +228,14 @@ impl<'d> Walk<'_, 'd> {
     }
 
     /// The tiling pattern named `name` in `scope`, the pattern a `scn`/`SCN`
-    /// selects to paint with, from a stream laid out in `space`: queued to be
-    /// walked once the page's own text is, if it is not already. `None` for a
-    /// shading pattern, which draws no text, or a name that is no pattern.
+    /// selects to paint with: queued to be walked once the page's own text
+    /// is, if it is not already. `None` for a shading pattern, which draws no
+    /// text, or a name that is no pattern.
     pub(super) fn select_pattern(
         &mut self,
         name: &[u8],
         scope: &Scope<'d>,
         depth: u8,
-        space: Matrix,
     ) -> Option<ObjectId> {
         let doc = self.doc;
         let id = scope
@@ -220,21 +254,17 @@ impl<'d> Walk<'_, 'd> {
             return None;
         }
         if self.patterns.insert(id) {
-            self.selected.push(Selected {
-                id,
-                stream,
-                space,
-                depth,
-            });
+            self.selected.push(Selected { id, stream, depth });
         }
         Some(id)
     }
 
     /// Walk the selected tiling `pattern`'s cell.
     ///
-    /// A pattern's cell is drawn in its own graphics state, in the space of the
-    /// stream that selected it transformed by the pattern's `/Matrix` (8.7.3.1),
-    /// so it inherits no font, pen or painting. Its text is located once,
+    /// A pattern's cell is drawn in its own graphics state, so it inherits no
+    /// font, pen or painting. It is walked once, in pattern space (through its
+    /// `/Matrix` alone), whatever space selects it; each tile it paints maps
+    /// that walk into the space it is painted in (8.7.3.1). Its text is located once,
     /// however many tiles show it or times it is selected, and deleting it from
     /// the one stream removes it from every tile; its glyph boxes are held
     /// back, to be placed on its tiles once every cell is walked
@@ -248,10 +278,7 @@ impl<'d> Walk<'_, 'd> {
     pub(super) fn walk_pattern(&mut self, pattern: Selected<'d>) -> Result<()> {
         let inherited = Inherited {
             font: None,
-            state: TextState {
-                ctm: pattern.space,
-                ..TextState::default()
-            },
+            state: TextState::default(),
             painting: Painting::default(),
         };
         let before = *self.accum.next_char;
@@ -300,8 +327,15 @@ impl<'d> Walk<'_, 'd> {
     /// the page's patterns would place more than [`MAX_TILED_GLYPHS`] glyph
     /// boxes, or as [`placements`](Self::placements).
     pub(super) fn place_tiles(&mut self) -> Result<()> {
+        // Only a pattern with text is placed, and those that paint it; one
+        // drawing graphics alone needs no tiles.
         let mut placed = Placements::default();
-        let ids: Vec<ObjectId> = self.cells.keys().copied().collect();
+        let ids: Vec<ObjectId> = self
+            .cells
+            .iter()
+            .filter(|(_, cell)| !cell.glyphs.is_empty())
+            .map(|(&id, _)| id)
+            .collect();
         for &id in &ids {
             self.placements(id, &mut placed, 0)?;
         }
@@ -310,28 +344,31 @@ impl<'d> Walk<'_, 'd> {
             let Some(cell) = self.cells.get(&id) else {
                 continue;
             };
-            let transforms = placed.done.get(&id).map(Vec::as_slice).unwrap_or_default();
-            boxes = boxes.saturating_add(transforms.len().saturating_mul(cell.glyphs.len()));
+            let tiles = placed.done.get(&id).map(Vec::as_slice).unwrap_or_default();
+            boxes = boxes.saturating_add(tiles.len().saturating_mul(cell.glyphs.len()));
             if boxes > MAX_TILED_GLYPHS {
                 return Err(Error::resource_limit(format!(
                     "page {} tiles its patterns' text into more than {MAX_TILED_GLYPHS} glyph boxes",
                     self.page
                 )));
             }
-            for &transform in transforms {
+            // A glyph shows on a tile only where the regions painting it
+            // cover it.
+            for tile in tiles {
                 self.accum
                     .rects
-                    .extend(cell.glyphs.iter().map(|glyph| GlyphRect {
-                        chars: glyph.chars.clone(),
-                        rect: glyph.rect.mapped(transform),
+                    .extend(cell.glyphs.iter().filter_map(|glyph| {
+                        Some(GlyphRect {
+                            chars: glyph.chars.clone(),
+                            rect: glyph.rect.mapped(tile.transform).within(tile.coverage)?,
+                        })
                     }));
             }
         }
         Ok(())
     }
 
-    /// The transform taking pattern `id`'s cell, as walked, onto each tile
-    /// it paints, kept in `placed`; `nesting` patterns deep in the cells
+    /// Each tile pattern `id` paints, kept in `placed`; `nesting` patterns deep in the cells
     /// that paint it. A pattern painted, through other cells, in its own
     /// cell paints nothing more through that.
     ///
@@ -358,16 +395,16 @@ impl<'d> Walk<'_, 'd> {
             placed.active.remove(&id);
             return Ok(());
         };
-        let mut transforms = Vec::new();
+        let mut tiles = Vec::new();
         if let Some(layout) = cell.pattern.layout(self.doc) {
             // The regions painted with it, by the space each was painted in.
-            let mut by_space: Vec<(Matrix, Vec<DeviceRect>)> = Vec::new();
-            let mut add = |space: Matrix, region: DeviceRect| match by_space
-                .iter_mut()
-                .find(|(s, _)| *s == space)
-            {
-                Some((_, regions)) => regions.push(region),
-                None => by_space.push((space, vec![region])),
+            let mut by_space: BTreeMap<[u64; 6], (Matrix, Vec<DeviceRect>)> = BTreeMap::new();
+            let mut add = |space: Matrix, region: DeviceRect| {
+                by_space
+                    .entry(space.values().map(f64::to_bits))
+                    .or_insert_with(|| (space, Vec::new()))
+                    .1
+                    .push(region);
             };
             for &(in_cell, painted) in self.painted.iter().filter(|(_, p)| p.paint.pattern == id) {
                 let Some(outer) = in_cell else {
@@ -384,29 +421,35 @@ impl<'d> Walk<'_, 'd> {
                 if placed.candidates > MAX_TILE_CANDIDATES {
                     return Err(over("on more tiles than are counted"));
                 }
-                for &transform in outer_tiles {
-                    add(
-                        painted.paint.space.then(transform),
-                        painted.region.mapped(transform),
-                    );
+                // Painted in the outer cell, it paints on each of its tiles,
+                // as far as that tile shows.
+                for outer_tile in outer_tiles {
+                    if let Some(region) = painted
+                        .region
+                        .mapped(outer_tile.transform)
+                        .intersection(outer_tile.coverage)
+                    {
+                        add(painted.paint.space.then(outer_tile.transform), region);
+                    }
                 }
             }
-            for (space, regions) in by_space {
-                let tiles = layout
+            for (space, regions) in by_space.into_values() {
+                let found = layout
                     .tiles(space, &regions, MAX_TILED_GLYPHS, &mut placed.candidates)
                     .ok_or_else(|| over("on more tiles than are placed"))?;
-                transforms.extend(
-                    tiles
-                        .into_iter()
-                        .filter_map(|tile| layout.placement(cell.pattern.space, space, tile)),
-                );
-                if transforms.len() > MAX_TILED_GLYPHS {
+                tiles.extend(found.into_iter().filter_map(|(tile, coverage)| {
+                    Some(Tile {
+                        transform: layout.placement(space, tile)?,
+                        coverage,
+                    })
+                }));
+                if tiles.len() > MAX_TILED_GLYPHS {
                     return Err(over("on more tiles than are placed"));
                 }
             }
         }
         placed.active.remove(&id);
-        placed.done.insert(id, transforms);
+        placed.done.insert(id, tiles);
         Ok(())
     }
 
@@ -462,6 +505,24 @@ impl<'d> Walk<'_, 'd> {
             .and_then(|matrix| doc.resolve_numbers(matrix))
             .map_or(Matrix::IDENTITY, Matrix::from);
         inherited.state.ctm = matrix.then(inherited.state.ctm);
+        // Its content is clipped to its `/BBox`, in the space it is drawn
+        // in, within whatever clips its caller (8.10.1).
+        if let Some(bbox) = stream
+            .dict
+            .get(b"BBox")
+            .ok()
+            .and_then(|bbox| doc.resolve_numbers::<4>(bbox))
+            .map(normalize_rect)
+        {
+            let [min_x, min_y, max_x, max_y] = bbox;
+            let area = DeviceRect {
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            };
+            inherited.painting.clip_to(area.mapped(inherited.state.ctm));
+        }
 
         self.active.insert(id);
         let result = self.walk_stream(

@@ -68,6 +68,15 @@ impl Space {
     fn rgb(&self) -> bool {
         !matches!(self, Self::Gray { .. } | Self::Indexed { rgb: false, .. })
     }
+
+    /// An indexed space's last index (its `hival`), `None` for any other.
+    fn last_index(&self) -> Option<u8> {
+        let Self::Indexed { rgb, palette } = self else {
+            return None;
+        };
+        let colours = palette.len() / if *rgb { 3 } else { 1 };
+        u8::try_from(colours.checked_sub(1)?).ok()
+    }
 }
 
 /// The shape of an image's samples, read from its dictionary.
@@ -161,8 +170,7 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the image is not of a supported kind (see
-/// [`is_supported`]), its samples cannot be decompressed, or an index falls
-/// outside its palette.
+/// [`is_supported`]), or its samples cannot be decompressed.
 pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
     let (layout, samples) = read(doc, stream)?;
     let row_bytes = layout.row_bytes();
@@ -171,8 +179,7 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
     let mut data = Vec::with_capacity(layout.pixel_bytes().unwrap_or_default());
     for row in samples.chunks_exact(row_bytes) {
         let values = unpack(row, layout.bits, count);
-        pixels(&layout.space, layout.bits, &values, &mut data)
-            .ok_or_else(|| Error::malformed("image palette index out of range"))?;
+        pixels(&layout.space, layout.bits, &values, &mut data);
     }
     Ok(Pixels {
         width: layout.width,
@@ -185,24 +192,23 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
 /// The samples of the raw-sample image XObject `stream` in `doc`, exactly as
 /// many as the image takes: samples short of it padded with zeros, as a
 /// viewer draws them, and bytes past it dropped, so nothing rides along
-/// after the image. Every index of an indexed image is checked against its
-/// palette, so samples kept are samples [`decode`] reads.
+/// after the image. An indexed image's index past its last colour is
+/// written as that colour's, as a viewer clamps it (8.9.5.2), so the
+/// samples kept are the colours drawn.
 ///
 /// # Errors
 ///
 /// As [`decode`].
 pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
-    let (layout, samples) = read(doc, stream)?;
-    if let Space::Indexed { rgb, palette } = &layout.space {
-        let colours = palette.len() / if *rgb { 3 } else { 1 };
-        let count = layout.width as usize;
-        let in_palette = samples.chunks_exact(layout.row_bytes()).all(|row| {
-            unpack(row, layout.bits, count)
-                .iter()
-                .all(|&index| usize::from(index) < colours)
-        });
-        if !in_palette {
-            return Err(Error::malformed("image palette index out of range"));
+    let (layout, mut samples) = read(doc, stream)?;
+    if let Some(last) = layout.space.last_index() {
+        let count = layout.width as usize * layout.space.components();
+        for row in samples.chunks_exact_mut(layout.row_bytes()) {
+            let values = unpack(row, layout.bits, count);
+            if values.iter().any(|&index| index > last) {
+                let clamped: Vec<u8> = values.iter().map(|&index| index.min(last)).collect();
+                pack(&clamped, layout.bits, row);
+            }
         }
     }
     Ok(samples)
@@ -326,12 +332,30 @@ fn space(doc: &Document, object: &Object, inverted: Option<bool>) -> Option<Spac
                             .ok()?,
                         _ => return None,
                     };
-                    (palette.len() >= needed).then_some(Space::Indexed { rgb, palette })
+                    // Only the colours up to `hival` are the palette's.
+                    let palette = palette.get(..needed)?.to_vec();
+                    Some(Space::Indexed { rgb, palette })
                 }
                 _ => None,
             }
         }
         _ => None,
+    }
+}
+
+/// Write `values` into `row` as `bits`-per-sample samples, from its start;
+/// the bits past them stay as they are.
+fn pack(values: &[u8], bits: usize, row: &mut [u8]) {
+    if bits == 8 {
+        row[..values.len()].copy_from_slice(values);
+        return;
+    }
+    let per_byte = 8 / bits;
+    let mask = (1u8 << bits) - 1;
+    for (i, &value) in values.iter().enumerate() {
+        let shift = 8 - bits * (i % per_byte + 1);
+        let byte = &mut row[i / per_byte];
+        *byte = *byte & !(mask << shift) | (value & mask) << shift;
     }
 }
 
@@ -352,9 +376,9 @@ fn unpack(row: &[u8], bits: usize, count: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Append the pixels of one row of sample `values` in `space` to `out`, or
-/// `None` when an index falls outside its palette.
-fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) -> Option<()> {
+/// Append the pixels of one row of sample `values` in `space` to `out`; an
+/// index past the palette's last colour is that colour (8.9.5.2).
+fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) {
     let max = (1u16 << bits) - 1;
     let scale = |v: u8| u8::try_from(u16::from(v) * 255 / max).unwrap_or(u8::MAX);
     match space {
@@ -374,13 +398,13 @@ fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) -> Optio
         }
         Space::Indexed { rgb, palette } => {
             let width = if *rgb { 3 } else { 1 };
+            let last = usize::from(space.last_index().unwrap_or(0));
             for &index in values {
-                let at = usize::from(index) * width;
-                out.extend_from_slice(palette.get(at..at + width)?);
+                let at = usize::from(index).min(last) * width;
+                out.extend_from_slice(&palette[at..at + width]);
             }
         }
     }
-    Some(())
 }
 
 #[cfg(test)]
@@ -432,10 +456,10 @@ mod tests {
         assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 255, 0, 0]);
     }
 
-    /// Samples are kept only when they decode: an index past the palette is
-    /// refused when the samples are read, as when they are decoded.
+    /// An index past the palette's last colour is that colour, as a viewer
+    /// clamps it: in the samples kept, and in the pixels decoded.
     #[test]
-    fn an_index_past_the_palette_is_refused() {
+    fn an_index_past_the_palette_is_clamped() {
         let doc = Document::new();
         let indexed = image(
             dictionary! {
@@ -449,8 +473,21 @@ mod tests {
             },
             vec![1, 2],
         );
-        assert!(decode(&doc, &indexed).is_err());
-        assert!(samples(&doc, &indexed).is_err());
+        assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 0, 0, 255]);
+        assert_eq!(samples(&doc, &indexed).unwrap(), [1, 1]);
+        let packed = image(
+            dictionary! {
+                "Width" => 4, "Height" => 1, "BitsPerComponent" => 2,
+                "ColorSpace" => vec![
+                    Object::Name(b"Indexed".to_vec()),
+                    Object::Name(b"DeviceGray".to_vec()),
+                    1.into(),
+                    Object::String(vec![0, 255], StringFormat::Hexadecimal),
+                ],
+            },
+            vec![0b00_01_10_11],
+        );
+        assert_eq!(samples(&doc, &packed).unwrap(), [0b00_01_01_01]);
     }
 
     /// An image whose packed samples fit the bound but whose pixels do not is

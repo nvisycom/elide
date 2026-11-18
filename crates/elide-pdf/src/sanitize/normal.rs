@@ -329,16 +329,21 @@ mod tests {
         verify(&doc).unwrap();
     }
 
-    /// A value nested past what is verified is a fault, not passed over.
+    /// A value nested past what is verified is a fault, not passed over: a
+    /// leaf as deep as is verified is normal, one level deeper is not.
     #[test]
     fn a_value_nested_too_deep_is_not_normal() {
-        let (mut doc, _) = document(Dictionary::new());
-        let mut value = Object::Reference((9999, 0));
-        for _ in 0..=MAX_DEPTH + 1 {
-            value = Object::Array(vec![value]);
-        }
-        doc.add_object(dictionary! { "Deep" => value });
-        assert!(faulted(&doc));
+        let nested = |levels: usize| {
+            let (mut doc, _) = document(Dictionary::new());
+            let mut value = Object::Integer(0);
+            for _ in 0..levels {
+                value = Object::Array(vec![value]);
+            }
+            doc.add_object(dictionary! { "Deep" => value });
+            doc
+        };
+        verify(&nested(MAX_DEPTH - 1)).unwrap();
+        assert!(faulted(&nested(MAX_DEPTH)));
     }
 
     /// A page's content is one stream, not an array of them.

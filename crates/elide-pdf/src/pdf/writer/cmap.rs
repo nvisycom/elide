@@ -94,24 +94,20 @@ impl UnicodeMap {
         self
     }
 
-    /// Unmap the code text draws as `bytes`, and every entry of the same
-    /// value at another length, which a viewer reading a code by its value
-    /// alone would take for it; an entry `kept` (codes text that stays still
-    /// draws, by their bytes) is spared.
-    pub(crate) fn remove(&mut self, bytes: &[u8], kept: &BTreeSet<Vec<u8>>) {
-        let Some((_, value)) = key(bytes) else {
-            return;
-        };
+    /// Unmap every code of one of `values`, at any length: the code text
+    /// drew, and every entry a viewer reading a code by its value alone would
+    /// take for it; an entry `kept` (codes text that stays still draws, by
+    /// their bytes) is spared.
+    pub(crate) fn remove(&mut self, values: &BTreeSet<u32>, kept: &BTreeSet<Vec<u8>>) {
         self.codes
-            .retain(|&(len, code), _| code != value || kept.contains(&code_bytes(len, code)));
+            .retain(|&(len, code), _| !removed(len, code, values, kept));
     }
 
-    /// Whether any entry maps a code of `value`, at any length, other than
-    /// one `kept`.
-    fn maps(&self, value: u32, kept: &BTreeSet<Vec<u8>>) -> bool {
+    /// Whether any entry maps a code [`remove`](Self::remove) would remove.
+    fn maps(&self, values: &BTreeSet<u32>, kept: &BTreeSet<Vec<u8>>) -> bool {
         self.codes
             .keys()
-            .any(|&(len, code)| code == value && !kept.contains(&code_bytes(len, code)))
+            .any(|&(len, code)| removed(len, code, values, kept))
     }
 
     /// The CMap written: its codespace, then each run of codes whose
@@ -231,11 +227,16 @@ pub(crate) fn scrub(
 ) -> Result<()> {
     for (&cmap_id, deleted_here) in deleted {
         // Fonts and their CMaps are shared, and a code (the letter `a`)
-        // recurs in text that stays: only codes used nowhere else go.
+        // recurs in text that stays: the very codes text still draws stay,
+        // while every other entry of a deleted code's value goes.
         let empty = BTreeSet::new();
         let kept = surviving.get(&cmap_id).unwrap_or(&empty);
-        let codes: Vec<&Vec<u8>> = deleted_here.difference(kept).collect();
-        if codes.is_empty() {
+        let values: BTreeSet<u32> = deleted_here
+            .iter()
+            .filter_map(|code| key(code))
+            .map(|(_, value)| value)
+            .collect();
+        if values.is_empty() {
             continue;
         }
         let Ok(Object::Stream(stream)) = doc.get_object(cmap_id) else {
@@ -247,19 +248,15 @@ pub(crate) fn scrub(
                  codes cannot be removed from it",
             ));
         };
-        for code in &codes {
-            map.remove(code, kept);
+        if !map.maps(&values, kept) {
+            continue;
         }
+        map.remove(&values, kept);
         // The CMap written is read back as a viewer would: a deleted code
         // still mapped there fails the redaction.
         let written = map.write();
         let check = Stream::new(Dictionary::new(), written.clone());
-        let remains = UnicodeMap::read(doc, &check)?.is_none_or(|read| {
-            codes
-                .iter()
-                .filter_map(|code| key(code))
-                .any(|(_, value)| read.maps(value, kept))
-        });
+        let remains = UnicodeMap::read(doc, &check)?.is_none_or(|read| read.maps(&values, kept));
         if remains {
             return Err(Error::redaction(
                 "a deleted glyph's code is still mapped in its rewritten /ToUnicode CMap",
@@ -270,6 +267,11 @@ pub(crate) fn scrub(
         }
     }
     Ok(())
+}
+
+/// Whether the `len`-byte `code` is one of `values` and not `kept`.
+fn removed(len: u8, code: u32, values: &BTreeSet<u32>, kept: &BTreeSet<Vec<u8>>) -> bool {
+    values.contains(&code) && !kept.contains(&code_bytes(len, code))
 }
 
 /// The code `bytes` name, by its length, or `None` past four bytes.
@@ -384,7 +386,7 @@ mod tests {
     #[test]
     fn a_code_is_removed_from_inside_a_range() {
         let mut map = read(&source());
-        map.remove(&[0x00, 0x11], &BTreeSet::new());
+        map.remove(&BTreeSet::from([0x11]), &BTreeSet::new());
         let map = read(&map.write());
         assert_eq!(text(&map, 2, 0x10).as_deref(), Some("a"));
         assert_eq!(text(&map, 2, 0x11), None);
@@ -400,12 +402,34 @@ mod tests {
             "2 begincodespacerange\n<00> <FF>\n<0000> <FFFF>\nendcodespacerange\n\
             3 beginbfchar\n<0041> <004A>\n<42> <0042>\n<0042> <0062>\nendbfchar",
         ));
-        map.remove(&[0x41], &BTreeSet::new());
-        map.remove(&[0x42], &BTreeSet::from([vec![0x00, 0x42]]));
+        map.remove(&BTreeSet::from([0x41]), &BTreeSet::new());
+        map.remove(&BTreeSet::from([0x42]), &BTreeSet::from([vec![0x00, 0x42]]));
         let map = read(&map.write());
         assert_eq!(text(&map, 2, 0x41), None);
         assert_eq!(text(&map, 1, 0x42), None);
         assert_eq!(text(&map, 2, 0x42).as_deref(), Some("b"));
+    }
+
+    /// A deleted code that text elsewhere still draws stays, while an entry
+    /// of its value at another length, which nothing draws, goes.
+    #[test]
+    fn a_surviving_code_spares_only_itself() {
+        let mut doc = Document::new();
+        let cmap = doc.add_object(Stream::new(
+            dictionary! {},
+            cmap(
+                "2 begincodespacerange\n<00> <FF>\n<0000> <FFFF>\nendcodespacerange\n\
+                2 beginbfchar\n<41> <0041>\n<0041> <004A>\nendbfchar",
+            ),
+        ));
+        let deleted = BTreeMap::from([(cmap, BTreeSet::from([vec![0x41]]))]);
+        scrub(&mut doc, &deleted, &deleted).unwrap();
+        let Ok(Object::Stream(stream)) = doc.get_object(cmap) else {
+            panic!("cmap");
+        };
+        let map = read(&stream.content);
+        assert_eq!(text(&map, 1, 0x41).as_deref(), Some("A"));
+        assert_eq!(text(&map, 2, 0x41), None);
     }
 
     /// Nothing but the map is written: a comment does not survive, and an
@@ -429,10 +453,8 @@ mod tests {
     #[test]
     fn a_map_of_no_code_is_still_read() {
         let mut map = read(&source());
-        let keys: Vec<(u8, u32)> = map.codes.keys().copied().collect();
-        for (len, code) in keys {
-            map.remove(&code_bytes(len, code), &BTreeSet::new());
-        }
+        let values = map.codes.keys().map(|&(_, code)| code).collect();
+        map.remove(&values, &BTreeSet::new());
         assert!(read(&map.write()).codes.is_empty());
     }
 

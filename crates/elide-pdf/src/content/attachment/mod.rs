@@ -162,8 +162,9 @@ mod tests {
         assert_eq!(names(&redacted), [("a.txt".to_owned(), b"[NAME]".to_vec())]);
     }
 
-    /// A file named only under a legacy platform key is read, and a name
-    /// given by reference is resolved.
+    /// A file held only under a legacy platform key is read, under the name
+    /// that same key gives, resolved by reference; a name under another key
+    /// does not name it.
     #[test]
     fn reads_a_legacy_file_under_a_referenced_name() {
         let mut doc = Document::with_version("1.7");
@@ -172,9 +173,10 @@ mod tests {
             dictionary! { "Type" => "EmbeddedFile" },
             b"Jane Roe".to_vec(),
         ));
-        let name = doc.add_object(Object::string_literal("legacy.txt"));
+        let name = doc.add_object(Object::string_literal("LEGACY.PDF"));
         let spec = doc.add_object(dictionary! {
-            "Type" => "Filespec", "UF" => name, "EF" => dictionary! { "DOS" => stream },
+            "Type" => "Filespec", "F" => Object::string_literal("portable.txt"), "DOS" => name,
+            "EF" => dictionary! { "DOS" => stream },
         });
         doc.catalog_mut().unwrap().set(
             "Names",
@@ -189,7 +191,7 @@ mod tests {
         let pdf = Pdf::open(&bytes).unwrap();
         assert_eq!(
             names(&pdf),
-            [("legacy.txt".to_owned(), b"Jane Roe".to_vec())]
+            [("LEGACY.PDF".to_owned(), b"Jane Roe".to_vec())]
         );
     }
 

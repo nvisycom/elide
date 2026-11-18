@@ -139,7 +139,17 @@ impl<'a> FontText<'a> {
                 collection,
             }))));
         }
-        let encoding = if font.get(b"Encoding").is_ok() {
+        let encoding = if let Ok(named) = font.get(b"Encoding") {
+            // A composite encoding is no simple font's, and lopdf would read
+            // one through `/ToUnicode` again, past the guard above.
+            let base = match doc.resolve(named) {
+                Some(Object::Dictionary(dict)) => dict.name(doc, b"BaseEncoding"),
+                Some(Object::Name(name)) => Some(name.as_slice()),
+                _ => None,
+            };
+            if matches!(base, Some(b"Identity-H" | b"Identity-V")) {
+                return Ok(None);
+            }
             let Ok(encoding) = font.get_font_encoding_with_limit(doc, MAX_CONTENT_BYTES) else {
                 return Ok(None);
             };
@@ -166,7 +176,7 @@ impl<'a> FontText<'a> {
 /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if an
 /// embedded CMap decodes past the content limit.
 fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Codespace)>> {
-    let read = |data: &[u8]| Some((CMap::parse(data, load_embedded)?, Codespace::read(data)));
+    let read = |data: &[u8]| Some((CMap::parse(data, load_embedded)?, Codespace::read(data)?));
     Ok(
         match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
             Some(Object::Name(name)) => match name.as_slice() {
@@ -174,6 +184,19 @@ fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Code
                 b"Identity-V" => Some((CMap::identity_v(), Codespace::identity())),
                 name => load_embedded(CMapName::from_bytes(name)).and_then(read),
             },
+            // A base CMap given as a stream (`/UseCMap`) is not followed:
+            // hayro-cmap resolves a base by name alone, so the font's codes
+            // are not read without it.
+            Some(Object::Stream(stream))
+                if stream
+                    .dict
+                    .get(b"UseCMap")
+                    .ok()
+                    .and_then(|base| doc.resolve(base))
+                    .is_some_and(|base| matches!(base, Object::Stream(_))) =>
+            {
+                None
+            }
             Some(Object::Stream(stream)) => match stream.decoded() {
                 Ok(data) => read(&data),
                 Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
@@ -223,9 +246,9 @@ fn standard() -> Encoding<'static> {
 }
 
 /// The built-in encoding of the simple `font`, which names none: the
-/// standard encoding, or none known for a symbolic font (the standard
-/// Symbol and ZapfDingbats, or one flagged symbolic), whose encoding is its
-/// font program's own (9.6.5.1).
+/// standard encoding, or none known for a font whose encoding is its font
+/// program's own (9.6.5.1): a symbolic font (the standard Symbol and
+/// ZapfDingbats, or one flagged symbolic), or a Type1 font it embeds.
 fn built_in(doc: &Document, font: &Dictionary) -> Option<Encoding<'static>> {
     let base = font
         .name(doc, b"BaseFont")
@@ -233,10 +256,16 @@ fn built_in(doc: &Document, font: &Dictionary) -> Option<Encoding<'static>> {
     if matches!(base, Some(b"Symbol" | b"ZapfDingbats")) {
         return None;
     }
-    let flags = font
+    let descriptor = font
         .get(b"FontDescriptor")
         .ok()
-        .and_then(|descriptor| doc.resolve_dict(descriptor))
+        .and_then(|descriptor| doc.resolve_dict(descriptor));
+    let embeds_type1 = matches!(font.name(doc, b"Subtype"), Some(b"Type1" | b"MMType1"))
+        && descriptor.is_some_and(|d| d.get(b"FontFile").is_ok() || d.get(b"FontFile3").is_ok());
+    if embeds_type1 {
+        return None;
+    }
+    let flags = descriptor
         .and_then(|descriptor| doc.resolve_number(descriptor.get(b"Flags").ok()?))
         .map_or(0, |flags| flags as i64);
     // Symbolic (bit 3) and not Nonsymbolic (bit 6), Table 121.
@@ -617,6 +646,21 @@ mod tests {
         assert_eq!(read, [("J", 0x41, 34), ("a", 0x8140, 0)]);
     }
 
+    /// An encoding whose base CMap is a stream (`/UseCMap`) is not followed,
+    /// so the font's codes are not read.
+    #[test]
+    fn an_encoding_on_a_stream_base_is_refused() {
+        let base = Stream::new(
+            dictionary! { "Type" => "CMap" },
+            b"begincmap\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\nendcmap".to_vec(),
+        );
+        let child = Object::Stream(Stream::new(
+            dictionary! { "Type" => "CMap", "UseCMap" => Object::Stream(base) },
+            b"begincmap\nendcmap".to_vec(),
+        ));
+        assert!(composite(child, true, b"\x41").is_none());
+    }
+
     /// A code the `/ToUnicode` does not map reads as its CID's text in the
     /// encoding's collection, not as nothing: under `90ms-RKSJ-H`, `0x42` is
     /// Adobe-Japan1's `B`.
@@ -768,19 +812,28 @@ mod tests {
         assert_eq!(glyphs, ["J", "B"]);
     }
 
-    /// A symbolic font with no `/Encoding` has a built-in encoding of its
-    /// own, so a byte its `/ToUnicode` lacks is refused, not read as the
-    /// standard encoding's letter.
+    /// A symbolic font, or an embedded Type1 font, with no `/Encoding` has a
+    /// built-in encoding of its own, so a byte its `/ToUnicode` lacks is
+    /// refused, not read as the standard encoding's letter; and a simple font
+    /// naming a composite encoding is no font whose codes can be read.
     #[test]
     fn a_symbolic_font_refuses_a_byte_its_map_lacks() {
         let mut doc = Document::with_version("1.7");
         let map = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
         let descriptor = doc.add_object(dictionary! { "Type" => "FontDescriptor", "Flags" => 4 });
+        let program = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
+        let embedded = doc.add_object(dictionary! {
+            "Type" => "FontDescriptor", "Flags" => 32, "FontFile" => program,
+        });
         for font in [
             dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Symbol", "ToUnicode" => map },
             dictionary! {
                 "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "ABCDEF+Glyphs",
                 "ToUnicode" => map, "FontDescriptor" => descriptor,
+            },
+            dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "ABCDEF+Embedded",
+                "ToUnicode" => map, "FontDescriptor" => embedded,
             },
         ] {
             let text = FontText::of(&doc, &font).unwrap().unwrap();
@@ -788,6 +841,11 @@ mod tests {
             let refused = decode_glyphs(&text, b"\x42");
             assert!(refused.is_err_and(|e| e.kind() == ErrorKind::Redaction));
         }
+        let composite = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "X",
+            "Encoding" => "Identity-H", "ToUnicode" => map,
+        };
+        assert!(FontText::of(&doc, &composite).unwrap().is_none());
     }
 
     #[test]

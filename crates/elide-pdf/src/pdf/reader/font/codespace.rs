@@ -24,11 +24,12 @@ impl Codespace {
         }
     }
 
-    /// The codespace the CMap `data` declares.
-    pub(crate) fn read(data: &[u8]) -> Self {
-        let mut ranges = ranges(data);
-        ranges.truncate(MAX_RANGES);
-        Self { ranges }
+    /// The codespace the CMap `data` declares, read past its comments and
+    /// strings, or `None` when it declares more than [`MAX_RANGES`] ranges,
+    /// so no code is split by part of its codespace.
+    pub(crate) fn read(data: &[u8]) -> Option<Self> {
+        let ranges = ranges(&uncommented(data));
+        (ranges.len() <= MAX_RANGES).then_some(Self { ranges })
     }
 
     /// The length of the code `bytes` begins with: the shortest that falls
@@ -63,6 +64,36 @@ fn ranges(data: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
             }
         }
         rest = &rest[end..];
+    }
+    out
+}
+
+/// `data` without its comments: each `%` outside a string, to the end of
+/// its line. A string is kept whole, so a `%` inside it hides nothing.
+fn uncommented(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < data.len() {
+        let byte = data[i];
+        match byte {
+            b'\\' if depth > 0 => {
+                out.extend_from_slice(&data[i..(i + 2).min(data.len())]);
+                i += 2;
+                continue;
+            }
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b'%' if depth == 0 => {
+                while i < data.len() && !matches!(data[i], b'\n' | b'\r') {
+                    i += 1;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        out.push(byte);
+        i += 1;
     }
     out
 }
@@ -111,14 +142,28 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
 
-    /// A codespace of one- and two-byte codes splits each by its first byte.
+    /// A codespace of one- and two-byte codes splits each by its first byte;
+    /// a range in a comment is none.
     #[test]
     fn codes_split_by_their_range() {
-        let space =
-            Codespace::read(b"2 begincodespacerange\n<00> <80>\n<8140> <FEFE>\nendcodespacerange");
+        let space = Codespace::read(
+            b"2 begincodespacerange\n<00> <80>\n% <81> <81>\n<8140> <FEFE>\nendcodespacerange",
+        )
+        .unwrap();
         assert_eq!(space.code_len(&[0x41, 0x42]), Some(1));
         assert_eq!(space.code_len(&[0x81, 0x40]), Some(2));
         assert_eq!(space.code_len(&[0x81]), None);
         assert_eq!(space.code_len(&[0xFF, 0xFF]), None);
+    }
+
+    /// A codespace past the range limit is not read in part.
+    #[test]
+    fn too_many_ranges_are_refused() {
+        let ranges = "<00> <01>\n".repeat(MAX_RANGES + 1);
+        let data = format!(
+            "{} begincodespacerange\n{ranges}endcodespacerange",
+            MAX_RANGES + 1
+        );
+        assert!(Codespace::read(data.as_bytes()).is_none());
     }
 }

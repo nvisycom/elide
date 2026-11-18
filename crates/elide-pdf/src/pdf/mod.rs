@@ -17,7 +17,7 @@ use lopdf::content::Content;
 use lopdf::xref::XrefEntry;
 use lopdf::{Document, Object};
 
-use self::reader::{DictionaryExt, DocumentExt, ObjectExt};
+use self::reader::{DictionaryExt, DocumentExt};
 pub(crate) use self::writer::Edit;
 
 /// A read of a [`Pdf`]: what a modality takes from a document.
@@ -194,21 +194,22 @@ fn holds_reference(value: &Object, depth: usize) -> bool {
 /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
 /// `budget` runs out.
 fn inline(doc: &Document, value: &Object, depth: usize, budget: &mut usize) -> Result<Object> {
-    let Some(value) = doc.resolve(value) else {
-        return Ok(Object::Null);
-    };
-    let followed = depth < 2 && matches!(value, Object::Array(_) | Object::Dictionary(_));
-    // A value not followed into is copied whole, at its whole size.
-    let cost = if followed {
-        INLINED_VALUE_COST
-    } else {
-        size(value)
+    let resolved = doc.resolve(value);
+    let followed = depth < 2 && matches!(resolved, Some(Object::Array(_) | Object::Dictionary(_)));
+    // A value not followed into is copied whole, at its whole size; a null
+    // standing for a reference to nothing costs a value too.
+    let cost = match resolved {
+        Some(value) if !followed => size(value),
+        _ => INLINED_VALUE_COST,
     };
     *budget = budget.checked_sub(cost).ok_or_else(|| {
         Error::resource_limit(format!(
             "stream encodings reference more than {MAX_INLINED_BYTES} bytes of values"
         ))
     })?;
+    let Some(value) = resolved else {
+        return Ok(Object::Null);
+    };
     Ok(match value {
         Object::Array(items) if depth < 2 => Object::Array(
             items
@@ -255,20 +256,51 @@ fn own_file_filter(doc: &Document, bytes: &[u8]) -> bool {
     let Some(state) = &doc.encryption_state else {
         return false;
     };
+    // A file is found wherever a file specification may be held: as an
+    // object, or in place in the attachment tree or an `/AF` array.
     let has_files = doc
         .objects
         .values()
-        .filter_map(ObjectExt::dict)
-        .any(|dict| dict.get(b"EF").is_ok() || dict.is_type(doc, b"EmbeddedFile"));
+        .any(|object| embeds_files(doc, object, 0));
     if !has_files {
         return false;
     }
+    // An omitted `/StmF` is `Identity`, which lopdf holds as no name.
+    let streams = match state.default_stream_filter() {
+        b"" => &b"Identity"[..],
+        name => name,
+    };
     match file_filter(doc, bytes) {
-        Some(Some(filter)) => filter != state.default_stream_filter(),
+        Some(Some(filter)) => filter != streams,
         Some(None) => false,
         None => true,
     }
 }
+
+/// Whether `object`, or a value it holds up to [`MAX_ENCRYPT_DEPTH`] levels
+/// down, is a file specification embedding a file (it has `/EF`) or an
+/// embedded file stream.
+fn embeds_files(doc: &Document, object: &Object, depth: usize) -> bool {
+    if depth > MAX_ENCRYPT_DEPTH {
+        return false;
+    }
+    match object {
+        Object::Dictionary(dict) => {
+            dict.get(b"EF").is_ok()
+                || dict
+                    .iter()
+                    .any(|(_, value)| embeds_files(doc, value, depth + 1))
+        }
+        Object::Stream(stream) => {
+            stream.dict.get(b"EF").is_ok() || stream.dict.is_type(doc, b"EmbeddedFile")
+        }
+        Object::Array(items) => items.iter().any(|item| embeds_files(doc, item, depth + 1)),
+        _ => false,
+    }
+}
+
+/// How deep [`embeds_files`] looks into an object's values held in place.
+const MAX_ENCRYPT_DEPTH: usize = 32;
 
 /// The `/EFF` of `doc`'s encryption dictionary, read from `bytes` with
 /// lopdf's content parser (which reads a dictionary as an operand):
@@ -449,14 +481,23 @@ mod tests {
     #[test]
     fn a_pdf_whose_files_have_their_own_crypt_filter_is_refused() {
         let mut doc = document();
-        let data = doc.add_object(Stream::new(
-            dictionary! { "Type" => "EmbeddedFile" },
-            b"Jane Roe".to_vec(),
-        ));
-        doc.add_object(dictionary! {
-            "Type" => "Filespec", "F" => Object::string_literal("a.txt"),
-            "EF" => dictionary! { "F" => data },
-        });
+        // The file's specification is held in place in the attachment tree,
+        // and its stream names no type.
+        let data = doc.add_object(Stream::new(dictionary! {}, b"Jane Roe".to_vec()));
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! {
+                "EmbeddedFiles" => dictionary! {
+                    "Names" => vec![
+                        Object::string_literal("a"),
+                        Object::Dictionary(dictionary! {
+                            "Type" => "Filespec", "F" => Object::string_literal("a.txt"),
+                            "EF" => dictionary! { "F" => data },
+                        }),
+                    ],
+                },
+            },
+        );
         let aes: Arc<dyn CryptFilter> = Arc::new(Aes128CryptFilter);
         let with = |names: &[&[u8]], files: Option<&str>| {
             let filters = names
