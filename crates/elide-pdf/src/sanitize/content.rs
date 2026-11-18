@@ -22,9 +22,10 @@ use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Object};
 
+use super::copy::At;
 use super::keys::Kind;
 use super::{Builder, MAX_NESTING};
-use crate::pdf::reader::{DictionaryExt, DocumentExt, Scope};
+use crate::pdf::reader::{DictionaryExt, DocumentExt};
 
 /// Every content operator the PDF specification defines, but the inline image
 /// and marked-content operators the rebuild handles itself.
@@ -58,9 +59,53 @@ const STATE_FONT_PREFIX: &str = "GSFont";
 /// text, an alternate description, and an expansion.
 const ALTERNATE_TEXT_KEYS: [&[u8]; 3] = [b"ActualText", b"Alt", b"E"];
 
+/// A resource content names by an operand: the category of resources it is
+/// listed under, and the kind it is copied as.
+#[derive(Debug, Clone, Copy)]
+enum Resource {
+    Font,
+    ExtGState,
+    Shading,
+    ColorSpace,
+    Pattern,
+}
+
+impl Resource {
+    /// The category of resources it is listed under.
+    fn category(self) -> &'static [u8] {
+        match self {
+            Self::Font => b"Font",
+            Self::ExtGState => b"ExtGState",
+            Self::Shading => b"Shading",
+            Self::ColorSpace => b"ColorSpace",
+            Self::Pattern => b"Pattern",
+        }
+    }
+
+    /// The kind it is copied as.
+    fn kind(self) -> Kind {
+        match self {
+            Self::Font => Kind::Font,
+            Self::ExtGState => Kind::ExtGState,
+            Self::Shading => Kind::Shading,
+            Self::ColorSpace => Kind::ColorSpace,
+            Self::Pattern => Kind::Pattern,
+        }
+    }
+
+    /// The operand of `operation` that names it: a pattern's last, after any
+    /// colour components; any other's first.
+    fn name(self, operation: &Operation) -> Option<&Object> {
+        match self {
+            Self::Pattern => operation.operands.last(),
+            _ => operation.operands.first(),
+        }
+    }
+}
+
 impl<'a> Builder<'a> {
-    /// The content `bytes` rebuilt, with names resolved in `scope`, and the
-    /// resources it names copied into `resources`.
+    /// The content `bytes` rebuilt at `at`, with names resolved in its scope,
+    /// and the resources it names copied into `resources`.
     ///
     /// # Errors
     ///
@@ -69,342 +114,329 @@ impl<'a> Builder<'a> {
     pub(super) fn content<'s>(
         &mut self,
         bytes: &[u8],
-        scope: &Scope<'s>,
+        at: At<'_, 's>,
         resources: &mut Dictionary,
-        depth: usize,
     ) -> Result<Vec<u8>>
     where
         'a: 's,
     {
-        if depth > MAX_NESTING {
+        if at.depth > MAX_NESTING {
             return Err(Error::resource_limit(format!(
                 "content nests deeper than {MAX_NESTING} levels"
             )));
         }
         let content =
             Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
-        let mut kept: Vec<Operation> = Vec::with_capacity(content.operations.len());
-        // One entry per open marked-content sequence, and how many of them
-        // hide, so whether content is hidden is known at once.
-        let mut open: Vec<Marked> = Vec::new();
-        let mut hiding = 0usize;
-        // The open `q` saves and whether a text object is open, so the
-        // rebuilt content is balanced and ends in the state it began in.
-        let mut saved = 0usize;
-        let mut in_text = false;
-        // How many of the open marked-content sequences began inside the open
-        // text object, so they are closed inside it.
-        let mut marked_in_text = 0usize;
+        let mut copy = ContentCopy {
+            builder: self,
+            at,
+            resources,
+            kept: Vec::with_capacity(content.operations.len()),
+            open: Vec::new(),
+            hiding: 0,
+            saved: 0,
+            font_lost: false,
+            font_saves: Vec::new(),
+            in_text: false,
+            marked_in_text: 0,
+        };
         for operation in content.operations {
-            let operator = operation.operator.as_str();
-            if hiding > 0 {
-                match operator {
-                    "BDC" | "BMC" => open.push(Marked::Within),
-                    "EMC" => hiding -= usize::from(open.pop() == Some(Marked::Hiding)),
-                    _ => {}
-                }
-                continue;
-            }
-            // A marked-content property list is rewritten, and an inline
-            // image is cut, so only the operators kept as written are checked.
-            if !matches!(operator, "BDC" | "DP" | "BI")
-                && !operands_fit(operator, &operation.operands)
-            {
-                self.residue += 1;
-                continue;
-            }
+            copy.operation(operation)?;
+        }
+        copy.finish()
+    }
+}
+
+/// One content stream being rebuilt: the rebuild it copies into, where (the
+/// scope its names resolve in), the resources they are copied into, the operations
+/// kept, and what is open as it goes, so the content written is balanced and
+/// ends in the state it began in.
+struct ContentCopy<'c, 'a, 's> {
+    builder: &'c mut Builder<'a>,
+    at: At<'c, 's>,
+    resources: &'c mut Dictionary,
+    kept: Vec<Operation>,
+    /// One entry per open marked-content sequence.
+    open: Vec<Marked>,
+    /// How many of the open sequences hide, so whether content is hidden is
+    /// known at once.
+    hiding: usize,
+    /// How many `q` saves are open.
+    saved: usize,
+    /// Whether the selected font could not be copied, so the text it shows
+    /// is cut and reported; saved and restored with `q`/`Q`, as the font is
+    /// graphics state.
+    font_lost: bool,
+    font_saves: Vec<bool>,
+    /// Whether a text object is open.
+    in_text: bool,
+    /// How many of the open sequences began inside the open text object, so
+    /// they are closed inside it.
+    marked_in_text: usize,
+}
+
+impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
+    /// Rebuild `operation`: keep it, rewrite it, or cut it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::copy`].
+    fn operation(&mut self, operation: Operation) -> Result<()> {
+        let operator = operation.operator.as_str();
+        if self.hiding > 0 {
             match operator {
-                "BDC" | "DP" => {
-                    let [Object::Name(tag), properties] = operation.operands.as_slice() else {
-                        self.residue += 1;
-                        if operator == "BDC" {
-                            open.push(Marked::Written);
-                            marked_in_text += usize::from(in_text);
-                            kept.push(Operation::new("BMC", vec![Object::Name(b"Span".to_vec())]));
-                        }
-                        continue;
-                    };
-                    let properties = match properties {
-                        Object::Name(name) => scope.lookup(self.source, b"Properties", name),
-                        other => Some(other),
-                    };
-                    if operator == "BDC"
-                        && tag == b"OC"
-                        && properties.is_some_and(|p| self.layers.is_hidden(p))
-                    {
-                        self.record(HiddenContent::Layer);
-                        open.push(Marked::Hiding);
-                        hiding += 1;
-                        continue;
-                    }
-                    if properties
-                        .and_then(|p| self.source.resolve_dict(p))
-                        .is_some_and(|p| ALTERNATE_TEXT_KEYS.iter().any(|k| p.get(k).is_ok()))
-                    {
-                        self.record(HiddenContent::AlternativeText);
-                    }
-                    let tag = Object::Name(tag.clone());
-                    if operator == "BDC" {
-                        open.push(Marked::Written);
-                        marked_in_text += usize::from(in_text);
-                        kept.push(Operation::new("BMC", vec![tag]));
-                    } else {
-                        kept.push(Operation::new("MP", vec![tag]));
-                    }
-                }
-                "BMC" => {
-                    open.push(Marked::Written);
-                    marked_in_text += usize::from(in_text);
-                    kept.push(operation);
-                }
-                "EMC" => {
-                    if open.pop().is_some() {
-                        marked_in_text = marked_in_text.saturating_sub(usize::from(in_text));
-                        kept.push(operation);
-                    } else {
-                        self.residue += 1;
-                    }
-                }
-                "MP" => kept.push(operation),
-                "BI" => self.unreadable(None),
-                "Tf" => self.resource(
-                    operation,
-                    b"Font",
-                    Kind::Font,
-                    scope,
-                    resources,
-                    &mut kept,
-                    depth,
-                )?,
-                "gs" => {
-                    let font = self.state_font(&operation, scope, resources, depth)?;
-                    self.resource(
-                        operation,
-                        b"ExtGState",
-                        Kind::ExtGState,
-                        scope,
-                        resources,
-                        &mut kept,
-                        depth,
-                    )?;
-                    kept.extend(font);
-                }
-                "sh" => self.resource(
-                    operation,
-                    b"Shading",
-                    Kind::Shading,
-                    scope,
-                    resources,
-                    &mut kept,
-                    depth,
-                )?,
-                "cs" | "CS" => match operation.operands.first() {
-                    Some(Object::Name(name)) if FAMILIES.contains(&name.as_slice()) => {
-                        kept.push(operation);
-                    }
-                    _ => self.resource(
-                        operation,
-                        b"ColorSpace",
-                        Kind::ColorSpace,
-                        scope,
-                        resources,
-                        &mut kept,
-                        depth,
-                    )?,
-                },
-                "scn" | "SCN" => match operation.operands.last() {
-                    Some(Object::Name(_)) => self.resource(
-                        operation,
-                        b"Pattern",
-                        Kind::Pattern,
-                        scope,
-                        resources,
-                        &mut kept,
-                        depth,
-                    )?,
-                    _ => kept.push(operation),
-                },
-                "Do" => self.draw(operation, scope, resources, &mut kept, depth)?,
-                "BX" | "EX" => {}
-                "q" => {
-                    saved += 1;
-                    kept.push(operation);
-                }
-                "Q" if saved == 0 => self.residue += 1,
-                "Q" => {
-                    saved -= 1;
-                    kept.push(operation);
-                }
-                "BT" if in_text => self.residue += 1,
-                "BT" => {
-                    in_text = true;
-                    kept.push(operation);
-                }
-                "ET" if !in_text => self.residue += 1,
-                "ET" => {
-                    // A sequence still open inside the text object closes first.
-                    for _ in 0..marked_in_text {
-                        open.pop();
-                        kept.push(Operation::new("EMC", Vec::new()));
-                    }
-                    marked_in_text = 0;
-                    in_text = false;
-                    kept.push(operation);
-                }
-                _ if OPERATORS.contains(&operator) => kept.push(operation),
-                _ => self.residue += 1,
+                "BDC" | "BMC" => self.open.push(Marked::Within),
+                "EMC" => self.hiding -= usize::from(self.open.pop() == Some(Marked::Hiding)),
+                _ => {}
             }
+            return Ok(());
         }
-        // Only the sequences written are closed: one hidden to the end, and
-        // any inside it, wrote no opener. Those begun in the open text object
-        // close inside it.
-        let written = open
-            .iter()
-            .filter(|&&marked| marked == Marked::Written)
-            .count();
-        if in_text {
-            for _ in 0..marked_in_text {
-                kept.push(Operation::new("EMC", Vec::new()));
+        // A marked-content property list is rewritten, and an inline image is
+        // cut, so only the operators kept as written are checked.
+        if !matches!(operator, "BDC" | "DP" | "BI") && !operands_fit(operator, &operation.operands)
+        {
+            self.builder.residue += 1;
+            return Ok(());
+        }
+        match operator {
+            "BDC" | "DP" => self.marked(operation),
+            "BMC" => {
+                self.open_written();
+                self.kept.push(operation);
             }
-            kept.push(Operation::new("ET", Vec::new()));
-        }
-        for _ in 0..written - usize::from(in_text) * marked_in_text {
-            kept.push(Operation::new("EMC", Vec::new()));
-        }
-        for _ in 0..saved {
-            kept.push(Operation::new("Q", Vec::new()));
-        }
-        // A default colour space remaps the device space of that name for
-        // everything this content draws in it.
-        for name in DEFAULT_SPACES {
-            if !has(resources, b"ColorSpace", name)
-                && let Some(space) = scope.lookup(self.source, b"ColorSpace", name)
-                && let Some(space) = self.copy(Kind::ColorSpace, space, scope, depth + 1)?
-            {
-                insert(resources, b"ColorSpace", name, space);
+            "EMC" => {
+                if self.open.pop().is_some() {
+                    self.marked_in_text = self
+                        .marked_in_text
+                        .saturating_sub(usize::from(self.in_text));
+                    self.kept.push(operation);
+                } else {
+                    self.builder.residue += 1;
+                }
             }
+            "MP" => self.kept.push(operation),
+            "BI" => self.builder.unreadable(None),
+            "Tf" => self.font_lost = !self.resource(operation, Resource::Font)?,
+            "gs" => {
+                let font = self.state_font(&operation)?;
+                self.resource(operation, Resource::ExtGState)?;
+                self.kept.extend(font);
+            }
+            "sh" => {
+                self.resource(operation, Resource::Shading)?;
+            }
+            "cs" | "CS" => match operation.operands.first() {
+                Some(Object::Name(name)) if FAMILIES.contains(&name.as_slice()) => {
+                    self.kept.push(operation);
+                }
+                _ => {
+                    self.resource(operation, Resource::ColorSpace)?;
+                }
+            },
+            "scn" | "SCN" => match operation.operands.last() {
+                Some(Object::Name(_)) => {
+                    self.resource(operation, Resource::Pattern)?;
+                }
+                _ => self.kept.push(operation),
+            },
+            "Do" => self.draw(operation)?,
+            "BX" | "EX" => {}
+            "q" => {
+                self.saved += 1;
+                self.font_saves.push(self.font_lost);
+                self.kept.push(operation);
+            }
+            "Q" if self.saved == 0 => self.builder.residue += 1,
+            "Q" => {
+                self.saved -= 1;
+                self.font_lost = self.font_saves.pop().unwrap_or(false);
+                self.kept.push(operation);
+            }
+            "Tj" | "TJ" | "'" | "\"" if self.font_lost => self.unreadable_text(&operation),
+            "BT" if self.in_text => self.builder.residue += 1,
+            "BT" => {
+                self.in_text = true;
+                self.kept.push(operation);
+            }
+            "ET" if !self.in_text => self.builder.residue += 1,
+            "ET" => {
+                // A sequence still open inside the text object closes first.
+                for _ in 0..self.marked_in_text {
+                    self.open.pop();
+                    self.kept.push(Operation::new("EMC", Vec::new()));
+                }
+                self.marked_in_text = 0;
+                self.in_text = false;
+                self.kept.push(operation);
+            }
+            _ if OPERATORS.contains(&operator) => self.kept.push(operation),
+            _ => self.builder.residue += 1,
         }
-        let encoded = Content { operations: kept }
-            .encode()
-            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
-        Ok(encoded)
+        Ok(())
     }
 
-    /// Keep `operation`, which names a `category` resource by its first name
-    /// operand (its last, for a pattern), copying the resource as `kind` into
-    /// `resources`; drop it when the name resolves to nothing kept.
-    #[allow(clippy::too_many_arguments)]
-    fn resource<'s>(
-        &mut self,
-        operation: Operation,
-        category: &[u8],
-        kind: Kind,
-        scope: &Scope<'s>,
-        resources: &mut Dictionary,
-        kept: &mut Vec<Operation>,
-        depth: usize,
-    ) -> Result<()>
-    where
-        'a: 's,
-    {
-        let name = match kind {
-            Kind::Pattern => operation.operands.last(),
-            _ => operation.operands.first(),
+    /// Open a marked-content sequence written as `BMC`.
+    fn open_written(&mut self) {
+        self.open.push(Marked::Written);
+        self.marked_in_text += usize::from(self.in_text);
+    }
+
+    /// A `BDC` or `DP` `operation`: its property list dropped (`BDC` becomes
+    /// `BMC`, `DP` becomes `MP`), and a sequence in a layer hidden by default
+    /// cut whole; alternate text the list carried is recorded.
+    fn marked(&mut self, operation: Operation) {
+        let builder = &mut *self.builder;
+        let is_sequence = operation.operator == "BDC";
+        let [Object::Name(tag), properties] = operation.operands.as_slice() else {
+            builder.residue += 1;
+            if is_sequence {
+                self.open_written();
+                self.kept
+                    .push(Operation::new("BMC", vec![Object::Name(b"Span".to_vec())]));
+            }
+            return;
         };
-        let Some(Object::Name(name)) = name else {
-            self.residue += 1;
-            return Ok(());
+        let properties = match properties {
+            Object::Name(name) => self.at.scope.lookup(builder.source, b"Properties", name),
+            other => Some(other),
         };
-        if !has(resources, category, name) {
-            let Some(value) = scope.lookup(self.source, category, name) else {
-                self.residue += 1;
-                return Ok(());
-            };
-            let Some(copy) = self.copy(kind, value, scope, depth + 1)? else {
-                return Ok(());
-            };
-            insert(resources, category, name, copy);
+        if is_sequence && tag == b"OC" && properties.is_some_and(|p| builder.layers.is_hidden(p)) {
+            builder.record(HiddenContent::Layer);
+            self.open.push(Marked::Hiding);
+            self.hiding += 1;
+            return;
         }
-        kept.push(operation);
-        Ok(())
+        if properties
+            .and_then(|p| builder.source.resolve_dict(p))
+            .is_some_and(|p| ALTERNATE_TEXT_KEYS.iter().any(|k| p.get(k).is_ok()))
+        {
+            builder.record(HiddenContent::AlternativeText);
+        }
+        let tag = Object::Name(tag.clone());
+        if is_sequence {
+            self.open_written();
+            self.kept.push(Operation::new("BMC", vec![tag]));
+        } else {
+            self.kept.push(Operation::new("MP", vec![tag]));
+        }
+    }
+
+    /// Text shown in a font that could not be copied, cut and reported as
+    /// unreadable; a line move or spacing it carries is kept, so the text
+    /// after it stays where it was.
+    fn unreadable_text(&mut self, operation: &Operation) {
+        self.builder.record(HiddenContent::Unreadable);
+        if operation.operator == "\"" {
+            let [word, character, _] = operation.operands.as_slice() else {
+                return;
+            };
+            self.kept.push(Operation::new("Tw", vec![word.clone()]));
+            self.kept
+                .push(Operation::new("Tc", vec![character.clone()]));
+        }
+        if matches!(operation.operator.as_str(), "'" | "\"") {
+            self.kept.push(Operation::new("T*", Vec::new()));
+        }
+    }
+
+    /// Keep `operation`, which names a `resource`, copying it into the
+    /// resources; drop it when the name resolves to nothing kept. Whether it
+    /// is kept.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::copy`].
+    fn resource(&mut self, operation: Operation, resource: Resource) -> Result<bool> {
+        let category = resource.category();
+        let Some(Object::Name(name)) = resource.name(&operation) else {
+            self.builder.residue += 1;
+            return Ok(false);
+        };
+        if !has(self.resources, category, name) {
+            let Some(value) = self.at.scope.lookup(self.builder.source, category, name) else {
+                self.builder.residue += 1;
+                return Ok(false);
+            };
+            let Some(copy) = self
+                .builder
+                .copy(resource.kind(), value, self.at.deeper())?
+            else {
+                return Ok(false);
+            };
+            insert(self.resources, category, name, copy);
+        }
+        self.kept.push(operation);
+        Ok(true)
     }
 
     /// Keep the `Do` `operation` when its XObject is kept: an image a codec
     /// reads, or a form, neither in a hidden layer.
-    fn draw<'s>(
-        &mut self,
-        operation: Operation,
-        scope: &Scope<'s>,
-        resources: &mut Dictionary,
-        kept: &mut Vec<Operation>,
-        depth: usize,
-    ) -> Result<()>
-    where
-        'a: 's,
-    {
-        let source = self.source;
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::copy`].
+    fn draw(&mut self, operation: Operation) -> Result<()> {
+        let builder = &mut *self.builder;
+        let source = builder.source;
         let Some(Object::Name(name)) = operation.operands.first() else {
-            self.residue += 1;
+            builder.residue += 1;
             return Ok(());
         };
-        if has(resources, b"XObject", name) {
-            kept.push(operation);
+        if has(self.resources, b"XObject", name) {
+            self.kept.push(operation);
             return Ok(());
         }
-        let Some(value) = scope.lookup(self.source, b"XObject", name) else {
-            self.residue += 1;
+        let Some(value) = self.at.scope.lookup(source, b"XObject", name) else {
+            builder.residue += 1;
             return Ok(());
         };
         let Some(Object::Stream(xobject)) = source.resolve(value) else {
-            self.residue += 1;
+            builder.residue += 1;
             return Ok(());
         };
         let id = value.as_reference().ok();
-        if self.layers.hides(&xobject.dict) {
-            self.record(HiddenContent::Layer);
-            self.cut.extend(id);
+        if builder.layers.hides(&xobject.dict) {
+            builder.record(HiddenContent::Layer);
+            builder.cut.extend(id);
             return Ok(());
         }
-        let kind = match xobject.dict.name(self.source, b"Subtype") {
+        let kind = match xobject.dict.name(source, b"Subtype") {
             Some(b"Form") => Kind::Form,
             Some(b"Image") => Kind::Image,
             Some(b"PS") => {
-                self.record(HiddenContent::Script);
-                self.cut.extend(id);
+                builder.record(HiddenContent::Script);
+                builder.cut.extend(id);
                 return Ok(());
             }
             _ => {
-                self.unreadable(id);
+                builder.unreadable(id);
                 return Ok(());
             }
         };
-        if let Some(copy) = self.copy(kind, value, scope, depth + 1)? {
-            insert(resources, b"XObject", name, copy);
-            kept.push(operation);
+        if let Some(copy) = builder.copy(kind, value, self.at.deeper())? {
+            insert(self.resources, b"XObject", name, copy);
+            self.kept.push(operation);
         }
         Ok(())
     }
 
     /// The `Tf` that selects the font the graphics state `gs` names sets
-    /// (`/Font [font size]`), its font copied into `resources` under a name of
-    /// its own; `None` when the state sets no font. A graphics state's font is
-    /// the same as a `Tf`, so writing it as one gives the text walk a single
-    /// way fonts are selected.
-    fn state_font<'s>(
-        &mut self,
-        gs: &Operation,
-        scope: &Scope<'s>,
-        resources: &mut Dictionary,
-        depth: usize,
-    ) -> Result<Option<Operation>>
-    where
-        'a: 's,
-    {
-        let source = self.source;
+    /// (`/Font [font size]`), its font copied into the resources under a name
+    /// of its own; `None` when the state sets no font. A graphics state's
+    /// font is the same as a `Tf`, so writing it as one gives the text walk a
+    /// single way fonts are selected.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::copy`].
+    fn state_font(&mut self, gs: &Operation) -> Result<Option<Operation>> {
+        let source = self.builder.source;
         let Some(Object::Name(name)) = gs.operands.first() else {
             return Ok(None);
         };
-        let setting = scope
+        let setting = self
+            .at
+            .scope
             .lookup(source, b"ExtGState", name)
             .and_then(|state| source.resolve_dict(state))
             .and_then(|state| state.get(b"Font").ok())
@@ -413,16 +445,18 @@ impl<'a> Builder<'a> {
             return Ok(None);
         };
         let Some(size @ (Object::Integer(_) | Object::Real(_))) = source.resolve(size) else {
-            self.residue += 1;
+            self.builder.residue += 1;
             return Ok(None);
         };
-        let Some(font) = self.copy(Kind::Font, font, scope, depth + 1)? else {
+        let Some(font) = self.builder.copy(Kind::Font, font, self.at.deeper())? else {
             return Ok(None);
         };
         // The font keeps the name it already has here, else takes the first
         // name nothing in scope uses.
+        let resources = &*self.resources;
+        let scope = self.at.scope;
         let taken = |name: &[u8]| {
-            has(resources, b"Font", name) || scope.lookup(self.source, b"Font", name).is_some()
+            has(resources, b"Font", name) || scope.lookup(source, b"Font", name).is_some()
         };
         let name = resources
             .get(b"Font")
@@ -431,11 +465,62 @@ impl<'a> Builder<'a> {
             .and_then(|fonts| fonts.iter().find(|(_, value)| **value == font))
             .map(|(name, _)| name.clone())
             .unwrap_or_else(|| fresh(STATE_FONT_PREFIX, taken));
-        insert(resources, b"Font", &name, font);
+        insert(self.resources, b"Font", &name, font);
         Ok(Some(Operation::new(
             "Tf",
             vec![Object::Name(name), size.clone()],
         )))
+    }
+
+    /// The content written: what is open closed, inside out, and a default
+    /// colour space the content's device spaces are remapped by copied.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// the content cannot be encoded, or as [`Builder::copy`].
+    fn finish(mut self) -> Result<Vec<u8>> {
+        // Only the sequences written are closed: one hidden to the end, and
+        // any inside it, wrote no opener. Those begun in the open text object
+        // close inside it.
+        let written = self
+            .open
+            .iter()
+            .filter(|&&marked| marked == Marked::Written)
+            .count();
+        let in_text = usize::from(self.in_text) * self.marked_in_text;
+        if self.in_text {
+            for _ in 0..self.marked_in_text {
+                self.kept.push(Operation::new("EMC", Vec::new()));
+            }
+            self.kept.push(Operation::new("ET", Vec::new()));
+        }
+        for _ in 0..written - in_text {
+            self.kept.push(Operation::new("EMC", Vec::new()));
+        }
+        for _ in 0..self.saved {
+            self.kept.push(Operation::new("Q", Vec::new()));
+        }
+        // A default colour space remaps the device space of that name for
+        // everything this content draws in it.
+        for name in DEFAULT_SPACES {
+            if !has(self.resources, b"ColorSpace", name)
+                && let Some(space) = self
+                    .at
+                    .scope
+                    .lookup(self.builder.source, b"ColorSpace", name)
+                && let Some(space) = self
+                    .builder
+                    .copy(Kind::ColorSpace, space, self.at.deeper())?
+            {
+                insert(self.resources, b"ColorSpace", name, space);
+            }
+        }
+        Content {
+            operations: self.kept,
+        }
+        .encode()
+        .map_err(|e| Error::malformed(format!("encode content: {e}")))
     }
 }
 

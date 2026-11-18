@@ -7,6 +7,7 @@ use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use lopdf::{Dictionary, Document, Object};
 
+use super::copy::At;
 use super::keys::Kind;
 use super::{Builder, MAX_NESTING, record};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, NameTree, Scope};
@@ -37,7 +38,7 @@ impl<'a> Builder<'a> {
         ];
         for (key, kind) in fields {
             if let Ok(value) = dict.get(key)
-                && let Some(value) = self.copy(kind, value, &scope, 0)?
+                && let Some(value) = self.copy(kind, value, At::top(&scope))?
             {
                 link.set(key, value);
             }

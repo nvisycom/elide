@@ -14,6 +14,7 @@ use elide_core::redaction::HiddenContent;
 use lopdf::{Dictionary, Object, dictionary};
 
 use super::Builder;
+use super::copy::At;
 use super::keys::Kind;
 use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, Scope, normalize_rect};
 
@@ -111,7 +112,7 @@ impl<'a> Builder<'a> {
                 .into_iter()
                 .chain(page.dictionaries().iter().copied()),
         );
-        let Some(form) = self.copy(Kind::Form, appearance, &defaults, 0)? else {
+        let Some(form) = self.copy(Kind::Form, appearance, At::top(&defaults))? else {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
@@ -167,7 +168,7 @@ impl<'a> Builder<'a> {
         let stroking = opacity(b"CA");
         let nonstroking = opacity(b"ca").or(stroking);
         let blend = match dict.get(b"BM") {
-            Ok(blend) => self.copy(Kind::Value, blend, &Scope::default(), 0)?,
+            Ok(blend) => self.copy(Kind::Value, blend, At::top(&Scope::default()))?,
             Err(_) => None,
         };
         let normal = blend

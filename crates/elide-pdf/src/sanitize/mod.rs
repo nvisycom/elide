@@ -54,6 +54,7 @@ use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 pub(crate) use self::check::Check;
+use self::copy::At;
 use self::keys::Kind;
 use self::layers::Layers;
 use self::links::destinations;
@@ -271,7 +272,8 @@ impl<'a> Builder<'a> {
             new_catalog.set("AF", af?);
         }
         if let Ok(intents) = catalog.get(b"OutputIntents")
-            && let Some(intents) = self.copy(Kind::OutputIntent, intents, &Scope::default(), 0)?
+            && let Some(intents) =
+                self.copy(Kind::OutputIntent, intents, At::top(&Scope::default()))?
         {
             new_catalog.set("OutputIntents", intents);
         }
@@ -698,7 +700,7 @@ mod tests {
         let copy = |budget: usize| {
             let mut builder = Builder::new(&doc);
             builder.copy_budget = budget;
-            builder.copy(Kind::Value, &widths, &Scope::default(), 0)
+            builder.copy(Kind::Value, &widths, At::top(&Scope::default()))
         };
         // Each reference and the array it refers to, at every level (1, 8,
         // 64 and 512 of them), and the 4096 numbers at the leaves.
@@ -725,13 +727,13 @@ mod tests {
         let (one, two) = (Scope::new([&one]), Scope::new([&two]));
         let used = {
             let mut builder = Builder::new(&doc);
-            builder.copy(Kind::Form, &form, &one, 0).unwrap();
+            builder.copy(Kind::Form, &form, At::top(&one)).unwrap();
             MAX_COPIED_BYTES - builder.copy_budget
         };
         let mut builder = Builder::new(&doc);
         builder.copy_budget = used + used / 2;
-        builder.copy(Kind::Form, &form, &one, 0).unwrap();
-        let error = builder.copy(Kind::Form, &form, &two, 0).unwrap_err();
+        builder.copy(Kind::Form, &form, At::top(&one)).unwrap();
+        let error = builder.copy(Kind::Form, &form, At::top(&two)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
 
@@ -744,7 +746,7 @@ mod tests {
         let mut builder = Builder::new(&doc);
         builder.copy_budget = 50_000;
         let error = builder
-            .copy(Kind::Value, &array, &Scope::default(), 0)
+            .copy(Kind::Value, &array, At::top(&Scope::default()))
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
@@ -2058,6 +2060,35 @@ mod tests {
             .unwrap();
         assert!(fonts.get(b"F1").is_ok());
         check(&out).unwrap();
+    }
+
+    /// Text in a font that resolves nowhere, not in the appearance, the form
+    /// defaults nor the page, is cut and reported as unreadable, and the
+    /// rebuilt page still reads.
+    #[test]
+    fn text_in_a_font_found_nowhere_is_cut_and_reported() {
+        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let answer = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+            },
+            b"BT /F9 12 Tf 0 0 Td (Jane Roe) Tj (Doe) ' ET".to_vec(),
+        ));
+        doc.get_dictionary_mut(page).unwrap().set(
+            "Annots",
+            vec![Object::Dictionary(dictionary! {
+                "Subtype" => "Widget",
+                "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+                "AP" => dictionary! { "N" => answer },
+            })],
+        );
+        let (bytes, stripped) = saved(&doc);
+        assert!(count(&stripped, HiddenContent::Unreadable) >= 1);
+        let out = Document::load_mem(&bytes).unwrap();
+        assert!(!text_of(&out).contains("Jane Roe"));
+        let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
+        assert_eq!(blocks[0].text.trim(), "Name:");
     }
 
     /// Widgets showing one form grouped share the one grouped copy of it.

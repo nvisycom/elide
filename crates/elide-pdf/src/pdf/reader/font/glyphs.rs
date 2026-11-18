@@ -13,7 +13,7 @@ use std::iter;
 use std::sync::LazyLock;
 
 use elide_core::{Error, ErrorKind, Result};
-use hayro_cmap::{CMap, CMapName, load_embedded};
+use hayro_cmap::{BfString, CMap, CMapName, CidFamily, load_embedded};
 use lopdf::{Dictionary, Document, Encoding, Object, Stream, dictionary};
 use unicode_normalization::UnicodeNormalization;
 
@@ -73,24 +73,35 @@ const MAX_DESTINATION_UNITS: usize = 256;
 
 /// How a font's codes split into glyphs and read as text (9.10.2).
 pub(crate) enum FontText<'a> {
-    /// A composite (Type0) font: codes split by its encoding CMap, each read
-    /// through its `/ToUnicode`, else, under a Unicode encoding, as the
-    /// UTF-16 it is.
-    Composite {
-        /// The encoding: `Identity-H`/`-V`, a predefined CMap, or one the font
-        /// embeds.
-        encoding: CMap,
-        to_unicode: Option<Encoding<'static>>,
-        /// Whether the encoding is a predefined Unicode CMap, its codes the
-        /// UTF-16 of their text.
-        unicode: bool,
-    },
-    /// A simple font: one byte per code, read through its `/ToUnicode` where
-    /// that maps the code, else its encoding.
-    Simple {
-        encoding: Encoding<'a>,
-        to_unicode: Option<Encoding<'static>>,
-    },
+    /// A composite (Type0) font, which reads its codes as [`Composite`]
+    /// describes.
+    Composite(Box<Composite>),
+    /// A simple font, which reads its codes as [`Simple`] describes.
+    Simple(Box<Simple<'a>>),
+}
+
+/// How a simple font's codes read: one byte per code, read through its
+/// `/ToUnicode` where that maps the code, else its encoding.
+pub(crate) struct Simple<'a> {
+    encoding: Encoding<'a>,
+    to_unicode: Option<Encoding<'static>>,
+}
+
+/// How a composite (Type0) font's codes read: split by its encoding CMap,
+/// each read through its `/ToUnicode`, else, under a Unicode encoding, as
+/// the UTF-16 it is, else as its CID's text in the font's character
+/// collection.
+pub(crate) struct Composite {
+    /// The encoding: `Identity-H`/`-V`, a predefined CMap, or one the font
+    /// embeds.
+    encoding: CMap,
+    to_unicode: Option<Encoding<'static>>,
+    /// Whether the encoding is a predefined Unicode CMap, its codes the
+    /// UTF-16 of their text.
+    unicode: bool,
+    /// The text of each CID in the font's character collection (Adobe's
+    /// `-UCS2` CMap for it), when the collection has one.
+    collection: Option<CMap>,
 }
 
 impl<'a> FontText<'a> {
@@ -111,11 +122,13 @@ impl<'a> FontText<'a> {
             let Some(encoding) = encoding_cmap(doc, font)? else {
                 return Ok(None);
             };
-            return Ok(Some(Self::Composite {
+            let collection = collection_text(doc, font, &encoding);
+            return Ok(Some(Self::Composite(Box::new(Composite {
                 encoding,
                 to_unicode,
                 unicode,
-            }));
+                collection,
+            }))));
         }
         let Ok(encoding) = font.get_font_encoding_with_limit(doc, MAX_CONTENT_BYTES) else {
             return Ok(None);
@@ -127,10 +140,10 @@ impl<'a> FontText<'a> {
             Encoding::UnicodeMapEncoding(_) => standard(),
             encoding => encoding,
         };
-        Ok(Some(Self::Simple {
+        Ok(Some(Self::Simple(Box::new(Simple {
             encoding,
             to_unicode,
-        }))
+        }))))
     }
 }
 
@@ -160,6 +173,35 @@ fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<CMap>> {
             _ => None,
         },
     )
+}
+
+/// The CMap giving the text of each CID in the composite `font`'s character
+/// collection: the one its descendant CIDFont's `/CIDSystemInfo` names, which
+/// defines its CIDs, else the one its `encoding` names; `None` for a
+/// collection with no such CMap (`Adobe-Identity`, or one of its own).
+fn collection_text(doc: &Document, font: &Dictionary, encoding: &CMap) -> Option<CMap> {
+    let descendant = font
+        .get(b"DescendantFonts")
+        .ok()
+        .and_then(|fonts| doc.resolve_array(fonts))
+        .and_then(|fonts| doc.resolve_dict(fonts.first()?));
+    let named = descendant
+        .and_then(|cid_font| doc.resolve_dict(cid_font.get(b"CIDSystemInfo").ok()?))
+        .and_then(|info| {
+            let text = |key: &[u8]| doc.resolve(info.get(key).ok()?)?.as_str().ok();
+            Some(CidFamily::from_registry_ordering(
+                text(b"Registry")?,
+                text(b"Ordering")?,
+            ))
+        });
+    let family = named.or_else(|| {
+        encoding
+            .metadata()
+            .character_collection
+            .as_ref()
+            .map(|collection| collection.family.clone())
+    })?;
+    CMap::parse(load_embedded(family.ucs2_cmap()?)?, load_embedded)
 }
 
 /// The standard encoding, which lopdf reads a font with no other by.
@@ -344,11 +386,13 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
         // Codes split by the encoding: each the shortest run of bytes its
         // ranges map, read through `/ToUnicode`, else as UTF-16 under a
         // Unicode encoding.
-        FontText::Composite {
-            encoding,
-            to_unicode,
-            unicode,
-        } => {
+        FontText::Composite(composite) => {
+            let Composite {
+                encoding,
+                to_unicode,
+                unicode,
+                collection,
+            } = &**composite;
             let mut glyphs = Vec::new();
             let mut i = 0;
             while i < bytes.len() {
@@ -372,6 +416,13 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
                     Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(code, len as u8),
                     _ => None,
                 };
+                let cid_text = || {
+                    let cid = encoding.lookup_cid_code(code, len as u8)?;
+                    match collection.as_ref()?.lookup_bf_string(cid)? {
+                        BfString::Char(c) => Some(c.encode_utf16(&mut [0; 2]).to_vec()),
+                        BfString::String(text) => Some(text.encode_utf16().collect()),
+                    }
+                };
                 let units = match mapped {
                     Some(units) => units,
                     None if *unicode && len.is_multiple_of(2) => code_bytes
@@ -380,6 +431,7 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
                         .iter()
                         .map(|&pair| u16::from_be_bytes(pair))
                         .collect(),
+                    None if let Some(units) = cid_text() => units,
                     None => {
                         return Err(Error::redaction(
                             "text drawn with a code that has no CMap mapping; its glyph \
@@ -400,37 +452,40 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
         // Simple font: one byte per glyph, read through `/ToUnicode` where it
         // maps the byte, else the encoding; a byte neither decodes is likewise
         // an unmatchable glyph.
-        FontText::Simple {
-            encoding,
-            to_unicode,
-        } => bytes
-            .iter()
-            .enumerate()
-            .map(|(i, &b)| {
-                let mapped = match to_unicode {
-                    Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(u32::from(b), 1),
-                    _ => None,
-                };
-                let text = match mapped {
-                    Some(units) => mapped_text(&units)?,
-                    None => encoding
-                        .bytes_to_string(&[b])
-                        .map(|t| readable(&t))
-                        .map_err(|_| {
-                            Error::redaction(
-                                "text drawn with a byte that does not decode under its \
+        FontText::Simple(simple) => {
+            let Simple {
+                encoding,
+                to_unicode,
+            } = &**simple;
+            bytes
+                .iter()
+                .enumerate()
+                .map(|(i, &b)| {
+                    let mapped = match to_unicode {
+                        Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(u32::from(b), 1),
+                        _ => None,
+                    };
+                    let text = match mapped {
+                        Some(units) => mapped_text(&units)?,
+                        None => encoding
+                            .bytes_to_string(&[b])
+                            .map(|t| readable(&t))
+                            .map_err(|_| {
+                                Error::redaction(
+                                    "text drawn with a byte that does not decode under its \
                                  font; its glyph cannot be located for redaction",
-                            )
-                        })?,
-                };
-                Ok(Glyph {
-                    byte_start: i,
-                    byte_end: i + 1,
-                    code: u32::from(b),
-                    text,
+                                )
+                            })?,
+                    };
+                    Ok(Glyph {
+                        byte_start: i,
+                        byte_end: i + 1,
+                        code: u32::from(b),
+                        text,
+                    })
                 })
-            })
-            .collect(),
+                .collect()
+        }
     }
 }
 
@@ -486,13 +541,16 @@ mod tests {
         }
     }
 
-    /// A code the `/ToUnicode` does not map has no text to read, so the text
-    /// drawn with it is refused rather than read as the encoding's CIDs.
+    /// A code the `/ToUnicode` does not map reads as its CID's text in the
+    /// encoding's collection, not as nothing: under `90ms-RKSJ-H`, `0x42` is
+    /// Adobe-Japan1's `B`.
     #[test]
-    fn a_code_its_to_unicode_does_not_map_is_refused() {
+    fn a_code_its_to_unicode_lacks_reads_through_the_collection() {
         let name = Object::Name(b"90ms-RKSJ-H".to_vec());
-        let err = composite(name, true, b"\x42").unwrap().unwrap_err();
-        assert_eq!(err.kind(), elide_core::ErrorKind::Redaction);
+        assert_eq!(
+            composite(name, true, b"\x41\x42").unwrap().unwrap(),
+            ["J", "B"]
+        );
     }
 
     /// A composite font under a predefined Unicode CMap and no `/ToUnicode`
@@ -537,16 +595,50 @@ mod tests {
         assert!(to_unicode(&Document::new(), &stream).unwrap().is_none());
     }
 
-    /// A composite font with no `/ToUnicode` and an encoding that is not
-    /// Unicode has no text to read: its codes split by the encoding, but read
-    /// as nothing. One whose encoding names no CMap can't even be split.
+    /// A composite font with no `/ToUnicode`, no Unicode encoding and no
+    /// character collection with text has none to read: under `Identity-H`
+    /// alone its codes split, but read as nothing. One whose encoding names
+    /// no CMap can't even be split.
     #[test]
     fn a_composite_font_with_nothing_to_read_is_refused() {
-        for name in [&b"Identity-H"[..], b"90ms-RKSJ-H"] {
-            let refused = composite(Object::Name(name.to_vec()), false, b"\x00\x41");
-            assert!(refused.unwrap().is_err());
-        }
+        let refused = composite(Object::Name(b"Identity-H".to_vec()), false, b"\x00\x41");
+        assert!(refused.unwrap().is_err());
         assert!(composite(Object::Name(b"No-Such-CMap".to_vec()), true, b"\x41").is_none());
+    }
+
+    /// The glyphs `bytes` draw in a composite font of `encoding` whose
+    /// descendant CIDFont names the collection `registry`-`ordering`, with no
+    /// `/ToUnicode`.
+    fn collected(encoding: &str, ordering: &str, bytes: &[u8]) -> Result<Vec<String>> {
+        let mut doc = Document::with_version("1.7");
+        let descendant = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "CIDFontType0", "BaseFont" => "X",
+            "CIDSystemInfo" => dictionary! {
+                "Registry" => Object::string_literal("Adobe"),
+                "Ordering" => Object::string_literal(ordering),
+                "Supplement" => 6,
+            },
+        });
+        let font = dictionary! {
+            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X",
+            "Encoding" => encoding, "DescendantFonts" => vec![descendant.into()],
+        };
+        let text = FontText::of(&doc, &font).unwrap().unwrap();
+        decode_glyphs(&text, bytes).map(|glyphs| glyphs.into_iter().map(|g| g.text).collect())
+    }
+
+    /// With no `/ToUnicode`, a code reads as its CID's text in the font's
+    /// character collection: Adobe-Japan1 CID 34 is `A`, reached directly
+    /// under `Identity-H` and through Shift-JIS under `90ms-RKSJ-H`.
+    #[test]
+    fn a_code_reads_as_its_cids_text_in_the_collection() {
+        assert_eq!(
+            collected("Identity-H", "Japan1", b"\x00\x22").unwrap(),
+            ["A"]
+        );
+        assert_eq!(collected("90ms-RKSJ-H", "Japan1", b"\x41").unwrap(), ["A"]);
+        let err = collected("Identity-H", "Identity", b"\x00\x22").unwrap_err();
+        assert_eq!(err.kind(), elide_core::ErrorKind::Redaction);
     }
 
     /// Codes split by the encoding's ranges, whatever the `/ToUnicode` maps:

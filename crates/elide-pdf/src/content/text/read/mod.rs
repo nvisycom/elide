@@ -23,9 +23,9 @@ use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, ObjectId};
 
-use self::nested::{Selected, walk_pattern};
+use self::nested::Selected;
 use self::run::TextRun;
-use self::stream::{Inherited, walk_stream};
+use self::stream::{Frame, Inherited};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
 use crate::pdf::reader::{DeviceRect, DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
@@ -85,7 +85,8 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut next_char = 0usize;
     let mut rects: Vec<GlyphRect> = Vec::new();
     let mut fonts: Vec<FontEntry> = Vec::new();
-    let mut ctx = Walk {
+    let mut walk = Walk {
+        doc,
         accum: TextAccum {
             text: &mut text,
             runs: &mut runs,
@@ -102,22 +103,23 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         walks_remaining: MAX_XOBJECT_WALKS,
     };
 
-    walk_stream(
-        doc,
+    let scope = Scope::page(doc, page_id);
+    walk.walk_stream(
         &content,
-        StreamTarget::PageContent,
-        &Scope::page(doc, page_id),
-        MAX_XOBJECT_DEPTH,
-        None,
-        &mut ctx,
+        Frame {
+            stream: StreamTarget::PageContent,
+            scope: &scope,
+            depth: MAX_XOBJECT_DEPTH,
+            inherited: None,
+        },
     )?;
     loop {
-        let selected = mem::take(&mut ctx.selected);
+        let selected = mem::take(&mut walk.selected);
         if selected.is_empty() {
             break;
         }
         for pattern in selected {
-            walk_pattern(doc, pattern, &mut ctx)?;
+            walk.walk_pattern(pattern)?;
         }
     }
 
@@ -147,13 +149,15 @@ struct TextAccum<'a> {
     fonts: &'a mut Vec<FontEntry>,
 }
 
-/// The mutable state threaded through a page's content walk, unchanged as it
-/// recurses into Form XObjects: the accumulating text/glyph/font output, the pen
+/// The state threaded through a page's content walk, unchanged as it recurses
+/// into Form XObjects: the document walked, the accumulating text/glyph/font
+/// output, the pen
 /// position shared across the page and every form it draws (so a word gap is
 /// judged consistently across a `Do` boundary), the XObjects currently on the
 /// recursion stack (cycle guard), the 1-based page number for diagnostics, and the
 /// remaining total-walk budget.
 struct Walk<'a, 'd> {
+    doc: &'d Document,
     accum: TextAccum<'a>,
     /// Where the last shown glyph left the pen, in device space, shared across
     /// every stream of the page (`None` before the first glyph).

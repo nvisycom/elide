@@ -38,13 +38,18 @@ impl<'a> NameTree<'a> {
     /// The tree `tree` (`/EmbeddedFiles`, `/Dests`, ...) of `doc`'s
     /// `/Names`, empty when the document has none.
     pub(crate) fn read(doc: &'a Document, tree: &[u8]) -> Self {
-        let mut out = Self {
-            nodes: Vec::new(),
-            pairs: Vec::new(),
-            complete: true,
+        let mut reader = Reader {
+            doc,
+            tree,
+            visited: BTreeSet::new(),
+            out: Self {
+                nodes: Vec::new(),
+                pairs: Vec::new(),
+                complete: true,
+            },
         };
         let Some(names) = doc.catalog().ok().and_then(|c| c.get(b"Names").ok()) else {
-            return out;
+            return reader.out;
         };
         let (names, names_id) = match names {
             Object::Reference(id) => (doc.get_dictionary(*id).ok(), Some(*id)),
@@ -52,61 +57,62 @@ impl<'a> NameTree<'a> {
             _ => (None, None),
         };
         let Some(root) = names.and_then(|names| names.get(tree).ok()) else {
-            return out;
+            return reader.out;
         };
-        let root = match root {
-            Object::Reference(id) => Node::Object(*id),
-            Object::Dictionary(_) => Node::InlineRoot(names_id),
-            _ => {
-                out.complete = false;
-                return out;
-            }
-        };
-        out.walk(doc, tree, root, &mut BTreeSet::new(), 0);
-        out
+        match root {
+            Object::Reference(id) => reader.walk(Node::Object(*id), 0),
+            Object::Dictionary(_) => reader.walk(Node::InlineRoot(names_id), 0),
+            _ => reader.out.complete = false,
+        }
+        reader.out
     }
+}
 
-    /// Record `node` and its pairs, then walk its kids.
-    fn walk(
-        &mut self,
-        doc: &'a Document,
-        tree: &[u8],
-        node: Node,
-        visited: &mut BTreeSet<ObjectId>,
-        depth: usize,
-    ) {
+/// One name tree being read: the document and tree, the objects already
+/// read, so none is read twice, and the tree as read so far.
+struct Reader<'a, 't> {
+    doc: &'a Document,
+    tree: &'t [u8],
+    visited: BTreeSet<ObjectId>,
+    out: NameTree<'a>,
+}
+
+impl<'a> Reader<'a, '_> {
+    /// Record `node`, `depth` levels down, and its pairs, then walk its kids.
+    fn walk(&mut self, node: Node, depth: usize) {
         if depth > MAX_TREE_DEPTH {
-            self.complete = false;
+            self.out.complete = false;
             return;
         }
         if let Node::Object(id) = node
-            && !visited.insert(id)
+            && !self.visited.insert(id)
         {
-            self.complete = false;
+            self.out.complete = false;
             return;
         }
-        let Some(dict) = node_dict(doc, tree, node) else {
-            self.complete = false;
+        let Some(dict) = node_dict(self.doc, self.tree, node) else {
+            self.out.complete = false;
             return;
         };
-        self.nodes.push(node);
+        self.out.nodes.push(node);
         if let Ok(names) = dict.get(b"Names") {
-            let Some(names) = self.array(doc, names, visited) else {
+            let Some(names) = self.array(names) else {
                 return;
             };
             let (pairs, unpaired) = names.as_chunks::<2>();
-            self.complete &= unpaired.is_empty();
-            self.pairs
+            self.out.complete &= unpaired.is_empty();
+            self.out
+                .pairs
                 .extend(pairs.iter().map(|[key, value]| (key, value)));
         }
         if let Ok(kids) = dict.get(b"Kids") {
-            let Some(kids) = self.array(doc, kids, visited) else {
+            let Some(kids) = self.array(kids) else {
                 return;
             };
             for kid in kids {
                 match kid.as_reference() {
-                    Ok(id) => self.walk(doc, tree, Node::Object(id), visited, depth + 1),
-                    Err(_) => self.complete = false,
+                    Ok(id) => self.walk(Node::Object(id), depth + 1),
+                    Err(_) => self.out.complete = false,
                 }
             }
         }
@@ -115,17 +121,12 @@ impl<'a> NameTree<'a> {
     /// The array `value` resolves to, read once: an array object another
     /// node already named, which no real tree shares, is not read again, so
     /// a tree that shares one among many nodes costs its size once.
-    fn array(
-        &mut self,
-        doc: &'a Document,
-        value: &'a Object,
-        visited: &mut BTreeSet<ObjectId>,
-    ) -> Option<&'a Vec<Object>> {
+    fn array(&mut self, value: &'a Object) -> Option<&'a Vec<Object>> {
         let array = match value {
-            Object::Reference(id) if !visited.insert(*id) => None,
-            value => doc.resolve_array(value),
+            Object::Reference(id) if !self.visited.insert(*id) => None,
+            value => self.doc.resolve_array(value),
         };
-        self.complete &= array.is_some();
+        self.out.complete &= array.is_some();
         array
     }
 }

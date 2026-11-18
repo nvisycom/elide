@@ -11,6 +11,7 @@ use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use lopdf::{Dictionary, Object};
 
+use super::copy::At;
 use super::keys::Kind;
 use super::{Builder, record};
 use crate::content::attachment::Tree;
@@ -34,7 +35,9 @@ impl Builder<'_> {
         let tree = Tree::read(self.source)?;
         let mut pairs = Vec::new();
         for entry in &tree.entries {
-            if let Some(spec) = self.copy(Kind::FileSpec, entry.value, &Scope::default(), 0)? {
+            if let Some(spec) =
+                self.copy(Kind::FileSpec, entry.value, At::top(&Scope::default()))?
+            {
                 pairs.push((self.spec_name(&spec), spec));
             }
         }
@@ -63,7 +66,7 @@ impl Builder<'_> {
         };
         let mut out = Vec::new();
         for spec in specs {
-            match self.copy(Kind::FileSpec, spec, &Scope::default(), 0)? {
+            match self.copy(Kind::FileSpec, spec, At::top(&Scope::default()))? {
                 Some(spec) => out.push(spec),
                 None => self.residue += 1,
             }
@@ -94,8 +97,7 @@ impl Builder<'_> {
         let Some(file) = self.copy(
             Kind::EmbeddedFile,
             &Object::Reference(stream),
-            &Scope::default(),
-            0,
+            At::top(&Scope::default()),
         )?
         else {
             return Ok(None);
