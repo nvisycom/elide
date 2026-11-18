@@ -9,7 +9,7 @@
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Object, ObjectId};
+use lopdf::{Dictionary, Object};
 
 use super::keys::Kind;
 use super::{Builder, record};
@@ -34,18 +34,18 @@ impl Builder<'_> {
         let tree = Tree::read(self.source)?;
         let mut pairs = Vec::new();
         for entry in &tree.entries {
-            if let Some((spec, name)) = self.attach(entry.stream, &entry.name, entry.spec)? {
-                pairs.push((name, spec));
+            if let Some(spec) = self.copy(Kind::FileSpec, entry.value, &Scope::default(), 0)? {
+                pairs.push((self.spec_name(&spec), spec));
             }
         }
         if pairs.is_empty() {
             return Ok(None);
         }
-        pairs.sort();
+        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
         pairs.dedup();
         let leaf: Vec<Object> = pairs
             .into_iter()
-            .flat_map(|(name, spec)| [Object::string_literal(name), Object::Reference(spec)])
+            .flat_map(|(name, spec)| [Object::string_literal(name), spec])
             .collect();
         Ok(Some(Dictionary::from_iter([(
             "Names",
@@ -71,7 +71,9 @@ impl Builder<'_> {
         Ok((!out.is_empty()).then_some(Object::Array(out)))
     }
 
-    /// The file specification `spec` copied, its file under a neutral name.
+    /// The file specification `spec` copied, its file under a neutral name of
+    /// its own and with its own relationship; the file it embeds is copied
+    /// once however many specifications name it.
     pub(super) fn file_spec(&mut self, spec: &Dictionary) -> Result<Option<Object>> {
         let source = self.source;
         let stream = spec
@@ -84,23 +86,6 @@ impl Builder<'_> {
             self.residue += 1;
             return Ok(None);
         };
-        let name = spec.file_name().unwrap_or_default();
-        Ok(self
-            .attach(stream, &name, spec)?
-            .map(|(spec, _)| Object::Reference(spec)))
-    }
-
-    /// The copy of the file `stream`, named `name` by the file specification
-    /// `spec`: its file specification and neutral name, copied once.
-    fn attach(
-        &mut self,
-        stream: ObjectId,
-        name: &str,
-        spec: &Dictionary,
-    ) -> Result<Option<(ObjectId, String)>> {
-        if let Some(copy) = self.files.get(&stream) {
-            return Ok(Some(copy.clone()));
-        }
         for (key, _) in spec.iter() {
             if !SPEC_KEYS.contains(&key.as_slice()) {
                 self.drop_key(key, record::entry);
@@ -115,23 +100,12 @@ impl Builder<'_> {
         else {
             return Ok(None);
         };
-        let taken = |candidate: &str| self.file_names.contains(candidate);
-        let kept = is_neutral(name) && !taken(name);
-        let neutral = if kept {
-            name.to_owned()
-        } else {
-            (self.files.len() + 1..)
-                .map(|index| neutral_name(index, name))
-                .find(|candidate| !taken(candidate))
-                .unwrap_or_default()
-        };
-        if !kept {
-            self.record(HiddenContent::Properties);
-        }
+        let name = spec.file_name().unwrap_or_default();
+        let neutral = self.neutral(&name);
         let mut copy = Dictionary::from_iter([
             ("Type", Object::Name(b"Filespec".to_vec())),
             ("F", Object::string_literal(neutral.clone())),
-            ("UF", Object::string_literal(neutral.clone())),
+            ("UF", Object::string_literal(neutral)),
             (
                 "EF",
                 Object::Dictionary(Dictionary::from_iter([("F", file)])),
@@ -145,10 +119,40 @@ impl Builder<'_> {
         {
             copy.set("AFRelationship", relationship.clone());
         }
-        let copy = self.out.add_object(copy);
+        Ok(Some(Object::Dictionary(copy)))
+    }
+
+    /// The neutral name a file named `name` is given: `name` itself when it
+    /// is neutral and not yet given, else the next neutral name not given,
+    /// recorded as a property removed.
+    fn neutral(&mut self, name: &str) -> String {
+        let neutral = if is_neutral(name) && !self.file_names.contains(name) {
+            name.to_owned()
+        } else {
+            self.record(HiddenContent::Properties);
+            loop {
+                let candidate = neutral_name(self.next_file, name);
+                self.next_file += 1;
+                if !self.file_names.contains(&candidate) {
+                    break candidate;
+                }
+            }
+        };
         self.file_names.insert(neutral.clone());
-        self.files.insert(stream, (copy, neutral.clone()));
-        Ok(Some((copy, neutral)))
+        neutral
+    }
+
+    /// The name the copied file specification `spec` gives its file.
+    fn spec_name(&self, spec: &Object) -> String {
+        let dict = match spec {
+            Object::Reference(id) => self.out.get_dictionary(*id).ok(),
+            Object::Dictionary(dict) => Some(dict),
+            _ => None,
+        };
+        dict.and_then(|dict| dict.get(b"F").ok())
+            .and_then(|name| name.as_str().ok())
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .unwrap_or_default()
     }
 }
 

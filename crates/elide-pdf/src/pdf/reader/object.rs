@@ -160,6 +160,11 @@ impl StreamExt for Stream {
 
 /// `stream`'s content with its filters decoded, at most `limit` bytes.
 fn decode(stream: &Stream, limit: usize) -> Result<Vec<u8>> {
+    // lopdf reads a stream whose filter is not a name or names as if it had
+    // none, which would take its encoded bytes for its content.
+    if stream.dict.get(b"Filter").is_ok() && stream.filters().is_err() {
+        return Err(Error::malformed("a stream's /Filter is not a filter name"));
+    }
     stream
         .get_plain_content_with_limit(limit)
         .map_err(|e| match e {

@@ -55,10 +55,16 @@ impl<'a> Layers<'a> {
         if let Ok(expression) = dict.get(b"VE") {
             return !self.expression_visible(expression, 0);
         }
+        // A null or deleted entry names no group, so it is no member.
+        let is_group = |group: &&Object| self.doc.resolve_dict(group).is_some();
         let groups: Vec<bool> = match dict.get(b"OCGs") {
-            Ok(Object::Array(groups)) => groups.iter().map(|g| self.group_hidden(g)).collect(),
-            Ok(group) => vec![self.group_hidden(group)],
-            Err(_) => return false,
+            Ok(Object::Array(groups)) => groups
+                .iter()
+                .filter(is_group)
+                .map(|g| self.group_hidden(g))
+                .collect(),
+            Ok(group) if is_group(&group) => vec![self.group_hidden(group)],
+            _ => return false,
         };
         if groups.is_empty() {
             return false;

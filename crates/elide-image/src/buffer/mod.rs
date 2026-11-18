@@ -125,6 +125,12 @@ impl ImageBuffer {
         &self.raster
     }
 
+    /// The decoded pixels, the source and its metadata let go.
+    #[must_use]
+    pub fn into_raster(self) -> RasterImage {
+        self.raster
+    }
+
     /// The image's pixel dimensions.
     #[must_use]
     pub fn dimensions(&self) -> Dimensions<u32> {

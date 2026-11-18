@@ -16,11 +16,13 @@ mod run;
 mod stream;
 
 use std::collections::BTreeSet;
+use std::mem;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, ObjectId};
 
+use self::nested::{Selected, walk_pattern};
 use self::run::TextRun;
 use self::stream::{Inherited, walk_stream};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
@@ -93,6 +95,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         pen: None,
         active: BTreeSet::new(),
         patterns: BTreeSet::new(),
+        selected: Vec::new(),
         page,
         walks_remaining: MAX_XOBJECT_WALKS,
     };
@@ -106,6 +109,15 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         None,
         &mut ctx,
     )?;
+    loop {
+        let selected = mem::take(&mut ctx.selected);
+        if selected.is_empty() {
+            break;
+        }
+        for pattern in selected {
+            walk_pattern(doc, pattern, &mut ctx)?;
+        }
+    }
 
     // The page's visible rectangle and rotation, for normalizing glyph device
     // boxes to page fractions. A page missing its boxes falls back to a unit
@@ -139,15 +151,18 @@ struct TextAccum<'a> {
 /// judged consistently across a `Do` boundary), the XObjects currently on the
 /// recursion stack (cycle guard), the 1-based page number for diagnostics, and the
 /// remaining total-walk budget.
-struct Walk<'a> {
+struct Walk<'a, 'd> {
     accum: TextAccum<'a>,
     /// Where the last shown glyph left the pen, in device space, shared across
     /// every stream of the page (`None` before the first glyph).
     pen: Option<(f64, f64)>,
     active: BTreeSet<ObjectId>,
-    /// The tiling patterns already walked on this page: a pattern's walk does
-    /// not depend on where it is selected, so each is walked once.
+    /// The tiling patterns already selected on this page: a pattern's walk
+    /// does not depend on where it is selected, so each is walked once.
     patterns: BTreeSet<ObjectId>,
+    /// The tiling patterns selected and not yet walked: each is walked once
+    /// the page's own text is, so its text never falls inside the page's.
+    selected: Vec<Selected<'d>>,
     page: u32,
     /// Form XObject walks still permitted on this page. The stack-based `active`
     /// guard stops re-entry (cycles) but not re-walks: a form reached through

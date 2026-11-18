@@ -23,8 +23,8 @@ pub(super) fn walk_xobject<'a>(
     name: &[u8],
     scope: &Scope<'a>,
     depth: u8,
-    inherited: Inherited<'a>,
-    ctx: &mut Walk<'_>,
+    inherited: Inherited<'_>,
+    ctx: &mut Walk<'_, 'a>,
 ) -> Result<()> {
     let Some(id) = scope
         .lookup(doc, b"XObject", name)
@@ -42,50 +42,94 @@ pub(super) fn walk_xobject<'a>(
     walk_nested(doc, id, stream, scope, depth, inherited, ctx)
 }
 
-/// Resolve and recurse into the tiling pattern named `name` in `scope`, the
-/// pattern a `scn`/`SCN` selects to paint with.
-///
-/// A pattern's cell is drawn in its own graphics state, in the page's default
-/// space transformed by the pattern's `/Matrix` (8.7.3.1), so it inherits no
-/// font or transform. Its text is located once, however many times the cell is
-/// tiled or the pattern selected, and deleting it from the one stream removes
-/// it from every tile; a gap sets it apart from the text around it. A shading
-/// pattern draws no text.
-pub(super) fn walk_pattern<'a>(
-    doc: &'a Document,
-    name: &[u8],
-    scope: &Scope<'a>,
+/// A tiling pattern selected to paint with, to be walked once the page's own
+/// text is: the pattern, the scope it was selected in, and the nesting depth
+/// left there.
+pub(super) struct Selected<'d> {
+    id: ObjectId,
+    stream: &'d Stream,
+    scope: Scope<'d>,
     depth: u8,
-    ctx: &mut Walk<'_>,
-) -> Result<()> {
+}
+
+/// Select the tiling pattern named `name` in `scope`, the pattern a
+/// `scn`/`SCN` selects to paint with, to be walked once the page's own text
+/// is; one already selected on the page, or a shading pattern, which draws
+/// no text, is passed over.
+pub(super) fn select_pattern<'d>(
+    doc: &'d Document,
+    name: &[u8],
+    scope: &Scope<'d>,
+    depth: u8,
+    ctx: &mut Walk<'_, 'd>,
+) {
     let Some(id) = scope
         .lookup(doc, b"Pattern", name)
         .and_then(|pattern| pattern.as_reference().ok())
     else {
-        return Ok(());
+        return;
     };
     let Ok(Object::Stream(stream)) = doc.get_object(id) else {
-        return Ok(());
+        return;
     };
     if stream
         .dict
         .get(b"PatternType")
         .ok()
         .and_then(ObjectExt::as_number)
-        != Some(1.0)
-        || !ctx.patterns.insert(id)
+        == Some(1.0)
+        && ctx.patterns.insert(id)
     {
-        return Ok(());
+        ctx.selected.push(Selected {
+            id,
+            stream,
+            scope: scope.clone(),
+            depth,
+        });
     }
+}
+
+/// Walk the selected tiling `pattern`.
+///
+/// A pattern's cell is drawn in its own graphics state, in the page's default
+/// space transformed by the pattern's `/Matrix` (8.7.3.1), so it inherits no
+/// font, transform or pen. Its text is located once, however many times the
+/// cell is tiled or the pattern selected, and deleting it from the one stream
+/// removes it from every tile. Text it draws is set apart from the text
+/// around it by a gap on each side; one that draws none leaves no gap.
+pub(super) fn walk_pattern<'d>(
+    doc: &'d Document,
+    pattern: Selected<'d>,
+    ctx: &mut Walk<'_, 'd>,
+) -> Result<()> {
     let inherited = Inherited {
         font: None,
         state: TextState::default(),
     };
+    let before = *ctx.accum.next_char;
     let accum = &mut ctx.accum;
     gap(accum.text, accum.next_char, accum.runs);
-    walk_nested(doc, id, stream, scope, depth, inherited, ctx)?;
+    let after_gap = *ctx.accum.next_char;
+    ctx.pen = None;
+    walk_nested(
+        doc,
+        pattern.id,
+        pattern.stream,
+        &pattern.scope,
+        pattern.depth,
+        inherited,
+        ctx,
+    )?;
     let accum = &mut ctx.accum;
-    gap(accum.text, accum.next_char, accum.runs);
+    if *accum.next_char == after_gap {
+        if after_gap > before {
+            accum.text.pop();
+            accum.runs.pop();
+            *accum.next_char = before;
+        }
+    } else {
+        gap(accum.text, accum.next_char, accum.runs);
+    }
     Ok(())
 }
 
@@ -102,8 +146,8 @@ pub(super) fn walk_nested<'a>(
     stream: &'a Stream,
     scope: &Scope<'a>,
     depth: u8,
-    mut inherited: Inherited<'a>,
-    ctx: &mut Walk<'_>,
+    mut inherited: Inherited<'_>,
+    ctx: &mut Walk<'_, 'a>,
 ) -> Result<()> {
     if ctx.active.contains(&id) {
         return Ok(());

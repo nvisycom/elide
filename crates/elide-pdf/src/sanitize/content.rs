@@ -35,6 +35,15 @@ const OPERATORS: &[&str] = &[
     "SC", "SCN", "sc", "scn", "G", "g", "RG", "rg", "K", "k", "sh", "Do",
 ];
 
+/// An open marked-content sequence: one written (as `BMC`), one hidden by
+/// its layer and cut, or one inside a hidden one, cut with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Marked {
+    Written,
+    Hiding,
+    Within,
+}
+
 /// The colour space families a `cs`/`CS` operand names directly (8.6.8).
 const FAMILIES: &[&[u8]] = &[b"DeviceGray", b"DeviceRGB", b"DeviceCMYK", b"Pattern"];
 
@@ -75,9 +84,9 @@ impl<'a> Builder<'a> {
         let content =
             Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let mut kept: Vec<Operation> = Vec::with_capacity(content.operations.len());
-        // One entry per open marked-content sequence: whether it hides; and
-        // how many of them hide, so whether content is hidden is known at once.
-        let mut open: Vec<bool> = Vec::new();
+        // One entry per open marked-content sequence, and how many of them
+        // hide, so whether content is hidden is known at once.
+        let mut open: Vec<Marked> = Vec::new();
         let mut hiding = 0usize;
         // The open `q` saves and whether a text object is open, so the
         // rebuilt content is balanced and ends in the state it began in.
@@ -90,8 +99,8 @@ impl<'a> Builder<'a> {
             let operator = operation.operator.as_str();
             if hiding > 0 {
                 match operator {
-                    "BDC" | "BMC" => open.push(false),
-                    "EMC" => hiding -= usize::from(open.pop() == Some(true)),
+                    "BDC" | "BMC" => open.push(Marked::Within),
+                    "EMC" => hiding -= usize::from(open.pop() == Some(Marked::Hiding)),
                     _ => {}
                 }
                 continue;
@@ -109,7 +118,7 @@ impl<'a> Builder<'a> {
                     let [Object::Name(tag), properties] = operation.operands.as_slice() else {
                         self.residue += 1;
                         if operator == "BDC" {
-                            open.push(false);
+                            open.push(Marked::Written);
                             marked_in_text += usize::from(in_text);
                             kept.push(Operation::new("BMC", vec![Object::Name(b"Span".to_vec())]));
                         }
@@ -124,7 +133,7 @@ impl<'a> Builder<'a> {
                         && properties.is_some_and(|p| self.layers.is_hidden(p))
                     {
                         self.record(HiddenContent::Layer);
-                        open.push(true);
+                        open.push(Marked::Hiding);
                         hiding += 1;
                         continue;
                     }
@@ -136,7 +145,7 @@ impl<'a> Builder<'a> {
                     }
                     let tag = Object::Name(tag.clone());
                     if operator == "BDC" {
-                        open.push(false);
+                        open.push(Marked::Written);
                         marked_in_text += usize::from(in_text);
                         kept.push(Operation::new("BMC", vec![tag]));
                     } else {
@@ -144,7 +153,7 @@ impl<'a> Builder<'a> {
                     }
                 }
                 "BMC" => {
-                    open.push(false);
+                    open.push(Marked::Written);
                     marked_in_text += usize::from(in_text);
                     kept.push(operation);
                 }
@@ -246,14 +255,20 @@ impl<'a> Builder<'a> {
                 _ => self.residue += 1,
             }
         }
+        // Only the sequences written are closed: one hidden to the end, and
+        // any inside it, wrote no opener. Those begun in the open text object
+        // close inside it.
+        let written = open
+            .iter()
+            .filter(|&&marked| marked == Marked::Written)
+            .count();
         if in_text {
             for _ in 0..marked_in_text {
-                open.pop();
                 kept.push(Operation::new("EMC", Vec::new()));
             }
             kept.push(Operation::new("ET", Vec::new()));
         }
-        for _ in open {
+        for _ in 0..written - usize::from(in_text) * marked_in_text {
             kept.push(Operation::new("EMC", Vec::new()));
         }
         for _ in 0..saved {

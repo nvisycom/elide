@@ -19,9 +19,9 @@ use lopdf::{Document, Encoding, Object, ObjectId, Stream};
 
 use crate::pdf::reader::font::{readable, to_unicode};
 
-/// The most codes a CMap is read as. Each is held while the CMap is written,
-/// and a range of four-byte codes may name billions.
-const MAX_CODES: u64 = 1 << 18;
+/// The most UTF-16 units a CMap's destinations hold together, so the map
+/// held while a CMap is written, and the CMap written, stay bounded.
+const MAX_UNITS: usize = 1 << 20;
 
 /// The most entries one `bfchar` or `bfrange` section holds.
 const SECTION: usize = 100;
@@ -55,29 +55,25 @@ impl UnicodeMap {
     ///
     /// As [`to_unicode`], and
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
-    /// it maps more than [`MAX_CODES`] codes.
+    /// its destinations hold more than [`MAX_UNITS`] UTF-16 units together.
     pub(crate) fn read(doc: &Document, stream: &Stream) -> Result<Option<Self>> {
         let Some(Encoding::UnicodeMapEncoding(cmap)) = to_unicode(doc, stream)? else {
             return Ok(None);
         };
-        let count: u64 = cmap
-            .bf_ranges
-            .iter()
-            .flat_map(|ranges| ranges.iter())
-            .map(|(range, _)| u64::from(range.end() - range.start()) + 1)
-            .sum();
-        if count > MAX_CODES {
-            return Err(Error::resource_limit(format!(
-                "a /ToUnicode CMap maps more than {MAX_CODES} codes"
-            )));
-        }
         let mut codes = BTreeMap::new();
+        let mut units_left = MAX_UNITS;
         for (len, ranges) in (1u8..).zip(&cmap.bf_ranges) {
             for (range, _) in ranges.iter() {
                 for code in range.clone() {
-                    if let Some(units) = cmap.get(code, len).filter(|units| !units.is_empty()) {
-                        codes.insert((len, code), units);
-                    }
+                    let Some(units) = cmap.get(code, len).filter(|units| !units.is_empty()) else {
+                        continue;
+                    };
+                    units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
+                        Error::resource_limit(format!(
+                            "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
+                        ))
+                    })?;
+                    codes.insert((len, code), units);
                 }
             }
         }
@@ -105,27 +101,18 @@ impl UnicodeMap {
         }
     }
 
-    /// The CMap written: a codespace for each code length, then each run of
-    /// codes whose destinations step one by one as a `bfrange`, and every
-    /// other code as a `bfchar`.
+    /// The CMap written: its codespace, then each run of codes whose
+    /// destinations step one by one as a `bfrange`, and every other code as
+    /// a `bfchar`.
     pub(crate) fn write(&self) -> Vec<u8> {
         let mut out = String::from(HEADER);
-
-        // Each length's codespace spans, byte by byte, the codes it maps.
-        let mut spaces: BTreeMap<u8, (u32, u32)> = BTreeMap::new();
-        for &(len, code) in self.codes.keys() {
-            let (low, high) = spaces.entry(len).or_insert((code, code));
-            for shift in (0..len).map(|byte| 8 * u32::from(byte)) {
-                let byte = (code >> shift) & 0xFF;
-                *low = with_byte(*low, shift, byte.min((*low >> shift) & 0xFF));
-                *high = with_byte(*high, shift, byte.max((*high >> shift) & 0xFF));
+        for section in self.codespace().chunks(SECTION) {
+            let _ = writeln!(out, "{} begincodespacerange", section.len());
+            for &(len, low, high) in section {
+                let _ = writeln!(out, "{} {}", code_hex(len, low), code_hex(len, high));
             }
+            out.push_str("endcodespacerange\n");
         }
-        let _ = writeln!(out, "{} begincodespacerange", spaces.len());
-        for (&len, &(low, high)) in &spaces {
-            let _ = writeln!(out, "{} {}", code_hex(len, low), code_hex(len, high));
-        }
-        out.push_str("endcodespacerange\n");
 
         // A run stays within one last-byte block, as a range's bounds differ
         // only in their last byte.
@@ -166,6 +153,50 @@ impl UnicodeMap {
         }
         out.push_str(FOOTER);
         out.into_bytes()
+    }
+}
+
+impl UnicodeMap {
+    /// The codespace of the codes mapped: a range for each run of first
+    /// bytes, in order, that codes of one length start with, its other bytes
+    /// spanning those of the length's codes. A run ends only where a code of
+    /// another length starts between, so codes of different lengths keep the
+    /// first bytes they have apart and a reader splits them as the source
+    /// did. A map of no code spans the one-byte codes, so the CMap stays one a
+    /// reader reads.
+    fn codespace(&self) -> Vec<(u8, u32, u32)> {
+        let mut leads: BTreeSet<(u32, u8)> = BTreeSet::new();
+        let mut rest: BTreeMap<u8, (u32, u32)> = BTreeMap::new();
+        for &(len, code) in self.codes.keys() {
+            let shift = 8 * (u32::from(len) - 1);
+            leads.insert((code >> shift, len));
+            let tail = code & ((1u64 << shift) - 1) as u32;
+            let (low, high) = rest.entry(len).or_insert((tail, tail));
+            for byte in (0..shift).step_by(8) {
+                let value = (tail >> byte) & 0xFF;
+                *low = with_byte(*low, byte, value.min((*low >> byte) & 0xFF));
+                *high = with_byte(*high, byte, value.max((*high >> byte) & 0xFF));
+            }
+        }
+        let mut runs: Vec<(u8, u32, u32)> = Vec::new();
+        for (lead, len) in leads {
+            match runs.last_mut() {
+                Some((run_len, _, last)) if *run_len == len => *last = lead,
+                _ => runs.push((len, lead, lead)),
+            }
+        }
+        let mut spaces: Vec<(u8, u32, u32)> = runs
+            .into_iter()
+            .map(|(len, first, last)| {
+                let shift = 8 * (u32::from(len) - 1);
+                let (low_tail, high_tail) = rest[&len];
+                (len, first << shift | low_tail, last << shift | high_tail)
+            })
+            .collect();
+        if spaces.is_empty() {
+            spaces.push((1, 0x00, 0xFF));
+        }
+        spaces
     }
 }
 
@@ -223,13 +254,15 @@ fn key(bytes: &[u8]) -> Option<(u8, u32)> {
 }
 
 /// Whether `units` are what a range starting at `first` maps the code
-/// `step` past its first to: `first` with its last unit stepped.
+/// `step` past its first to: `first` with its last byte stepped, the step
+/// staying within that byte, as a range's destinations do (9.10.3).
 fn steps(first: &[u16], step: u32, units: &[u16]) -> bool {
     let (Some((&last, head)), Some((&unit, rest))) = (first.split_last(), units.split_last())
     else {
         return false;
     };
-    head == rest && u32::from(last) + step == u32::from(unit)
+    let stepped = u32::from(last) + step;
+    head == rest && stepped == u32::from(unit) && stepped >> 8 == u32::from(last) >> 8
 }
 
 /// `code` with its byte at `shift` set to `byte`.
@@ -338,6 +371,46 @@ mod tests {
             text(&read(written.as_bytes()), 1, 0x02).as_deref(),
             Some("A")
         );
+    }
+
+    /// A map whose every code was removed is still a CMap lopdf reads.
+    #[test]
+    fn a_map_of_no_code_is_still_read() {
+        let mut map = read(&source());
+        let keys: Vec<(u8, u32)> = map.codes.keys().copied().collect();
+        for (len, code) in keys {
+            map.remove(&code.to_be_bytes()[4 - usize::from(len)..]);
+        }
+        assert!(read(&map.write()).codes.is_empty());
+    }
+
+    /// Codes of one length span one codespace however far apart they are;
+    /// a code of another length between them splits it, so that byte stays
+    /// the first byte of the longer code.
+    #[test]
+    fn the_codespace_keeps_first_bytes_apart() {
+        let map = read(&cmap(
+            "2 begincodespacerange\n<00> <80>\n<8140> <9FFC>\nendcodespacerange\n\
+            4 beginbfchar\n<41> <0041>\n<7A> <007A>\n<8140> <3000>\n<A1> <FF61>\nendbfchar",
+        ));
+        let written = String::from_utf8(map.write()).unwrap();
+        assert!(
+            written.contains("3 begincodespacerange\n<41> <7A>\n<8140> <8140>\n<A1> <A1>\n"),
+            "{written}"
+        );
+    }
+
+    /// A range's destinations step within their last byte: codes whose
+    /// destinations carry into the byte before are written apart.
+    #[test]
+    fn a_range_does_not_carry_past_its_last_byte() {
+        let map = read(&cmap(
+            "1 begincodespacerange\n<00> <FF>\nendcodespacerange\n\
+            2 beginbfchar\n<01> <00FF>\n<02> <0100>\nendbfchar",
+        ));
+        let written = String::from_utf8(map.write()).unwrap();
+        assert!(written.contains("<01> <00FF>\n<02> <0100>"), "{written}");
+        assert_eq!(read(written.as_bytes()), map);
     }
 
     /// A CMap naming more codes than are held is refused before any is.

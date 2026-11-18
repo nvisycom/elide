@@ -111,7 +111,7 @@ impl ScannedPage {
     /// [`PageReplacement::pixels`].
     pub(crate) fn replacement(&self) -> Result<PageReplacement> {
         let render = ImageBuffer::open(&self.painted, ImageFormat::Png)?;
-        PageReplacement::pixels(self.number, render.raster().clone())
+        PageReplacement::pixels(self.number, render.into_raster())
     }
 
     /// The image that replaces the page: `render`, a fresh render of it, with

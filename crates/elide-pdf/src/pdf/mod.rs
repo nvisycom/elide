@@ -13,9 +13,9 @@ pub(crate) mod writer;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use lopdf::Document;
+use lopdf::{Document, Object};
 
-use self::reader::{DictionaryExt, ObjectExt};
+use self::reader::{DictionaryExt, DocumentExt, ObjectExt};
 pub(crate) use self::writer::Edit;
 
 /// A read of a [`Pdf`]: what a modality takes from a document.
@@ -73,7 +73,7 @@ impl Pdf {
                 Self::MAX_DOCUMENT_BYTES
             )));
         }
-        let doc = Document::load_mem(document)
+        let mut doc = Document::load_mem(document)
             .map_err(|e| Error::malformed(format!("not a readable PDF: {e}")))?;
         // A document with an empty user password decrypts on load. One that
         // still carries `/Encrypt` needs a password: its strings and streams are
@@ -90,6 +90,7 @@ impl Pdf {
                  which cannot be read",
             ));
         }
+        inline_encodings(&mut doc);
         Ok(Self {
             doc,
             bytes: Bytes::copy_from_slice(document),
@@ -123,6 +124,54 @@ impl Pdf {
     /// An edit of a copy of the document, leaving this one as it is.
     pub(crate) fn edit(&self) -> Edit {
         Edit::of(self.doc.clone())
+    }
+}
+
+/// Each stream's `/Filter` and `/DecodeParms` with the references in them
+/// followed. lopdf reads both only as direct values: it decodes a stream
+/// whose filter is a reference as if it had none, so its encoded bytes would
+/// be read, and written back, as its content.
+fn inline_encodings(doc: &mut Document) {
+    let mut inlined = Vec::new();
+    for (&id, object) in &doc.objects {
+        let Object::Stream(stream) = object else {
+            continue;
+        };
+        for key in [&b"Filter"[..], b"DecodeParms"] {
+            if let Ok(value) = stream.dict.get(key) {
+                let value = inline(doc, value, 0);
+                if stream.dict.get(key).ok() != Some(&value) {
+                    inlined.push((id, key, value));
+                }
+            }
+        }
+    }
+    for (id, key, value) in inlined {
+        if let Some(Object::Stream(stream)) = doc.objects.get_mut(&id) {
+            stream.dict.set(key, value);
+        }
+    }
+}
+
+/// `value` with the references in it, and in the arrays and dictionaries it
+/// holds two levels down, followed; a reference to nothing is null.
+fn inline(doc: &Document, value: &Object, depth: usize) -> Object {
+    let Some(value) = doc.resolve(value) else {
+        return Object::Null;
+    };
+    match value {
+        Object::Array(items) if depth < 2 => Object::Array(
+            items
+                .iter()
+                .map(|item| inline(doc, item, depth + 1))
+                .collect(),
+        ),
+        Object::Dictionary(dict) if depth < 2 => Object::Dictionary(
+            dict.iter()
+                .map(|(key, value)| (key.clone(), inline(doc, value, depth + 1)))
+                .collect(),
+        ),
+        value => value.clone(),
     }
 }
 

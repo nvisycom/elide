@@ -45,8 +45,8 @@ impl Builder<'_> {
         ]);
         // A page with no box of its own or inherited is drawn as US Letter,
         // and the media box is required, so it is written.
+        let boxes = page_boxes(source, id).unwrap_or(PageBoxes::LETTER);
         {
-            let boxes = page_boxes(source, id).unwrap_or(PageBoxes::LETTER);
             page.set("MediaBox", rect(boxes.media));
             if boxes.crop != boxes.media {
                 page.set("CropBox", rect(boxes.crop));
@@ -87,7 +87,7 @@ impl Builder<'_> {
                 continue;
             };
             if annotation.is_subtype(self.source, b"Widget") {
-                appearances.extend(self.flatten(annotation)?);
+                appearances.extend(self.flatten(annotation, &scope, boxes.rotate)?);
                 continue;
             }
             if let Some(link) = self.link(annotation)? {

@@ -8,7 +8,7 @@ use elide_core::{Error, Result};
 use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
-use super::{Builder, MAX_COPIED_VALUES, MAX_NESTING, ScopedCopy, record};
+use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST, record};
 use crate::content::image;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 use crate::pdf::writer::{UnicodeMap, compressed};
@@ -21,7 +21,7 @@ impl<'a> Builder<'a> {
     ///
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// objects nest past [`MAX_NESTING`] or the rebuild copies more than
-    /// [`MAX_COPIED_VALUES`] values.
+    /// [`MAX_COPIED_BYTES`].
     pub(super) fn copy<'s>(
         &mut self,
         kind: Kind,
@@ -37,11 +37,11 @@ impl<'a> Builder<'a> {
                 "objects nest deeper than {MAX_NESTING} levels"
             )));
         }
-        self.values_left = self.values_left.checked_sub(1).ok_or_else(|| {
-            Error::resource_limit(format!(
-                "the rebuild would copy more than {MAX_COPIED_VALUES} values"
-            ))
-        })?;
+        let held = match value {
+            Object::String(bytes, _) | Object::Name(bytes) => bytes.len(),
+            _ => 0,
+        };
+        self.charge(VALUE_COST + held)?;
         match value {
             Object::Reference(id) => self.copy_reference(kind, *id, scope, depth),
             Object::Dictionary(_) | Object::Stream(_) => {
@@ -191,7 +191,7 @@ impl<'a> Builder<'a> {
     {
         match (kind, value) {
             (Kind::Font, Object::Dictionary(dict)) => self.font(dict, scope, depth).map(Some),
-            (Kind::Form, Object::Stream(stream)) => self.form(stream, FORM, scope, depth).map(Some),
+            (Kind::Form, Object::Stream(stream)) => self.form(stream, FORM, scope, depth),
             (Kind::Pattern, _) => self.pattern(value, scope, depth),
             (Kind::FileSpec, Object::Dictionary(dict)) => self.file_spec(dict),
             (Kind::ToUnicode, Object::Stream(stream)) if !self.external(&stream.dict) => {
@@ -214,6 +214,18 @@ impl<'a> Builder<'a> {
                     }
                 }
                 Ok(Some(Object::Dictionary(out)))
+            }
+            // A graphics state's font is carried as the `Tf` it selects, where
+            // the state is set.
+            (Kind::ExtGState, Object::Dictionary(dict)) => {
+                let fields = keys::fields(kind).unwrap_or_default();
+                Ok(Some(Object::Dictionary(self.keys(
+                    dict,
+                    fields,
+                    &[b"Font"],
+                    scope,
+                    depth,
+                )?)))
             }
             _ => match keys::fields(kind) {
                 Some(fields) => self.table(value, fields, scope, depth),
@@ -253,7 +265,10 @@ impl<'a> Builder<'a> {
     {
         let fields = keys::fields(kind).unwrap_or_default();
         let samples = match image::raw_samples(self.source, stream) {
-            Ok(Some(samples)) => samples,
+            Ok(Some(samples)) => {
+                self.charge(samples.len())?;
+                samples
+            }
             Ok(None) => return self.table(value, fields, scope, depth),
             Err(_) => {
                 self.unreadable(id);
@@ -268,6 +283,21 @@ impl<'a> Builder<'a> {
             depth,
         )?;
         Ok(Some(Object::Stream(compressed(dict, samples)?)))
+    }
+
+    /// Take `bytes` from the copy budget.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+    /// the rebuild would copy more than [`MAX_COPIED_BYTES`].
+    fn charge(&mut self, bytes: usize) -> Result<()> {
+        self.copy_budget = self.copy_budget.checked_sub(bytes).ok_or_else(|| {
+            Error::resource_limit(format!(
+                "the rebuild would copy more than {MAX_COPIED_BYTES} bytes"
+            ))
+        })?;
+        Ok(())
     }
 
     /// Record an image no codec reads as removed.
@@ -299,6 +329,7 @@ impl<'a> Builder<'a> {
                 return Ok(None);
             }
             Object::Stream(stream) => {
+                self.charge(stream.content.len())?;
                 let dict = self.stream_keys(&stream.dict, fields, &[], scope, depth)?;
                 Object::Stream(Stream::new(dict, stream.content.clone()).with_compression(false))
             }
@@ -412,7 +443,12 @@ impl<'a> Builder<'a> {
                 self.residue += 1;
                 continue;
             };
+            if self.external(&glyph.dict) {
+                self.record(HiddenContent::Unreadable);
+                continue;
+            }
             let content = self.content(&glyph.decoded()?, &inner, &mut resources, depth + 1)?;
+            self.charge(content.len())?;
             procs.set(
                 name.clone(),
                 self.out.add_object(compressed(Dictionary::new(), content)?),
@@ -425,21 +461,32 @@ impl<'a> Builder<'a> {
     }
 
     /// A form XObject or tiling pattern `stream` keeping `fields`, its content
-    /// rebuilt with names resolved in its own resources, else in `scope`.
+    /// rebuilt with names resolved in its own resources, else in `scope`;
+    /// `None`, recorded as unreadable, when its data is in another file or
+    /// under a `/Crypt` filter.
     fn form<'s>(
         &mut self,
         stream: &'s Stream,
         fields: &[(&[u8], Kind)],
         scope: &Scope<'s>,
         depth: usize,
-    ) -> Result<Object>
+    ) -> Result<Option<Object>>
     where
         'a: 's,
     {
+        // Content kept in another file is not what the stream's own bytes
+        // say, so it is not rebuilt from them.
+        if self.external(&stream.dict) {
+            self.record(HiddenContent::Unreadable);
+            return Ok(None);
+        }
         let inner = scope.inner(self.source, &stream.dict);
         let scoped = self.scoped;
         let mut resources = Dictionary::new();
         let content = self.content(&stream.decoded()?, &inner, &mut resources, depth + 1)?;
+        // Content that borrows its scope is rebuilt once per scope, so each
+        // rebuild is charged.
+        self.charge(content.len())?;
         self.own_scope(&stream.dict, scoped);
         let mut dict = self.stream_keys(
             &stream.dict,
@@ -449,7 +496,7 @@ impl<'a> Builder<'a> {
             depth,
         )?;
         dict.set("Resources", resources);
-        Ok(Object::Stream(compressed(dict, content)?))
+        Ok(Some(Object::Stream(compressed(dict, content)?)))
     }
 
     /// A `/ToUnicode` CMap `stream` written anew from what lopdf, which
@@ -505,7 +552,10 @@ impl<'a> Builder<'a> {
         // dictionary a shading pattern. `/PatternType` is written to match,
         // so a viewer and the text walk read the copy as the same kind.
         let (mut copy, kind) = match value {
-            Object::Stream(stream) => (self.form(stream, TILING, scope, depth)?, 1),
+            Object::Stream(stream) => match self.form(stream, TILING, scope, depth)? {
+                Some(copy) => (copy, 1),
+                None => return Ok(None),
+            },
             Object::Dictionary(_) => match self.table(value, SHADING_PATTERN, scope, depth)? {
                 Some(copy) => (copy, 2),
                 None => return Ok(None),

@@ -250,7 +250,11 @@ impl OffsetMap {
     pub(crate) fn glyph_bytes(&self, chars: Range<usize>) -> impl Iterator<Item = GlyphBytes> + '_ {
         self.runs
             .iter()
-            .filter(move |run| run.chars.start < chars.end && run.chars.end > chars.start)
+            .filter(move |run| {
+                chars.start < chars.end
+                    && run.chars.start < chars.end
+                    && run.chars.end > chars.start
+            })
             .filter_map(|run| run.source)
     }
 }
@@ -280,6 +284,29 @@ mod tests {
                 .into_owned()
             })
             .collect()
+    }
+
+    /// An empty range covers no character, so it selects no glyph, even
+    /// inside a ligature's characters.
+    #[test]
+    fn an_empty_range_selects_no_glyph() {
+        let ligature = GlyphBytes {
+            address: Address {
+                stream: StreamTarget::PageContent,
+                op: 0,
+                operand: 0,
+                item: None,
+            },
+            byte_start: 0,
+            byte_end: 1,
+            font: 0,
+        };
+        let map = OffsetMap::new(vec![OffsetRun {
+            chars: 3..5,
+            source: Some(ligature),
+        }]);
+        assert_eq!(map.glyph_bytes(4..4).count(), 0);
+        assert_eq!(map.glyph_bytes(4..5).count(), 1);
     }
 
     /// Text a tiling pattern draws is detected and deleted like the page's:
@@ -315,6 +342,43 @@ mod tests {
         let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
         let text = &pdf.read(Text).unwrap()[0].text;
         assert_eq!(text, "alice@example.com Jane Roe ");
+    }
+
+    /// A pattern that draws no text adds no gap: the text around its
+    /// selection reads as one.
+    #[test]
+    fn a_pattern_drawing_no_text_leaves_no_gap() {
+        let mut doc = Document::with_version("1.5");
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let pattern = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                "BBox" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+                "XStep" => 10, "YStep" => 10,
+            },
+            b"0 0 5 5 re f".to_vec(),
+        ));
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /F1 12 Tf 10 50 Td (ali) Tj /Pattern cs /P0 scn (ce) Tj ET".to_vec(),
+        ));
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! {
+                    "Font" => dictionary! { "F1" => font },
+                    "Pattern" => dictionary! { "P0" => pattern },
+                },
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            }],
+        );
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        assert_eq!(pdf.read(Text).unwrap()[0].text, "alice");
     }
 
     /// Find and delete the text a tiling pattern of `/PatternType` `kind`
@@ -378,6 +442,53 @@ mod tests {
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         bytes
+    }
+
+    /// Deleting the only glyph a font's `/ToUnicode` maps leaves a CMap of
+    /// no code, which the output still reads and passes the check with.
+    #[test]
+    fn deleting_the_only_mapped_glyph_leaves_a_readable_cmap() {
+        let mut doc = Document::with_version("1.5");
+        let cmap = doc.add_object(Stream::new(
+            dictionary! {},
+            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
+              /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
+              /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
+              1 begincodespacerange\n<00> <FF>\nendcodespacerange\n\
+              1 beginbfchar\n<4A> <004A>\nendbfchar\n\
+              endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
+                .to_vec(),
+        ));
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "ToUnicode" => cmap,
+        });
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /F1 12 Tf (J) Tj ET".to_vec(),
+        ));
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            }],
+        );
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let blocks = pdf.read(Text).unwrap();
+        assert_eq!(blocks[0].text, "J");
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &blocks,
+            detections: &[Detection::new(1, 0, 1)],
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        out.read(Check).unwrap();
+        assert!(out.read(Text).unwrap()[0].text.is_empty());
     }
 
     /// A stream another redaction changed no longer holds the glyphs where the

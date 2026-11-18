@@ -57,7 +57,8 @@ pub(super) fn replace(edit: &mut Edit, replacements: &[ImageReplacement]) -> Res
         // Rebuild a valid image XObject from the encoded bytes (lopdf sets
         // the dictionary, dimensions, colour space, filter, to match); a
         // stencil mask stays a stencil, so it still paints in the fill colour.
-        let stencil = matches!(doc.get_object(id), Ok(Object::Stream(s)) if is_stencil(&s.dict));
+        let stencil =
+            matches!(doc.get_object(id), Ok(Object::Stream(s)) if is_stencil(doc, &s.dict));
         let stream = if stencil {
             stencil_from(&replacement.image)
         } else {
@@ -240,7 +241,7 @@ mod tests {
         .unwrap();
         let doc = edit.doc();
         let stream = doc.get_object(id).and_then(Object::as_stream).unwrap();
-        assert!(is_stencil(&stream.dict));
+        assert!(is_stencil(doc, &stream.dict));
         assert_eq!(decode(doc, stream).unwrap().data, [0, 0]);
     }
 }

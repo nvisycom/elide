@@ -95,9 +95,11 @@ impl Layout {
 
 /// Whether the image XObject `dict` is a stencil mask: its samples say where
 /// to paint, not what colour.
-pub(crate) fn is_stencil(dict: &Dictionary) -> bool {
+pub(crate) fn is_stencil(doc: &Document, dict: &Dictionary) -> bool {
     dict.get(b"ImageMask")
-        .and_then(Object::as_bool)
+        .ok()
+        .and_then(|mask| doc.resolve(mask))
+        .and_then(|mask| mask.as_bool().ok())
         .unwrap_or(false)
 }
 
@@ -111,18 +113,16 @@ pub(crate) fn is_supported(doc: &Document, dict: &Dictionary) -> bool {
 /// module does not decode, or they or their pixels take more than
 /// [`MAX_SAMPLE_BYTES`].
 fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
-    let width = u32::try_from(dict.get(b"Width").ok()?.as_i64().ok()?).ok()?;
-    let height = u32::try_from(dict.get(b"Height").ok()?.as_i64().ok()?).ok()?;
+    let integer = |key: &[u8]| doc.resolve(dict.get(key).ok()?)?.as_i64().ok();
+    let width = u32::try_from(integer(b"Width")?).ok()?;
+    let height = u32::try_from(integer(b"Height")?).ok()?;
     if width == 0 || height == 0 {
         return None;
     }
-    let layout = if is_stencil(dict) {
+    let layout = if is_stencil(doc, dict) {
         // A stencil mask's samples are 1 bit, a 0 painting under the default
         // decode array (8.9.6.2): as gray, the painted samples are black.
-        let bits = dict
-            .get(b"BitsPerComponent")
-            .and_then(Object::as_i64)
-            .unwrap_or(1);
+        let bits = integer(b"BitsPerComponent").unwrap_or(1);
         if bits != 1 {
             return None;
         }
@@ -131,11 +131,11 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
             height,
             bits: 1,
             space: Space::Gray {
-                inverted: decode_array(dict)?,
+                inverted: decode_array(doc, dict)?,
             },
         }
     } else {
-        let bits = dict.get(b"BitsPerComponent").ok()?.as_i64().ok()?;
+        let bits = integer(b"BitsPerComponent")?;
         if ![1, 2, 4, 8].contains(&bits) {
             return None;
         }
@@ -146,7 +146,7 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
             space: space(
                 doc,
                 doc.resolve(dict.get(b"ColorSpace").ok()?)?,
-                decode_array(dict),
+                decode_array(doc, dict),
             )?,
         }
     };
@@ -203,6 +203,18 @@ fn read(doc: &Document, stream: &Stream) -> Result<(Layout, Vec<u8>)> {
         .decompressed_content_with_limit(MAX_SAMPLE_BYTES)
         .map_err(|e| Error::malformed(format!("image samples: {e}")))?;
     samples.resize(size, 0);
+    // The bits past a row's last sample, in its last byte, draw nothing, so
+    // nothing is carried in them.
+    let used = layout.width as usize * layout.space.components() * layout.bits;
+    let spare = layout.row_bytes() * 8 - used;
+    if spare > 0 {
+        let mask = 0xFFu8 << spare;
+        for row in samples.chunks_exact_mut(layout.row_bytes()) {
+            if let Some(last) = row.last_mut() {
+                *last &= mask;
+            }
+        }
+    }
     Ok((layout, samples))
 }
 
@@ -232,12 +244,17 @@ pub(crate) fn png(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
 }
 
 /// Whether the image's `/Decode` array inverts a gray sample, or `None` when
-/// it maps samples some other non-default way.
-fn decode_array(dict: &Dictionary) -> Option<bool> {
-    let Ok(array) = dict.get(b"Decode").and_then(Object::as_array) else {
+/// it maps samples some other non-default way, or is not an array of
+/// numbers.
+fn decode_array(doc: &Document, dict: &Dictionary) -> Option<bool> {
+    let Ok(decode) = dict.get(b"Decode") else {
         return Some(false);
     };
-    let values: Vec<f32> = array.iter().filter_map(|v| v.as_float().ok()).collect();
+    let values: Vec<f64> = doc
+        .resolve_array(decode)?
+        .iter()
+        .map(|value| doc.resolve_number(value))
+        .collect::<Option<_>>()?;
     let default = values.chunks(2).all(|pair| pair == [0.0, 1.0]);
     let inverted = values == [1.0, 0.0];
     if default {
@@ -282,8 +299,10 @@ fn space(doc: &Document, object: &Object, inverted: Option<bool>) -> Option<Spac
                         Space::Rgb => true,
                         _ => return None,
                     };
-                    let hival = usize::try_from(array.get(2)?.as_i64().ok()?).ok()?;
-                    let needed = hival.checked_add(1)? * if rgb { 3 } else { 1 };
+                    let hival = usize::try_from(doc.resolve(array.get(2)?)?.as_i64().ok()?)
+                        .ok()
+                        .filter(|&hival| hival <= 255)?;
+                    let needed = (hival + 1) * if rgb { 3 } else { 1 };
                     // A palette has at most 256 entries, so a stream decoding
                     // past the colours they take is not read whole.
                     let palette = match doc.resolve(array.get(3)?)? {

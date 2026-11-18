@@ -121,8 +121,11 @@ impl PdfState {
         &mut self,
         spans: impl IntoIterator<Item = (u32, Range<usize>)>,
     ) -> Result<()> {
+        // An empty range covers no character, so it redacts nothing; within
+        // a ligature it would otherwise select the glyph around it.
         let detections = spans
             .into_iter()
+            .filter(|(_, range)| !range.is_empty())
             .map(|(number, range)| {
                 let text = self.text(number)?;
                 let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone()))

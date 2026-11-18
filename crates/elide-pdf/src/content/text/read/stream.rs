@@ -10,7 +10,7 @@ use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object};
 
 use super::geometry::{Cursor, TextState};
-use super::nested::{walk_pattern, walk_xobject};
+use super::nested::{select_pattern, walk_xobject};
 use super::{TextRun, Walk};
 use crate::content::text::{FontEntry, StreamTarget};
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
@@ -92,7 +92,7 @@ pub(super) fn walk_stream<'a>(
     scope: &Scope<'a>,
     depth: u8,
     inherited: Option<Inherited<'_>>,
-    ctx: &mut Walk<'_>,
+    ctx: &mut Walk<'_, 'a>,
 ) -> Result<()> {
     // Resolve this scope's fonts to encodings, width tables, and a `FontEntry`
     // per font in the shared table. A local name->slot map points the run at the
@@ -168,8 +168,6 @@ pub(super) fn walk_stream<'a>(
     // parametric `TextState`. The text matrix is *not* graphics state (it resets
     // at `BT`), so it is not saved.
     let mut gs_stack: Vec<SavedState<'_>> = Vec::new();
-    // The tiling patterns selected to paint with, walked once the stream is.
-    let mut selected: Vec<&[u8]> = Vec::new();
 
     for (op_idx, op) in content.operations.iter().enumerate() {
         match op.operator.as_str() {
@@ -323,17 +321,14 @@ pub(super) fn walk_stream<'a>(
 
             // A tiling pattern selected to paint with draws its cell's content,
             // text included, wherever it paints. Selecting it paints nothing,
-            // so its text is read after the stream's, never inside it.
+            // so its text is read once the page's is, never inside it.
             "scn" | "SCN" => {
                 if let Some(Object::Name(name)) = op.operands.last() {
-                    selected.push(name);
+                    select_pattern(doc, name, scope, depth, ctx);
                 }
             }
             _ => {}
         }
-    }
-    for name in selected {
-        walk_pattern(doc, name, scope, depth, ctx)?;
     }
     Ok(())
 }

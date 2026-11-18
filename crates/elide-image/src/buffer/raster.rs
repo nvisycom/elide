@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use elide_core::{Error, Result};
 use image::imageops::FilterType;
-use image::{DynamicImage, GenericImageView, RgbImage, Rgba, RgbaImage};
+use image::{DynamicImage, GenericImage, GenericImageView, RgbImage, Rgba};
 
 use crate::modality::{ImageFormat, ImageReplacement};
 use crate::primitive::{BoundingBox, Color, Dimensions, Point};
@@ -174,12 +174,12 @@ impl RasterImage {
 
     /// Solid-color block over the region.
     fn block(&mut self, region: BoundingBox<u32>, color: Color) {
-        let fill = RgbaImage::from_pixel(
-            region.width(),
-            region.height(),
-            Rgba([color.r, color.g, color.b, 255]),
-        );
-        self.overlay(&DynamicImage::ImageRgba8(fill), region);
+        let fill = Rgba([color.r, color.g, color.b, 255]);
+        for y in region.top()..region.top() + region.height() {
+            for x in region.left()..region.left() + region.width() {
+                self.inner.put_pixel(x, y, fill);
+            }
+        }
     }
 
     /// Mosaic pixelation: downscale the region with nearest-neighbor, scale it

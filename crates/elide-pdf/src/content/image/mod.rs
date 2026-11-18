@@ -187,7 +187,8 @@ mod tests {
     }
 
     /// An image a tiling pattern or a Type3 glyph draws is cut from that
-    /// stream too, so its drawing never names a resource that is gone.
+    /// stream too, so its drawing never names a resource that is gone; the
+    /// font is held inline in the page's resources, where it is found too.
     #[test]
     fn an_image_drawn_by_a_pattern_or_glyph_is_cut() {
         let mut doc = Document::with_version("1.5");
@@ -209,7 +210,7 @@ mod tests {
             draw(),
         ));
         let glyph = doc.add_object(Stream::new(dictionary! {}, draw()));
-        let font = doc.add_object(dictionary! {
+        let font = Object::Dictionary(dictionary! {
             "Type" => "Font", "Subtype" => "Type3",
             "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
             "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],

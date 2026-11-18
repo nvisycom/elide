@@ -82,13 +82,10 @@ pub(super) fn trailer(key: &[u8]) -> Option<HiddenContent> {
     }
 }
 
-/// What an entry `key` of any other copied object held, or `None` for one
-/// the rebuild carries another way: a graphics state's `/Font`, written as a
-/// `Tf` where the state is set. A key the specification does not define is
-/// application data.
+/// What an entry `key` of any other copied object held. A key the
+/// specification does not define is application data.
 pub(super) fn entry(key: &[u8]) -> Option<HiddenContent> {
     Some(match key {
-        b"Font" => return None,
         b"Metadata" | b"LastModified" | b"Desc" | b"CreationDate" | b"ModDate" | b"CheckSum"
         | b"Mac" | b"CI" | b"RF" | b"Measure" | b"PtData" => HiddenContent::Properties,
         b"PieceInfo" | b"Alternates" => HiddenContent::ApplicationData,

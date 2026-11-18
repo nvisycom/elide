@@ -21,6 +21,10 @@ use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, Scope, normalize_rect}
 /// and NoView.
 const UNSHOWN: i64 = 2 | 32;
 
+/// The annotation flag that keeps a widget upright on a rotated page
+/// (12.5.3): NoRotate.
+const NO_ROTATE: i64 = 16;
+
 /// A flattened appearance: the form that draws it, the matrix that places it
 /// on the page, and the graphics state it is composited in when that is not
 /// the page's initial one.
@@ -31,14 +35,20 @@ pub(super) struct Flattened {
 }
 
 impl<'a> Builder<'a> {
-    /// The widget `dict`'s appearance, flattened, or `None` when the widget
-    /// shows nothing (it is hidden, by its flags or its layer, or has no
-    /// appearance for its state), recorded as what it was.
+    /// The widget `dict`'s appearance, flattened onto a page of resources
+    /// `page` and rotation `rotate`, or `None` when the widget shows nothing
+    /// (it is hidden, by its flags or its layer, or has no appearance for its
+    /// state), recorded as what it was.
     ///
     /// # Errors
     ///
     /// As [`copy`](Self::copy).
-    pub(super) fn flatten(&mut self, dict: &'a Dictionary) -> Result<Option<Flattened>> {
+    pub(super) fn flatten(
+        &mut self,
+        dict: &'a Dictionary,
+        page: &Scope<'a>,
+        rotate: u32,
+    ) -> Result<Option<Flattened>> {
         let source = self.source;
         let flags = dict
             .get(b"F")
@@ -79,21 +89,27 @@ impl<'a> Builder<'a> {
             .ok()
             .and_then(|matrix| source.resolve_numbers(matrix))
             .map_or(Matrix::IDENTITY, Matrix::from);
-        let Some(matrix) = placement(bbox, matrix, rect) else {
+        let Some(mut matrix) = placement(bbox, matrix, rect) else {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
+        if flags & NO_ROTATE != 0 {
+            matrix = matrix.then(upright(rect, rotate));
+        }
 
         // An appearance without resources of its own resolves names in the
-        // form's default resources.
+        // form's default resources, then in the page's it is drawn on.
+        let defaults = source
+            .catalog()
+            .ok()
+            .and_then(|catalog| catalog.get(b"AcroForm").ok())
+            .and_then(|form| source.resolve_dict(form))
+            .and_then(|form| form.get(b"DR").ok())
+            .and_then(|resources| source.resolve_dict(resources));
         let defaults = Scope::new(
-            source
-                .catalog()
-                .ok()
-                .and_then(|catalog| catalog.get(b"AcroForm").ok())
-                .and_then(|form| source.resolve_dict(form))
-                .and_then(|form| form.get(b"DR").ok())
-                .and_then(|resources| source.resolve_dict(resources)),
+            defaults
+                .into_iter()
+                .chain(page.dictionaries().iter().copied()),
         );
         let Some(form) = self.copy(Kind::Form, appearance, &defaults, 0)? else {
             self.record(HiddenContent::FormField);
@@ -101,20 +117,28 @@ impl<'a> Builder<'a> {
         };
         let state = self.compositing(dict)?;
         let mut form = form;
-        if let Object::Reference(id) = &form
-            && let Ok(Object::Stream(copy)) = self.out.get_object_mut(*id)
+        if let Object::Reference(id) = form
+            && let Ok(Object::Stream(copy)) = self.out.get_object_mut(id)
         {
             copy.dict.set("Type", Object::Name(b"XObject".to_vec()));
             copy.dict.set("Subtype", Object::Name(b"Form".to_vec()));
             // The annotation is composited as a group; the copy may also be
             // drawn by page content, which must not be, so the group is set
-            // on a copy of its own.
+            // on a copy of its own, one for every widget showing the form.
             if state.is_some() && copy.dict.get(b"Group").is_err() {
-                let mut grouped = copy.clone();
-                grouped
-                    .dict
-                    .set("Group", dictionary! { "S" => "Transparency" });
-                form = Object::Reference(self.out.add_object(grouped));
+                let grouped = match self.grouped.get(&id) {
+                    Some(&grouped) => grouped,
+                    None => {
+                        let mut grouped = copy.clone();
+                        grouped
+                            .dict
+                            .set("Group", dictionary! { "S" => "Transparency" });
+                        let grouped = self.out.add_object(grouped);
+                        self.grouped.insert(id, grouped);
+                        grouped
+                    }
+                };
+                form = Object::Reference(grouped);
             }
         }
         Ok(Some(Flattened {
@@ -187,6 +211,23 @@ impl<'a> Builder<'a> {
     }
 }
 
+/// The matrix that turns what a page of rotation `rotate` (0, 90, 180 or
+/// 270 degrees, clockwise as displayed) shows turned back about the upper
+/// left corner of `rect`, so an annotation that keeps upright reads upright
+/// (12.5.3).
+fn upright(rect: [f64; 4], rotate: u32) -> Matrix {
+    let (sin, cos) = match rotate {
+        90 => (1.0, 0.0),
+        180 => (0.0, -1.0),
+        270 => (-1.0, 0.0),
+        _ => return Matrix::IDENTITY,
+    };
+    let (x, y) = (rect[0], rect[3]);
+    Matrix::translation(-x, -y)
+        .then(Matrix::from([cos, sin, -sin, cos, 0.0, 0.0]))
+        .then(Matrix::translation(x, y))
+}
+
 /// The matrix that maps an appearance with bounding box `bbox` and form
 /// matrix `matrix` onto the annotation rectangle `rect` (12.5.5): the box
 /// transformed by the matrix, then scaled and moved onto the rectangle.
@@ -213,7 +254,7 @@ fn placement(bbox: [f64; 4], matrix: Matrix, rect: [f64; 4]) -> Option<Matrix> {
 
 #[cfg(test)]
 mod tests {
-    use super::placement;
+    use super::{placement, upright};
     use crate::pdf::reader::Matrix;
 
     #[test]
@@ -242,5 +283,20 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// On a page turned 90 degrees, an upright annotation is turned back
+    /// about its upper left corner: that corner stays, and its width runs up
+    /// the page, which displays as across.
+    #[test]
+    fn an_upright_annotation_turns_back_about_its_corner() {
+        let m = upright([10.0, 20.0, 50.0, 30.0], 90);
+        let at = |x: f64, y: f64| {
+            let (x, y) = m.apply(x, y);
+            ((x * 1e9).round() / 1e9, (y * 1e9).round() / 1e9)
+        };
+        assert_eq!(at(10.0, 30.0), (10.0, 30.0));
+        assert_eq!(at(11.0, 30.0), (10.0, 31.0));
+        assert_eq!(upright([10.0, 20.0, 50.0, 30.0], 0), Matrix::IDENTITY);
     }
 }

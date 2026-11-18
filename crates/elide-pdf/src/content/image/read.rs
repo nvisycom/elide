@@ -27,7 +27,12 @@ impl EmbeddingKind {
     /// The encoding of the image XObject `stream`: the last filter in its chain
     /// determines the sample encoding.
     fn of(stream: &Stream) -> Self {
-        let filters = stream.filters().unwrap_or_default();
+        // A filter that is not a name or names is no encoding a codec reads.
+        let filters = match stream.filters() {
+            Ok(filters) => filters,
+            Err(_) if stream.dict.get(b"Filter").is_ok() => return Self::Unreadable,
+            Err(_) => Vec::new(),
+        };
         match filters.as_slice() {
             [b"DCTDecode"] => Self::Jpeg,
             [b"JPXDecode"] => Self::Jpeg2000,

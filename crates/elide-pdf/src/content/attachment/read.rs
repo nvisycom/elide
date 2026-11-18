@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
+use lopdf::{DecompressError, Document, Error as PdfError, Object, ObjectId, decode_text_string};
 
 use super::{Attachment, AttachmentId};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, NameTree, Node, ObjectExt};
@@ -38,7 +38,13 @@ pub(super) fn attachments(doc: &Document) -> Result<Vec<Attachment>> {
             };
             let bytes = stream
                 .get_plain_content_with_limit(left)
-                .map_err(|_| over())?;
+                .map_err(|e| match e {
+                    PdfError::Decompress(DecompressError::MemoryLimitExceeded { .. }) => over(),
+                    e => Error::malformed(format!(
+                        "attachment `{}` cannot be decoded: {e}",
+                        entry.name
+                    )),
+                })?;
             left = left.checked_sub(bytes.len()).ok_or_else(over)?;
             Ok(Attachment {
                 id: AttachmentId::from_object(entry.stream),
@@ -57,8 +63,8 @@ pub(super) const EMBEDDED_FILES: &[u8] = b"EmbeddedFiles";
 pub(crate) struct Entry<'a> {
     pub(crate) name: String,
     pub(crate) stream: ObjectId,
-    /// The file specification that names it.
-    pub(crate) spec: &'a Dictionary,
+    /// The tree's value for it: the file specification, or a reference to it.
+    pub(crate) value: &'a Object,
 }
 
 /// The `/EmbeddedFiles` name tree, read once: its nodes (so entries can be
@@ -112,7 +118,11 @@ pub(super) fn entry<'a>(doc: &'a Document, key: &Object, value: &'a Object) -> O
         .file_name()
         .or_else(|| decode_text_string(key).ok())
         .unwrap_or_default();
-    Some(Entry { name, stream, spec })
+    Some(Entry {
+        name,
+        stream,
+        value,
+    })
 }
 
 /// Every file associated through an `/AF` array, on any object of `doc`, in
