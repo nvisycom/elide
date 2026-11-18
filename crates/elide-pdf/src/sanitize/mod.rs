@@ -58,6 +58,11 @@ use crate::pdf::{Edit, Pdf, Read};
 /// How deep forms, patterns, and glyph procedures may nest in one another.
 const MAX_NESTING: usize = 32;
 
+/// The most values a rebuild copies. A value referenced many times is copied
+/// in place each time, so arrays referring to arrays could otherwise expand
+/// far past the source.
+const MAX_COPIED_VALUES: usize = 1 << 24;
+
 /// The document rebuilt with only what draws its pages, its internal links,
 /// and its attached files, with the record of what the source held that it
 /// did not copy.
@@ -136,9 +141,11 @@ struct Builder<'a> {
     /// How many entries, values, and operators nothing models were dropped
     /// unrecorded.
     residue: usize,
-    /// The bytes the `/ToUnicode` CMap rewrites may still add: a rewrite
-    /// expands each changed range to all its destinations.
+    /// The bytes the `/ToUnicode` CMaps the rebuild writes may still take: a
+    /// range of a few bytes may write as many entries as it maps codes.
     cmap_budget: usize,
+    /// The values the rebuild may still copy.
+    values_left: usize,
 }
 
 impl<'a> Builder<'a> {
@@ -158,6 +165,7 @@ impl<'a> Builder<'a> {
             stripped: StrippedContent::new(),
             residue: 0,
             cmap_budget: MAX_CONTENT_BYTES,
+            values_left: MAX_COPIED_VALUES,
         }
     }
 
@@ -344,6 +352,7 @@ fn reachable(doc: &Document) -> HashSet<ObjectId> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use lopdf::content::{Content, Operation};
     use lopdf::{IncrementalDocument, Stream, StringFormat, dictionary};
 
@@ -519,11 +528,97 @@ mod tests {
         assert!(check(&doc).is_err(), "the source font's extra key passed");
     }
 
-    /// A resource keeps only the keys its kind defines.
+    /// An operator whose operands are not what it takes is cut, so a string
+    /// among them never ships unread.
+    #[test]
+    fn an_operator_with_operands_of_another_shape_is_cut() {
+        let mut ops = vec![
+            Operation::new("w", vec![Object::string_literal("123-45-6789")]),
+            Operation::new("w", vec![2.into()]),
+        ];
+        ops.extend(show("Hello"));
+        let (doc, _) = document(ops, Dictionary::new(), Dictionary::new());
+        let (out, _) = rebuilt(&doc);
+        let text = text_of(&out);
+        assert!(!text.contains("123-45-6789"));
+        assert!(text.contains("Hello") && text.contains("2 w"));
+        check(&out).unwrap();
+    }
+
+    /// An image stored as raw samples is written as exactly the samples it
+    /// takes: bytes past them do not ship.
+    #[test]
+    fn bytes_past_an_images_samples_are_dropped() {
+        let (mut doc, page) = document(
+            vec![Operation::new("Do", vec!["Im".into()])],
+            Dictionary::new(),
+            Dictionary::new(),
+        );
+        let mask = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 1,
+                "ImageMask" => true,
+            },
+            [&[0x0F][..], b"tail-secret"].concat(),
+        ));
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("XObject", dictionary! { "Im" => mask });
+        let (out, _) = rebuilt(&doc);
+        let Object::Stream(image) = resource(&out, b"XObject", b"Im") else {
+            panic!("image");
+        };
+        assert_eq!(image.decompressed_content().unwrap(), [0x0F]);
+        assert!(!text_of(&out).contains("tail-secret"));
+        check(&out).unwrap();
+    }
+
+    /// Arrays referring many times to arrays expand past the source when
+    /// copied in place, so a rebuild that would copy too many values is
+    /// refused.
+    #[test]
+    fn arrays_fanning_out_are_refused() {
+        let mut doc = Document::with_version("1.7");
+        let mut widths = doc.add_object(vec![Object::Integer(500); 8]);
+        for _ in 0..10 {
+            widths = doc.add_object(vec![Object::Reference(widths); 8]);
+        }
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+            "FirstChar" => 0, "LastChar" => 7, "Widths" => widths,
+        });
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            Content {
+                operations: show("Hello"),
+            }
+            .encode()
+            .unwrap(),
+        ));
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            }],
+        );
+        let Err(error) = rebuild(&doc) else {
+            panic!("rebuilt");
+        };
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    }
+
+    /// A resource keeps only the keys its kind defines; one the
+    /// specification does not define is recorded as application data.
     #[test]
     fn a_font_keeps_only_its_keys() {
         let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        let (out, _) = rebuilt(&doc);
+        let (out, stripped) = rebuilt(&doc);
+        assert_eq!(count(&stripped, HiddenContent::ApplicationData), 1);
         assert!(!text_of(&out).contains("Jane Roe"));
         assert!(text_of(&out).contains("Helvetica"));
     }
@@ -880,7 +975,11 @@ mod tests {
         };
         let cmap = out.resolve(font.get(b"ToUnicode").unwrap()).unwrap();
         let data = cmap.as_stream().unwrap().decompressed_content().unwrap();
-        assert_eq!(data, to_unicode(&["<01> <5C71>"]));
+        let data = String::from_utf8(data).unwrap();
+        assert!(
+            data.contains("<01> <5C71>") && !data.contains("2F2D"),
+            "{data}"
+        );
     }
 
     /// A `/ToUnicode` CMap mapping one-byte codes by the `bfchar` entries
@@ -1687,6 +1786,47 @@ mod tests {
             panic!("form");
         };
         assert!(form.dict.get(b"Group").is_ok());
+        check(&out).unwrap();
+    }
+
+    /// A form the page draws and a widget shows is grouped only where the
+    /// widget is composited: the page's drawing of it stays ungrouped.
+    #[test]
+    fn a_widget_group_leaves_the_page_drawing_alone() {
+        let (mut doc, page) = document(
+            vec![Operation::new("Do", vec!["Fm".into()])],
+            Dictionary::new(),
+            Dictionary::new(),
+        );
+        let answer = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form", "Resources" => dictionary! {},
+                "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+            },
+            b"0 0 10 10 re f".to_vec(),
+        ));
+        let dict = doc.get_dictionary_mut(page).unwrap();
+        dict.get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("XObject", dictionary! { "Fm" => answer });
+        dict.set(
+            "Annots",
+            vec![Object::Dictionary(dictionary! {
+                "Subtype" => "Widget", "CA" => 0.5,
+                "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+                "AP" => dictionary! { "N" => answer },
+            })],
+        );
+        let (out, _) = rebuilt(&doc);
+        let Object::Stream(drawn) = resource(&out, b"XObject", b"Fm") else {
+            panic!("form");
+        };
+        assert!(drawn.dict.get(b"Group").is_err());
+        let Object::Stream(shown) = resource(&out, b"XObject", b"Annot1") else {
+            panic!("form");
+        };
+        assert!(shown.dict.get(b"Group").is_ok());
         check(&out).unwrap();
     }
 

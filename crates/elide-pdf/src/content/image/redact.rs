@@ -19,6 +19,7 @@ use super::ImageReplacement;
 use super::samples::is_stencil;
 use crate::pdf::Edit;
 use crate::pdf::reader::{DictionaryExt, Scope};
+use crate::pdf::writer::compressed;
 
 /// Replace the embedded images named in `replacements` in `doc` with redacted
 /// images.
@@ -79,7 +80,7 @@ pub(super) fn replace(edit: &mut Edit, replacements: &[ImageReplacement]) -> Res
 /// # Errors
 ///
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the bytes are
-/// not an image, or the mask cannot be compressed.
+/// not an image, and as [`compressed`].
 fn stencil_from(bytes: &[u8]) -> Result<Stream> {
     let image = load_from_memory(bytes)
         .map_err(|e| Error::redaction(format!("not an image: {e}")))?
@@ -94,7 +95,7 @@ fn stencil_from(bytes: &[u8]) -> Result<Stream> {
             samples[y as usize * row_bytes + x as usize / 8] |= 0x80 >> (x % 8);
         }
     }
-    let mut stream = Stream::new(
+    compressed(
         dictionary! {
             "Type" => "XObject",
             "Subtype" => "Image",
@@ -104,11 +105,7 @@ fn stencil_from(bytes: &[u8]) -> Result<Stream> {
             "BitsPerComponent" => 1,
         },
         samples,
-    );
-    stream
-        .compress()
-        .map_err(|e| Error::redaction(format!("could not compress mask: {e}")))?;
-    Ok(stream)
+    )
 }
 
 /// Whether `id` is an image XObject of `doc`.

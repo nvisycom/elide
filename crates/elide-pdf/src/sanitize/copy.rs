@@ -8,18 +8,20 @@ use elide_core::{Error, Result};
 use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
-use super::{Builder, MAX_NESTING, ScopedCopy, record};
+use super::{Builder, MAX_COPIED_VALUES, MAX_NESTING, ScopedCopy, record};
 use crate::content::image;
-use crate::pdf::reader::font::to_unicode;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
-use crate::pdf::writer::readable_cmap;
-
-/// How many references a value is followed through.
-const MAX_HOPS: usize = 16;
+use crate::pdf::writer::{UnicodeMap, compressed};
 
 impl<'a> Builder<'a> {
     /// `value` copied as `kind`, its names resolved in `scope` where it is
     /// content; `None` when nothing of it is kept.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+    /// objects nest past [`MAX_NESTING`] or the rebuild copies more than
+    /// [`MAX_COPIED_VALUES`] values.
     pub(super) fn copy<'s>(
         &mut self,
         kind: Kind,
@@ -35,6 +37,11 @@ impl<'a> Builder<'a> {
                 "objects nest deeper than {MAX_NESTING} levels"
             )));
         }
+        self.values_left = self.values_left.checked_sub(1).ok_or_else(|| {
+            Error::resource_limit(format!(
+                "the rebuild would copy more than {MAX_COPIED_VALUES} values"
+            ))
+        })?;
         match value {
             Object::Reference(id) => self.copy_reference(kind, *id, scope, depth),
             Object::Dictionary(_) | Object::Stream(_) => {
@@ -76,26 +83,15 @@ impl<'a> Builder<'a> {
     where
         'a: 's,
     {
+        // The object `id` holds, or the one a chain of references from it
+        // ends at.
         let source = self.source;
-        let mut target = id;
-        let mut hops = 0;
-        let object = loop {
-            let Ok(object) = source.get_object(target) else {
-                self.residue += 1;
-                return Ok(None);
-            };
-            match object {
-                Object::Reference(next) if hops < MAX_HOPS => {
-                    target = *next;
-                    hops += 1;
-                }
-                Object::Reference(_) => {
-                    self.residue += 1;
-                    return Ok(None);
-                }
-                object => break object,
-            }
+        let Some(Ok((last, object))) = source.objects.get(&id).map(|o| source.dereference(o))
+        else {
+            self.residue += 1;
+            return Ok(None);
         };
+        let target = last.unwrap_or(id);
         if !matches!(object, Object::Dictionary(_) | Object::Stream(_)) {
             return self.copy(kind, object, scope, depth + 1);
         }
@@ -199,13 +195,16 @@ impl<'a> Builder<'a> {
             (Kind::Pattern, _) => self.pattern(value, scope, depth),
             (Kind::FileSpec, Object::Dictionary(dict)) => self.file_spec(dict),
             (Kind::ToUnicode, Object::Stream(stream)) if !self.external(&stream.dict) => {
-                self.unicode_map(value, stream, scope, depth)
+                self.unicode_map(stream, scope, depth)
             }
             (Kind::Image | Kind::Mask, Object::Stream(stream))
                 if !image::is_surfaceable(self.source, stream) =>
             {
                 self.unreadable(id);
                 Ok(None)
+            }
+            (Kind::Image | Kind::Mask, Object::Stream(stream)) if !self.external(&stream.dict) => {
+                self.image(kind, id, value, stream, scope, depth)
             }
             (Kind::Map(inner), Object::Dictionary(dict)) => {
                 let mut out = Dictionary::new();
@@ -234,6 +233,41 @@ impl<'a> Builder<'a> {
         if Scope::own(self.source, dict).is_some() {
             self.scoped = scoped;
         }
+    }
+
+    /// An image XObject or stencil mask `stream` (the object `value`, the
+    /// source object `id` when it is one): one stored as raw samples written
+    /// as exactly the samples it takes, so no bytes past them are carried;
+    /// one stored as a file copied as it is.
+    fn image<'s>(
+        &mut self,
+        kind: Kind,
+        id: Option<ObjectId>,
+        value: &'s Object,
+        stream: &'s Stream,
+        scope: &Scope<'s>,
+        depth: usize,
+    ) -> Result<Option<Object>>
+    where
+        'a: 's,
+    {
+        let fields = keys::fields(kind).unwrap_or_default();
+        let samples = match image::raw_samples(self.source, stream) {
+            Ok(Some(samples)) => samples,
+            Ok(None) => return self.table(value, fields, scope, depth),
+            Err(_) => {
+                self.unreadable(id);
+                return Ok(None);
+            }
+        };
+        let dict = self.stream_keys(
+            &stream.dict,
+            fields,
+            &[b"Filter", b"DecodeParms", b"DL"],
+            scope,
+            depth,
+        )?;
+        Ok(Some(Object::Stream(compressed(dict, samples)?)))
     }
 
     /// Record an image no codec reads as removed.
@@ -379,7 +413,10 @@ impl<'a> Builder<'a> {
                 continue;
             };
             let content = self.content(&glyph.decoded()?, &inner, &mut resources, depth + 1)?;
-            procs.set(name.clone(), self.out.add_object(compressed(content)?));
+            procs.set(
+                name.clone(),
+                self.out.add_object(compressed(Dictionary::new(), content)?),
+            );
         }
         self.own_scope(dict, scoped);
         out.set("CharProcs", procs);
@@ -412,26 +449,22 @@ impl<'a> Builder<'a> {
             depth,
         )?;
         dict.set("Resources", resources);
-        let mut out = compressed(content)?;
-        for (key, value) in dict.iter() {
-            out.dict.set(key.clone(), value.clone());
-        }
-        Ok(Object::Stream(out))
+        Ok(Object::Stream(compressed(dict, content)?))
     }
 
-    /// A `/ToUnicode` CMap `stream` (the object `value`), its destinations
-    /// written as the text detection reads; as it is stored when none
-    /// changes, and dropped as unreadable when lopdf, which detection decodes
-    /// text with, can't read it, so a viewer reads no text detection did not.
+    /// A `/ToUnicode` CMap `stream` written anew from what lopdf, which
+    /// detection decodes text with, reads of it, its destinations written as
+    /// the text detection reads; dropped as unreadable when lopdf can't read
+    /// it, so a viewer reads no text detection did not.
     ///
     /// # Errors
     ///
-    /// As [`to_unicode`] and [`readable_cmap`]: the rewrites across the
-    /// document add at most
+    /// As [`UnicodeMap::read`], and
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+    /// the CMaps written across the document take more than
     /// [`MAX_CONTENT_BYTES`](crate::pdf::reader::MAX_CONTENT_BYTES).
     fn unicode_map<'s>(
         &mut self,
-        value: &'s Object,
         stream: &'s Stream,
         scope: &Scope<'s>,
         depth: usize,
@@ -439,17 +472,15 @@ impl<'a> Builder<'a> {
     where
         'a: 's,
     {
-        if to_unicode(self.source, stream)?.is_none() {
+        let Some(map) = UnicodeMap::read(self.source, stream)? else {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
-        }
-        let content = match stream.decoded() {
-            Ok(data) => readable_cmap(&data, &mut self.cmap_budget)?,
-            Err(_) => None,
         };
-        let Some(content) = content else {
-            return self.table(value, TO_UNICODE, scope, depth);
-        };
+        let content = map.readable().write();
+        self.cmap_budget = self
+            .cmap_budget
+            .checked_sub(content.len())
+            .ok_or_else(|| Error::resource_limit("the /ToUnicode CMaps pass their size limit"))?;
         let dict = self.stream_keys(
             &stream.dict,
             TO_UNICODE,
@@ -457,11 +488,7 @@ impl<'a> Builder<'a> {
             scope,
             depth,
         )?;
-        let mut out = compressed(content)?;
-        for (key, value) in dict.iter() {
-            out.dict.set(key.clone(), value.clone());
-        }
-        Ok(Some(Object::Stream(out)))
+        Ok(Some(Object::Stream(compressed(dict, content)?)))
     }
 
     /// A pattern: a tiling one rebuilt as content, a shading one copied.
@@ -550,13 +577,4 @@ impl<'a> Builder<'a> {
         self.residue += parameters.len().saturating_sub(kinds.len());
         Ok(Some(Object::Array(out)))
     }
-}
-
-/// A content stream holding `content`, compressed.
-pub(super) fn compressed(content: Vec<u8>) -> Result<Stream> {
-    let mut stream = Stream::new(Dictionary::new(), content);
-    stream
-        .compress()
-        .map_err(|e| Error::malformed(format!("could not compress content: {e}")))?;
-    Ok(stream)
 }

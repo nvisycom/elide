@@ -5,12 +5,12 @@ use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, Object, ObjectId, Stream};
 
-use super::geometry::{Matrix, TextState};
+use super::geometry::TextState;
 use super::run::gap;
-use super::stream::{read_matrix, walk_stream};
+use super::stream::walk_stream;
 use super::{Inherited, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
 use crate::content::text::StreamTarget;
-use crate::pdf::reader::{DictionaryExt, ObjectExt, Scope, StreamExt};
+use crate::pdf::reader::{DictionaryExt, DocumentExt, Matrix, ObjectExt, Scope, StreamExt};
 
 /// Resolve and recurse into the Form XObject named `name` in `scope`.
 ///
@@ -139,9 +139,8 @@ pub(super) fn walk_nested<'a>(
         .dict
         .get(b"Matrix")
         .ok()
-        .and_then(|o| o.as_array().ok())
-        .and_then(|a| read_matrix(a, 0))
-        .unwrap_or(Matrix::IDENTITY);
+        .and_then(|matrix| doc.resolve_numbers(matrix))
+        .map_or(Matrix::IDENTITY, Matrix::from);
     inherited.state.ctm = matrix.then(inherited.state.ctm);
 
     ctx.active.insert(id);

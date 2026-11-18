@@ -75,8 +75,10 @@ impl<'a> Builder<'a> {
         let content =
             Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let mut kept: Vec<Operation> = Vec::with_capacity(content.operations.len());
-        // One entry per open marked-content sequence: whether it hides.
+        // One entry per open marked-content sequence: whether it hides; and
+        // how many of them hide, so whether content is hidden is known at once.
         let mut open: Vec<bool> = Vec::new();
+        let mut hiding = 0usize;
         // The open `q` saves and whether a text object is open, so the
         // rebuilt content is balanced and ends in the state it began in.
         let mut saved = 0usize;
@@ -86,14 +88,20 @@ impl<'a> Builder<'a> {
         let mut marked_in_text = 0usize;
         for operation in content.operations {
             let operator = operation.operator.as_str();
-            if open.contains(&true) {
+            if hiding > 0 {
                 match operator {
                     "BDC" | "BMC" => open.push(false),
-                    "EMC" => {
-                        open.pop();
-                    }
+                    "EMC" => hiding -= usize::from(open.pop() == Some(true)),
                     _ => {}
                 }
+                continue;
+            }
+            // A marked-content property list is rewritten, and an inline
+            // image is cut, so only the operators kept as written are checked.
+            if !matches!(operator, "BDC" | "DP" | "BI")
+                && !operands_fit(operator, &operation.operands)
+            {
+                self.residue += 1;
                 continue;
             }
             match operator {
@@ -113,10 +121,11 @@ impl<'a> Builder<'a> {
                     };
                     if operator == "BDC"
                         && tag == b"OC"
-                        && properties.is_some_and(|p| self.layers.is_hidden(p, 0))
+                        && properties.is_some_and(|p| self.layers.is_hidden(p))
                     {
                         self.record(HiddenContent::Layer);
                         open.push(true);
+                        hiding += 1;
                         continue;
                     }
                     if properties
@@ -336,11 +345,7 @@ impl<'a> Builder<'a> {
             return Ok(());
         };
         let id = value.as_reference().ok();
-        if xobject
-            .dict
-            .get(b"OC")
-            .is_ok_and(|membership| self.layers.is_hidden(membership, 0))
-        {
+        if self.layers.hides(&xobject.dict) {
             self.record(HiddenContent::Layer);
             self.cut.extend(id);
             return Ok(());
@@ -410,18 +415,62 @@ impl<'a> Builder<'a> {
             .ok()
             .and_then(|fonts| fonts.iter().find(|(_, value)| **value == font))
             .map(|(name, _)| name.clone())
-            .unwrap_or_else(|| {
-                (1..)
-                    .map(|index| format!("{STATE_FONT_PREFIX}{index}").into_bytes())
-                    .find(|candidate| !taken(candidate))
-                    .unwrap_or_default()
-            });
+            .unwrap_or_else(|| fresh(STATE_FONT_PREFIX, taken));
         insert(resources, b"Font", &name, font);
         Ok(Some(Operation::new(
             "Tf",
             vec![Object::Name(name), size.clone()],
         )))
     }
+}
+
+/// Whether `operands` are what `operator` takes (8.2, table 50): operands of
+/// another shape are not drawing, and a string among them is text no
+/// detection reads.
+fn operands_fit(operator: &str, operands: &[Object]) -> bool {
+    let number = |o: &Object| matches!(o, Object::Integer(_) | Object::Real(_));
+    let numbers = |count: usize| operands.len() == count && operands.iter().all(number);
+    match operator {
+        "q" | "Q" | "h" | "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "n" | "W"
+        | "W*" | "BT" | "ET" | "T*" | "EMC" | "BX" | "EX" => operands.is_empty(),
+        "w" | "J" | "j" | "M" | "i" | "Tc" | "Tw" | "Tz" | "TL" | "Tr" | "Ts" | "G" | "g" => {
+            numbers(1)
+        }
+        "m" | "l" | "Td" | "TD" | "d0" => numbers(2),
+        "RG" | "rg" => numbers(3),
+        "re" | "v" | "y" | "K" | "k" => numbers(4),
+        "cm" | "c" | "Tm" | "d1" => numbers(6),
+        "SC" | "sc" => !operands.is_empty() && operands.iter().all(number),
+        "SCN" | "scn" => match operands.split_last() {
+            Some((Object::Name(_), rest)) => rest.iter().all(number),
+            Some(_) => operands.iter().all(number),
+            None => false,
+        },
+        "ri" | "gs" | "sh" | "Do" | "CS" | "cs" | "BMC" | "MP" => {
+            matches!(operands, [Object::Name(_)])
+        }
+        "Tf" => matches!(operands, [Object::Name(_), size] if number(size)),
+        "d" => matches!(
+            operands,
+            [Object::Array(dashes), phase] if number(phase) && dashes.iter().all(number)
+        ),
+        "Tj" | "'" => matches!(operands, [Object::String(..)]),
+        "\"" => matches!(operands, [w, c, Object::String(..)] if number(w) && number(c)),
+        "TJ" => matches!(
+            operands,
+            [Object::Array(items)]
+                if items.iter().all(|item| number(item) || matches!(item, Object::String(..)))
+        ),
+        _ => false,
+    }
+}
+
+/// The first of the names `prefix1`, `prefix2`, ... not `taken`.
+pub(super) fn fresh(prefix: &str, taken: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+    (1..)
+        .map(|index| format!("{prefix}{index}").into_bytes())
+        .find(|name| !taken(name))
+        .unwrap_or_default()
 }
 
 /// Whether `resources` already holds `name` under `category`.

@@ -220,17 +220,10 @@ pub(crate) fn page_boxes(doc: &Document, page_id: ObjectId) -> Option<PageBoxes>
         .unwrap_or(1.0);
     let print = PRINT_BOXES.map(|key| {
         let page = doc.get_dictionary(page_id).ok()?;
-        let rect = doc.resolve_array(page.get(key).ok()?)?;
-        let [a, b, c, d] = rect.as_slice() else {
-            return None;
-        };
-        let rect = [
-            doc.resolve_number(a)?,
-            doc.resolve_number(b)?,
-            doc.resolve_number(c)?,
-            doc.resolve_number(d)?,
-        ];
-        intersect(normalize_rect(rect), media)
+        intersect(
+            normalize_rect(doc.resolve_numbers(page.get(key).ok()?)?),
+            media,
+        )
     });
     Some(PageBoxes {
         media,
@@ -256,7 +249,7 @@ pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame>
 }
 
 /// `[x0, y0, x1, y1]` with its corners ordered low to high.
-fn normalize_rect([x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
+pub(crate) fn normalize_rect([x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
     [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)]
 }
 
@@ -282,20 +275,7 @@ fn intersect(a: [f64; 4], b: [f64; 4]) -> Option<[f64; 4]> {
 /// `None`), so the caller's fallback chain (CropBox → MediaBox → unit frame)
 /// stays available rather than accepting a distorted box.
 fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
-    doc.inherited(page_id, key, |value| {
-        let array = doc.resolve_array(value)?;
-        let [a, b, c, d] = array.as_slice() else {
-            return None;
-        };
-        // All four elements must resolve to numbers; a single unresolvable one
-        // fails the whole box rather than defaulting to 0.
-        Some([
-            doc.resolve_number(a)?,
-            doc.resolve_number(b)?,
-            doc.resolve_number(c)?,
-            doc.resolve_number(d)?,
-        ])
-    })
+    doc.inherited(page_id, key, |value| doc.resolve_numbers(value))
 }
 
 /// A page's glyph boxes in default user space and the frame that places them

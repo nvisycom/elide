@@ -15,7 +15,7 @@ use lopdf::{Dictionary, Object, dictionary};
 
 use super::Builder;
 use super::keys::Kind;
-use crate::pdf::reader::{DocumentExt, Scope};
+use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, Scope, normalize_rect};
 
 /// The annotation flags that keep a widget from being shown (12.5.3): Hidden
 /// and NoView.
@@ -26,7 +26,7 @@ const UNSHOWN: i64 = 2 | 32;
 /// the page's initial one.
 pub(super) struct Flattened {
     pub(super) form: Object,
-    pub(super) matrix: [f64; 6],
+    pub(super) matrix: Matrix,
     pub(super) state: Option<Dictionary>,
 }
 
@@ -46,10 +46,7 @@ impl<'a> Builder<'a> {
             .and_then(|f| source.resolve(f))
             .and_then(|f| f.as_i64().ok())
             .unwrap_or(0);
-        if dict
-            .get(b"OC")
-            .is_ok_and(|membership| self.layers.is_hidden(membership, 0))
-        {
+        if self.layers.hides(dict) {
             self.record(HiddenContent::Layer);
             return Ok(None);
         }
@@ -67,11 +64,7 @@ impl<'a> Builder<'a> {
         };
         // The appearance is a form, and a form in a hidden layer is not drawn
         // whatever shows it.
-        if stream
-            .dict
-            .get(b"OC")
-            .is_ok_and(|membership| self.layers.is_hidden(membership, 0))
-        {
+        if self.layers.hides(&stream.dict) {
             self.record(HiddenContent::Layer);
             self.cut.extend(appearance.as_reference().ok());
             return Ok(None);
@@ -84,12 +77,8 @@ impl<'a> Builder<'a> {
             .dict
             .get(b"Matrix")
             .ok()
-            .and_then(|m| source.resolve_array(m))
-            .and_then(|m| {
-                let values: Vec<f64> = m.iter().filter_map(|v| source.resolve_number(v)).collect();
-                <[f64; 6]>::try_from(values).ok()
-            })
-            .unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+            .and_then(|matrix| source.resolve_numbers(matrix))
+            .map_or(Matrix::IDENTITY, Matrix::from);
         let Some(matrix) = placement(bbox, matrix, rect) else {
             self.record(HiddenContent::FormField);
             return Ok(None);
@@ -111,14 +100,21 @@ impl<'a> Builder<'a> {
             return Ok(None);
         };
         let state = self.compositing(dict)?;
+        let mut form = form;
         if let Object::Reference(id) = &form
             && let Ok(Object::Stream(copy)) = self.out.get_object_mut(*id)
         {
             copy.dict.set("Type", Object::Name(b"XObject".to_vec()));
             copy.dict.set("Subtype", Object::Name(b"Form".to_vec()));
+            // The annotation is composited as a group; the copy may also be
+            // drawn by page content, which must not be, so the group is set
+            // on a copy of its own.
             if state.is_some() && copy.dict.get(b"Group").is_err() {
-                copy.dict
+                let mut grouped = copy.clone();
+                grouped
+                    .dict
                     .set("Group", dictionary! { "S" => "Transparency" });
+                form = Object::Reference(self.out.add_object(grouped));
             }
         }
         Ok(Some(Flattened {
@@ -187,17 +183,7 @@ impl<'a> Builder<'a> {
 
     /// `value` as a rectangle, `[x0, y0, x1, y1]` with low corners first.
     fn rect(&self, value: &Object) -> Option<[f64; 4]> {
-        let source = self.source;
-        let [a, b, c, d] = source.resolve_array(value)?.as_slice() else {
-            return None;
-        };
-        let [x0, y0, x1, y1] = [
-            source.resolve_number(a)?,
-            source.resolve_number(b)?,
-            source.resolve_number(c)?,
-            source.resolve_number(d)?,
-        ];
-        Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
+        self.source.resolve_numbers(value).map(normalize_rect)
     }
 }
 
@@ -205,54 +191,53 @@ impl<'a> Builder<'a> {
 /// matrix `matrix` onto the annotation rectangle `rect` (12.5.5): the box
 /// transformed by the matrix, then scaled and moved onto the rectangle.
 /// `None` when the transformed box has no area.
-fn placement(bbox: [f64; 4], matrix: [f64; 6], rect: [f64; 4]) -> Option<[f64; 6]> {
-    let [a, b, c, d, e, f] = matrix;
-    let corners = [
-        (bbox[0], bbox[1]),
-        (bbox[2], bbox[1]),
-        (bbox[2], bbox[3]),
-        (bbox[0], bbox[3]),
-    ]
-    .map(|(x, y)| (a * x + c * y + e, b * x + d * y + f));
-    let xs = corners.map(|(x, _)| x);
-    let ys = corners.map(|(_, y)| y);
-    let low = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min);
-    let high = |v: [f64; 4]| v.into_iter().fold(f64::NEG_INFINITY, f64::max);
-    let (x0, y0, x1, y1) = (low(xs), low(ys), high(xs), high(ys));
-    if x1 - x0 <= f64::EPSILON || y1 - y0 <= f64::EPSILON {
+fn placement(bbox: [f64; 4], matrix: Matrix, rect: [f64; 4]) -> Option<Matrix> {
+    let [x0, y0, x1, y1] = bbox;
+    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| matrix.apply(x, y));
+    let placed = DeviceRect::of_corners(corners);
+    let (width, height) = (placed.max_x - placed.min_x, placed.max_y - placed.min_y);
+    if width <= f64::EPSILON || height <= f64::EPSILON {
         return None;
     }
-    let sx = (rect[2] - rect[0]) / (x1 - x0);
-    let sy = (rect[3] - rect[1]) / (y1 - y0);
-    Some([sx, 0.0, 0.0, sy, rect[0] - x0 * sx, rect[1] - y0 * sy])
+    let sx = (rect[2] - rect[0]) / width;
+    let sy = (rect[3] - rect[1]) / height;
+    Some(Matrix::from([
+        sx,
+        0.0,
+        0.0,
+        sy,
+        rect[0] - placed.min_x * sx,
+        rect[1] - placed.min_y * sy,
+    ]))
 }
 
 #[cfg(test)]
 mod tests {
     use super::placement;
+    use crate::pdf::reader::Matrix;
 
     #[test]
     fn an_appearance_is_placed_on_its_rectangle() {
         // A 200x24 box at the origin onto a rectangle at (300, 300).
         let m = placement(
             [0.0, 0.0, 200.0, 24.0],
-            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            Matrix::IDENTITY,
             [300.0, 300.0, 500.0, 324.0],
         )
         .unwrap();
-        assert_eq!(m, [1.0, 0.0, 0.0, 1.0, 300.0, 300.0]);
+        assert_eq!(m.values(), [1.0, 0.0, 0.0, 1.0, 300.0, 300.0]);
         // A box twice the rectangle's size is scaled down.
         let m = placement(
             [0.0, 0.0, 40.0, 40.0],
-            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            Matrix::IDENTITY,
             [0.0, 0.0, 20.0, 20.0],
         )
         .unwrap();
-        assert_eq!(m, [0.5, 0.0, 0.0, 0.5, 0.0, 0.0]);
+        assert_eq!(m.values(), [0.5, 0.0, 0.0, 0.5, 0.0, 0.0]);
         assert!(
             placement(
                 [0.0, 0.0, 0.0, 10.0],
-                [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                Matrix::IDENTITY,
                 [0.0, 0.0, 1.0, 1.0]
             )
             .is_none()

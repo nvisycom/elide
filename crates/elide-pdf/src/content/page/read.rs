@@ -5,7 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use elide_core::{Error, Result};
-use image::{Rgb, RgbImage};
+use elide_image::modality::ImageReplacement;
+use elide_image::primitive::{BoundingBox, Color, Point};
 
 use super::{PageReplacement, ScannedPage};
 use crate::content::text::Detection;
@@ -28,7 +29,7 @@ pub(super) fn flatten(
             for (corner, (x, y)) in corners.iter_mut().zip(glyph.corners()) {
                 *corner = place(x, y)?;
             }
-            fill(&mut image, PixelRect::covering(corners));
+            image.redact(covering(corners), &FILL);
         }
         out.push(PageReplacement::pixels(number, image)?);
         Ok(())
@@ -92,65 +93,36 @@ pub(crate) fn glyph_boxes(
     Ok(boxes)
 }
 
-/// The colour a redacted glyph box is painted.
-const FILL: Rgb<u8> = Rgb([0, 0, 0]);
+/// The paint over a redacted glyph box.
+const FILL: ImageReplacement = ImageReplacement::Block {
+    color: Color::BLACK,
+};
 
-/// An axis-aligned rectangle in rendered-page pixels (top-left origin).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PixelRect {
-    /// Left edge, in pixels from the page's left.
-    pub(super) x: u32,
-    /// Top edge, in pixels from the page's top.
-    pub(super) y: u32,
-    /// Width in pixels.
-    pub(super) width: u32,
-    /// Height in pixels.
-    pub(super) height: u32,
-}
-
-impl PixelRect {
-    /// The rectangle covering every pixel `corners` touch, with a pixel to
-    /// spare on each side: each corner is the pixel a point was rounded to,
-    /// which may sit inside the glyph's true edge, so nothing of the glyph is
-    /// left uncovered.
-    pub(super) fn covering(corners: [(i32, i32); 4]) -> Self {
-        let xs = corners.map(|(x, _)| x);
-        let ys = corners.map(|(_, y)| y);
-        let clamp = |v: i32| u32::try_from(v).unwrap_or(0);
-        let (x0, x1) = (
-            clamp(min(xs).saturating_sub(1)),
-            clamp(max(xs)).saturating_add(2),
-        );
-        let (y0, y1) = (
-            clamp(min(ys).saturating_sub(1)),
-            clamp(max(ys)).saturating_add(2),
-        );
-        Self {
-            x: x0,
-            y: y0,
-            width: x1.saturating_sub(x0),
-            height: y1.saturating_sub(y0),
-        }
-    }
-}
-
-fn min(values: [i32; 4]) -> i32 {
-    values.into_iter().min().unwrap_or(0)
-}
-
-fn max(values: [i32; 4]) -> i32 {
-    values.into_iter().max().unwrap_or(0)
-}
-
-/// Paint `rect` over `image`, clipped to its bounds.
-pub(super) fn fill(image: &mut RgbImage, rect: PixelRect) {
-    let x1 = rect.x.saturating_add(rect.width).min(image.width());
-    let y1 = rect.y.saturating_add(rect.height).min(image.height());
-    for y in rect.y..y1 {
-        for x in rect.x..x1 {
-            image.put_pixel(x, y, FILL);
-        }
-    }
+/// The pixels covering every pixel `corners` touch, with a pixel to spare on
+/// each side: each corner is the pixel a point was rounded to, which may sit
+/// inside the glyph's true edge, so nothing of the glyph is left uncovered.
+fn covering(corners: [(i32, i32); 4]) -> BoundingBox<u32> {
+    let xs = corners.map(|(x, _)| x);
+    let ys = corners.map(|(_, y)| y);
+    let clamp = |v: i32| u32::try_from(v).unwrap_or(0);
+    let edge = |values: [i32; 4], low: bool| {
+        let value = if low {
+            values.into_iter().min()
+        } else {
+            values.into_iter().max()
+        };
+        value.unwrap_or(0)
+    };
+    BoundingBox::new(
+        Point::new(
+            clamp(edge(xs, true).saturating_sub(1)),
+            clamp(edge(ys, true).saturating_sub(1)),
+        ),
+        Point::new(
+            clamp(edge(xs, false)).saturating_add(2),
+            clamp(edge(ys, false)).saturating_add(2),
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -206,57 +178,23 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
+    /// A rotated page maps corners out of order; the box spans them all, a
+    /// pixel past each.
     #[test]
     fn covers_every_pixel_its_corners_touch() {
-        // A rotated page maps corners out of order; the rect spans them all,
-        // a pixel past each.
-        let r = PixelRect::covering([(12, 40), (30, 40), (30, 20), (12, 20)]);
-        assert_eq!(
-            r,
-            PixelRect {
-                x: 11,
-                y: 19,
-                width: 21,
-                height: 23
-            }
-        );
+        let b = covering([(12, 40), (30, 40), (30, 20), (12, 20)]);
+        assert_eq!((b.left(), b.top(), b.width(), b.height()), (11, 19, 21, 23));
     }
 
     #[test]
     fn a_corner_off_the_page_clamps_to_its_edge() {
-        let r = PixelRect::covering([(-5, -3), (4, -3), (4, 6), (-5, 6)]);
-        assert_eq!(
-            r,
-            PixelRect {
-                x: 0,
-                y: 0,
-                width: 6,
-                height: 8
-            }
-        );
+        let b = covering([(-5, -3), (4, -3), (4, 6), (-5, 6)]);
+        assert_eq!((b.left(), b.top(), b.width(), b.height()), (0, 0, 6, 8));
     }
 
     #[test]
     fn an_extreme_corner_does_not_overflow() {
-        let r = PixelRect::covering([(i32::MIN, i32::MIN), (4, i32::MIN), (4, 6), (i32::MIN, 6)]);
-        assert_eq!((r.x, r.y), (0, 0));
-        assert_eq!((r.width, r.height), (6, 8));
-    }
-    #[test]
-    fn a_fill_paints_its_rect_clipped_to_the_page() {
-        let mut image = RgbImage::from_pixel(4, 4, Rgb([255, 255, 255]));
-        fill(
-            &mut image,
-            PixelRect {
-                x: 2,
-                y: 1,
-                width: 9,
-                height: 2,
-            },
-        );
-        for (x, y, pixel) in image.enumerate_pixels() {
-            let inside = x >= 2 && (1..3).contains(&y);
-            assert_eq!(*pixel == FILL, inside, "pixel ({x}, {y})");
-        }
+        let b = covering([(i32::MIN, i32::MIN), (4, i32::MIN), (4, 6), (i32::MIN, 6)]);
+        assert_eq!((b.left(), b.top(), b.width(), b.height()), (0, 0, 6, 8));
     }
 }

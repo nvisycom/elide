@@ -5,11 +5,12 @@ use std::collections::HashSet;
 
 use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Object, ObjectId};
 
 use super::keys::Kind;
 use super::{Builder, content, record};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, PRINT_BOXES, PageBoxes, Scope, page_boxes};
+use crate::pdf::writer::compressed;
 
 impl Builder<'_> {
     /// Record the entries of the page `id` and of each page-tree node above it
@@ -99,17 +100,14 @@ impl Builder<'_> {
         if !appearances.is_empty() {
             let mut drawn = Vec::with_capacity(appearances.len() * 5);
             for flattened in appearances {
-                let name = (1..)
-                    .map(|index| format!("Annot{index}").into_bytes())
-                    .find(|name| !content::has(&resources, b"XObject", name))
-                    .unwrap_or_default();
+                let name =
+                    content::fresh("Annot", |name| content::has(&resources, b"XObject", name));
                 content::insert(&mut resources, b"XObject", &name, flattened.form);
                 drawn.push(Operation::new("q", Vec::new()));
                 if let Some(state) = flattened.state {
-                    let state_name = (1..)
-                        .map(|index| format!("AnnotGS{index}").into_bytes())
-                        .find(|name| !content::has(&resources, b"ExtGState", name))
-                        .unwrap_or_default();
+                    let state_name = content::fresh("AnnotGS", |name| {
+                        content::has(&resources, b"ExtGState", name)
+                    });
                     content::insert(
                         &mut resources,
                         b"ExtGState",
@@ -120,7 +118,11 @@ impl Builder<'_> {
                 }
                 drawn.push(Operation::new(
                     "cm",
-                    flattened.matrix.map(|v| Object::Real(v as f32)).to_vec(),
+                    flattened
+                        .matrix
+                        .values()
+                        .map(|v| Object::Real(v as f32))
+                        .to_vec(),
                 ));
                 drawn.push(Operation::new("Do", vec![Object::Name(name)]));
                 drawn.push(Operation::new("Q", Vec::new()));
@@ -131,11 +133,10 @@ impl Builder<'_> {
             content = [b"q\n".as_slice(), &content, b"\nQ\n", &drawn].concat();
         }
 
-        let mut stream = Stream::new(Dictionary::new(), content);
-        stream
-            .compress()
-            .map_err(|e| Error::malformed(format!("could not compress page content: {e}")))?;
-        page.set("Contents", self.out.add_object(stream));
+        page.set(
+            "Contents",
+            self.out.add_object(compressed(Dictionary::new(), content)?),
+        );
         page.set("Resources", resources);
 
         let own: [(&[u8], Kind); 2] = [

@@ -9,12 +9,12 @@ use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object};
 
-use super::geometry::{Cursor, Matrix, TextState};
+use super::geometry::{Cursor, TextState};
 use super::nested::{walk_pattern, walk_xobject};
 use super::{TextRun, Walk};
 use crate::content::text::{FontEntry, StreamTarget};
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
-use crate::pdf::reader::{DocumentExt, ObjectExt, Scope};
+use crate::pdf::reader::{DocumentExt, Matrix, ObjectExt, Scope};
 
 /// The numeric operand at `index` as `f64`, or `0.0` when absent or non-numeric
 /// (a malformed operator reads as its zero, never a hard error — positioning is
@@ -29,17 +29,8 @@ pub(super) fn operand_f64(operands: &[Object], index: usize) -> f64 {
 /// Read six numeric operands from `base` as a [`Matrix`] `[a b c d e f]`, or
 /// `None` when fewer than six are present.
 pub(super) fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
-    if operands.len() < base + 6 {
-        return None;
-    }
-    Some(Matrix {
-        a: operand_f64(operands, base),
-        b: operand_f64(operands, base + 1),
-        c: operand_f64(operands, base + 2),
-        d: operand_f64(operands, base + 3),
-        e: operand_f64(operands, base + 4),
-        f: operand_f64(operands, base + 5),
-    })
+    (operands.len() >= base + 6)
+        .then(|| Matrix::from(std::array::from_fn(|i| operand_f64(operands, base + i))))
 }
 
 /// The caller's graphics state passed into a `Do`-invoked Form XObject: the

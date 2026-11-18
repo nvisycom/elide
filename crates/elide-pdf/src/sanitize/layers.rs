@@ -31,9 +31,16 @@ impl<'a> Layers<'a> {
         }
     }
 
+    /// Whether the content `dict` belongs to (its `/OC`, if any) is hidden by
+    /// the default configuration.
+    pub(super) fn hides(&self, dict: &Dictionary) -> bool {
+        dict.get(b"OC")
+            .is_ok_and(|membership| self.is_hidden(membership))
+    }
+
     /// Whether the optional-content `membership` (a group, or a membership
     /// dictionary over groups) is hidden by the default configuration.
-    pub(super) fn is_hidden(&self, membership: &Object, depth: usize) -> bool {
+    pub(super) fn is_hidden(&self, membership: &Object) -> bool {
         if let Object::Reference(id) = membership
             && self.hidden.contains(id)
         {
@@ -46,7 +53,7 @@ impl<'a> Layers<'a> {
             return false;
         }
         if let Ok(expression) = dict.get(b"VE") {
-            return !self.expression_visible(expression, depth);
+            return !self.expression_visible(expression, 0);
         }
         let groups: Vec<bool> = match dict.get(b"OCGs") {
             Ok(Object::Array(groups)) => groups.iter().map(|g| self.group_hidden(g)).collect(),

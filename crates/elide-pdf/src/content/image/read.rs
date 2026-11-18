@@ -50,6 +50,21 @@ pub(crate) fn is_surfaceable(doc: &Document, stream: &Stream) -> bool {
     }
 }
 
+/// The samples of the image XObject `stream` in `doc` when it stores raw
+/// samples, exactly as many as the image takes (see [`samples::samples`]);
+/// `None` for an image stored as a file.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// its samples are of an unsupported kind or cannot be decompressed.
+pub(crate) fn raw_samples(doc: &Document, stream: &Stream) -> Result<Option<Vec<u8>>> {
+    match EmbeddingKind::of(stream) {
+        EmbeddingKind::Raw => samples::samples(doc, stream).map(Some),
+        _ => Ok(None),
+    }
+}
+
 /// Every image XObject of `doc`, as [`Images`] reads them.
 pub(super) fn surfaced(doc: &Document) -> Result<Vec<SurfacedImage>> {
     doc.objects

@@ -29,6 +29,10 @@ pub(crate) trait DocumentExt {
     /// `object` as a number, following a reference; `None` when it is not one.
     fn resolve_number(&self, object: &Object) -> Option<f64>;
 
+    /// `object` as an array of `N` numbers (a rectangle, a matrix),
+    /// following references to it and its items; `None` when it is not one.
+    fn resolve_numbers<const N: usize>(&self, object: &Object) -> Option<[f64; N]>;
+
     /// The value of the page attribute `key` on `page` or the nearest
     /// page-tree ancestor holding one `read` accepts.
     fn inherited<T>(
@@ -77,6 +81,15 @@ impl DocumentExt for Document {
 
     fn resolve_number(&self, object: &Object) -> Option<f64> {
         self.resolve(object)?.as_number()
+    }
+
+    fn resolve_numbers<const N: usize>(&self, object: &Object) -> Option<[f64; N]> {
+        let items = <&[Object; N]>::try_from(self.resolve_array(object)?.as_slice()).ok()?;
+        let mut numbers = [0.0; N];
+        for (number, item) in numbers.iter_mut().zip(items) {
+            *number = self.resolve_number(item)?;
+        }
+        Some(numbers)
     }
 
     fn inherited<T>(

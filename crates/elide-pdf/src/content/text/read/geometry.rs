@@ -11,65 +11,13 @@
 //! next glyph starts further along than its predecessor's advance accounts for —
 //! reads the gap as a space.
 //!
-//! The vocabulary follows the PDF specification (ISO 32000-1 §9.4): a [`Matrix`]
-//! is the 2×3 affine `[a b c d e f]`; [`TextState`] is the parametric text state
+//! The vocabulary follows the PDF specification (ISO 32000-1 §9.4): a
+//! [`Matrix`] places text space on the page; [`TextState`] is the parametric text state
 //! the `q`/`Q` graphics-state stack saves; the text matrix and line matrix are
 //! *not* part of that state (they reset at `BT` and are set by the text-
 //! positioning operators), so [`Cursor`] holds them separately.
 
-/// A 2×3 affine transform `[a b c d e f]`, mapping a point `(x, y)` to
-/// `(a·x + c·y + e, b·x + d·y + f)`. Row-vector convention, as PDF uses.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Matrix {
-    pub(super) a: f64,
-    pub(super) b: f64,
-    pub(super) c: f64,
-    pub(super) d: f64,
-    pub(super) e: f64,
-    pub(super) f: f64,
-}
-
-impl Matrix {
-    /// The identity transform.
-    pub(super) const IDENTITY: Matrix = Matrix {
-        a: 1.0,
-        b: 0.0,
-        c: 0.0,
-        d: 1.0,
-        e: 0.0,
-        f: 0.0,
-    };
-
-    /// A pure translation by `(tx, ty)`.
-    pub(super) fn translation(tx: f64, ty: f64) -> Matrix {
-        Matrix {
-            a: 1.0,
-            b: 0.0,
-            c: 0.0,
-            d: 1.0,
-            e: tx,
-            f: ty,
-        }
-    }
-
-    /// `self × other` (apply `self` first, then `other`), the composition PDF text
-    /// positioning uses for `Tlm ← translate · Tlm`.
-    pub(super) fn then(self, other: Matrix) -> Matrix {
-        Matrix {
-            a: self.a * other.a + self.b * other.c,
-            b: self.a * other.b + self.b * other.d,
-            c: self.c * other.a + self.d * other.c,
-            d: self.c * other.b + self.d * other.d,
-            e: self.e * other.a + self.f * other.c + other.e,
-            f: self.e * other.b + self.f * other.d + other.f,
-        }
-    }
-
-    /// The device-space origin `(e, f)` — where this matrix places `(0, 0)`.
-    pub(super) fn origin(self) -> (f64, f64) {
-        (self.e, self.f)
-    }
-}
+use crate::pdf::reader::Matrix;
 
 /// The parametric text state (ISO 32000-1 §9.3) the `q`/`Q` stack saves and
 /// restores. The text matrix and line matrix are deliberately absent: the spec

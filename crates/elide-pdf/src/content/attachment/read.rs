@@ -10,14 +10,16 @@ use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
 use super::{Attachment, AttachmentId};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, NameTree, Node, ObjectExt};
 
-/// The largest an attached file may decompress to. An attachment's stream may
-/// claim any size, so its decode is bounded to refuse a decompression bomb.
+/// The most the attached files may decompress to, together. A stream may
+/// claim any size, so each decode is bounded by what is left, to refuse a
+/// decompression bomb spread across many files.
 const MAX_ATTACHMENT_BYTES: usize = 512 * 1024 * 1024;
 
 /// Every embedded file of `doc`, as [`Attachments`] reads them.
 pub(super) fn attachments(doc: &Document) -> Result<Vec<Attachment>> {
     let tree = Tree::read(doc)?;
     let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
+    let mut left = MAX_ATTACHMENT_BYTES;
     tree.entries
         .iter()
         .chain(associated(doc).iter())
@@ -27,14 +29,17 @@ pub(super) fn attachments(doc: &Document) -> Result<Vec<Attachment>> {
                 .get_object(entry.stream)
                 .and_then(Object::as_stream)
                 .map_err(|e| Error::malformed(format!("attachment stream: {e}")))?;
+            let over = || {
+                Error::resource_limit(format!(
+                    "attachment `{}` could not be decoded within the \
+                     {MAX_ATTACHMENT_BYTES}-byte limit on all attachments",
+                    entry.name
+                ))
+            };
             let bytes = stream
-                .get_plain_content_with_limit(MAX_ATTACHMENT_BYTES)
-                .map_err(|e| {
-                    Error::resource_limit(format!(
-                        "attachment `{}` could not be decoded within bounds: {e}",
-                        entry.name
-                    ))
-                })?;
+                .get_plain_content_with_limit(left)
+                .map_err(|_| over())?;
+            left = left.checked_sub(bytes.len()).ok_or_else(over)?;
             Ok(Attachment {
                 id: AttachmentId::from_object(entry.stream),
                 name: entry.name.clone(),

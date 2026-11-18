@@ -3,16 +3,19 @@
 //! trees under the catalog's `/Names`, page geometry, and fonts.
 
 pub(crate) mod font;
+mod matrix;
 pub(crate) mod name_tree;
 mod object;
 mod page;
 mod scope;
 
+pub(crate) use self::matrix::Matrix;
 pub(crate) use self::name_tree::{NameTree, Node};
 pub(crate) use self::object::{
     DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, ObjectExt, StreamExt,
 };
 pub(crate) use self::page::{
-    DeviceRect, GlyphRect, PRINT_BOXES, PageBoxes, PageFrame, PageGeometry, page_boxes, page_frame,
+    DeviceRect, GlyphRect, PRINT_BOXES, PageBoxes, PageFrame, PageGeometry, normalize_rect,
+    page_boxes, page_frame,
 };
 pub(crate) use self::scope::Scope;

@@ -18,13 +18,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use bytes::Bytes;
 use elide_core::{Error, Result};
 use elide_image::modality::{ImageFormat, ImageReplacement};
-use elide_image::primitive::{BoundingBox, Dimensions};
+use elide_image::primitive::BoundingBox;
 use elide_image::{ImageBuffer, RasterImage};
-use image::{RgbImage, load_from_memory};
 use lopdf::{Stream, dictionary};
 
 pub(crate) use self::read::glyph_boxes;
 use crate::pdf::reader::DeviceRect;
+use crate::pdf::writer::compressed;
 use crate::pdf::{Edit, Pdf, Read, Redact};
 
 /// The pages `pages` (1-based) rendered at `scale` with the glyph boxes
@@ -107,18 +107,11 @@ impl ScannedPage {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
-    /// if the render cannot be decoded, and as [`PageReplacement::pixels`].
+    /// As [`ImageBuffer::open`] if the render cannot be decoded, and as
+    /// [`PageReplacement::pixels`].
     pub(crate) fn replacement(&self) -> Result<PageReplacement> {
-        let pixels = load_from_memory(&self.painted)
-            .map_err(|e| {
-                Error::malformed(format!(
-                    "page {}'s render cannot be decoded: {e}",
-                    self.number
-                ))
-            })?
-            .into_rgb8();
-        PageReplacement::pixels(self.number, pixels)
+        let render = ImageBuffer::open(&self.painted, ImageFormat::Png)?;
+        PageReplacement::pixels(self.number, render.raster().clone())
     }
 
     /// The image that replaces the page: `render`, a fresh render of it, with
@@ -129,25 +122,17 @@ impl ScannedPage {
     /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if `render`
     /// is not the size of the render the regions were found on, and as
     /// [`PageReplacement::pixels`].
-    pub(crate) fn repainted(&self, render: RgbImage) -> Result<PageReplacement> {
-        let size = Dimensions::new(render.width(), render.height());
-        let mismatch = || {
-            Error::redaction(format!(
+    pub(crate) fn repainted(&self, mut render: RasterImage) -> Result<PageReplacement> {
+        if render.dimensions() != ImageBuffer::dimensions_of(&self.painted)? {
+            return Err(Error::redaction(format!(
                 "page {}'s render is not the size of the one it was redacted on",
                 self.number
-            ))
-        };
-        if size != ImageBuffer::dimensions_of(&self.painted)? {
-            return Err(mismatch());
+            )));
         }
-        let mut raster = RasterImage::from_rgb(size, render.into_raw(), ImageFormat::Png)
-            .ok_or_else(mismatch)?;
         for (region, replacement) in &self.redactions {
-            raster.redact(*region, replacement);
+            render.redact(*region, replacement);
         }
-        let pixels =
-            RgbImage::from_raw(size.width, size.height, raster.into_rgb()).ok_or_else(mismatch)?;
-        PageReplacement::pixels(self.number, pixels)
+        PageReplacement::pixels(self.number, render)
     }
 }
 
@@ -168,21 +153,19 @@ impl PageReplacement {
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// the pixels cannot be compressed.
-    pub(crate) fn pixels(number: u32, pixels: RgbImage) -> Result<Self> {
-        let mut image = Stream::new(
+    pub(crate) fn pixels(number: u32, pixels: RasterImage) -> Result<Self> {
+        let size = pixels.dimensions();
+        let image = compressed(
             dictionary! {
                 "Type" => "XObject",
                 "Subtype" => "Image",
-                "Width" => i64::from(pixels.width()),
-                "Height" => i64::from(pixels.height()),
+                "Width" => i64::from(size.width),
+                "Height" => i64::from(size.height),
                 "ColorSpace" => "DeviceRGB",
                 "BitsPerComponent" => 8,
             },
-            pixels.into_raw(),
-        );
-        image
-            .compress()
-            .map_err(|e| Error::malformed(format!("failed to compress page {number}: {e}")))?;
+            pixels.into_rgb(),
+        )?;
         Ok(Self { number, image })
     }
 }

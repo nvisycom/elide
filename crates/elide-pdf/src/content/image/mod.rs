@@ -19,7 +19,7 @@ use bytes::Bytes;
 use elide_core::Result;
 use lopdf::ObjectId;
 
-pub(crate) use self::read::is_surfaceable;
+pub(crate) use self::read::{is_surfaceable, raw_samples};
 use crate::pdf::{Edit, Pdf, Read, Redact};
 
 /// The identity of an image XObject within a PDF: its indirect-object id
@@ -122,6 +122,7 @@ mod tests {
 
     use super::*;
     use crate::fixtures::with_pages;
+    use crate::sanitize::Check;
 
     /// A 1x1 gray image of raw samples.
     fn gray() -> Stream {
@@ -183,6 +184,63 @@ mod tests {
         let mut expected = vec![image, mask];
         expected.sort_unstable();
         assert_eq!(ids, expected);
+    }
+
+    /// An image a tiling pattern or a Type3 glyph draws is cut from that
+    /// stream too, so its drawing never names a resource that is gone.
+    #[test]
+    fn an_image_drawn_by_a_pattern_or_glyph_is_cut() {
+        let mut doc = Document::with_version("1.5");
+        let image = doc.add_object(gray());
+        let draw = || {
+            Content {
+                operations: vec![Operation::new("Do", vec!["Im".into()])],
+            }
+            .encode()
+            .unwrap()
+        };
+        let resources = || dictionary! { "XObject" => dictionary! { "Im" => image } };
+        let pattern = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                "BBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+                "XStep" => 1, "YStep" => 1, "Resources" => resources(),
+            },
+            draw(),
+        ));
+        let glyph = doc.add_object(Stream::new(dictionary! {}, draw()));
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type3",
+            "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+            "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
+            "CharProcs" => dictionary! { "a" => glyph },
+            "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::Name(b"a".to_vec())] },
+            "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
+            "Resources" => resources(),
+        });
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"/Pattern cs /P scn 0 0 1 1 re f BT /T3 1 Tf (a) Tj ET".to_vec(),
+        ));
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "MediaBox" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+                "Resources" => dictionary! {
+                    "Pattern" => dictionary! { "P" => pattern },
+                    "Font" => dictionary! { "T3" => font },
+                },
+            }],
+        );
+        let mut edit = Edit::of(doc);
+        assert_eq!(
+            redact::remove(&mut edit, &HashSet::from([image])).unwrap(),
+            2
+        );
+        let pdf = edit.finish().unwrap();
+        assert!(pdf.doc().get_object(image).is_err());
+        pdf.read(Check).unwrap();
     }
 
     #[test]

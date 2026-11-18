@@ -6,12 +6,13 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Cursor;
 use std::sync::LazyLock;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use image::{ImageFormat, RgbImage};
+use elide_image::RasterImage;
+use elide_image::modality::ImageFormat;
+use elide_image::primitive::Dimensions;
 use pdfium_render::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
@@ -134,9 +135,7 @@ pub(super) fn observe(pdf: &Pdf) -> Result<Vec<(String, Vec<GlyphRect>)>> {
 ///
 /// # Errors
 ///
-/// As [`each_page`], and
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
-/// page cannot be encoded.
+/// As [`each_page`] and [`RasterImage::encode`].
 pub(super) fn render_pages(
     pdf: &Pdf,
     numbers: &BTreeSet<u32>,
@@ -144,15 +143,15 @@ pub(super) fn render_pages(
 ) -> Result<BTreeMap<u32, Bytes>> {
     let mut out = BTreeMap::new();
     each_page(pdf, numbers, scale, |number, image, _| {
-        out.insert(number, png(number, &image)?);
+        out.insert(number, image.encode()?);
         Ok(())
     })?;
     Ok(out)
 }
 
 /// Render each of the 1-based pages `numbers` at `scale` and hand it to
-/// `visit`, on the PDFium thread, with the pixel a point of the page in
-/// default user space lands on.
+/// `visit` as an image encoding to PNG, on the PDFium thread, with the pixel
+/// a point of the page in default user space lands on.
 ///
 /// # Errors
 ///
@@ -164,7 +163,8 @@ pub(crate) fn each_page(
     pdf: &Pdf,
     numbers: &BTreeSet<u32>,
     scale: f32,
-    mut visit: impl FnMut(u32, RgbImage, &dyn Fn(f64, f64) -> Result<(i32, i32)>) -> Result<()> + Send,
+    mut visit: impl FnMut(u32, RasterImage, &dyn Fn(f64, f64) -> Result<(i32, i32)>) -> Result<()>
+    + Send,
 ) -> Result<()> {
     with_document(pdf, |document| {
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
@@ -192,6 +192,9 @@ pub(crate) fn each_page(
                 .and_then(|bitmap| bitmap.as_image())
                 .map(|image| image.into_rgb8())
                 .map_err(|e| Error::malformed(format!("failed to render page {number}: {e}")))?;
+            let size = Dimensions::new(image.width(), image.height());
+            let image = RasterImage::from_rgb(size, image.into_raw(), ImageFormat::Png)
+                .ok_or_else(|| Error::malformed(format!("page {number} rendered short")))?;
             let place = |x: f64, y: f64| {
                 let (x, y) = (PdfPoints::new(x as f32), PdfPoints::new(y as f32));
                 page.points_to_pixels(x, y, &config).map_err(|e| {
@@ -209,13 +212,4 @@ pub(crate) fn each_page(
             numbers.len()
         )))
     })
-}
-
-/// `image` encoded as a PNG.
-fn png(number: u32, image: &RgbImage) -> Result<Bytes> {
-    let mut png = Cursor::new(Vec::new());
-    image
-        .write_to(&mut png, ImageFormat::Png)
-        .map_err(|e| Error::malformed(format!("failed to encode page {number}: {e}")))?;
-    Ok(Bytes::from(png.into_inner()))
 }

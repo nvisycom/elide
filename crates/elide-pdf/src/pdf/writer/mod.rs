@@ -9,9 +9,23 @@ use std::collections::HashSet;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use lopdf::{Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
-pub(crate) use self::cmap::{readable_cmap, scrub};
+pub(crate) use self::cmap::{UnicodeMap, scrub};
+
+/// A stream of `dict` holding `content`, compressed.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// `content` cannot be compressed.
+pub(crate) fn compressed(dict: Dictionary, content: Vec<u8>) -> Result<Stream> {
+    let mut stream = Stream::new(dict, content);
+    stream
+        .compress()
+        .map_err(|e| Error::malformed(format!("could not compress a stream: {e}")))?;
+    Ok(stream)
+}
 use super::reader::{Node, ObjectExt, Scope};
 use super::{Pdf, Redact};
 
@@ -48,10 +62,11 @@ impl Edit {
     }
 
     /// Rewrite every content stream `rewrite` changes: each page's (each set
-    /// of shared streams once) and each form XObject's, planned against the
-    /// document before any is written. `rewrite` reads the document, a
-    /// stream's bytes and the scope its names resolve in, and returns its new bytes and what it
-    /// reports cutting; what each changed stream reports is returned.
+    /// of shared streams once), and each form XObject's, tiling pattern's and
+    /// Type3 glyph procedure's, planned against the document before any is
+    /// written. `rewrite` reads the document, a stream's bytes and the scope
+    /// its names resolve in, and returns its new bytes and what it reports
+    /// cutting; what each changed stream reports is returned.
     ///
     /// # Errors
     ///

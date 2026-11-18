@@ -28,6 +28,9 @@ use crate::pdf::reader::DocumentExt;
 /// a decompression bomb.
 const MAX_SAMPLE_BYTES: usize = 256 * 1024 * 1024;
 
+/// The most bytes a palette takes: 256 entries of three components.
+const MAX_PALETTE_BYTES: usize = 256 * 3;
+
 /// An image's decoded pixels: 8-bit gray or RGB, row-major.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Pixels {
@@ -161,14 +164,8 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
 /// [`is_supported`]), its samples cannot be decompressed, or an index falls
 /// outside its palette.
 pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
-    let layout =
-        layout(doc, &stream.dict).ok_or_else(|| Error::malformed("unsupported image samples"))?;
+    let (layout, samples) = read(doc, stream)?;
     let row_bytes = layout.row_bytes();
-    let size = row_bytes * layout.height as usize;
-    let mut samples = stream
-        .decompressed_content_with_limit(MAX_SAMPLE_BYTES)
-        .map_err(|e| Error::malformed(format!("image samples: {e}")))?;
-    samples.resize(size, 0);
 
     let count = layout.width as usize * layout.space.components();
     let mut data = Vec::with_capacity(layout.pixel_bytes().unwrap_or_default());
@@ -183,6 +180,30 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
         rgb: layout.space.rgb(),
         data,
     })
+}
+
+/// The samples of the raw-sample image XObject `stream` in `doc`, exactly as
+/// many as the image takes: samples short of it padded with zeros, as a
+/// viewer draws them, and bytes past it dropped, so nothing rides along
+/// after the image.
+///
+/// # Errors
+///
+/// As [`decode`].
+pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
+    read(doc, stream).map(|(_, samples)| samples)
+}
+
+/// The layout of `stream` and its samples, exactly as many as it takes.
+fn read(doc: &Document, stream: &Stream) -> Result<(Layout, Vec<u8>)> {
+    let layout =
+        layout(doc, &stream.dict).ok_or_else(|| Error::malformed("unsupported image samples"))?;
+    let size = layout.row_bytes() * layout.height as usize;
+    let mut samples = stream
+        .decompressed_content_with_limit(MAX_SAMPLE_BYTES)
+        .map_err(|e| Error::malformed(format!("image samples: {e}")))?;
+    samples.resize(size, 0);
+    Ok((layout, samples))
 }
 
 /// The pixels of `stream` encoded as a PNG, the form the image pipeline reads.
@@ -262,12 +283,16 @@ fn space(doc: &Document, object: &Object, inverted: Option<bool>) -> Option<Spac
                         _ => return None,
                     };
                     let hival = usize::try_from(array.get(2)?.as_i64().ok()?).ok()?;
+                    let needed = hival.checked_add(1)? * if rgb { 3 } else { 1 };
+                    // A palette has at most 256 entries, so a stream decoding
+                    // past the colours they take is not read whole.
                     let palette = match doc.resolve(array.get(3)?)? {
                         Object::String(bytes, _) => bytes.clone(),
-                        Object::Stream(stream) => stream.decompressed_content().ok()?,
+                        Object::Stream(stream) => stream
+                            .decompressed_content_with_limit(MAX_PALETTE_BYTES)
+                            .ok()?,
                         _ => return None,
                     };
-                    let needed = (hival + 1) * if rgb { 3 } else { 1 };
                     (palette.len() >= needed).then_some(Space::Indexed { rgb, palette })
                 }
                 _ => None,
