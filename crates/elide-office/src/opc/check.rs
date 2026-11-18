@@ -2,7 +2,7 @@
 //! should not ship.
 //!
 //! The check a document runs on its output before returning it: sanitizing
-//! the output again removes nothing (so every XML part is a fixed point of
+//! the output again changes nothing (so every XML part is a fixed point of
 //! its schema rebuild), every relationship and every element
 //! naming one resolves, every XML part speaks only reviewed vocabularies, and
 //! no part the format never extracts carries text.
@@ -19,7 +19,7 @@ use crate::opc::part::PartPath;
 use crate::opc::references::References;
 use crate::opc::sanitize::{Sanitizer, sanitize};
 use crate::opc::vocabulary::Vocabulary;
-use crate::opc::{PartRole, xml_edit};
+use crate::opc::{PartKind, PartRole, xml_edit};
 
 /// Check that the package `document` carries no hidden content `policy` and
 /// `sanitizer` would remove, that every reference in it resolves, that its XML
@@ -35,13 +35,20 @@ pub(crate) fn check(
     policy: HiddenContentPolicy,
     sanitizer: &dyn Sanitizer,
 ) -> Result<()> {
-    let (_, survived) = sanitize(document, policy, sanitizer)?;
+    let (changed, survived) = sanitize(document, policy, sanitizer)?;
     if let Some(entry) = survived.iter().next() {
         let place = entry.at.as_ref().map_or("the package", |at| at.as_str());
         return Err(Error::sanitization(format!(
             "encoded package still carries hidden content: {:?} in {place}",
             entry.content
         )));
+    }
+    // A rewrite that removes nothing still changes the package, which is then
+    // not what a sanitize writes.
+    if changed.is_some_and(|changed| changed != document) {
+        return Err(Error::sanitization(
+            "encoded package is not what a sanitize writes: sanitizing it again changes it",
+        ));
     }
     let index = Index::read(document)?;
     let present: HashSet<&PartPath> = index.parts.iter().map(|(path, _)| path).collect();
@@ -85,6 +92,10 @@ pub(crate) fn check(
             return Err(Error::sanitization(format!(
                 "`{path}` carries text no extraction reads: `{stray}`"
             )));
+        }
+        // An embedding (an SVG image) is its own format, not Office XML.
+        if matches!(kind, PartKind::Embedding(_) | PartKind::Font) {
+            continue;
         }
         let vocabulary = if index.is_vml(path) {
             Vocabulary::vml()

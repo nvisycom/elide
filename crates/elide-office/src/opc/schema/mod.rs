@@ -10,7 +10,11 @@
 //!
 //! - an element its parent does not allow goes with everything inside it, as
 //!   does one whose type holds nothing but a schema wildcard (an extension's
-//!   payload, `a:ext` and its kin);
+//!   payload, `a:ext` and its kin); an `a:graphicData` keeps only the payload
+//!   its `uri` names (a picture, chart, diagram, locked canvas, table, or OLE
+//!   object);
+//! - the attributes of a VML drawing's `<xml>` root go, but for its namespace
+//!   declarations;
 //! - an attribute its type does not declare goes; namespace declarations stay,
 //!   holding no content;
 //! - markup compatibility is resolved as a reader without extensions resolves
@@ -28,7 +32,8 @@
 //!
 //! The rebuild cuts what it leaves out of the source rather than
 //! re-serializing what it keeps, so a kept element round-trips byte for byte,
-//! and rebuilding a rebuilt part changes nothing.
+//! and rebuilding a rebuilt part changes nothing. Where a cut joins text into
+//! a `]]>`, which XML forbids in text, its `>` is written as `&gt;`.
 //!
 //! The schemas admit no `xml:space` on SpreadsheetML's strings, where Excel
 //! writes it, so the generator allows it on every element that holds text.
@@ -51,6 +56,7 @@ use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
+use crate::opc::archive::MAX_PART_BYTES;
 use crate::opc::xml_edit::bound;
 
 /// An element type of the schema.
@@ -330,6 +336,8 @@ pub(crate) struct Rebuilt {
 enum Frame {
     /// An element of this type.
     Typed(u16),
+    /// An `a:graphicData` of this type, holding the payload its `uri` names.
+    Graphic(u16, Option<Payload>),
     /// The root of a VML drawing.
     Vml,
     /// An `mc:AlternateContent`, read in this scope.
@@ -343,6 +351,8 @@ enum Frame {
 enum Scope {
     /// The schema type.
     Typed(u16),
+    /// An `a:graphicData`'s type, allowing only this payload.
+    Graphic(u16, Option<Payload>),
     /// The top of a VML drawing.
     Vml,
     /// Nothing yet: before the root.
@@ -353,6 +363,7 @@ impl Frame {
     fn scope(self) -> Scope {
         match self {
             Self::Typed(ty) => Scope::Typed(ty),
+            Self::Graphic(ty, payload) => Scope::Graphic(ty, payload),
             Self::Vml => Scope::Vml,
             Self::Alternate(scope) | Self::Fallback(scope) => scope,
         }
@@ -388,6 +399,9 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     // An element being left out: its start byte and the open depth inside it.
     let mut removing: Option<(usize, usize)> = None;
     let mut seen_root = false;
+    // The bytes the rebuild adds, which must keep the part within the size a
+    // package read allows.
+    let mut added = 0usize;
 
     loop {
         let (namespace, event) = {
@@ -474,11 +488,20 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                     Some(frame) if frame.unwrapped() => carried.last().cloned().unwrap_or_default(),
                     _ => Vec::new(),
                 };
+                let decision = match decision {
+                    Decision::Keep(Frame::Typed(ty))
+                        if namespace_index(namespace.as_deref()) == namespace_index(Some(A))
+                            && local == "graphicData" =>
+                    {
+                        Decision::Keep(Frame::Graphic(ty, payload(e)?))
+                    }
+                    decision => decision,
+                };
                 match decision {
                     Decision::Keep(frame) => {
                         let mut declares = Vec::new();
-                        if let Frame::Typed(ty) = frame {
-                            attributes(&reader, raw, e, ty, &mut cuts, &mut record)?;
+                        if let Frame::Typed(ty) | Frame::Graphic(ty, _) = frame {
+                            attributes(&reader, raw, e, Some(ty), &mut cuts, &mut record)?;
                             let own = declarations(raw, e)?;
                             let missing: String = around
                                 .iter()
@@ -486,9 +509,18 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                                 .map(|(_, source)| format!(" {source}"))
                                 .collect();
                             if !missing.is_empty() {
+                                added += missing.len();
+                                if (raw.len() + added) as u64 > MAX_PART_BYTES {
+                                    return Err(Error::malformed(
+                                        "malformed part XML: declaring the namespaces of markup \
+                                         compatibility again outgrows the part size limit",
+                                    ));
+                                }
                                 let at = span.start + 1 + e.name().into_inner().len();
                                 cuts.push((at..at, missing));
                             }
+                        } else if let Frame::Vml = frame {
+                            attributes(&reader, raw, e, None, &mut cuts, &mut record)?;
                         } else if frame.unwrapped() {
                             // The unwrapped tag goes whole, its declarations
                             // carried to the children it held.
@@ -527,18 +559,89 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     for (cut, replacement) in cuts {
         // An attribute cut never overlaps another: an element left out whole
         // is cut before its attributes are read.
-        text.push_str(&raw[cursor..cut.start.max(cursor)]);
+        push_joined(&mut text, &raw[cursor..cut.start.max(cursor)]);
         text.push_str(&replacement);
         cursor = cursor.max(cut.end);
     }
-    text.push_str(&raw[cursor..]);
+    push_joined(&mut text, &raw[cursor..]);
     Ok(Some(Rebuilt { text, removed }))
+}
+
+/// Append the source span `kept` to `text`. A `]]>` is not allowed in text,
+/// so where a cut joins `]` to `]>` its `>` is written as a reference; no
+/// tag ends in `]`, so such a join is always in text.
+fn push_joined(text: &mut String, kept: &str) {
+    let before = text
+        .bytes()
+        .rev()
+        .take(2)
+        .take_while(|&b| b == b']')
+        .count();
+    let lead = kept.bytes().take_while(|&b| b == b']').count();
+    if before > 0 && before + lead >= 2 && kept.as_bytes().get(lead) == Some(&b'>') {
+        text.push_str(&kept[..lead]);
+        text.push_str("&gt;");
+        text.push_str(&kept[lead + 1..]);
+    } else {
+        text.push_str(kept);
+    }
+}
+
+/// A payload of `a:graphicData`: its namespace index and local name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Payload(u8, &'static str);
+
+/// The payloads `a:graphicData` may hold, by the `uri` naming each: its
+/// vocabulary and name in the URI, and its element.
+const PAYLOADS: &[(&str, &str, &str, &str)] = &[
+    (
+        "drawingml",
+        "picture",
+        "http://schemas.openxmlformats.org/drawingml/2006/picture",
+        "pic",
+    ),
+    ("drawingml", "chart", C, "chart"),
+    ("drawingml", "diagram", DGM, "relIds"),
+    (
+        "drawingml",
+        "lockedCanvas",
+        "http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas",
+        "lockedCanvas",
+    ),
+    ("drawingml", "table", A, "tbl"),
+    ("presentationml", "ole", P, "oleObj"),
+];
+
+/// The payload the `uri` of the `a:graphicData` `e` names, transitional or
+/// strict, or `None` for one this rebuild does not keep.
+fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+    let uri = e
+        .try_get_attribute("uri")
+        .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+    let Some(uri) = uri else {
+        return Ok(None);
+    };
+    let uri: &str = &uri.value;
+    Ok(PAYLOADS
+        .iter()
+        .find(|(area, name, _, _)| {
+            uri.strip_prefix("http://schemas.openxmlformats.org/")
+                .and_then(|rest| rest.strip_prefix(*area))
+                .is_some_and(|rest| rest.strip_prefix("/2006/") == Some(*name))
+                || uri
+                    .strip_prefix("http://purl.oclc.org/ooxml/")
+                    .and_then(|rest| rest.strip_prefix(*area))
+                    .is_some_and(|rest| rest.strip_prefix('/') == Some(*name))
+        })
+        .and_then(|(_, _, namespace, local)| {
+            namespace_index(Some(namespace)).map(|index| Payload(index, local))
+        }))
 }
 
 /// Whether text is shown in `scope`.
 fn holds_text(scope: Scope) -> bool {
     match scope {
-        Scope::Typed(ty) => TYPES[usize::from(ty)].text,
+        Scope::Typed(ty) | Scope::Graphic(ty, _) => TYPES[usize::from(ty)].text,
         Scope::Vml | Scope::Document => false,
     }
 }
@@ -596,6 +699,12 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, open: &[Frame]) ->
     };
     let ty = match scope {
         Scope::Typed(parent) => TYPES[usize::from(parent)].child(index, local),
+        Scope::Graphic(parent, Some(Payload(namespace, name)))
+            if (namespace, name) == (index, local) =>
+        {
+            TYPES[usize::from(parent)].child(index, local)
+        }
+        Scope::Graphic(..) => None,
         // A VML drawing holds the global VML shapes.
         Scope::Vml if namespace.is_some_and(|namespace| VML.contains(&namespace)) => ROOTS
             .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(index, local)))
@@ -609,16 +718,17 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, open: &[Frame]) ->
     }
 }
 
-/// Cut each attribute of `e` its type `ty` does not declare, recording it.
+/// Cut each attribute of `e` its type `ty` does not declare (every one but
+/// the namespace declarations when it has no type), recording it.
 fn attributes(
     reader: &NsReader<&[u8]>,
     raw: &str,
     e: &BytesStart<'_>,
-    ty: u16,
+    ty: Option<u16>,
     cuts: &mut Vec<(Range<usize>, String)>,
     record: &mut impl FnMut(HiddenContent),
 ) -> Result<()> {
-    let ty = &TYPES[usize::from(ty)];
+    let ty = ty.map(|ty| &TYPES[usize::from(ty)]);
     for attr in e.attributes() {
         let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
         let key = attr.key.into_inner();
@@ -631,8 +741,9 @@ fn attributes(
             continue;
         }
         let local = local.into_inner();
-        let declared =
-            namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local));
+        let declared = ty.is_some_and(|ty| {
+            namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local))
+        });
         if declared {
             continue;
         }

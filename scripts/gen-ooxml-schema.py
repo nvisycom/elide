@@ -138,7 +138,15 @@ class Generator:
                 owner, ct = self.complex[name]
                 self.resolve(key, owner, ct)
             return key
+        self.simple_type(name)
         return "text"
+
+    def simple_type(self, name):
+        """Check that `name` is a simple type, which holds text: a builtin or
+        one the schemas declare. Anything else is a type from a schema that
+        is missing, which would read as text and lose its children."""
+        if name[0] != XSD[1:-1] and name not in self.simple:
+            sys.exit(f"unresolved type {{{name[0]}}}{name[1]}: is a schema missing?")
 
     def resolve(self, key, schema, node):
         """Resolve the complex type `node` into `self.types[key]`."""
@@ -165,6 +173,7 @@ class Generator:
             resolved["text"] |= other["text"]
         else:
             # A simple type, or a builtin.
+            self.simple_type(name)
             resolved["text"] = True
 
     def content(self, schema, node, resolved):

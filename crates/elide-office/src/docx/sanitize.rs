@@ -366,6 +366,7 @@ mod tests {
                 .all(|entry| entry.content != HiddenContent::ApplicationData),
             "{stripped:?}"
         );
+        check(&out, HiddenContentPolicy::default(), &WordFormat).unwrap();
     }
 
     #[test]

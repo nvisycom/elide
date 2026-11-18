@@ -168,17 +168,61 @@ fn a_fallback_hands_its_namespaces_to_its_children() {
     );
 }
 
-/// A picture inside `a:graphicData` is a payload the allowlist names.
+/// `a:graphicData` keeps the payload its `uri` names, with its content, and
+/// nothing else.
 #[test]
-fn a_graphic_keeps_its_picture() {
-    let raw = format!(
-        r#"<p:sld xmlns:p="{P}" xmlns:a="{A}" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="t"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm/><a:graphic><a:graphicData uri="u"><pic:pic/><a:tbl><a:tr h="1"><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Jane</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl><s:x xmlns:s="urn:vendor"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>"#
+fn a_graphic_keeps_the_payload_its_uri_names() {
+    let frame = |uri: &str, payload: &str| {
+        format!(
+            r#"<p:sld xmlns:p="{P}" xmlns:a="{A}" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="t"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm/><a:graphic><a:graphicData uri="{uri}">{payload}</a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>"#
+        )
+    };
+    let picture = r#"<pic:pic><pic:nvPicPr><pic:cNvPr id="3" name="logo"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr/></pic:pic>"#;
+    let table = r#"<a:tbl><a:tr h="1"><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Jane</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl>"#;
+    let vendor = r#"<s:x xmlns:s="urn:vendor"/>"#;
+    let sld = Root::Element(P, "sld");
+
+    let raw = frame(
+        "http://schemas.openxmlformats.org/drawingml/2006/picture",
+        &format!("{picture}{table}{vendor}"),
     );
-    let (text, removed) = rebuilt(&raw, Root::Element(P, "sld"));
-    assert!(text.contains("<pic:pic/>"), "{text}");
-    assert!(text.contains("<a:t>Jane</a:t>"), "{text}");
-    assert!(!text.contains("urn:vendor"), "{text}");
+    let (text, removed) = rebuilt(&raw, sld);
+    assert_eq!(
+        text,
+        frame(
+            "http://schemas.openxmlformats.org/drawingml/2006/picture",
+            picture
+        )
+    );
+    assert_eq!(removed, [(HiddenContent::ApplicationData, 2)]);
+
+    let raw = frame("http://purl.oclc.org/ooxml/drawingml/table", table);
+    assert!(rebuild(&raw, sld).unwrap().is_none());
+
+    let raw = frame("urn:vendor", table);
+    let (text, _) = rebuilt(&raw, sld);
+    assert_eq!(text, frame("urn:vendor", ""));
+}
+
+/// A VML drawing's `<xml>` root keeps its namespace declarations alone.
+#[test]
+fn a_vml_root_keeps_only_its_declarations() {
+    let raw =
+        r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" extra="Jane"><v:shape id="s"/></xml>"#;
+    let (text, removed) = rebuilt(raw, Root::Vml);
+    assert_eq!(
+        text,
+        r#"<xml xmlns:v="urn:schemas-microsoft-com:vml"><v:shape id="s"/></xml>"#
+    );
     assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
+}
+
+/// A cut never joins text into a `]]>`, which XML forbids in text.
+#[test]
+fn text_stays_well_formed_across_a_cut() {
+    let raw = word("<w:p><w:r><w:t>]]<?app x?>></w:t></w:r></w:p>");
+    let (text, _) = rebuilt(&raw, DOCUMENT);
+    assert_eq!(text, word("<w:p><w:r><w:t>]]&gt;</w:t></w:r></w:p>"));
 }
 
 /// Excel writes `xml:space` on a string's text, which its schema leaves off.
