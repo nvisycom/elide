@@ -88,9 +88,14 @@ impl BoundingBox<f64> {
     /// any pixel the float box touches at all must be covered; truncating instead
     /// could leave a fractional edge pixel visible. Returns `None` when the
     /// intersection is empty (the box lies past an edge, or spans no whole pixel),
-    /// so a caller can `let region = bbox.to_pixels(dims)?;` and skip it.
+    /// or the box itself has no area, which rounding outward would otherwise
+    /// widen to a pixel, so a caller can `let region = bbox.to_pixels(dims)?;`
+    /// and skip it.
     #[must_use]
     pub fn to_pixels(&self, dims: Dimensions<u32>) -> Option<BoundingBox<u32>> {
+        if !(self.max.x > self.min.x && self.max.y > self.min.y) {
+            return None;
+        }
         let left = self.min.x.floor().clamp(0.0, f64::from(dims.width)) as u32;
         let top = self.min.y.floor().clamp(0.0, f64::from(dims.height)) as u32;
         let right = self.max.x.ceil().clamp(0.0, f64::from(dims.width)) as u32;
@@ -272,6 +277,10 @@ mod tests {
         // Zero-size box clamps to empty.
         let empty = BoundingBox::from_origin(Point::new(10.0, 10.0), Dimensions::new(0.0, 0.0));
         assert_eq!(empty.to_pixels(dims), None);
+        // A box of no width is empty even off the pixel grid, where rounding
+        // outward would widen it to a pixel.
+        let line = BoundingBox::new(Point::new(4.5, 1.0), Point::new(4.5, 3.0));
+        assert_eq!(line.to_pixels(dims), None);
         // Negative origin clamps to 0 and yields only the in-image part: the box
         // spans `-5..5`, so after clamping the left edge to 0 the region is
         // `0..5`, not `0..10`.

@@ -13,18 +13,34 @@ use crate::content::image;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 use crate::pdf::writer::{UnicodeMap, compressed};
 
-/// Where a value is copied: the scope names in its content resolve in, and
-/// how deep in the rebuild it nests.
+/// Where a value is copied: the scope names in its content resolve in, how
+/// deep in the rebuild it nests, and whether content drawn there begins
+/// with no font to show text in.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct At<'c, 's> {
     pub(super) scope: &'c Scope<'s>,
     pub(super) depth: usize,
+    /// Whether text the content shows before it selects a font has none:
+    /// content that starts its own graphics state (a page, a pattern's
+    /// cell, a glyph, a flattened appearance), or a form drawn where its
+    /// caller's font is lost. A form otherwise shows such text in its
+    /// caller's font.
+    pub(super) no_font: bool,
 }
 
 impl<'c, 's> At<'c, 's> {
-    /// The top of a copy, in `scope`.
+    /// The top of a copy, in `scope`, with no font selected.
     pub(super) fn top(scope: &'c Scope<'s>) -> Self {
-        Self { scope, depth: 0 }
+        Self {
+            scope,
+            depth: 0,
+            no_font: true,
+        }
+    }
+
+    /// The same place, its content beginning with no font when `no_font`.
+    pub(super) fn font(self, no_font: bool) -> Self {
+        Self { no_font, ..self }
     }
 
     /// One level deeper, in the same scope.
@@ -41,6 +57,7 @@ impl<'c, 's> At<'c, 's> {
         At {
             scope,
             depth: self.depth + 1,
+            no_font: self.no_font,
         }
     }
 }
@@ -134,13 +151,15 @@ impl<'a> Builder<'a> {
         // is copied once for each scope whose resources differ; any other
         // object is copied once.
         let drawn_in = at.scope.dictionaries();
+        // A form's copy also depends on whether its caller's font is lost.
+        let key = (target, kind, kind == Kind::Form && at.no_font);
         let scopes = &self.scopes;
         let fits = |(index, _): &&ScopedCopy| {
             index.is_none_or(|index| scopes[index].iter().eq(drawn_in.iter().copied()))
         };
         if let Some(&(index, copy)) = self
             .copies
-            .get(&(target, kind))
+            .get(&key)
             .and_then(|copies| copies.iter().find(fits))
         {
             self.scoped |= index.is_some();
@@ -151,10 +170,7 @@ impl<'a> Builder<'a> {
         let borrows = self.borrows_scope(kind, object);
         let index = borrows.then(|| self.scope_index(drawn_in));
         let copy = self.out.new_object_id();
-        self.copies
-            .entry((target, kind))
-            .or_default()
-            .push((index, copy));
+        self.copies.entry(key).or_default().push((index, copy));
         let outer = mem::take(&mut self.scoped);
         let copied = self.copy_object(kind, Some(target), object, at.deeper())?;
         let scoped = borrows || self.scoped;
@@ -163,7 +179,7 @@ impl<'a> Builder<'a> {
             let index = self.scope_index(drawn_in);
             if let Some(entry) = self
                 .copies
-                .get_mut(&(target, kind))
+                .get_mut(&key)
                 .and_then(|copies| copies.iter_mut().find(|(_, id)| *id == copy))
             {
                 entry.0 = Some(index);
@@ -175,7 +191,7 @@ impl<'a> Builder<'a> {
                 Ok(Some(Object::Reference(copy)))
             }
             None => {
-                if let Some(copies) = self.copies.get_mut(&(target, kind)) {
+                if let Some(copies) = self.copies.get_mut(&key) {
                     copies.retain(|(_, id)| *id != copy);
                 }
                 Ok(None)
@@ -282,7 +298,8 @@ impl<'a> Builder<'a> {
     /// An image XObject or stencil mask `stream` (the source object `id`
     /// when it is one): one stored as raw samples written as exactly the
     /// samples it takes, so no bytes past them are carried; one stored as a
-    /// JPEG or JPEG 2000 file copied as it is.
+    /// JPEG or JPEG 2000 file copied as it is. Either is written as an image
+    /// XObject, which the image pipeline surfaces, whatever its source said.
     fn image<'s>(
         &mut self,
         kind: Kind,
@@ -305,17 +322,19 @@ impl<'a> Builder<'a> {
                 return Ok(None);
             }
         };
-        let dict = self.stream_keys(
+        let mut dict = self.stream_keys(
             &stream.dict,
             fields,
             &[b"Filter", b"DecodeParms", b"DL"],
             at,
         )?;
+        image_xobject(&mut dict);
         Ok(Some(Object::Stream(compressed(dict, samples)?)))
     }
 
     /// An image `stream` stored as a JPEG or JPEG 2000 file, keeping
-    /// `fields`, its data and encoding as stored: the file a codec reads.
+    /// `fields`, and its data and parameters as stored: the file a codec
+    /// reads. Its one filter is written as a name.
     fn stored<'s>(
         &mut self,
         stream: &'s Stream,
@@ -326,7 +345,22 @@ impl<'a> Builder<'a> {
         'a: 's,
     {
         self.charge(stream.content.len())?;
-        let dict = self.stream_keys(&stream.dict, fields, &[], at)?;
+        let mut dict = self.stream_keys(&stream.dict, fields, &[b"Filter", b"DecodeParms"], at)?;
+        let filters = stream.filters();
+        let Ok([filter]) = filters.as_deref() else {
+            return Ok(None);
+        };
+        dict.set("Filter", Object::Name(filter.to_vec()));
+        let parameters = match stream.dict.get(b"DecodeParms") {
+            Ok(Object::Array(parameters)) => parameters.first(),
+            parameters => parameters.ok(),
+        };
+        if let Some(parameters) = parameters
+            && let Some(parameters) = self.copy(Kind::Value, parameters, at.deeper())?
+        {
+            dict.set("DecodeParms", parameters);
+        }
+        image_xobject(&mut dict);
         Ok(Some(Object::Stream(
             Stream::new(dict, stream.content.clone()).with_compression(false),
         )))
@@ -343,7 +377,7 @@ impl<'a> Builder<'a> {
     ///
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the rebuild would copy more than [`MAX_COPIED_BYTES`].
-    fn charge(&mut self, bytes: usize) -> Result<()> {
+    pub(super) fn charge(&mut self, bytes: usize) -> Result<()> {
         self.copy_budget = self.copy_budget.checked_sub(bytes).ok_or_else(|| {
             Error::resource_limit(format!(
                 "the rebuild would copy more than {MAX_COPIED_BYTES} bytes"
@@ -510,7 +544,11 @@ impl<'a> Builder<'a> {
                 self.record(HiddenContent::Unreadable);
                 continue;
             }
-            let content = self.content(&glyph.decoded()?, at.within(&inner), &mut resources)?;
+            let content = self.content(
+                &glyph.decoded()?,
+                at.within(&inner).font(true),
+                &mut resources,
+            )?;
             self.charge(content.len())?;
             procs.set(
                 name.clone(),
@@ -602,7 +640,7 @@ impl<'a> Builder<'a> {
         // dictionary a shading pattern. `/PatternType` is written to match,
         // so a viewer and the text walk read the copy as the same kind.
         let (mut copy, kind) = match value {
-            Object::Stream(stream) => match self.form(stream, TILING, at)? {
+            Object::Stream(stream) => match self.form(stream, TILING, at.font(true))? {
                 Some(copy) => (copy, 1),
                 None => return Ok(None),
             },
@@ -672,4 +710,10 @@ impl<'a> Builder<'a> {
         self.residue += parameters.len().saturating_sub(kinds.len());
         Ok(Some(Object::Array(out)))
     }
+}
+
+/// Mark `dict` an image XObject.
+fn image_xobject(dict: &mut Dictionary) {
+    dict.set("Type", Object::Name(b"XObject".to_vec()));
+    dict.set("Subtype", Object::Name(b"Image".to_vec()));
 }

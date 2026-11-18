@@ -23,10 +23,12 @@
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
+use super::MAX_NESTING;
 use crate::pdf::reader::DictionaryExt;
 
-/// How deep the verifier looks into an object's values held in place.
-const MAX_DEPTH: usize = 32;
+/// How deep the verifier looks into an object's values held in place: as
+/// deep as the rebuild writes them.
+const MAX_DEPTH: usize = MAX_NESTING;
 
 /// The most faults one verification names.
 const MAX_FAULTS: usize = 8;
@@ -43,7 +45,7 @@ pub(super) fn verify(doc: &Document) -> Result<()> {
         faults.object(doc, id, object, 0);
     }
     for (_, value) in doc.trailer.iter() {
-        faults.references(doc, value, 0);
+        faults.references(doc, None, value, 0);
     }
     for page in doc.get_pages().into_values() {
         let Ok(dict) = doc.get_dictionary(page) else {
@@ -70,6 +72,15 @@ struct Faults {
 }
 
 impl Faults {
+    /// A value in the object `id` (or the trailer, for `None`) nests past
+    /// [`MAX_DEPTH`], so it cannot be verified.
+    fn too_deep(&mut self, id: impl Into<Option<ObjectId>>) {
+        match id.into() {
+            Some(id) => self.push(format!("{id:?} nests past what is verified")),
+            None => self.push("the trailer nests past what is verified".to_owned()),
+        }
+    }
+
     fn push(&mut self, fault: String) {
         self.count += 1;
         if self.found.len() < MAX_FAULTS {
@@ -81,6 +92,7 @@ impl Faults {
     /// its references, and the resources of the content it is or holds.
     fn object(&mut self, doc: &Document, id: ObjectId, object: &Object, depth: usize) {
         if depth > MAX_DEPTH {
+            self.too_deep(id);
             return;
         }
         let dict = match object {
@@ -107,7 +119,7 @@ impl Faults {
                 return;
             }
             other => {
-                self.references(doc, other, depth);
+                self.references(doc, Some(id), other, depth);
                 return;
             }
         };
@@ -119,9 +131,11 @@ impl Faults {
         }
     }
 
-    /// Check that a reference in `value` names a dictionary or a stream.
-    fn references(&mut self, doc: &Document, value: &Object, depth: usize) {
+    /// Check that a reference in `value`, held in the object `id` (or the
+    /// trailer, for `None`), names a dictionary or a stream.
+    fn references(&mut self, doc: &Document, id: Option<ObjectId>, value: &Object, depth: usize) {
         if depth > MAX_DEPTH {
+            self.too_deep(id);
             return;
         }
         match value {
@@ -132,12 +146,12 @@ impl Faults {
             },
             Object::Array(items) => {
                 for item in items {
-                    self.references(doc, item, depth + 1);
+                    self.references(doc, id, item, depth + 1);
                 }
             }
             Object::Dictionary(dict) => {
                 for (_, value) in dict.iter() {
-                    self.references(doc, value, depth + 1);
+                    self.references(doc, id, value, depth + 1);
                 }
             }
             _ => {}
@@ -313,6 +327,18 @@ mod tests {
             Vec::new(),
         ));
         verify(&doc).unwrap();
+    }
+
+    /// A value nested past what is verified is a fault, not passed over.
+    #[test]
+    fn a_value_nested_too_deep_is_not_normal() {
+        let (mut doc, _) = document(Dictionary::new());
+        let mut value = Object::Reference((9999, 0));
+        for _ in 0..=MAX_DEPTH + 1 {
+            value = Object::Array(vec![value]);
+        }
+        doc.add_object(dictionary! { "Deep" => value });
+        assert!(faulted(&doc));
     }
 
     /// A page's content is one stream, not an array of them.

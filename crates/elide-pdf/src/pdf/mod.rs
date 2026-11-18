@@ -77,13 +77,16 @@ impl Pdf {
         }
         let mut doc = Document::load_mem(document)
             .map_err(|e| Error::malformed(format!("not a readable PDF: {e}")))?;
-        // A document with an empty user password decrypts on load. One that
-        // still carries `/Encrypt` needs a password: its strings and streams are
-        // ciphertext nothing can extract or redact, so it is refused rather than
-        // passed through unread.
-        if doc.is_encrypted() {
+        // A document with an empty user password decrypts on load, and its
+        // trailer loses `/Encrypt`. One that still carries it was not
+        // decrypted (it needs a password, or its encryption dictionary could
+        // not be read): its strings and streams are ciphertext nothing can
+        // extract or redact, so it is refused rather than passed through
+        // unread.
+        if doc.trailer.has(b"Encrypt") {
             return Err(Error::capability_unavailable(
-                "PDF is encrypted with a user password, so its content cannot be read",
+                "PDF is encrypted and could not be decrypted without a password, so its \
+                 content cannot be read",
             ));
         }
         if own_file_filter(&doc, document) {
@@ -92,7 +95,7 @@ impl Pdf {
                  which cannot be read",
             ));
         }
-        inline_encodings(&mut doc);
+        inline_encodings(&mut doc)?;
         Ok(Self {
             doc,
             bytes: Bytes::copy_from_slice(document),
@@ -133,18 +136,24 @@ impl Pdf {
 /// followed. lopdf reads both only as direct values: it decodes a stream
 /// whose filter is a reference as if it had none, so its encoded bytes would
 /// be read, and written back, as its content.
-fn inline_encodings(doc: &mut Document) {
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+/// the values inlined, shared ones counted once per stream that holds them,
+/// come to more than [`MAX_INLINED_BYTES`].
+fn inline_encodings(doc: &mut Document) -> Result<()> {
+    let mut budget = MAX_INLINED_BYTES;
     let mut inlined = Vec::new();
     for (&id, object) in &doc.objects {
         let Object::Stream(stream) = object else {
             continue;
         };
         for key in [&b"Filter"[..], b"DecodeParms"] {
-            if let Ok(value) = stream.dict.get(key) {
-                let value = inline(doc, value, 0);
-                if stream.dict.get(key).ok() != Some(&value) {
-                    inlined.push((id, key, value));
-                }
+            if let Ok(value) = stream.dict.get(key)
+                && holds_reference(value, 0)
+            {
+                inlined.push((id, key, inline(doc, value, 0, &mut budget)?));
             }
         }
     }
@@ -153,29 +162,85 @@ fn inline_encodings(doc: &mut Document) {
             stream.dict.set(key, value);
         }
     }
+    Ok(())
+}
+
+/// The most bytes of values [`inline_encodings`] copies into a document's
+/// stream dictionaries, each value costing [`INLINED_VALUE_COST`] and a
+/// string or name its bytes too.
+const MAX_INLINED_BYTES: usize = 16 * 1024 * 1024;
+
+/// What one inlined value costs, beyond its bytes.
+const INLINED_VALUE_COST: usize = 16;
+
+/// Whether `value`, or what it holds two levels down, is a reference.
+fn holds_reference(value: &Object, depth: usize) -> bool {
+    match value {
+        Object::Reference(_) => true,
+        Object::Array(items) if depth < 2 => items.iter().any(|v| holds_reference(v, depth + 1)),
+        Object::Dictionary(dict) if depth < 2 => {
+            dict.iter().any(|(_, v)| holds_reference(v, depth + 1))
+        }
+        _ => false,
+    }
 }
 
 /// `value` with the references in it, and in the arrays and dictionaries it
-/// holds two levels down, followed; a reference to nothing is null.
-fn inline(doc: &Document, value: &Object, depth: usize) -> Object {
+/// holds two levels down, followed; a reference to nothing is null. Each
+/// value copied is taken from `budget`.
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+/// `budget` runs out.
+fn inline(doc: &Document, value: &Object, depth: usize, budget: &mut usize) -> Result<Object> {
     let Some(value) = doc.resolve(value) else {
-        return Object::Null;
+        return Ok(Object::Null);
     };
-    match value {
+    let followed = depth < 2 && matches!(value, Object::Array(_) | Object::Dictionary(_));
+    // A value not followed into is copied whole, at its whole size.
+    let cost = if followed {
+        INLINED_VALUE_COST
+    } else {
+        size(value)
+    };
+    *budget = budget.checked_sub(cost).ok_or_else(|| {
+        Error::resource_limit(format!(
+            "stream encodings reference more than {MAX_INLINED_BYTES} bytes of values"
+        ))
+    })?;
+    Ok(match value {
         Object::Array(items) if depth < 2 => Object::Array(
             items
                 .iter()
-                .map(|item| inline(doc, item, depth + 1))
-                .collect(),
+                .map(|item| inline(doc, item, depth + 1, budget))
+                .collect::<Result<_>>()?,
         ),
         Object::Dictionary(dict) if depth < 2 => Object::Dictionary(
             dict.iter()
-                .map(|(key, value)| (key.clone(), inline(doc, value, depth + 1)))
-                .collect(),
+                .map(|(key, value)| Ok((key.clone(), inline(doc, value, depth + 1, budget)?)))
+                .collect::<Result<_>>()?,
         ),
         value => value.clone(),
-    }
+    })
 }
+
+/// What a copy of `value` costs: [`INLINED_VALUE_COST`] for it and each
+/// value it holds, and the bytes of each string and name.
+fn size(value: &Object) -> usize {
+    INLINED_VALUE_COST
+        + match value {
+            Object::String(bytes, _) | Object::Name(bytes) => bytes.len(),
+            Object::Array(items) => items.iter().map(size).sum(),
+            Object::Dictionary(dict) => dict.iter().map(|(key, v)| key.len() + size(v)).sum(),
+            Object::Stream(stream) => stream.content.len(),
+            _ => 0,
+        }
+}
+
+/// How many `endobj`s past the encryption dictionary's offset are tried as
+/// its end.
+const MAX_ENCRYPT_ENDS: usize = 16;
 
 /// Whether the decrypted `doc`, parsed from `bytes`, holds embedded files
 /// encrypted under a crypt filter of their own (`/EFF`, 7.6.2), which lopdf
@@ -184,8 +249,8 @@ fn inline(doc: &Document, value: &Object, depth: usize) -> Object {
 /// its stream default.
 ///
 /// lopdf drops the encryption dictionary on load, so `/EFF` is read from the
-/// dictionary's own bytes. When that can't be read, a document that defines
-/// a filter other than its defaults is refused, whether or not it selects it.
+/// dictionary's own bytes. When that can't be read, the filter the files are
+/// under is unknown (it may even be `Identity`), so the document is refused.
 fn own_file_filter(doc: &Document, bytes: &[u8]) -> bool {
     let Some(state) = &doc.encryption_state else {
         return false;
@@ -201,13 +266,7 @@ fn own_file_filter(doc: &Document, bytes: &[u8]) -> bool {
     match file_filter(doc, bytes) {
         Some(Some(filter)) => filter != state.default_stream_filter(),
         Some(None) => false,
-        None => {
-            let defaults = [state.default_stream_filter(), state.default_string_filter()];
-            state
-                .crypt_filters()
-                .keys()
-                .any(|name| !defaults.contains(&name.as_slice()))
-        }
+        None => true,
     }
 }
 
@@ -215,24 +274,29 @@ fn own_file_filter(doc: &Document, bytes: &[u8]) -> bool {
 /// lopdf's content parser (which reads a dictionary as an operand):
 /// `Some(None)` when it has none, `None` when the dictionary, or an `/EFF`
 /// that is not a name, cannot be read.
+///
+/// The dictionary ends at the first `endobj` that parses as the operator
+/// closing it: one inside a comment or a string is no end, so each is tried
+/// in turn, up to [`MAX_ENCRYPT_ENDS`].
 fn file_filter(doc: &Document, bytes: &[u8]) -> Option<Option<Vec<u8>>> {
     let id = doc.encryption_state.as_ref()?.encrypt_object_id()?;
     let Some(XrefEntry::Normal { offset, .. }) = doc.reference_table.get(id.0) else {
         return None;
     };
     let object = bytes.get(usize::try_from(*offset).ok()?..)?;
-    let end = object
+    let dict = object
         .windows(b"endobj".len())
-        .position(|window| window == b"endobj")?;
-    let content = Content::decode(&object[..end + b"endobj".len()]).ok()?;
-    let dict = content
-        .operations
-        .iter()
-        .find(|operation| operation.operator == "endobj")?
+        .enumerate()
+        .filter(|(_, window)| *window == b"endobj")
+        .take(MAX_ENCRYPT_ENDS)
+        .find_map(|(end, _)| {
+            let content = Content::decode(&object[..end + b"endobj".len()]).ok()?;
+            let closing = content.operations.into_iter().next_back()?;
+            (closing.operator == "endobj").then_some(closing)
+        })?
         .operands
-        .first()?
-        .as_dict()
-        .ok()?;
+        .into_iter()
+        .find_map(|operand| operand.as_dict().ok().cloned())?;
     match dict.get(b"EFF") {
         Err(_) => Some(None),
         Ok(Object::Name(name)) => Some(Some(name.clone())),
@@ -253,6 +317,42 @@ mod tests {
 
     use super::*;
     use crate::fixtures::with_pages;
+
+    /// A document that saves past the limit it would be opened within is
+    /// refused when written, not when opened again.
+    #[test]
+    fn a_document_saved_past_the_limit_is_refused() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let large = doc.add_object(
+            Stream::new(dictionary! {}, vec![0; Pdf::MAX_DOCUMENT_BYTES]).with_compression(false),
+        );
+        doc.trailer.set("Large", large);
+        let error = Edit::of(doc).finish().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    }
+
+    /// A large value many streams name as their encoding is inlined into
+    /// each, so the copies are bounded together: past the bound the
+    /// document is refused, not expanded.
+    #[test]
+    fn inlined_encodings_are_bounded() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let shared = doc.add_object(dictionary! {
+            "Padding" => vec![Object::Integer(0); 100_000],
+        });
+        for _ in 0..20 {
+            doc.add_object(Stream::new(
+                dictionary! { "DecodeParms" => shared },
+                Vec::new(),
+            ));
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let error = Pdf::open(&bytes).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    }
 
     /// A one-page PDF, unencrypted.
     fn document() -> Document {
@@ -307,6 +407,32 @@ mod tests {
     #[test]
     fn a_pdf_that_needs_a_password_is_refused() {
         let error = Pdf::open(&encrypted("secret")).expect_err("a password-protected PDF");
+        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+    }
+
+    /// A document whose encryption dictionary lopdf cannot read is loaded
+    /// undecrypted, so it is refused rather than read as ciphertext: here an
+    /// `endobj` in a name ends the dictionary early for lopdf.
+    #[test]
+    fn a_pdf_lopdf_could_not_decrypt_is_refused() {
+        let doc = document();
+        let version = EncryptionVersion::V2 {
+            document: &doc,
+            owner_password: "owner",
+            user_password: "",
+            key_length: 128,
+            permissions: Permissions::all(),
+        };
+        let state = EncryptionState::try_from(version).unwrap();
+        let mut doc = doc.clone();
+        doc.encrypt(&state).unwrap();
+        let id = doc.trailer.get(b"Encrypt").unwrap().as_reference().unwrap();
+        doc.get_dictionary_mut(id)
+            .unwrap()
+            .set("Note", Object::Name(b"endobj".to_vec()));
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let error = Pdf::open(&bytes).expect_err("an undecrypted PDF");
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
     }
 

@@ -2,9 +2,9 @@
 
 use bytes::Bytes;
 use elide_codec::{FormatId, LocalId, Stream};
-use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
+use elide_core::{Error, Result};
 use elide_image::ImageBuffer;
 use elide_image::modality::{Image, ImageData, ImageFormat, ImageLocation, ImageReplacement};
 use elide_image::primitive::BoundingBox;
@@ -55,6 +55,23 @@ impl PageStream {
     fn open(&self) -> Result<ImageBuffer> {
         ImageBuffer::open(&self.render, ImageFormat::Png)
     }
+
+    /// Check that `location` addresses this page: it names no page, or
+    /// this one.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// if it names another page.
+    fn on_this_page(&self, location: &ImageLocation) -> Result<()> {
+        match location.page {
+            Some(page) if page != self.number => Err(Error::malformed(format!(
+                "a region of page {page} addressed to page {}'s render",
+                self.number
+            ))),
+            _ => Ok(()),
+        }
+    }
 }
 
 impl Stream<Image> for PageStream {
@@ -75,6 +92,7 @@ impl Stream<Image> for PageStream {
 #[async_trait::async_trait]
 impl DataReader<Image> for PageStream {
     async fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
+        self.on_this_page(location)?;
         self.open()?.read_at(location)
     }
 }
@@ -82,8 +100,12 @@ impl DataReader<Image> for PageStream {
 #[async_trait::async_trait]
 impl DataWriter<Image> for PageStream {
     /// Paint each redaction into the render and keep its region; a region
-    /// outside the render refuses the whole batch, painting none of it.
+    /// outside the render, or of another page, refuses the whole batch,
+    /// painting none of it.
     async fn write_at(&mut self, redactions: Redactions<Image>) -> Result<()> {
+        for (location, _) in &redactions {
+            self.on_this_page(location)?;
+        }
         let mut render = self.open()?;
         let regions = render.redact_all(redactions)?;
         self.render = render.encode()?;

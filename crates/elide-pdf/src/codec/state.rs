@@ -121,27 +121,26 @@ impl PdfState {
         &mut self,
         spans: impl IntoIterator<Item = (u32, Range<usize>)>,
     ) -> Result<()> {
-        // An empty range covers no character, so it redacts nothing; within
-        // a ligature it would otherwise select the glyph around it.
-        let detections = spans
-            .into_iter()
-            .filter(|(_, range)| !range.is_empty())
-            .map(|(number, range)| {
-                let text = self.text(number)?;
-                let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone()))
-                else {
-                    return Err(Error::malformed(format!(
-                        "range {}..{} is outside page {number}'s text or splits a character",
-                        range.start, range.end
-                    )));
-                };
-                // Glyphs address characters, so the byte range is measured in
-                // character offsets.
-                let start = before.chars().count();
-                let end = start + text[range].chars().count();
-                Ok(Detection::new(number, start, end))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut detections = Vec::new();
+        for (number, range) in spans {
+            let text = self.text(number)?;
+            let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone())) else {
+                return Err(Error::malformed(format!(
+                    "range {}..{} is outside page {number}'s text or splits a character",
+                    range.start, range.end
+                )));
+            };
+            // An empty range covers no character, so it redacts nothing;
+            // within a ligature it would otherwise select the glyph around it.
+            if range.is_empty() {
+                continue;
+            }
+            // Glyphs address characters, so the byte range is measured in
+            // character offsets.
+            let start = before.chars().count();
+            let end = start + text[range].chars().count();
+            detections.push(Detection::new(number, start, end));
+        }
         self.detections.extend(detections);
         Ok(())
     }

@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use elide_core::{Error, Result};
-use lopdf::{Document, Encoding, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Document, Encoding, Object, ObjectId, Stream};
 
 use crate::pdf::reader::font::{readable, to_unicode};
 
@@ -94,11 +94,24 @@ impl UnicodeMap {
         self
     }
 
-    /// Unmap the code text draws as `bytes`.
-    pub(crate) fn remove(&mut self, bytes: &[u8]) {
-        if let Some(key) = key(bytes) {
-            self.codes.remove(&key);
-        }
+    /// Unmap the code text draws as `bytes`, and every entry of the same
+    /// value at another length, which a viewer reading a code by its value
+    /// alone would take for it; an entry `kept` (codes text that stays still
+    /// draws, by their bytes) is spared.
+    pub(crate) fn remove(&mut self, bytes: &[u8], kept: &BTreeSet<Vec<u8>>) {
+        let Some((_, value)) = key(bytes) else {
+            return;
+        };
+        self.codes
+            .retain(|&(len, code), _| code != value || kept.contains(&code_bytes(len, code)));
+    }
+
+    /// Whether any entry maps a code of `value`, at any length, other than
+    /// one `kept`.
+    fn maps(&self, value: u32, kept: &BTreeSet<Vec<u8>>) -> bool {
+        self.codes
+            .keys()
+            .any(|&(len, code)| code == value && !kept.contains(&code_bytes(len, code)))
     }
 
     /// The CMap written: its codespace, then each run of codes whose
@@ -200,15 +213,17 @@ impl UnicodeMap {
     }
 }
 
-/// Remove `deleted` codes from each named `/ToUnicode` CMap stream, sparing
-/// any code `surviving` text still draws with it.
+/// Remove `deleted` codes from each named `/ToUnicode` CMap stream, each by
+/// its value at any length the CMap stores it under (see
+/// [`UnicodeMap::remove`]), sparing any code `surviving` text still draws
+/// with it.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a CMap
-/// holding a deleted code cannot be read, so the redaction fails closed
-/// rather than leaving a recoverable code->Unicode entry; or as
-/// [`UnicodeMap::read`].
+/// holding a deleted code cannot be read, or its rewrite, read back, still
+/// maps one, so the redaction fails closed rather than leaving a
+/// recoverable code->Unicode entry; or as [`UnicodeMap::read`].
 pub(crate) fn scrub(
     doc: &mut Document,
     deleted: &BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
@@ -232,11 +247,26 @@ pub(crate) fn scrub(
                  codes cannot be removed from it",
             ));
         };
-        for code in codes {
-            map.remove(code);
+        for code in &codes {
+            map.remove(code, kept);
+        }
+        // The CMap written is read back as a viewer would: a deleted code
+        // still mapped there fails the redaction.
+        let written = map.write();
+        let check = Stream::new(Dictionary::new(), written.clone());
+        let remains = UnicodeMap::read(doc, &check)?.is_none_or(|read| {
+            codes
+                .iter()
+                .filter_map(|code| key(code))
+                .any(|(_, value)| read.maps(value, kept))
+        });
+        if remains {
+            return Err(Error::redaction(
+                "a deleted glyph's code is still mapped in its rewritten /ToUnicode CMap",
+            ));
         }
         if let Ok(Object::Stream(stream)) = doc.get_object_mut(cmap_id) {
-            stream.set_plain_content(map.write());
+            stream.set_plain_content(written);
         }
     }
     Ok(())
@@ -263,6 +293,11 @@ fn steps(first: &[u16], step: u32, units: &[u16]) -> bool {
     };
     let stepped = u32::from(last) + step;
     head == rest && stepped == u32::from(unit) && stepped >> 8 == u32::from(last) >> 8
+}
+
+/// The `len`-byte `code` as its bytes.
+fn code_bytes(len: u8, code: u32) -> Vec<u8> {
+    code.to_be_bytes()[4 - usize::from(len)..].to_vec()
 }
 
 /// `code` with its byte at `shift` set to `byte`.
@@ -349,11 +384,28 @@ mod tests {
     #[test]
     fn a_code_is_removed_from_inside_a_range() {
         let mut map = read(&source());
-        map.remove(&[0x00, 0x11]);
+        map.remove(&[0x00, 0x11], &BTreeSet::new());
         let map = read(&map.write());
         assert_eq!(text(&map, 2, 0x10).as_deref(), Some("a"));
         assert_eq!(text(&map, 2, 0x11), None);
         assert_eq!(text(&map, 2, 0x12).as_deref(), Some("c"));
+    }
+
+    /// A one-byte code is removed under whatever length the CMap stores it,
+    /// so a viewer reading codes by value alone finds it nowhere; a code
+    /// text that stays still draws is spared.
+    #[test]
+    fn a_code_is_removed_at_every_length_it_is_stored() {
+        let mut map = read(&cmap(
+            "2 begincodespacerange\n<00> <FF>\n<0000> <FFFF>\nendcodespacerange\n\
+            3 beginbfchar\n<0041> <004A>\n<42> <0042>\n<0042> <0062>\nendbfchar",
+        ));
+        map.remove(&[0x41], &BTreeSet::new());
+        map.remove(&[0x42], &BTreeSet::from([vec![0x00, 0x42]]));
+        let map = read(&map.write());
+        assert_eq!(text(&map, 2, 0x41), None);
+        assert_eq!(text(&map, 1, 0x42), None);
+        assert_eq!(text(&map, 2, 0x42).as_deref(), Some("b"));
     }
 
     /// Nothing but the map is written: a comment does not survive, and an
@@ -379,7 +431,7 @@ mod tests {
         let mut map = read(&source());
         let keys: Vec<(u8, u32)> = map.codes.keys().copied().collect();
         for (len, code) in keys {
-            map.remove(&code.to_be_bytes()[4 - usize::from(len)..]);
+            map.remove(&code_bytes(len, code), &BTreeSet::new());
         }
         assert!(read(&map.write()).codes.is_empty());
     }

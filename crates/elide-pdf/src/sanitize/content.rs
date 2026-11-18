@@ -55,6 +55,10 @@ const DEFAULT_SPACES: [&[u8]; 3] = [b"DefaultGray", b"DefaultRGB", b"DefaultCMYK
 /// state selects.
 const STATE_FONT_PREFIX: &str = "GSFont";
 
+/// The prefix of an XObject resource name the rebuild gives a second copy
+/// of a form drawn under one name.
+const DRAWN_PREFIX: &str = "Fx";
+
 /// The property-list entries that carry text of their own: the replacement
 /// text, an alternate description, and an expansion.
 const ALTERNATE_TEXT_KEYS: [&[u8]; 3] = [b"ActualText", b"Alt", b"E"];
@@ -135,7 +139,7 @@ impl<'a> Builder<'a> {
             open: Vec::new(),
             hiding: 0,
             saved: 0,
-            font_lost: false,
+            font_lost: at.no_font,
             font_saves: Vec::new(),
             in_text: false,
             marked_in_text: 0,
@@ -145,6 +149,16 @@ impl<'a> Builder<'a> {
         }
         copy.finish()
     }
+}
+
+/// The font a graphics state sets.
+enum StateFont {
+    /// It sets none.
+    Unset,
+    /// The `Tf` that selects it.
+    Selected(Operation),
+    /// It sets one that cannot be read or copied.
+    Lost,
 }
 
 /// One content stream being rebuilt: the rebuild it copies into, where (the
@@ -163,9 +177,10 @@ struct ContentCopy<'c, 'a, 's> {
     hiding: usize,
     /// How many `q` saves are open.
     saved: usize,
-    /// Whether the selected font could not be copied, so the text it shows
-    /// is cut and reported; saved and restored with `q`/`Q`, as the font is
-    /// graphics state.
+    /// Whether there is no font to show text in (none is selected yet, or
+    /// the one selected could not be copied), so the text shown is cut and
+    /// reported; saved and restored with `q`/`Q`, as the font is graphics
+    /// state.
     font_lost: bool,
     font_saves: Vec<bool>,
     /// Whether a text object is open.
@@ -183,14 +198,34 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     /// As [`Builder::copy`].
     fn operation(&mut self, operation: Operation) -> Result<()> {
         let operator = operation.operator.as_str();
+        // What a hidden sequence draws is cut, but the graphics state it
+        // sets lasts past it (8.11.3.2), so that is kept: a painting
+        // operator ends its path unpainted, keeping any clip it sets, and a
+        // text operator keeps its line move and spacing.
         if self.hiding > 0 {
             match operator {
                 "BDC" | "BMC" => self.open.push(Marked::Within),
                 "EMC" => self.hiding -= usize::from(self.open.pop() == Some(Marked::Hiding)),
-                _ => {}
+                "f" | "F" | "f*" | "S" | "s" | "B" | "B*" | "b" | "b*" => {
+                    self.kept.push(Operation::new("n", Vec::new()));
+                }
+                "Tj" | "TJ" | "'" | "\"" => self.text_state(&operation),
+                "sh" | "Do" | "BI" | "MP" | "DP" => {}
+                _ => return self.visible(operation),
             }
             return Ok(());
         }
+        self.visible(operation)
+    }
+
+    /// Rebuild `operation`, outside any hidden sequence or setting state
+    /// within one.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::copy`].
+    fn visible(&mut self, operation: Operation) -> Result<()> {
+        let operator = operation.operator.as_str();
         // A marked-content property list is rewritten, and an inline image is
         // cut, so only the operators kept as written are checked.
         if !matches!(operator, "BDC" | "DP" | "BI") && !operands_fit(operator, &operation.operands)
@@ -220,7 +255,14 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             "gs" => {
                 let font = self.state_font(&operation)?;
                 self.resource(operation, Resource::ExtGState)?;
-                self.kept.extend(font);
+                match font {
+                    StateFont::Unset => {}
+                    StateFont::Selected(tf) => {
+                        self.font_lost = false;
+                        self.kept.push(tf);
+                    }
+                    StateFont::Lost => self.font_lost = true,
+                }
             }
             "sh" => {
                 self.resource(operation, Resource::Shading)?;
@@ -326,6 +368,12 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     /// after it stays where it was.
     fn unreadable_text(&mut self, operation: &Operation) {
         self.builder.record(HiddenContent::Unreadable);
+        self.text_state(operation);
+    }
+
+    /// The line move and spacing the text-showing `operation` sets, without
+    /// the text it shows.
+    fn text_state(&mut self, operation: &Operation) {
         if operation.operator == "\"" {
             let [word, character, _] = operation.operands.as_slice() else {
                 return;
@@ -382,10 +430,6 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             builder.residue += 1;
             return Ok(());
         };
-        if has(self.resources, b"XObject", name) {
-            self.kept.push(operation);
-            return Ok(());
-        }
         let Some(value) = self.at.scope.lookup(source, b"XObject", name) else {
             builder.residue += 1;
             return Ok(());
@@ -413,43 +457,70 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 return Ok(());
             }
         };
-        if let Some(copy) = builder.copy(kind, value, self.at.deeper())? {
-            insert(self.resources, b"XObject", name, copy);
-            self.kept.push(operation);
-        }
+        // A form shows text before its own font in the caller's, so one
+        // drawn where that font is lost is a copy of its own, under a name
+        // of its own when the name already stands for the other copy.
+        let at = self.at.deeper().font(self.font_lost);
+        let Some(copy) = builder.copy(kind, value, at)? else {
+            return Ok(());
+        };
+        let existing = self
+            .resources
+            .get(b"XObject")
+            .and_then(Object::as_dict)
+            .ok()
+            .and_then(|entries| entries.get(name).ok());
+        let name = match existing {
+            None => name.clone(),
+            Some(existing) if *existing == copy => name.clone(),
+            Some(_) => {
+                let resources = &*self.resources;
+                let scope = self.at.scope;
+                fresh(DRAWN_PREFIX, |name| {
+                    has(resources, b"XObject", name)
+                        || scope.lookup(source, b"XObject", name).is_some()
+                })
+            }
+        };
+        insert(self.resources, b"XObject", &name, copy);
+        self.kept
+            .push(Operation::new("Do", vec![Object::Name(name)]));
         Ok(())
     }
 
-    /// The `Tf` that selects the font the graphics state `gs` names sets
-    /// (`/Font [font size]`), its font copied into the resources under a name
-    /// of its own; `None` when the state sets no font. A graphics state's
-    /// font is the same as a `Tf`, so writing it as one gives the text walk a
-    /// single way fonts are selected.
+    /// The font the graphics state `gs` names sets (`/Font [font size]`):
+    /// selected by a `Tf`, its font copied into the resources under a name
+    /// of its own, or lost when it cannot be read or copied. A graphics
+    /// state's font is the same as a `Tf`, so writing it as one gives the
+    /// text walk a single way fonts are selected.
     ///
     /// # Errors
     ///
     /// As [`Builder::copy`].
-    fn state_font(&mut self, gs: &Operation) -> Result<Option<Operation>> {
+    fn state_font(&mut self, gs: &Operation) -> Result<StateFont> {
         let source = self.builder.source;
         let Some(Object::Name(name)) = gs.operands.first() else {
-            return Ok(None);
+            return Ok(StateFont::Unset);
         };
-        let setting = self
+        let Some(setting) = self
             .at
             .scope
             .lookup(source, b"ExtGState", name)
             .and_then(|state| source.resolve_dict(state))
             .and_then(|state| state.get(b"Font").ok())
-            .and_then(|font| source.resolve_array(font));
-        let Some([font, size]) = setting.map(Vec::as_slice) else {
-            return Ok(None);
+        else {
+            return Ok(StateFont::Unset);
+        };
+        let Some([font, size]) = source.resolve_array(setting).map(Vec::as_slice) else {
+            self.builder.residue += 1;
+            return Ok(StateFont::Lost);
         };
         let Some(size @ (Object::Integer(_) | Object::Real(_))) = source.resolve(size) else {
             self.builder.residue += 1;
-            return Ok(None);
+            return Ok(StateFont::Lost);
         };
         let Some(font) = self.builder.copy(Kind::Font, font, self.at.deeper())? else {
-            return Ok(None);
+            return Ok(StateFont::Lost);
         };
         // The font keeps the name it already has here, else takes the first
         // name nothing in scope uses.
@@ -466,7 +537,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             .map(|(name, _)| name.clone())
             .unwrap_or_else(|| fresh(STATE_FONT_PREFIX, taken));
         insert(self.resources, b"Font", &name, font);
-        Ok(Some(Operation::new(
+        Ok(StateFont::Selected(Operation::new(
             "Tf",
             vec![Object::Name(name), size.clone()],
         )))

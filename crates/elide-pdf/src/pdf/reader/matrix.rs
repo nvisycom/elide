@@ -1,5 +1,7 @@
 //! [`Matrix`]: the affine transform PDF places content with (8.3.4).
 
+use std::cmp::Ordering;
+
 /// A 2×3 affine transform `[a b c d e f]`, mapping a point `(x, y)` to
 /// `(a·x + c·y + e, b·x + d·y + f)`. Row-vector convention, as PDF uses.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,21 +64,29 @@ impl Matrix {
     }
 
     /// The matrix undoing this one, or `None` when it flattens the plane
-    /// and has none.
+    /// and has none. Whether it flattens is judged against its own scale, so
+    /// a uniformly tiny matrix still inverts.
     pub(crate) fn inverse(self) -> Option<Matrix> {
         let det = self.a * self.d - self.b * self.c;
-        if det.abs() < f64::EPSILON {
+        let scale = (self.a * self.d).abs().max((self.b * self.c).abs());
+        // A NaN determinant fails the comparison too.
+        if det.abs().partial_cmp(&(scale * f64::EPSILON)) != Some(Ordering::Greater) {
             return None;
         }
         let (a, b, c, d) = (self.d / det, -self.b / det, -self.c / det, self.a / det);
-        Some(Matrix {
+        let inverse = Matrix {
             a,
             b,
             c,
             d,
             e: -(self.e * a + self.f * c),
             f: -(self.e * b + self.f * d),
-        })
+        };
+        inverse
+            .values()
+            .iter()
+            .all(|v| v.is_finite())
+            .then_some(inverse)
     }
 
     /// The matrix as the six values `[a b c d e f]` an operator takes.
@@ -108,5 +118,16 @@ mod tests {
                 .inverse()
                 .is_none()
         );
+    }
+
+    /// A uniformly tiny scale is no flattening: it inverts, and a point it
+    /// places maps back.
+    #[test]
+    fn a_tiny_scale_inverts() {
+        let m = Matrix::from([1e-9, 0.0, 0.0, 1e-9, 3.0, 4.0]);
+        let (x, y) = m.apply(5e9, 7e9);
+        let (x, y) = m.inverse().unwrap().apply(x, y);
+        assert!((x - 5e9).abs() < 1.0 && (y - 7e9).abs() < 1.0);
+        assert!(Matrix::from([0.0; 6]).inverse().is_none());
     }
 }

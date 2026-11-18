@@ -99,7 +99,8 @@ impl<'a> Builder<'a> {
         }
 
         // An appearance without resources of its own resolves names in the
-        // form's default resources, then in the page's it is drawn on.
+        // page's it is drawn on (7.8.3), then, for a name the page does not
+        // define, in the form's default resources.
         let defaults = source
             .catalog()
             .ok()
@@ -107,11 +108,7 @@ impl<'a> Builder<'a> {
             .and_then(|form| source.resolve_dict(form))
             .and_then(|form| form.get(b"DR").ok())
             .and_then(|resources| source.resolve_dict(resources));
-        let defaults = Scope::new(
-            defaults
-                .into_iter()
-                .chain(page.dictionaries().iter().copied()),
-        );
+        let defaults = Scope::new(page.dictionaries().iter().copied().chain(defaults));
         let Some(form) = self.copy(Kind::Form, appearance, At::top(&defaults))? else {
             self.record(HiddenContent::FormField);
             return Ok(None);

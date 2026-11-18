@@ -29,10 +29,11 @@
 //! What the rebuild writes is in a normal form ([`normal`]) that everything
 //! reading it afterwards may count on.
 //!
-//! The codec rebuilds at decode, so detection reads exactly what will ship, and
-//! again at encode, so every document it writes is a rebuild. That output is
-//! in the normal form, and rebuilding it drops nothing: that is the output
-//! check ([`check`]).
+//! The codec rebuilds at decode, so detection reads exactly what will ship.
+//! At encode, the document written (the rebuild, or the rebuild with its
+//! redactions applied) is checked, not rebuilt again: it is in the normal
+//! form, and a trial rebuild of it drops nothing ([`check`]). A document
+//! that fails the check is refused.
 
 mod check;
 mod content;
@@ -126,10 +127,11 @@ type ScopedCopy = (Option<usize>, ObjectId);
 struct Builder<'a> {
     source: &'a Document,
     out: Document,
-    /// The copies of each source object, by the kind it was copied as: one
-    /// per scope for an object whose copy depends on the scope it is drawn
-    /// in, and one for anything else.
-    copies: HashMap<(ObjectId, Kind), Vec<ScopedCopy>>,
+    /// The copies of each source object, by the kind it was copied as (and,
+    /// for a form, whether its caller's font is lost): one per scope for an
+    /// object whose copy depends on the scope it is drawn in, and one for
+    /// anything else.
+    copies: HashMap<(ObjectId, Kind, bool), Vec<ScopedCopy>>,
     /// Each scope a copy depends on, its resource dictionaries kept once:
     /// equal resources resolve every name alike, so they share copies.
     scopes: Vec<Vec<Dictionary>>,
@@ -143,6 +145,8 @@ struct Builder<'a> {
     cut: HashSet<ObjectId>,
     /// The neutral names of the attached files copied.
     file_names: HashSet<String>,
+    /// The copy of each embedded file made for a name of each extension.
+    file_copies: HashMap<(ObjectId, Option<String>), Object>,
     /// The number the next attached file renamed is tried with: one tried
     /// is never tried again, so naming every file takes one pass.
     next_file: usize,
@@ -175,6 +179,7 @@ impl<'a> Builder<'a> {
             pages: BTreeMap::new(),
             cut: HashSet::new(),
             file_names: HashSet::new(),
+            file_copies: HashMap::new(),
             next_file: 1,
             layers: Layers::read(source),
             destinations: destinations(source),
@@ -286,16 +291,18 @@ impl<'a> Builder<'a> {
         let catalog_id = self.out.add_object(new_catalog);
         self.out.trailer.set("Root", catalog_id);
 
-        // A form or image a resource dictionary lists but no content draws.
+        // A resource a resource dictionary lists (a font, form, image,
+        // graphics state, shading, pattern or colour space) but no content
+        // uses.
         let copied: HashSet<ObjectId> = self
             .copies
             .iter()
             .filter(|(_, copies)| !copies.is_empty())
-            .map(|((id, _), _)| *id)
+            .map(|((id, ..), _)| *id)
             .collect();
         let mut listed = HashSet::new();
         for object in source.objects.values() {
-            listed_xobjects(source, object, 0, &mut listed);
+            listed_resources(source, object, 0, &mut listed);
         }
         let undisplayed = listed
             .iter()
@@ -331,20 +338,44 @@ fn parse_version(version: &str) -> Option<(u32, u32)> {
     Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
-/// Collect into `out` every XObject a resource dictionary within `object`
-/// lists.
-fn listed_xobjects(doc: &Document, object: &Object, depth: usize, out: &mut HashSet<ObjectId>) {
+/// The resource categories whose entries the rebuild copies only when
+/// content uses them.
+const USED_CATEGORIES: [&[u8]; 6] = [
+    b"Font",
+    b"XObject",
+    b"ExtGState",
+    b"Shading",
+    b"Pattern",
+    b"ColorSpace",
+];
+
+/// Collect into `out` every object a resource dictionary within `object`
+/// lists under a category of [`USED_CATEGORIES`]: each a dictionary or
+/// stream, which a copy of it is made of.
+fn listed_resources(doc: &Document, object: &Object, depth: usize, out: &mut HashSet<ObjectId>) {
     if depth > MAX_NESTING {
         return;
     }
     let Some(dict) = object.dict() else {
         return;
     };
-    if let Some(entries) = dict.get(b"XObject").ok().and_then(|e| doc.resolve_dict(e)) {
-        out.extend(entries.iter().filter_map(|(_, x)| x.as_reference().ok()));
+    for category in USED_CATEGORIES {
+        if let Some(entries) = dict.get(category).ok().and_then(|e| doc.resolve_dict(e)) {
+            out.extend(
+                entries
+                    .iter()
+                    .filter_map(|(_, entry)| entry.as_reference().ok())
+                    .filter(|&id| {
+                        matches!(
+                            doc.get_object(id),
+                            Ok(Object::Dictionary(_) | Object::Stream(_))
+                        )
+                    }),
+            );
+        }
     }
     for (_, value) in dict.iter() {
-        listed_xobjects(doc, value, depth + 1, out);
+        listed_resources(doc, value, depth + 1, out);
     }
 }
 
@@ -567,6 +598,53 @@ mod tests {
         check(&out).unwrap();
     }
 
+    /// A copied image or mask is an image XObject, so the image pipeline
+    /// sees it, whatever its source said; a JPEG's one filter, given as an
+    /// array, is written as its name, as the normal form holds.
+    #[test]
+    fn copied_images_are_image_xobjects_with_named_filters() {
+        let (mut doc, page) = document(
+            vec![Operation::new("Do", vec!["Im".into()])],
+            Dictionary::new(),
+            Dictionary::new(),
+        );
+        let mask = doc.add_object(Stream::new(
+            dictionary! { "Width" => 8, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
+            vec![0; 8],
+        ));
+        let jpeg = doc.add_object(
+            Stream::new(
+                dictionary! {
+                    "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 8,
+                    "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB",
+                    "Filter" => vec![Object::Name(b"DCTDecode".to_vec())],
+                    "SMask" => mask,
+                },
+                b"jpeg".to_vec(),
+            )
+            .with_compression(false),
+        );
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("XObject", dictionary! { "Im" => jpeg });
+        let (out, _) = rebuilt(&doc);
+        let Object::Stream(image) = resource(&out, b"XObject", b"Im") else {
+            panic!("image");
+        };
+        assert_eq!(
+            image.dict.get(b"Filter").unwrap(),
+            &Object::Name(b"DCTDecode".to_vec())
+        );
+        let mask = out.get_object(image.dict.get(b"SMask").unwrap().as_reference().unwrap());
+        let Ok(Object::Stream(mask)) = mask else {
+            panic!("mask");
+        };
+        assert!(mask.dict.is_subtype(&out, b"Image"));
+    }
+
     /// An image stored as raw samples is written as exactly the samples it
     /// takes: bytes past them do not ship.
     #[test]
@@ -737,6 +815,36 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
 
+    /// Each page's rebuilt content is charged, so pages sharing one content
+    /// stream cost it once per page.
+    #[test]
+    fn each_pages_content_is_charged() {
+        let mut doc = Document::with_version("1.7");
+        let content = doc.add_object(Stream::new(dictionary! {}, b"0 0 1 1 re f ".repeat(1_000)));
+        let pages = with_pages(
+            &mut doc,
+            [0, 1].map(|_| dictionary! { "Contents" => content, "Resources" => dictionary! {} }),
+        );
+        let parent = (9999, 0);
+        let builder = || {
+            let mut builder = Builder::new(&doc);
+            for (n, &page) in pages.iter().enumerate() {
+                builder.pages.insert(page, (10_000 + n as u32, 0));
+            }
+            builder
+        };
+        let used = {
+            let mut builder = builder();
+            builder.page(pages[0], parent).unwrap();
+            MAX_COPIED_BYTES - builder.copy_budget
+        };
+        let mut builder = builder();
+        builder.copy_budget = used + used / 2;
+        builder.page(pages[0], parent).unwrap();
+        let error = builder.page(pages[1], parent).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    }
+
     /// A string referenced many times costs its bytes each time it is copied.
     #[test]
     fn a_string_referred_to_again_and_again_is_charged_each_time() {
@@ -881,7 +989,7 @@ mod tests {
             Object::Dictionary(dictionary! {
                 "Subtype" => "Link",
                 "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-                "Dest" => Object::string_literal("chapter"),
+                "Dest" => Object::Name(b"chapter".to_vec()),
                 "Contents" => Object::string_literal("ask Jane Roe"),
             }),
             Object::Dictionary(dictionary! {
@@ -914,6 +1022,53 @@ mod tests {
         assert_eq!(count(&stripped, HiddenContent::Annotation), 1);
     }
 
+    /// A file named under two extensions is a file of each: each name keeps
+    /// a copy of its own, so the one whose extension the bytes match is read
+    /// as it is, whichever name sorts first.
+    #[test]
+    fn a_file_named_under_two_extensions_is_copied_for_each() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let stream = doc.add_object(Stream::new(
+            dictionary! { "Type" => "EmbeddedFile" },
+            b"Jane Roe".to_vec(),
+        ));
+        let spec = |doc: &mut Document, name: &str| {
+            doc.add_object(dictionary! {
+                "Type" => "Filespec", "F" => Object::string_literal(name),
+                "EF" => dictionary! { "F" => stream },
+            })
+        };
+        let (pdf, txt) = (spec(&mut doc, "report.pdf"), spec(&mut doc, "notes.txt"));
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! {
+                "EmbeddedFiles" => dictionary! {
+                    "Names" => vec![
+                        Object::string_literal("a"), pdf.into(),
+                        Object::string_literal("b"), txt.into(),
+                    ],
+                },
+            },
+        );
+        let (out, _) = rebuilt(&doc);
+        let entries = Tree::read(&out).unwrap().entries;
+        assert_eq!(entries.len(), 2);
+        assert_ne!(entries[0].stream, entries[1].stream);
+        let text = entries
+            .iter()
+            .find(|entry| entry.name.ends_with(".txt"))
+            .unwrap();
+        let bytes = out.get_object(text.stream).unwrap().as_stream().unwrap();
+        assert_eq!(
+            bytes
+                .decompressed_content()
+                .unwrap_or(bytes.content.clone()),
+            b"Jane Roe"
+        );
+        check(&out).unwrap();
+    }
+
     /// A neutral name another file already took is renamed, so no two files
     /// share a name.
     #[test]
@@ -932,6 +1087,42 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["attachment-1.pdf", "attachment-2.pdf"]);
+    }
+
+    /// A string names a destination only in the `/Names` tree, so a
+    /// catalog `/Dests` entry of the same name is not followed; and a link
+    /// in a layer hidden by default is no link.
+    #[test]
+    fn links_resolve_in_their_own_namespace_and_hidden_ones_are_dropped() {
+        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let layer = doc.add_object(dictionary! { "Type" => "OCG", "Name" => "Off" });
+        let link = |dest: Object| {
+            dictionary! {
+                "Subtype" => "Link",
+                "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+                "Dest" => dest,
+            }
+        };
+        let mut hidden = link(Object::Name(b"chapter".to_vec()));
+        hidden.set("OC", layer);
+        doc.get_dictionary_mut(page).unwrap().set(
+            "Annots",
+            vec![
+                Object::Dictionary(link(Object::string_literal("chapter"))),
+                Object::Dictionary(hidden),
+            ],
+        );
+        doc.catalog_mut().unwrap().set(
+            "Dests",
+            dictionary! { "chapter" => vec![page.into(), "Fit".into()] },
+        );
+        doc.catalog_mut().unwrap().set(
+            "OCProperties",
+            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+        );
+        let (out, stripped) = rebuilt(&doc);
+        assert!(page_dict(&out).get(b"Annots").is_err());
+        assert!(count(&stripped, HiddenContent::Layer) >= 1);
     }
 
     /// A named destination is found in the `/Names` tree past a kid that
@@ -1202,11 +1393,12 @@ mod tests {
     }
 
     /// A font a graphics state selects becomes a `Tf`, so its text is
-    /// located like any other.
+    /// located like any other, even after a font that could not be found.
     #[test]
     fn a_graphics_state_font_becomes_a_tf() {
         let ops = vec![
             Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["Missing".into(), 12.into()]),
             Operation::new("gs", vec!["GS1".into()]),
             Operation::new("Tj", vec![Object::string_literal("Hello")]),
             Operation::new("ET", vec![]),
@@ -1228,6 +1420,69 @@ mod tests {
         let (rebuilt, _) = saved(&doc);
         let blocks = Pdf::open(&rebuilt).unwrap().read(Text).unwrap();
         assert_eq!(blocks[0].text, "Hello");
+    }
+
+    /// A form shows text before its own font in its caller's: drawn where
+    /// that font is lost, its text is cut and reported, while the same form
+    /// drawn under a font that is kept keeps its text; text shown before
+    /// any font is selected is cut too.
+    #[test]
+    fn a_forms_text_follows_its_callers_font() {
+        let mut ops = vec![
+            Operation::new("Tj", vec![Object::string_literal("Before")]),
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm".into()]),
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["Missing".into(), 12.into()]),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm".into()]),
+        ];
+        ops.extend(show("Page"));
+        let (mut doc, page) = document(ops, Dictionary::new(), Dictionary::new());
+        let form = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+            },
+            b"BT (Inherited) Tj ET".to_vec(),
+        ));
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("XObject", dictionary! { "Fm" => form });
+        let (bytes, stripped) = saved(&doc);
+        assert!(count(&stripped, HiddenContent::Unreadable) >= 2);
+        let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
+        let text = &blocks[0].text;
+        assert_eq!(text.matches("Inherited").count(), 1, "{text}");
+        assert!(text.contains("Page") && !text.contains("Before"), "{text}");
+    }
+
+    /// A font a page lists but no content uses is dropped and recorded, so
+    /// the check refuses a document that still carries one.
+    #[test]
+    fn an_unused_font_fails_the_check() {
+        let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut out, _) = rebuilt(&doc);
+        check(&out).unwrap();
+        let unused = out.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+        });
+        let page = out.get_pages().into_values().next().unwrap();
+        out.get_dictionary_mut(page)
+            .unwrap()
+            .get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .and_then(|resources| resources.get_mut(b"Font"))
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("Unused", unused);
+        let error = check(&out).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Sanitization);
     }
 
     /// A default colour space travels with the content that draws in its
@@ -1452,7 +1707,8 @@ mod tests {
     }
 
     /// Two file specifications of one file each keep their own relationship
-    /// and the extension of their own name; the file is copied once.
+    /// and the extension of their own name; the file is copied once for
+    /// each extension they give it.
     #[test]
     fn specifications_of_one_file_stay_apart() {
         let mut source =
@@ -1494,7 +1750,7 @@ mod tests {
         );
         assert_eq!(relationship(associated), b"Source");
         assert!(named.name.ends_with(".xml"), "{}", named.name);
-        assert!(associated.file_name().unwrap().ends_with(".pdf"));
+        assert!(associated.file_name(&out).unwrap().ends_with(".pdf"));
         let files = out
             .objects
             .values()
@@ -1504,7 +1760,7 @@ mod tests {
                     .is_ok_and(|s| s.dict.has_type(b"EmbeddedFile"))
             })
             .count();
-        assert_eq!(files, 1);
+        assert_eq!(files, 2);
     }
 
     /// A form with no resources of its own drawn many times in one scope is
@@ -1950,6 +2206,64 @@ mod tests {
         assert!(!text_of(redacted).contains("Jane Roe"));
     }
 
+    /// An appearance without resources of its own resolves names in the
+    /// page's resources first, the form's default resources only after.
+    #[test]
+    fn a_widget_resolves_names_in_the_page_before_the_form_defaults() {
+        let (mut doc, page) = document(Vec::new(), Dictionary::new(), Dictionary::new());
+        let courier = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+        });
+        let appearance = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
+            },
+            Content {
+                operations: show("Jane"),
+            }
+            .encode()
+            .unwrap(),
+        ));
+        doc.get_dictionary_mut(page).unwrap().set(
+            "Annots",
+            vec![Object::Dictionary(dictionary! {
+                "Subtype" => "Widget", "FT" => "Tx",
+                "Rect" => vec![50.into(), 100.into(), 150.into(), 120.into()],
+                "AP" => dictionary! { "N" => appearance },
+            })],
+        );
+        doc.catalog_mut().unwrap().set(
+            "AcroForm",
+            dictionary! { "DR" => dictionary! { "Font" => dictionary! { "F1" => courier } } },
+        );
+        let (out, _) = rebuilt(&doc);
+        let xobjects = resources_of(&out)
+            .get(b"XObject")
+            .and_then(Object::as_dict)
+            .unwrap();
+        let (_, form) = xobjects.iter().next().unwrap();
+        let form = out
+            .get_object(form.as_reference().unwrap())
+            .unwrap()
+            .as_stream()
+            .unwrap();
+        let fonts = form
+            .dict
+            .get(b"Resources")
+            .and_then(Object::as_dict)
+            .and_then(|resources| resources.get(b"Font"))
+            .and_then(Object::as_dict)
+            .unwrap();
+        let font = out
+            .get_dictionary(fonts.get(b"F1").unwrap().as_reference().unwrap())
+            .unwrap();
+        assert_eq!(
+            font.get(b"BaseFont").unwrap(),
+            &Object::Name(b"Helvetica".to_vec())
+        );
+    }
+
     /// A translucent widget is composited as its annotation would be: as a
     /// transparency group, with the annotation's blend mode and opacities.
     #[test]
@@ -2293,7 +2607,56 @@ mod tests {
             .into_iter()
             .map(|op| op.operator)
             .collect();
-        assert_eq!(operators, ["BMC", "EMC"]);
+        // The path the hidden sequence builds is kept, painting nothing, so
+        // a clip it would set still holds.
+        assert_eq!(operators, ["BMC", "re", "EMC"]);
+        check(&out).unwrap();
+    }
+
+    /// What a hidden sequence draws is cut, but the state it sets holds
+    /// after it: a colour, and a clip, whose painting ends unpainted.
+    #[test]
+    fn state_set_in_a_hidden_sequence_lasts_past_it() {
+        let mut ops = vec![
+            Operation::new("BDC", vec!["OC".into(), "L".into()]),
+            Operation::new("rg", vec![1.into(), 0.into(), 0.into()]),
+            Operation::new("re", vec![0.into(), 0.into(), 50.into(), 50.into()]),
+            Operation::new("W", vec![]),
+            Operation::new("f", vec![]),
+        ];
+        ops.extend(show("secret"));
+        ops.push(Operation::new("EMC", vec![]));
+        ops.push(Operation::new(
+            "re",
+            vec![0.into(), 0.into(), 10.into(), 10.into()],
+        ));
+        ops.push(Operation::new("f", vec![]));
+        let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
+        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
+        let page = doc.get_pages().into_values().next().unwrap();
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .get_mut(b"Resources")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("Properties", dictionary! { "L" => layer });
+        doc.catalog_mut().unwrap().set(
+            "OCProperties",
+            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+        );
+        let (out, _) = rebuilt(&doc);
+        let page = out.get_pages().into_values().next().unwrap();
+        let operators: Vec<String> = Content::decode(&out.get_page_content(page))
+            .unwrap()
+            .operations
+            .into_iter()
+            .map(|op| op.operator)
+            .collect();
+        assert_eq!(
+            operators,
+            ["rg", "re", "W", "n", "BT", "Tf", "ET", "re", "f"]
+        );
+        assert!(!text_of(&out).contains("secret"));
         check(&out).unwrap();
     }
 

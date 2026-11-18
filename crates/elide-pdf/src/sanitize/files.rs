@@ -1,5 +1,5 @@
 //! Attached files: the attachment tree and the `/AF` associations, each file
-//! copied once under a neutral name.
+//! copied once for each extension its names give it, under a neutral name.
 //!
 //! A file's name (`/F`, `/UF`, and its key in the attachment tree) is shown in
 //! a viewer's attachment panel but never reaches detection, so it is replaced
@@ -9,7 +9,7 @@
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Object};
+use lopdf::{Dictionary, Object, ObjectId};
 
 use super::copy::At;
 use super::keys::Kind;
@@ -76,16 +76,11 @@ impl Builder<'_> {
 
     /// The file specification `spec` copied, its file under a neutral name of
     /// its own and with its own relationship; the file it embeds is copied
-    /// once however many specifications name it.
+    /// once for each extension the specifications naming it give it, so the
+    /// file each name says it is is a file of its own, decoded as that.
     pub(super) fn file_spec(&mut self, spec: &Dictionary) -> Result<Option<Object>> {
         let source = self.source;
-        let stream = spec
-            .get(b"EF")
-            .ok()
-            .and_then(|files| source.resolve_dict(files))
-            .and_then(|files| files.get(b"UF").or_else(|_| files.get(b"F")).ok())
-            .and_then(|file| file.as_reference().ok());
-        let Some(stream) = stream else {
+        let Some(stream) = spec.embedded_file(source) else {
             self.residue += 1;
             return Ok(None);
         };
@@ -94,15 +89,10 @@ impl Builder<'_> {
                 self.drop_key(key, record::entry);
             }
         }
-        let Some(file) = self.copy(
-            Kind::EmbeddedFile,
-            &Object::Reference(stream),
-            At::top(&Scope::default()),
-        )?
-        else {
+        let name = spec.file_name(source).unwrap_or_default();
+        let Some(file) = self.embedded_file(stream, extension(&name))? else {
             return Ok(None);
         };
-        let name = spec.file_name().unwrap_or_default();
         let neutral = self.neutral(&name);
         let mut copy = Dictionary::from_iter([
             ("Type", Object::Name(b"Filespec".to_vec())),
@@ -122,6 +112,43 @@ impl Builder<'_> {
             copy.set("AFRelationship", relationship.clone());
         }
         Ok(Some(Object::Dictionary(copy)))
+    }
+
+    /// The embedded file `stream` copied for a name of `extension`: the copy
+    /// already made for it, else the first copy of the stream, else a copy of
+    /// its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`copy`](Self::copy).
+    fn embedded_file(
+        &mut self,
+        stream: ObjectId,
+        extension: Option<String>,
+    ) -> Result<Option<Object>> {
+        let key = (stream, extension);
+        if let Some(file) = self.file_copies.get(&key) {
+            return Ok(Some(file.clone()));
+        }
+        let scope = Scope::default();
+        let first = !self.file_copies.keys().any(|(copied, _)| *copied == stream);
+        let file = if first {
+            self.copy(
+                Kind::EmbeddedFile,
+                &Object::Reference(stream),
+                At::top(&scope),
+            )?
+        } else {
+            // The stream itself, not a reference to it, is copied anew.
+            let Ok(data @ Object::Stream(_)) = self.source.get_object(stream) else {
+                return Ok(None);
+            };
+            self.copy(Kind::EmbeddedFile, data, At::top(&scope))?
+        };
+        if let Some(file) = &file {
+            self.file_copies.insert(key, file.clone());
+        }
+        Ok(file)
     }
 
     /// The neutral name a file named `name` is given: `name` itself when it
@@ -171,15 +198,20 @@ fn is_neutral(name: &str) -> bool {
 /// The neutral name of the `index`th attached file, keeping the extension of
 /// its `original` name when it has a plain one.
 fn neutral_name(index: usize, original: &str) -> String {
-    let extension = original
-        .rsplit_once('.')
+    match extension(original) {
+        Some(extension) => format!("{NEUTRAL_PREFIX}{index}.{extension}"),
+        None => format!("{NEUTRAL_PREFIX}{index}"),
+    }
+}
+
+/// The plain extension of the file name `name`, lowercased: what the codec
+/// decodes the file by.
+fn extension(name: &str) -> Option<String> {
+    name.rsplit_once('.')
         .map(|(_, extension)| extension)
         .filter(|extension| {
             (1..=8).contains(&extension.len())
                 && extension.bytes().all(|b| b.is_ascii_alphanumeric())
-        });
-    match extension {
-        Some(extension) => format!("{NEUTRAL_PREFIX}{index}.{}", extension.to_ascii_lowercase()),
-        None => format!("{NEUTRAL_PREFIX}{index}"),
-    }
+        })
+        .map(str::to_ascii_lowercase)
 }

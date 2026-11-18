@@ -185,13 +185,27 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
 /// The samples of the raw-sample image XObject `stream` in `doc`, exactly as
 /// many as the image takes: samples short of it padded with zeros, as a
 /// viewer draws them, and bytes past it dropped, so nothing rides along
-/// after the image.
+/// after the image. Every index of an indexed image is checked against its
+/// palette, so samples kept are samples [`decode`] reads.
 ///
 /// # Errors
 ///
 /// As [`decode`].
 pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
-    read(doc, stream).map(|(_, samples)| samples)
+    let (layout, samples) = read(doc, stream)?;
+    if let Space::Indexed { rgb, palette } = &layout.space {
+        let colours = palette.len() / if *rgb { 3 } else { 1 };
+        let count = layout.width as usize;
+        let in_palette = samples.chunks_exact(layout.row_bytes()).all(|row| {
+            unpack(row, layout.bits, count)
+                .iter()
+                .all(|&index| usize::from(index) < colours)
+        });
+        if !in_palette {
+            return Err(Error::malformed("image palette index out of range"));
+        }
+    }
+    Ok(samples)
 }
 
 /// The layout of `stream` and its samples, exactly as many as it takes.
@@ -416,6 +430,27 @@ mod tests {
             vec![1, 0],
         );
         assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 255, 0, 0]);
+    }
+
+    /// Samples are kept only when they decode: an index past the palette is
+    /// refused when the samples are read, as when they are decoded.
+    #[test]
+    fn an_index_past_the_palette_is_refused() {
+        let doc = Document::new();
+        let indexed = image(
+            dictionary! {
+                "Width" => 2, "Height" => 1, "BitsPerComponent" => 8,
+                "ColorSpace" => vec![
+                    Object::Name(b"Indexed".to_vec()),
+                    Object::Name(b"DeviceRGB".to_vec()),
+                    1.into(),
+                    Object::String(vec![255, 0, 0, 0, 0, 255], StringFormat::Hexadecimal),
+                ],
+            },
+            vec![1, 2],
+        );
+        assert!(decode(&doc, &indexed).is_err());
+        assert!(samples(&doc, &indexed).is_err());
     }
 
     /// An image whose packed samples fit the bound but whose pixels do not is

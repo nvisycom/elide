@@ -239,6 +239,24 @@ mod tests {
         assert_eq!(body.state.detections().len(), 1);
     }
 
+    /// An empty span is checked like any other before it is skipped: on a
+    /// page the document doesn't have, or reversed, it fails the batch.
+    #[tokio::test]
+    async fn an_empty_span_is_checked_before_it_is_skipped() {
+        let mut body = body();
+        let missing = Redactions::from([redaction(1, 0..4), redaction(2, 0..0)]);
+        assert!(body.write_at(missing).await.is_err());
+        #[allow(clippy::reversed_empty_ranges)]
+        let reversed = Redactions::from([redaction(1, 4..2)]);
+        assert!(body.write_at(reversed).await.is_err());
+        assert!(body.state.detections().is_empty());
+
+        body.write_at(Redactions::from([redaction(1, 2..2)]))
+            .await
+            .unwrap();
+        assert!(body.state.detections().is_empty());
+    }
+
     /// A reviewer's mark on a flattened page resolves through PDFium's glyph
     /// boxes, placed by the page's frame.
     #[cfg(feature = "render")]

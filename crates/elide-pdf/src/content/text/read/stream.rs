@@ -10,7 +10,7 @@ use lopdf::Object;
 use lopdf::content::Content;
 
 use super::geometry::{Cursor, TextState};
-use super::paint::Painting;
+use super::paint::{Paint, Painting};
 use super::{TextRun, Walk};
 use crate::content::text::{FontEntry, StreamTarget};
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
@@ -83,14 +83,18 @@ impl Fonts<'_> {
 }
 
 /// The caller's graphics state passed into a `Do`-invoked Form XObject: the
-/// font it had selected, and its parametric text state (with the form's
-/// `/Matrix` already composed onto the CTM), so the form's text is decoded
-/// with that font before its own `Tf`, and positioned in the page's space.
+/// font it had selected, its parametric text state (with the form's
+/// `/Matrix` already composed onto the CTM), and what it paints with, so the
+/// form's text is decoded with that font before its own `Tf`, positioned in
+/// the page's space, and a fill it makes before its own colour paints the
+/// caller's pattern.
 pub(super) struct Inherited<'a> {
     /// The caller's selected font, or `None` when it had selected none.
     pub(super) font: Option<Font<'a>>,
     /// The caller's text state, CTM composed with the form's `/Matrix`.
     pub(super) state: TextState,
+    /// The caller's patterns, clip and line style.
+    pub(super) painting: Painting,
 }
 
 /// A graphics-state snapshot pushed by `q` and restored by `Q`: the parametric
@@ -197,14 +201,17 @@ impl<'d> Walk<'_, 'd> {
             .as_ref()
             .map_or_else(TextState::default, |inh| inh.state);
         let mut gs_stack: Vec<SavedState<'_>> = Vec::new();
-        // The patterns fills and strokes paint with, and the path being
-        // built, so the region each pattern paints is known; and the space a
-        // pattern this stream selects is laid out in (8.7.3.1).
-        let mut painting = Painting::default();
+        // The patterns fills and strokes paint with, the clip, and the path
+        // being built, so the region each pattern paints is known; and the
+        // space a pattern this stream selects is laid out in (8.7.3.1).
+        let mut painting = inherited
+            .as_ref()
+            .map_or_else(Painting::default, |inh| inh.painting.inherited());
         let pattern_space = state.ctm;
 
         for (op_idx, op) in content.operations.iter().enumerate() {
-            if painting.path(op, state.ctm, &mut self.painted) {
+            if let Some(painted) = painting.path(op, state.ctm) {
+                self.paint(painted);
                 continue;
             }
             match op.operator.as_str() {
@@ -319,13 +326,13 @@ impl<'d> Walk<'_, 'd> {
                     };
                     run.show(text, operands, op_idx, base)?;
                     // Text filled with a pattern paints it where it shows.
-                    if let Some(pattern) = painting.fill
-                        && let Some(region) = self.accum.rects[shown..]
-                            .iter()
-                            .map(|glyph| glyph.rect)
-                            .reduce(DeviceRect::union)
+                    if let Some(painted) = self.accum.rects[shown..]
+                        .iter()
+                        .map(|glyph| glyph.rect)
+                        .reduce(DeviceRect::union)
+                        .and_then(|extent| painting.text(extent))
                     {
-                        self.painted.entry(pattern).or_default().push(region);
+                        self.paint(vec![painted]);
                     }
                 }
 
@@ -335,7 +342,11 @@ impl<'d> Walk<'_, 'd> {
                 // whose CTM `walk_xobject` composes the form's `/Matrix`.
                 "Do" => {
                     if let Some(Object::Name(name)) = op.operands.first() {
-                        let inherited = Inherited { font, state };
+                        let inherited = Inherited {
+                            font,
+                            state,
+                            painting,
+                        };
                         self.walk_xobject(name, scope, depth, inherited)?;
                     }
                 }
@@ -351,10 +362,23 @@ impl<'d> Walk<'_, 'd> {
                         }
                         _ => None,
                     };
+                    let paint = pattern.map(|pattern| Paint {
+                        pattern,
+                        space: pattern_space,
+                    });
                     if op.operator == "scn" {
-                        painting.fill = pattern;
+                        painting.fill = paint;
                     } else {
-                        painting.stroke = pattern;
+                        painting.stroke = paint;
+                    }
+                }
+                "gs" => {
+                    if let Some(Object::Name(name)) = op.operands.first()
+                        && let Some(graphics) = scope
+                            .lookup(self.doc, b"ExtGState", name)
+                            .and_then(|graphics| self.doc.resolve_dict(graphics))
+                    {
+                        painting.state(self.doc, graphics);
                     }
                 }
                 "sc" | "g" | "rg" | "k" | "cs" => painting.fill = None,

@@ -8,7 +8,7 @@ use elide_core::{Error, Result};
 use lopdf::{DecompressError, Document, Error as PdfError, Object, ObjectId, decode_text_string};
 
 use super::{Attachment, AttachmentId};
-use crate::pdf::reader::{DictionaryExt, DocumentExt, NameTree, Node, ObjectExt};
+use crate::pdf::reader::{DictionaryExt, NameTree, Node, ObjectExt};
 
 /// The most the attached files may decompress to, together. A stream may
 /// claim any size, so each decode is bounded by what is left, to refuse a
@@ -108,14 +108,9 @@ pub(super) fn entry<'a>(doc: &'a Document, key: &Object, value: &'a Object) -> O
         Object::Dictionary(dict) => dict,
         _ => return None,
     };
-    let files = doc.resolve_dict(spec.get(b"EF").ok()?)?;
-    let stream = files
-        .get(b"UF")
-        .or_else(|_| files.get(b"F"))
-        .and_then(Object::as_reference)
-        .ok()?;
+    let stream = spec.embedded_file(doc)?;
     let name = spec
-        .file_name()
+        .file_name(doc)
         .or_else(|| decode_text_string(key).ok())
         .unwrap_or_default();
     Some(Entry {

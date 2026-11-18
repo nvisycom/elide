@@ -23,12 +23,13 @@ use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, ObjectId};
 
-use self::nested::Selected;
+use self::nested::{Cell, Selected};
+use self::paint::Painted;
 use self::run::TextRun;
 use self::stream::{Frame, Inherited};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
-use crate::pdf::reader::{DeviceRect, DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
+use crate::pdf::reader::{DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
 
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
@@ -98,7 +99,9 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         active: BTreeSet::new(),
         patterns: BTreeSet::new(),
         selected: Vec::new(),
-        painted: BTreeMap::new(),
+        painted: Vec::new(),
+        cell: None,
+        cells: BTreeMap::new(),
         page,
         walks_remaining: MAX_XOBJECT_WALKS,
     };
@@ -122,6 +125,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
             walk.walk_pattern(pattern)?;
         }
     }
+    walk.place_tiles()?;
 
     // The page's visible rectangle and rotation, for normalizing glyph device
     // boxes to page fractions. A page missing its boxes falls back to a unit
@@ -169,8 +173,14 @@ struct Walk<'a, 'd> {
     /// The tiling patterns selected and not yet walked: each is walked once
     /// the page's own text is, so its text never falls inside the page's.
     selected: Vec<Selected<'d>>,
-    /// The device-space regions each tiling pattern paints on this page.
-    painted: BTreeMap<ObjectId, Vec<DeviceRect>>,
+    /// The regions tiling patterns paint on this page, each with the
+    /// pattern whose cell it was painted in, if any.
+    painted: Vec<(Option<ObjectId>, Painted)>,
+    /// The tiling pattern whose cell is being walked, if any.
+    cell: Option<ObjectId>,
+    /// The tiling patterns' cells walked, their glyph boxes held back to be
+    /// placed on their tiles.
+    cells: BTreeMap<ObjectId, Cell<'d>>,
     page: u32,
     /// Form XObject walks still permitted on this page. The stack-based `active`
     /// guard stops re-entry (cycles) but not re-walks: a form reached through

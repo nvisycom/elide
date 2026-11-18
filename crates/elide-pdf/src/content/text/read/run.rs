@@ -209,7 +209,7 @@ impl TextRun<'_> {
             // text space, relative to the current pen: x from 0 to the advance,
             // y from descent to ascent (em fractions × font size). An unknown
             // width gives a zero-width advance; the box still has its height.
-            let w0 = self.widths.advance(glyph.code).unwrap_or(0.0) / 1000.0;
+            let w0 = self.widths.advance(glyph.width_key).unwrap_or(0.0) / 1000.0;
             let glyph_w = w0 * self.state.font_size * self.state.h_scale;
             let top = self.metrics.top * self.state.font_size;
             let bottom = self.metrics.bottom * self.state.font_size;

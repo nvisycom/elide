@@ -106,7 +106,7 @@ impl Redact for AttachmentRedaction<'_> {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Document, Object, Stream, dictionary};
+    use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
     use super::*;
     use crate::fixtures::{with_attachments, with_pages};
@@ -160,6 +160,37 @@ mod tests {
             &[b.id],
         );
         assert_eq!(names(&redacted), [("a.txt".to_owned(), b"[NAME]".to_vec())]);
+    }
+
+    /// A file named only under a legacy platform key is read, and a name
+    /// given by reference is resolved.
+    #[test]
+    fn reads_a_legacy_file_under_a_referenced_name() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let stream = doc.add_object(Stream::new(
+            dictionary! { "Type" => "EmbeddedFile" },
+            b"Jane Roe".to_vec(),
+        ));
+        let name = doc.add_object(Object::string_literal("legacy.txt"));
+        let spec = doc.add_object(dictionary! {
+            "Type" => "Filespec", "UF" => name, "EF" => dictionary! { "DOS" => stream },
+        });
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! {
+                "EmbeddedFiles" => dictionary! {
+                    "Names" => vec![Object::string_literal("key"), spec.into()],
+                },
+            },
+        );
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let pdf = Pdf::open(&bytes).unwrap();
+        assert_eq!(
+            names(&pdf),
+            [("legacy.txt".to_owned(), b"Jane Roe".to_vec())]
+        );
     }
 
     /// A one-page PDF whose page associates `on_page` through an inline `/AF`

@@ -85,7 +85,7 @@ impl<'a> Reader<'a, '_> {
             return;
         }
         if let Node::Object(id) = node
-            && !self.visited.insert(id)
+            && !self.visit(&Object::Reference(id))
         {
             self.out.complete = false;
             return;
@@ -95,7 +95,10 @@ impl<'a> Reader<'a, '_> {
             return;
         };
         self.out.nodes.push(node);
-        if let Ok(names) = dict.get(b"Names") {
+        // A null entry is no entry.
+        if let Ok(names) = dict.get(b"Names")
+            && !matches!(names, Object::Null)
+        {
             let Some(names) = self.array(names) else {
                 return;
             };
@@ -105,7 +108,9 @@ impl<'a> Reader<'a, '_> {
                 .pairs
                 .extend(pairs.iter().map(|[key, value]| (key, value)));
         }
-        if let Ok(kids) = dict.get(b"Kids") {
+        if let Ok(kids) = dict.get(b"Kids")
+            && !matches!(kids, Object::Null)
+        {
             let Some(kids) = self.array(kids) else {
                 return;
             };
@@ -123,11 +128,21 @@ impl<'a> Reader<'a, '_> {
     /// a tree that shares one among many nodes costs its size once.
     fn array(&mut self, value: &'a Object) -> Option<&'a Vec<Object>> {
         let array = match value {
-            Object::Reference(id) if !self.visited.insert(*id) => None,
+            Object::Reference(_) if !self.visit(value) => None,
             value => self.doc.resolve_array(value),
         };
         self.out.complete &= array.is_some();
         array
+    }
+
+    /// Mark the object the reference `value` ends at, through any chain of
+    /// references, read: whether it was not already, and `false` when it
+    /// does not resolve.
+    fn visit(&mut self, value: &Object) -> bool {
+        match self.doc.dereference(value) {
+            Ok((Some(id), _)) => self.visited.insert(id),
+            _ => false,
+        }
     }
 }
 
@@ -219,6 +234,43 @@ mod tests {
         );
         let tree = NameTree::read(&doc, b"Dests");
         assert!(!tree.complete);
+        assert_eq!(tree.pairs.len(), 1);
+    }
+
+    /// A node reached through two references, one to the other, is read
+    /// once.
+    #[test]
+    fn a_node_named_through_another_reference_is_read_once() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let leaf = doc.add_object(dictionary! {
+            "Names" => vec![Object::string_literal("a"), 1.into()],
+        });
+        let alias = doc.add_object(Object::Reference(leaf));
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! { "Dests" => dictionary! { "Kids" => vec![leaf.into(), alias.into()] } },
+        );
+        let tree = NameTree::read(&doc, b"Dests");
+        assert_eq!(tree.pairs.len(), 1);
+    }
+
+    /// A null `/Names` is no entry: the node's kids are still read.
+    #[test]
+    fn a_null_names_entry_is_skipped() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let leaf = doc.add_object(dictionary! {
+            "Names" => vec![Object::string_literal("a"), 1.into()],
+        });
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! {
+                "Dests" => dictionary! { "Names" => Object::Null, "Kids" => vec![leaf.into()] },
+            },
+        );
+        let tree = NameTree::read(&doc, b"Dests");
+        assert!(tree.complete);
         assert_eq!(tree.pairs.len(), 1);
     }
 }

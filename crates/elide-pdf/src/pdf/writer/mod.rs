@@ -106,7 +106,9 @@ impl Edit {
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
-    /// the document cannot be saved.
+    /// the document cannot be saved;
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+    /// it saves past [`Pdf::MAX_DOCUMENT_BYTES`].
     pub(crate) fn finish(self) -> Result<Pdf> {
         let mut doc = self.doc;
         doc.objects.retain(|_, object| !object.is_xref_stream());
@@ -114,6 +116,15 @@ impl Edit {
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes)
             .map_err(|e| Error::malformed(format!("could not save PDF: {e}")))?;
+        // What is written is opened again (to check it, or to redact it), so
+        // it is held to the limit any document is opened within.
+        if bytes.len() > Pdf::MAX_DOCUMENT_BYTES {
+            return Err(Error::resource_limit(format!(
+                "the document written is {} bytes, over the {}-byte limit",
+                bytes.len(),
+                Pdf::MAX_DOCUMENT_BYTES
+            )));
+        }
         Ok(Pdf::from_parts(doc, Bytes::from(bytes)))
     }
 }

@@ -173,7 +173,12 @@ impl StreamExt for Stream {
 fn decode(stream: &Stream, limit: usize) -> Result<Vec<u8>> {
     // lopdf reads a stream whose filter is not a name or names as if it had
     // none, which would take its encoded bytes for its content.
-    if stream.dict.get(b"Filter").is_ok() && stream.filters().is_err() {
+    // A null entry is no entry.
+    let filtered = stream
+        .dict
+        .get(b"Filter")
+        .is_ok_and(|filter| !matches!(filter, Object::Null));
+    if filtered && stream.filters().is_err() {
         return Err(Error::malformed("a stream's /Filter is not a filter name"));
     }
     stream
@@ -232,6 +237,11 @@ impl ObjectExt for Object {
     }
 }
 
+/// The keys a file specification names its file under, in the order they
+/// are read: the Unicode name, the portable name, then the legacy platform
+/// names (7.11.3).
+const FILE_KEYS: [&[u8]; 5] = [b"UF", b"F", b"DOS", b"Mac", b"Unix"];
+
 /// Reads and writes of one [`Dictionary`].
 pub(crate) trait DictionaryExt {
     /// The name the dictionary holds under `key`, following a reference
@@ -244,8 +254,13 @@ pub(crate) trait DictionaryExt {
     /// Whether the dictionary's `/Subtype` is `subtype`.
     fn is_subtype(&self, doc: &Document, subtype: &[u8]) -> bool;
 
-    /// This file specification's file name: its Unicode `/UF`, else its `/F`.
-    fn file_name(&self) -> Option<String>;
+    /// This file specification's file name: its Unicode `/UF`, else its
+    /// `/F`, else a legacy platform name (`/DOS`, `/Mac`, `/Unix`).
+    fn file_name(&self, doc: &Document) -> Option<String>;
+
+    /// The embedded-file stream this file specification names in its `/EF`,
+    /// under the same keys in the same order as its name.
+    fn embedded_file(&self, doc: &Document) -> Option<ObjectId>;
 }
 
 impl DictionaryExt for Dictionary {
@@ -262,10 +277,17 @@ impl DictionaryExt for Dictionary {
         self.name(doc, b"Subtype") == Some(subtype)
     }
 
-    fn file_name(&self) -> Option<String> {
-        self.get(b"UF")
-            .or_else(|_| self.get(b"F"))
-            .ok()
-            .and_then(|name| decode_text_string(name).ok())
+    fn file_name(&self, doc: &Document) -> Option<String> {
+        FILE_KEYS.iter().find_map(|key| {
+            let name = doc.resolve(self.get(key).ok()?)?;
+            decode_text_string(name).ok()
+        })
+    }
+
+    fn embedded_file(&self, doc: &Document) -> Option<ObjectId> {
+        let files = doc.resolve_dict(self.get(b"EF").ok()?)?;
+        FILE_KEYS
+            .iter()
+            .find_map(|key| files.get(key).ok()?.as_reference().ok())
     }
 }

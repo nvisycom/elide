@@ -114,6 +114,19 @@ impl TextBlock {
             frame: &self.frame,
         }
     }
+
+    /// Whether the page shows text: a glyph placed on it stands for a
+    /// character that is not whitespace. Text located but placed nowhere (a
+    /// pattern's that it never paints) shows nothing.
+    #[cfg(any(feature = "render", test))]
+    pub(crate) fn shows_text(&self) -> bool {
+        let chars: Vec<char> = self.text.chars().collect();
+        self.rects.iter().any(|glyph| {
+            chars
+                .get(glyph.chars.clone())
+                .is_some_and(|shown| shown.iter().any(|c| !c.is_whitespace()))
+        })
+    }
 }
 
 /// A font referenced while walking content, resolved to its `/ToUnicode` CMap.
@@ -335,9 +348,15 @@ mod tests {
     /// The glyph boxes of the text a tiling pattern draws, its page painting
     /// with it as `content` draws.
     fn tiled_rects(content: &[u8]) -> Vec<GlyphRect> {
+        tiled_block(content).rects
+    }
+
+    /// The text block of a page painting with a tiling pattern as `content`
+    /// draws.
+    fn tiled_block(content: &[u8]) -> TextBlock {
         let bytes = tiling_document(Object::Integer(1), content.to_vec());
         let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
-        pdf.read(Text).unwrap().remove(0).rects
+        pdf.read(Text).unwrap().remove(0)
     }
 
     /// A pattern's text shows on every tile it paints: its glyph boxes are
@@ -355,10 +374,84 @@ mod tests {
         );
     }
 
-    /// A pattern selected but never painted shows its text nowhere.
+    /// A region painted twice places its tiles once, so painting over the
+    /// same tiles again is not charged again.
+    #[test]
+    fn tiles_painted_twice_are_placed_once() {
+        let once = tiled_rects(b"/Pattern cs /P0 scn 0 0 100 40 re f");
+        let twice = tiled_rects(b"/Pattern cs /P0 scn 0 0 100 40 re f 0 0 100 40 re f");
+        assert_eq!(once.len(), twice.len());
+    }
+
+    /// Tiles far past where a float places them exactly, or more than the
+    /// page's budget, refuse the page rather than place without bound.
+    #[test]
+    fn tiles_past_the_budget_are_refused() {
+        for content in [
+            &b"/Pattern cs /P0 scn -1000000000000000000000.0 0 2000000000000000000000.0 20 re f"[..],
+            b"/Pattern cs /P0 scn 0 0 1000000 1000000 re f",
+        ] {
+            let bytes = tiling_document(Object::Integer(1), content.to_vec());
+            let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+            let error = pdf.read(Text).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+        }
+    }
+
+    /// A pattern selected but never painted shows its text nowhere, so its
+    /// page shows no text, though the text is located for redaction.
     #[test]
     fn an_unpainted_pattern_places_no_box() {
         assert!(tiled_rects(b"/Pattern cs /P0 scn").is_empty());
+        let block = tiled_block(b"/Pattern cs /P0 scn");
+        assert!(block.text.contains("Jane Roe") && !block.shows_text());
+        assert!(tiled_block(b"/Pattern cs /P0 scn 0 0 50 20 re f").shows_text());
+    }
+
+    /// A clip bounds what a fill paints: a fill of four tiles clipped to one
+    /// places the pattern's text on that one.
+    #[test]
+    fn a_clip_bounds_the_tiles_painted() {
+        let one = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re f");
+        let clipped = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re W n 0 0 100 40 re f");
+        assert_eq!(clipped.len(), one.len());
+        let restored = tiled_rects(
+            b"q /Pattern cs /P0 scn 0 0 50 20 re W n Q /Pattern cs /P0 scn 0 0 100 40 re f",
+        );
+        assert_eq!(restored.len(), 4 * one.len());
+    }
+
+    /// A stroke paints past its path by its width: a line along a row
+    /// boundary paints the tiles on either side.
+    #[test]
+    fn a_stroke_paints_its_width() {
+        assert!(!tiled_rects(b"/Pattern CS /P0 SCN 4 w 1 j 0 20 m 100 20 l S").is_empty());
+    }
+
+    /// A form fills with the pattern its caller selected; one selecting the
+    /// pattern itself, drawn at two places, tiles each on its own grid; and
+    /// a pattern filling another's cell shows on each of that one's tiles.
+    #[test]
+    fn patterns_follow_forms_and_other_patterns() {
+        let one = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re f");
+        assert_eq!(tiled_rects(b"/Pattern cs /P0 scn /Fm Do").len(), one.len());
+
+        let twice = tiled_rects(b"q /Fs Do Q q 1 0 0 1 25 0 cm /Fs Do Q");
+        assert_eq!(twice.len(), 2 * one.len());
+        let start = one
+            .iter()
+            .map(|glyph| glyph.rect.min_x)
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            twice
+                .iter()
+                .any(|glyph| (glyph.rect.min_x - (start + 25.0)).abs() < 1e-6),
+            "no box on the second form's grid: {twice:?}"
+        );
+
+        let nested = tiled_rects(b"/Pattern cs /Q0 scn 0 0 100 20 re f");
+        assert_eq!(nested.len(), 2 * one.len());
+        assert!(nested.iter().any(|glyph| glyph.rect.min_x >= 50.0));
     }
 
     /// Selecting a pattern paints nothing, so its cell's text is read apart
@@ -433,8 +526,11 @@ mod tests {
         out.read(Check).unwrap();
     }
 
-    /// A one-page document drawing `content`, its `/F1` Helvetica and its
-    /// `/P0` a tiling pattern of `/PatternType` `kind` showing "Jane Roe".
+    /// A one-page document drawing `content`, its `/F1` Helvetica, its `/P0`
+    /// a tiling pattern of `/PatternType` `kind` showing "Jane Roe", its
+    /// `/Q0` a pattern of the same cell filled with `/P0`, its `/Fm` a form
+    /// filling that cell with whatever it is drawn with, and its `/Fs` a form
+    /// filling it with `/P0`.
     fn tiling_document(kind: Object, content: Vec<u8>) -> Vec<u8> {
         let mut doc = Document::with_version("1.5");
         let font = doc.add_object(dictionary! {
@@ -457,6 +553,26 @@ mod tests {
             },
             cell.encode().unwrap(),
         ));
+        let cell_box = || vec![0.into(), 0.into(), 50.into(), 20.into()];
+        let filled = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                "BBox" => cell_box(), "XStep" => 50, "YStep" => 20,
+                "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+            },
+            b"/Pattern cs /P0 scn 0 0 50 20 re f".to_vec(),
+        ));
+        let form = |doc: &mut Document, content: &[u8]| {
+            doc.add_object(Stream::new(
+                dictionary! {
+                    "Type" => "XObject", "Subtype" => "Form", "BBox" => cell_box(),
+                    "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+                },
+                content.to_vec(),
+            ))
+        };
+        let fills = form(&mut doc, b"0 0 50 20 re f");
+        let selects = form(&mut doc, b"/Pattern cs /P0 scn 0 0 50 20 re f");
         let content = doc.add_object(Stream::new(dictionary! {}, content));
         with_pages(
             &mut doc,
@@ -464,7 +580,8 @@ mod tests {
                 "Contents" => content,
                 "Resources" => dictionary! {
                     "Font" => dictionary! { "F1" => font },
-                    "Pattern" => dictionary! { "P0" => pattern },
+                    "Pattern" => dictionary! { "P0" => pattern, "Q0" => filled },
+                    "XObject" => dictionary! { "Fm" => fills, "Fs" => selects },
                 },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
@@ -519,6 +636,19 @@ mod tests {
         let out = edit.finish().unwrap();
         out.read(Check).unwrap();
         assert!(out.read(Text).unwrap()[0].text.is_empty());
+        let doc = out.doc();
+        let cmap = doc
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find_map(|font| font.get(b"ToUnicode").ok())
+            .and_then(|cmap| doc.get_object(cmap.as_reference().ok()?).ok())
+            .and_then(|cmap| cmap.as_stream().ok())
+            .and_then(|cmap| cmap.decompressed_content().ok())
+            .map(|cmap| String::from_utf8_lossy(&cmap).to_ascii_uppercase())
+            .unwrap();
+        assert!(cmap.contains("BEGINCODESPACERANGE"), "{cmap}");
+        assert!(!cmap.contains("<4A>"), "{cmap}");
     }
 
     /// A stream another redaction changed no longer holds the glyphs where the

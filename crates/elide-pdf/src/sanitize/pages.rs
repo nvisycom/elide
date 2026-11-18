@@ -134,6 +134,7 @@ impl Builder<'_> {
             content = [b"q\n".as_slice(), &content, b"\nQ\n", &drawn].concat();
         }
 
+        self.charge(content.len())?;
         page.set(
             "Contents",
             self.out.add_object(compressed(Dictionary::new(), content)?),

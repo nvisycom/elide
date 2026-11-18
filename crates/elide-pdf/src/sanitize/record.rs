@@ -55,14 +55,13 @@ pub(super) fn page(key: &[u8]) -> Option<HiddenContent> {
         | b"Tabs"
         | b"Dur"
         | b"Trans"
-        | b"PresSteps"
         | b"TemplateInstantiated"
         | b"SeparationInfo" => {
             return None;
         }
         b"LastModified" | b"Metadata" | b"VP" | b"DPart" => HiddenContent::Properties,
         b"Thumb" => HiddenContent::Thumbnail,
-        b"AA" => HiddenContent::Action,
+        b"AA" | b"PresSteps" => HiddenContent::Action,
         b"B" => HiddenContent::Outline,
         b"ID" | b"PZ" => HiddenContent::Link,
         b"StructParents" => HiddenContent::AlternativeText,

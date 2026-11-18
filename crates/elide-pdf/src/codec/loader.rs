@@ -126,7 +126,14 @@ impl PdfDocumentLoader {
             }
             RasterMode::Auto => {
                 let blocks = pdf.read(Text)?;
-                let scanned = scanned(blocks.iter().map(|b| (b.page, b.text.as_str())));
+                // A page is scanned when it shows no text: text located but
+                // placed nowhere (a pattern's it never paints) is no text a
+                // reader sees on the page.
+                let scanned = blocks
+                    .iter()
+                    .filter(|block| !block.shows_text())
+                    .map(|block| block.page)
+                    .collect();
                 (Pages::Glyph(blocks), scanned, SCAN_DPI)
             }
             RasterMode::Never => return Ok((Pages::Glyph(pdf.read(Text)?), Vec::new())),
@@ -332,6 +339,21 @@ mod tests {
         )
         .await
         .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        let out = doc.encode().unwrap().to_bytes();
+        assert!(holds_marker(&out));
+    }
+
+    /// A region addressed to another page refuses the batch: this page's
+    /// render is left as it is.
+    #[tokio::test]
+    async fn a_region_of_another_page_is_refused() {
+        let mut doc = scanned_document(&scanned_doc(), &png(30, 30, [200, 200, 200]), vec![]);
+        let mut elsewhere = region(0.0, 0.0, 30.0, 30.0);
+        elsewhere.page = Some(2);
+        let err = redact_page(&mut doc, elsewhere, ImageReplacement::block())
+            .await
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         let out = doc.encode().unwrap().to_bytes();
         assert!(holds_marker(&out));

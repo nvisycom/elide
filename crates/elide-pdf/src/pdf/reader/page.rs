@@ -7,7 +7,7 @@ use std::ops::Range;
 use elide_core::primitive::UnitBoundingBox;
 use lopdf::{Document, ObjectId};
 
-use super::DocumentExt;
+use super::{DocumentExt, Matrix};
 
 /// One glyph's box and the decoded character range it drew, so a detected
 /// character span can be resolved back to the page rectangles it covers.
@@ -51,6 +51,31 @@ impl DeviceRect {
             max_x: xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
             max_y: ys.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         }
+    }
+
+    /// The part of the box `other` also covers, or `None` when they share
+    /// no area; boxes that only touch share none.
+    pub(crate) fn intersection(self, other: DeviceRect) -> Option<DeviceRect> {
+        let out = DeviceRect {
+            min_x: self.min_x.max(other.min_x),
+            min_y: self.min_y.max(other.min_y),
+            max_x: self.max_x.min(other.max_x),
+            max_y: self.max_y.min(other.max_y),
+        };
+        (out.min_x < out.max_x && out.min_y < out.max_y).then_some(out)
+    }
+
+    /// The box covering this one once `matrix` maps it.
+    pub(crate) fn mapped(self, matrix: Matrix) -> DeviceRect {
+        DeviceRect::of_corners(
+            [
+                (self.min_x, self.min_y),
+                (self.max_x, self.min_y),
+                (self.max_x, self.max_y),
+                (self.min_x, self.max_y),
+            ]
+            .map(|(x, y)| matrix.apply(x, y)),
+        )
     }
 
     /// The union covering both boxes, for merging a line's glyphs into one rect.

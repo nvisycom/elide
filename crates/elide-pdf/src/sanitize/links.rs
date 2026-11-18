@@ -15,8 +15,13 @@ use crate::pdf::reader::{DictionaryExt, DocumentExt, NameTree, Scope};
 impl<'a> Builder<'a> {
     /// The annotation `dict` as a link to a place in this document, reduced
     /// to where it is and where it goes; `None` for any other annotation,
-    /// recorded by what it is.
+    /// recorded by what it is, and for a link in a layer hidden by default,
+    /// which is no link to follow.
     pub(super) fn link(&mut self, dict: &'a Dictionary) -> Result<Option<Object>> {
+        if self.layers.hides(dict) {
+            self.record(HiddenContent::Layer);
+            return Ok(None);
+        }
         let Some(dest) = self.internal_destination(dict) else {
             self.record(record::annotation(self.source, dict));
             return Ok(None);
@@ -114,25 +119,26 @@ impl<'a> Builder<'a> {
             }
             Object::Dictionary(dict) => self.destination(dict.get(b"D").ok()?, depth + 1),
             Object::Name(name) => self.destination(self.named(name)?, depth + 1),
-            Object::String(name, _) => self.destination(self.named(name)?, depth + 1),
+            Object::String(name, _) => {
+                self.destination(self.destinations.get(name.as_slice())?, depth + 1)
+            }
             _ => None,
         }
     }
 
-    /// The destination `name` names: in the catalog's `/Dests`, or its
-    /// `/Names` tree of destinations.
-    pub(super) fn named(&self, name: &[u8]) -> Option<&'a Object> {
+    /// The destination the name `name` names, in the catalog's `/Dests`; a
+    /// string names one in the `/Names` tree of destinations instead
+    /// (12.3.2.4).
+    fn named(&self, name: &[u8]) -> Option<&'a Object> {
         let source = self.source;
-        let catalog = source.catalog().ok()?;
-        if let Some(dests) = catalog
+        source
+            .catalog()
+            .ok()?
             .get(b"Dests")
             .ok()
-            .and_then(|d| source.resolve_dict(d))
-            && let Ok(dest) = dests.get(name)
-        {
-            return Some(dest);
-        }
-        self.destinations.get(name).copied()
+            .and_then(|d| source.resolve_dict(d))?
+            .get(name)
+            .ok()
     }
 }
 
