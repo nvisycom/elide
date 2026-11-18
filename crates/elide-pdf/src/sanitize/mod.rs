@@ -26,9 +26,13 @@
 //! is resolved to a direct value, so later reads never meet a reference where a
 //! name or number belongs.
 //!
+//! What the rebuild writes is in a normal form ([`normal`]) that everything
+//! reading it afterwards may count on.
+//!
 //! The codec rebuilds at decode, so detection reads exactly what will ship, and
-//! again at encode, so every document it writes is a rebuild. Rebuilding that
-//! output drops nothing: that is the output check ([`check`]).
+//! again at encode, so every document it writes is a rebuild. That output is
+//! in the normal form, and rebuilding it drops nothing: that is the output
+//! check ([`check`]).
 
 mod check;
 mod content;
@@ -37,6 +41,7 @@ mod files;
 mod keys;
 mod layers;
 mod links;
+mod normal;
 mod pages;
 mod record;
 mod widgets;
@@ -108,6 +113,7 @@ fn rebuild(source: &Document) -> Result<(Document, StrippedContent)> {
     let mut builder = Builder::new(source);
     builder.run()?;
     let Builder { out, stripped, .. } = builder;
+    normal::verify(&out)?;
     Ok((out, stripped))
 }
 
@@ -416,7 +422,9 @@ mod tests {
     /// `doc` rebuilt, saved, and read back, with what the rebuild recorded.
     fn rebuilt(doc: &Document) -> (Document, StrippedContent) {
         let (bytes, stripped) = saved(doc);
-        (Document::load_mem(&bytes).unwrap(), stripped)
+        let out = Document::load_mem(&bytes).unwrap();
+        normal::verify(&out).unwrap();
+        (out, stripped)
     }
 
     /// `doc` rebuilt and saved, with what the rebuild recorded.

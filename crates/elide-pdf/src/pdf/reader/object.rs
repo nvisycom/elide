@@ -150,11 +150,22 @@ pub(crate) trait StreamExt {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// it cannot be decoded.
     fn decoded(&self) -> Result<Vec<u8>>;
+
+    /// As [`decoded`](Self::decoded), at most `limit` bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`decoded`](Self::decoded), past `limit`.
+    fn decoded_within(&self, limit: usize) -> Result<Vec<u8>>;
 }
 
 impl StreamExt for Stream {
     fn decoded(&self) -> Result<Vec<u8>> {
         decode(self, MAX_CONTENT_BYTES)
+    }
+
+    fn decoded_within(&self, limit: usize) -> Result<Vec<u8>> {
+        decode(self, limit)
     }
 }
 
@@ -169,9 +180,7 @@ fn decode(stream: &Stream, limit: usize) -> Result<Vec<u8>> {
         .get_plain_content_with_limit(limit)
         .map_err(|e| match e {
             PdfError::Decompress(DecompressError::MemoryLimitExceeded { .. }) => {
-                Error::resource_limit(format!(
-                    "content decodes past the {MAX_CONTENT_BYTES}-byte limit"
-                ))
+                Error::resource_limit(format!("a stream decodes past its {limit}-byte limit"))
             }
             e => Error::malformed(format!("content stream: {e}")),
         })

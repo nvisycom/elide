@@ -2,7 +2,10 @@
 //! once), and every form XObject's, tiling pattern's and Type3 glyph
 //! procedure's, planned against the unchanged document and then written back.
 //!
-//! Image removal cuts the drawing of an image this way.
+//! Image removal cuts the drawing of an image this way. The document is a
+//! rebuild, in the normal form: every font, form, pattern and glyph
+//! procedure is an object of its own, and each page, form, pattern and Type3
+//! font has its resources, every category of them, held in place.
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -21,8 +24,8 @@ pub(super) enum Target {
 /// The content streams of `doc`'s pages (each set of shared streams once),
 /// form XObjects, tiling patterns and Type3 glyph procedures that `rewrite`
 /// changes, with their new content and what `rewrite` reports cutting.
-/// `rewrite` reads a stream's bytes and the resource dictionaries its names
-/// resolve against: a stream's own, a glyph procedure's its font's.
+/// `rewrite` reads a stream's bytes and the resources its names resolve in:
+/// a stream's own, a glyph procedure's its font's.
 pub(super) fn plan<C>(
     doc: &Document,
     mut rewrite: impl FnMut(&Document, &[u8], &Scope<'_>) -> Result<Option<(Vec<u8>, C)>>,
@@ -39,30 +42,29 @@ pub(super) fn plan<C>(
             edits.push((Target::Page(page), content, cut));
         }
     }
-    // Each content stream with the resources it resolves its names in. A
-    // Type3 font may be an object of its own or inline in a resource
-    // dictionary, so every dictionary is looked through.
+    // Each content stream with the resources it resolves its names in.
     let mut streams: Vec<(ObjectId, &Stream, Option<&Dictionary>)> = Vec::new();
-    let mut fonts = Vec::new();
     for (&id, object) in &doc.objects {
-        if let Object::Stream(stream) = object
-            && (stream.dict.is_subtype(doc, b"Form") || is_tiling(doc, &stream.dict))
-        {
-            streams.push((id, stream, Scope::own(doc, &stream.dict)));
-        }
-        type3_fonts(doc, object, 0, &mut fonts);
-    }
-    for font in fonts {
-        let procs = font
-            .get(b"CharProcs")
-            .ok()
-            .and_then(|procs| doc.resolve_dict(procs));
-        for (_, glyph) in procs.into_iter().flat_map(Dictionary::iter) {
-            if let Ok(id) = glyph.as_reference()
-                && let Ok(Object::Stream(stream)) = doc.get_object(id)
+        match object {
+            Object::Stream(stream)
+                if stream.dict.is_subtype(doc, b"Form") || is_tiling(doc, &stream.dict) =>
             {
-                streams.push((id, stream, Scope::own(doc, font)));
+                streams.push((id, stream, Scope::own(doc, &stream.dict)));
             }
+            Object::Dictionary(font) if font.is_subtype(doc, b"Type3") => {
+                let procs = font
+                    .get(b"CharProcs")
+                    .ok()
+                    .and_then(|procs| doc.resolve_dict(procs));
+                for (_, glyph) in procs.into_iter().flat_map(Dictionary::iter) {
+                    if let Ok(id) = glyph.as_reference()
+                        && let Ok(Object::Stream(stream)) = doc.get_object(id)
+                    {
+                        streams.push((id, stream, Scope::own(doc, font)));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     let mut rewritten = HashSet::new();
@@ -93,39 +95,6 @@ pub(super) fn apply<C>(doc: &mut Document, edits: Vec<(Target, Vec<u8>, C)>) -> 
     Ok(cuts)
 }
 
-/// How deep [`type3_fonts`] and [`drop_xobjects`] look into an object's
-/// inline values.
-const MAX_INLINE_DEPTH: usize = 32;
-
-/// Collect into `fonts` each Type3 font `object` is or holds inline.
-fn type3_fonts<'d>(
-    doc: &Document,
-    object: &'d Object,
-    depth: usize,
-    fonts: &mut Vec<&'d Dictionary>,
-) {
-    if depth > MAX_INLINE_DEPTH {
-        return;
-    }
-    let dict = match object {
-        Object::Dictionary(dict) => dict,
-        Object::Stream(stream) => &stream.dict,
-        Object::Array(items) => {
-            for item in items {
-                type3_fonts(doc, item, depth + 1, fonts);
-            }
-            return;
-        }
-        _ => return,
-    };
-    if dict.is_subtype(doc, b"Type3") {
-        fonts.push(dict);
-    }
-    for (_, value) in dict.iter() {
-        type3_fonts(doc, value, depth + 1, fonts);
-    }
-}
-
 /// Whether the stream `dict` is a tiling pattern's.
 fn is_tiling(doc: &Document, dict: &Dictionary) -> bool {
     dict.get(b"PatternType")
@@ -135,64 +104,28 @@ fn is_tiling(doc: &Document, dict: &Dictionary) -> bool {
 }
 
 /// Drop every entry naming one of the `hidden` XObjects from the `/XObject`
-/// sub-dictionary of every resource dictionary: an object of its own, or
-/// inline at any depth in another (a page's, a form's, a Type3 font's held
-/// inline in a page's).
+/// resources of every page, form, pattern and Type3 font.
 pub(super) fn drop_xobjects(doc: &mut Document, hidden: &HashSet<ObjectId>) {
     if hidden.is_empty() {
         return;
     }
-    let mut referenced: Vec<ObjectId> = Vec::new();
     for object in doc.objects.values_mut() {
-        drop_inline(object, hidden, 0, &mut referenced);
-    }
-    for id in referenced {
-        if let Ok(Object::Dictionary(entries)) = doc.get_object_mut(id) {
-            retain(entries, hidden);
-        }
-    }
-}
-
-/// Drop the `hidden` entries of every `/XObject` sub-dictionary `object`
-/// holds inline, collecting into `referenced` those it refers to.
-fn drop_inline(
-    object: &mut Object,
-    hidden: &HashSet<ObjectId>,
-    depth: usize,
-    referenced: &mut Vec<ObjectId>,
-) {
-    if depth > MAX_INLINE_DEPTH {
-        return;
-    }
-    let dict = match object {
-        Object::Dictionary(dict) => dict,
-        Object::Stream(stream) => &mut stream.dict,
-        Object::Array(items) => {
-            for item in items {
-                drop_inline(item, hidden, depth + 1, referenced);
+        let dict = match object {
+            Object::Dictionary(dict) => dict,
+            Object::Stream(stream) => &mut stream.dict,
+            _ => continue,
+        };
+        if let Ok(Object::Dictionary(resources)) = dict.get_mut(b"Resources")
+            && let Ok(Object::Dictionary(entries)) = resources.get_mut(b"XObject")
+        {
+            let names: Vec<Vec<u8>> = entries
+                .iter()
+                .filter(|(_, value)| value.as_reference().is_ok_and(|id| hidden.contains(&id)))
+                .map(|(name, _)| name.clone())
+                .collect();
+            for name in names {
+                entries.remove(&name);
             }
-            return;
         }
-        _ => return,
-    };
-    match dict.get_mut(b"XObject") {
-        Ok(Object::Dictionary(entries)) => retain(entries, hidden),
-        Ok(Object::Reference(id)) => referenced.push(*id),
-        _ => {}
-    }
-    for (_, value) in dict.iter_mut() {
-        drop_inline(value, hidden, depth + 1, referenced);
-    }
-}
-
-/// Drop the entries of `entries` naming one of the `hidden` objects.
-fn retain(entries: &mut Dictionary, hidden: &HashSet<ObjectId>) {
-    let names: Vec<Vec<u8>> = entries
-        .iter()
-        .filter(|(_, value)| value.as_reference().is_ok_and(|id| hidden.contains(&id)))
-        .map(|(name, _)| name.clone())
-        .collect();
-    for name in names {
-        entries.remove(&name);
     }
 }

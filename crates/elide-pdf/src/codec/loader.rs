@@ -186,6 +186,7 @@ mod tests {
     use crate::content::image::Images;
     use crate::fixtures::with_pages;
     use crate::pdf::Pdf;
+    use crate::sanitize::Rebuild;
 
     /// A solid-colour PNG of `w`x`h`.
     fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
@@ -201,10 +202,7 @@ mod tests {
     /// to tell whether the original page content survives a reflatten.
     fn scanned_doc() -> Bytes {
         let mut doc = PdfDocument::with_version("1.5");
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"q 1 0 0 1 0 0 cm % SCANNED-PAGE-MARKER".to_vec(),
-        ));
+        let content = doc.add_object(Stream::new(dictionary! {}, MARKER.to_vec()));
         with_pages(
             &mut doc,
             [dictionary! {
@@ -222,7 +220,25 @@ mod tests {
     fn scanned_document(document: &[u8], render: &[u8], blobs: Vec<Blob>) -> Document {
         let state = PdfState::new(Pages::Glyph(Vec::new()));
         let page = PageStream::new(1, Bytes::copy_from_slice(render));
-        PdfDocumentLoader::document(Pdf::open(document).unwrap(), state, vec![page], blobs)
+        let pdf = Pdf::open(document).unwrap().read(Rebuild).unwrap().pdf;
+        PdfDocumentLoader::document(pdf, state, vec![page], blobs)
+    }
+
+    /// The scanned page's own content: a drawing the rebuild keeps.
+    const MARKER: &[u8] = b"0.271828 g 0 0 1 1 re f";
+
+    /// Whether any stream of the PDF `bytes` still holds [`MARKER`]'s drawing.
+    fn holds_marker(bytes: &[u8]) -> bool {
+        let doc = PdfDocument::load_mem(bytes).unwrap();
+        doc.objects
+            .values()
+            .filter_map(|o| o.as_stream().ok())
+            .any(|stream| {
+                let content = stream
+                    .decompressed_content()
+                    .unwrap_or(stream.content.clone());
+                String::from_utf8_lossy(&content).contains("0.271828")
+            })
     }
 
     /// The region from `(x, y)` of `w`x`h` pixels.
@@ -261,7 +277,7 @@ mod tests {
 
         let out = doc.encode().unwrap().to_bytes();
         assert!(
-            !String::from_utf8_lossy(&out).contains("SCANNED-PAGE-MARKER"),
+            !holds_marker(&out),
             "original scanned page content survived reflatten"
         );
         let reopened = PdfDocument::load_mem(&out).unwrap();
@@ -318,7 +334,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         let out = doc.encode().unwrap().to_bytes();
-        assert!(String::from_utf8_lossy(&out).contains("SCANNED-PAGE-MARKER"));
+        assert!(holds_marker(&out));
     }
 
     /// A scanned page is a stream of the document, not one of its blobs.
@@ -357,7 +373,15 @@ mod tests {
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         let bytes = Bytes::from(bytes);
-        let surfaced = Pdf::open(&bytes).unwrap().read(Images).unwrap().remove(0);
+        // Surfaced from the rebuild the loader reads, whose ids it uses.
+        let surfaced = Pdf::open(&bytes)
+            .unwrap()
+            .read(Rebuild)
+            .unwrap()
+            .pdf
+            .read(Images)
+            .unwrap()
+            .remove(0);
         let image = Blob {
             id: LocalId::new(BlobId::Image(surfaced.id).to_string()),
             bytes: surfaced.bytes,

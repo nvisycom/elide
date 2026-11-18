@@ -4,7 +4,7 @@
 use std::mem;
 
 use elide_core::redaction::HiddenContent;
-use elide_core::{Error, Result};
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
@@ -44,8 +44,14 @@ impl<'a> Builder<'a> {
         self.charge(VALUE_COST + held)?;
         match value {
             Object::Reference(id) => self.copy_reference(kind, *id, scope, depth),
+            // A font held in place is written as an object of its own, as
+            // the normal form has every font and stream.
             Object::Dictionary(_) | Object::Stream(_) => {
-                self.copy_object(kind, None, value, scope, depth)
+                Ok(match self.copy_object(kind, None, value, scope, depth)? {
+                    Some(copy @ Object::Stream(_)) => Some(self.add(copy)),
+                    Some(copy) if kind == Kind::Font => Some(self.add(copy)),
+                    copy => copy,
+                })
             }
             Object::Array(items) if kind == Kind::ColorSpace => {
                 self.color_space(items, scope, depth)
@@ -204,7 +210,7 @@ impl<'a> Builder<'a> {
                 Ok(None)
             }
             (Kind::Image | Kind::Mask, Object::Stream(stream)) if !self.external(&stream.dict) => {
-                self.image(kind, id, value, stream, scope, depth)
+                self.image(kind, id, stream, scope, depth)
             }
             (Kind::Map(inner), Object::Dictionary(dict)) => {
                 let mut out = Dictionary::new();
@@ -247,15 +253,14 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// An image XObject or stencil mask `stream` (the object `value`, the
-    /// source object `id` when it is one): one stored as raw samples written
-    /// as exactly the samples it takes, so no bytes past them are carried;
-    /// one stored as a file copied as it is.
+    /// An image XObject or stencil mask `stream` (the source object `id`
+    /// when it is one): one stored as raw samples written as exactly the
+    /// samples it takes, so no bytes past them are carried; one stored as a
+    /// JPEG or JPEG 2000 file copied as it is.
     fn image<'s>(
         &mut self,
         kind: Kind,
         id: Option<ObjectId>,
-        value: &'s Object,
         stream: &'s Stream,
         scope: &Scope<'s>,
         depth: usize,
@@ -269,7 +274,7 @@ impl<'a> Builder<'a> {
                 self.charge(samples.len())?;
                 samples
             }
-            Ok(None) => return self.table(value, fields, scope, depth),
+            Ok(None) => return self.stored(stream, fields, scope, depth),
             Err(_) => {
                 self.unreadable(id);
                 return Ok(None);
@@ -283,6 +288,30 @@ impl<'a> Builder<'a> {
             depth,
         )?;
         Ok(Some(Object::Stream(compressed(dict, samples)?)))
+    }
+
+    /// An image `stream` stored as a JPEG or JPEG 2000 file, keeping
+    /// `fields`, its data and encoding as stored: the file a codec reads.
+    fn stored<'s>(
+        &mut self,
+        stream: &'s Stream,
+        fields: &[(&[u8], Kind)],
+        scope: &Scope<'s>,
+        depth: usize,
+    ) -> Result<Option<Object>>
+    where
+        'a: 's,
+    {
+        self.charge(stream.content.len())?;
+        let dict = self.stream_keys(&stream.dict, fields, &[], scope, depth)?;
+        Ok(Some(Object::Stream(
+            Stream::new(dict, stream.content.clone()).with_compression(false),
+        )))
+    }
+
+    /// `object` added to the rebuild as an object of its own, referred to.
+    fn add(&mut self, object: Object) -> Object {
+        Object::Reference(self.out.add_object(object))
     }
 
     /// Take `bytes` from the copy budget.
@@ -328,10 +357,27 @@ impl<'a> Builder<'a> {
                 self.record(HiddenContent::Unreadable);
                 return Ok(None);
             }
+            // Written as its data, compressed anew, so no encoding but Flate
+            // reaches the output; its data decodes within what the copy
+            // budget has left.
             Object::Stream(stream) => {
-                self.charge(stream.content.len())?;
-                let dict = self.stream_keys(&stream.dict, fields, &[], scope, depth)?;
-                Object::Stream(Stream::new(dict, stream.content.clone()).with_compression(false))
+                let data = match stream.decoded_within(self.copy_budget) {
+                    Ok(data) => data,
+                    Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
+                    Err(_) => {
+                        self.record(HiddenContent::Unreadable);
+                        return Ok(None);
+                    }
+                };
+                self.charge(data.len())?;
+                let dict = self.stream_keys(
+                    &stream.dict,
+                    fields,
+                    &[b"Filter", b"DecodeParms", b"DL"],
+                    scope,
+                    depth,
+                )?;
+                Object::Stream(compressed(dict, data)?)
             }
             _ => return Ok(None),
         }))

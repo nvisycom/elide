@@ -122,7 +122,8 @@ mod tests {
 
     use super::*;
     use crate::fixtures::with_pages;
-    use crate::sanitize::Check;
+    use crate::pdf::reader::DictionaryExt;
+    use crate::sanitize::{Check, Rebuild};
 
     /// A 1x1 gray image of raw samples.
     fn gray() -> Stream {
@@ -187,8 +188,9 @@ mod tests {
     }
 
     /// An image a tiling pattern or a Type3 glyph draws is cut from that
-    /// stream too, so its drawing never names a resource that is gone; the
-    /// font is held inline in the page's resources, where it is found too.
+    /// stream too, so its drawing never names a resource that is gone. The
+    /// font is held in place in the source; the rebuild, which image removal
+    /// always follows, makes it an object of its own.
     #[test]
     fn an_image_drawn_by_a_pattern_or_glyph_is_cut() {
         let mut doc = Document::with_version("1.5");
@@ -234,7 +236,21 @@ mod tests {
                 },
             }],
         );
-        let mut edit = Edit::of(doc);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let rebuilt = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let image = rebuilt
+            .doc()
+            .objects
+            .iter()
+            .find(|(_, object)| {
+                object
+                    .as_stream()
+                    .is_ok_and(|s| s.dict.is_subtype(rebuilt.doc(), b"Image"))
+            })
+            .map(|(&id, _)| id)
+            .unwrap();
+        let mut edit = rebuilt.edit();
         assert_eq!(
             redact::remove(&mut edit, &HashSet::from([image])).unwrap(),
             2

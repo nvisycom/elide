@@ -34,15 +34,16 @@ pub(super) fn reflatten(edit: &mut Edit, replacements: &[PageReplacement]) -> Re
         let image_id = doc.add_object(replacement.image.clone());
         let content = format!("q {width} 0 0 {height} 0 0 cm /Im0 Do Q");
         let content_id = doc.add_object(Stream::new(dictionary! {}, content.into_bytes()));
-        let resources_id = doc.add_object(dictionary! {
-            "XObject" => dictionary! { "Im0" => Object::Reference(image_id) },
-        });
 
         let page = doc
             .get_dictionary_mut(page_id)
             .map_err(|e| Error::redaction(format!("page {number} is unreadable: {e}")))?;
         page.set("Contents", Object::Reference(content_id));
-        page.set("Resources", Object::Reference(resources_id));
+        // Held in place, as the normal form has it.
+        page.set(
+            "Resources",
+            dictionary! { "XObject" => dictionary! { "Im0" => Object::Reference(image_id) } },
+        );
         // Each is set on the page itself, so an inherited value from an
         // ancestor `Pages` node cannot clip, rotate, or rescale the image.
         let size = vec![
