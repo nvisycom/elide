@@ -294,14 +294,16 @@ fn embeds_files(doc: &Document, object: &Object, depth: usize) -> bool {
                     .any(|(_, file)| matches!(doc.resolve(file), Some(Object::Stream(_))))
             })
     };
+    // A stream's dictionary holds values (an image's `/AF`) as any other.
+    let holds = |dict: &Dictionary| {
+        embeds(dict)
+            || dict
+                .iter()
+                .any(|(_, value)| embeds_files(doc, value, depth + 1))
+    };
     match object {
-        Object::Dictionary(dict) => {
-            embeds(dict)
-                || dict
-                    .iter()
-                    .any(|(_, value)| embeds_files(doc, value, depth + 1))
-        }
-        Object::Stream(stream) => embeds(&stream.dict) || stream.dict.is_type(doc, b"EmbeddedFile"),
+        Object::Dictionary(dict) => holds(dict),
+        Object::Stream(stream) => stream.dict.is_type(doc, b"EmbeddedFile") || holds(&stream.dict),
         Object::Array(items) => items.iter().any(|item| embeds_files(doc, item, depth + 1)),
         _ => false,
     }

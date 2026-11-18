@@ -166,12 +166,9 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
         let space = space(doc, colours, inverted)?;
         if indexed && let Ok(decode) = dict.get(b"Decode") {
             let identity = [0.0, ((1u32 << bits) - 1) as f64];
-            let values: Option<Vec<f64>> = doc.resolve_array(decode).map(|values| {
-                values
-                    .iter()
-                    .filter_map(|v| doc.resolve_number(v))
-                    .collect()
-            });
+            let values: Option<Vec<f64>> = doc
+                .resolve_array(decode)
+                .and_then(|values| values.iter().map(|v| doc.resolve_number(v)).collect());
             if values.as_deref() != Some(&identity[..]) {
                 return None;
             }

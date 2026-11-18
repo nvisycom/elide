@@ -31,8 +31,14 @@ impl<'a> Scope<'a> {
             let Some(dict) = node else {
                 break;
             };
-            if let Ok(resources) = dict.get(b"Resources") {
-                return Self(doc.resolve_dict(resources).into_iter().collect());
+            // A null or dangling entry is absent, so inheritance goes on.
+            if let Some(resources) = dict
+                .get(b"Resources")
+                .ok()
+                .and_then(|resources| doc.resolve(resources))
+                .filter(|resources| !matches!(resources, Object::Null))
+            {
+                return Self(resources.as_dict().ok().into_iter().collect());
             }
             node = dict
                 .get(b"Parent")
@@ -115,7 +121,7 @@ mod tests {
     use super::*;
 
     /// A page's own `/Resources`, even empty, is its scope whole; one with
-    /// none inherits its parent's.
+    /// none, or a null one, inherits its parent's.
     #[test]
     fn a_page_inherits_resources_whole() {
         let mut doc = Document::with_version("1.7");
@@ -127,10 +133,13 @@ mod tests {
             "Type" => "Page", "Parent" => pages, "Resources" => dictionary! {},
         });
         let inheriting = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
+        let null = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Resources" => Object::Null,
+        });
         doc.objects.insert(
             pages,
             Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![own.into(), inheriting.into()], "Count" => 2,
+                "Type" => "Pages", "Kids" => vec![own.into(), inheriting.into(), null.into()], "Count" => 3,
                 "Resources" => parent_resources,
             }),
         );
@@ -141,5 +150,6 @@ mod tests {
         };
         assert!(!lookup(own));
         assert!(lookup(inheriting));
+        assert!(lookup(null));
     }
 }

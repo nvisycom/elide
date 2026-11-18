@@ -361,14 +361,24 @@ impl<'a> Builder<'a> {
             .ok()
             .and_then(|p| source.resolve(p))
         {
-            Some(Object::Array(parameters)) => parameters.first().and_then(|p| source.resolve(p)),
+            Some(Object::Array(parameters)) => {
+                self.residue += parameters.len().saturating_sub(1);
+                parameters.first().and_then(|p| source.resolve(p))
+            }
             parameters => parameters,
-        };
+        }
+        .filter(|p| !matches!(p, Object::Null));
         let transform = parameters
             .and_then(|p| p.as_dict().ok())
             .and_then(|p| source.resolve(p.get(b"ColorTransform").ok()?))
             .and_then(|t| t.as_i64().ok())
             .filter(|t| *filter == b"DCTDecode" && matches!(t, 0 | 1));
+        // Every other parameter, and a transform not written, is dropped.
+        match parameters.map(Object::as_dict) {
+            None => {}
+            Some(Ok(p)) => self.residue += p.len() - usize::from(transform.is_some()),
+            Some(Err(_)) => self.residue += 1,
+        }
         if let Some(transform) = transform {
             dict.set(
                 "DecodeParms",

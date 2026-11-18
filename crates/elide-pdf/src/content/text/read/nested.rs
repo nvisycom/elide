@@ -104,9 +104,10 @@ impl Selected<'_> {
 
 impl Layout {
     /// The tiles, laid out in `space`, whose cell overlaps one of `regions`,
-    /// each once, by column and row, with the regions that overlap it; `None` past `limit` tiles, when the regions name more
-    /// than [`MAX_TILE_CANDIDATES`] together with those counted in
-    /// `candidates` already, or tiles too far out to place.
+    /// each once, by column and row, with the distinct regions that overlap
+    /// it; `None` past `limit` tiles, when the regions name more than
+    /// [`MAX_TILE_CANDIDATES`] together with those counted in `candidates`
+    /// already, or tiles too far out to place.
     fn tiles<'r>(
         &self,
         space: Matrix,
@@ -120,7 +121,13 @@ impl Layout {
             return Some(placed);
         };
         let cell = self.cell;
+        // A region painted again counts once.
+        let mut seen = BTreeSet::new();
         for region in regions {
+            let key = [region.min_x, region.min_y, region.max_x, region.max_y].map(f64::to_bits);
+            if !seen.insert(key) {
+                continue;
+            }
             // The region in pattern space, and the tiles whose cell overlaps it.
             let area = region.mapped(to_cell);
             // The first and last tile indices along an axis, as floats until
@@ -148,13 +155,8 @@ impl Layout {
             }
             for column in first_column as i64..=last_column as i64 {
                 for row in first_row as i64..=last_row as i64 {
-                    // A region painted again over the same tile counts once.
                     match placed.get_mut(&(column, row)) {
-                        Some(coverage) => {
-                            if !coverage.contains(region) {
-                                coverage.push(*region);
-                            }
-                        }
+                        Some(coverage) => coverage.push(*region),
                         None => {
                             placed.insert((column, row), vec![*region]);
                             if placed.len() > limit {
@@ -211,7 +213,9 @@ impl<'d> Walk<'_, 'd> {
                 .ok()
                 .and_then(|mask| doc.resolve(mask))
                 .is_some_and(|mask| matches!(mask.as_bool(), Ok(true)));
+            // The samples are read only when the fill paints a pattern.
             if stencil
+                && inherited.painting.fills_pattern()
                 && let Some([min_x, min_y, max_x, max_y]) = stencil_extent(doc, stream)
                 && let Some(painted) = inherited.painting.fill_area(
                     DeviceRect {

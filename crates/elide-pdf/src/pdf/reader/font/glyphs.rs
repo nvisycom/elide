@@ -196,7 +196,7 @@ fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Code
                     .ok()
                     .and_then(|b| doc.resolve(b))
                 {
-                    None => Vec::new(),
+                    None | Some(Object::Null) => Vec::new(),
                     Some(Object::Name(name)) => [b"/", name.as_slice(), b" usecmap\n"].concat(),
                     Some(_) => return Ok(None),
                 };

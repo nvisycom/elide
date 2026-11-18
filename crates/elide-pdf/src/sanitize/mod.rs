@@ -659,6 +659,25 @@ mod tests {
             panic!("mask");
         };
         assert!(mask.dict.is_subtype(&out, b"Image"));
+        // The note dropped is recorded: a rebuild that carries one again is
+        // not passed as clean.
+        check(&out).unwrap();
+        let mut noted = out.clone();
+        let image = noted
+            .objects
+            .values_mut()
+            .find_map(|object| match object {
+                Object::Stream(stream) if stream.dict.has(b"DecodeParms") => Some(stream),
+                _ => None,
+            })
+            .unwrap();
+        image
+            .dict
+            .get_mut(b"DecodeParms")
+            .and_then(Object::as_dict_mut)
+            .unwrap()
+            .set("Note", Object::string_literal("Jane Roe"));
+        assert!(check(&noted).is_err(), "the JPEG's note passed");
     }
 
     /// An image stored as raw samples is written as exactly the samples it

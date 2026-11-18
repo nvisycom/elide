@@ -195,10 +195,11 @@ impl Painting {
     /// Where text shown in `extent`, under the transform `ctm`, paints with
     /// a pattern, within the clip: filled over its glyphs, stroked as far as
     /// the stroke reaches past them, or both, as the rendering mode draws
-    /// it; text the mode does not draw paints nothing. Text shown under a
-    /// clipping mode adds to the clip its text object sets at `ET`.
-    pub(super) fn text(&mut self, extent: DeviceRect, ctm: Matrix) -> Vec<Painted> {
-        if self.render >= 4 {
+    /// it; text the mode does not draw paints nothing. Text of `outlines`
+    /// shown under a clipping mode adds to the clip its text object sets at
+    /// `ET`.
+    pub(super) fn text(&mut self, extent: DeviceRect, ctm: Matrix, outlines: bool) -> Vec<Painted> {
+        if self.render >= 4 && outlines {
             self.text_clip = Some(match self.text_clip {
                 Some(clip) => clip.union(extent),
                 None => extent,
@@ -241,11 +242,16 @@ impl Painting {
         }
     }
 
+    /// Whether a fill paints with a pattern, and is not fully transparent.
+    pub(super) fn fills_pattern(&self) -> bool {
+        self.fill.is_some() && !self.fill_clear
+    }
+
     /// Where a fill of `extent` paints with a pattern, within the clip: a
     /// stencil mask's, which paints with the fill colour.
     pub(super) fn fill_area(&self, extent: DeviceRect) -> Option<Painted> {
         Some(Painted {
-            paint: self.fill.filter(|_| !self.fill_clear)?,
+            paint: self.fill.filter(|_| self.fills_pattern())?,
             region: self.clipped(extent)?,
         })
     }
@@ -275,12 +281,13 @@ impl Painting {
     }
 
     /// The patterns, clip and line style `saved` holds restored, as `Q`
-    /// restores them; the path being built is not graphics state, so it
-    /// stays.
+    /// restores them; the path being built and the text object's pending
+    /// clip are not graphics state, so they stay.
     pub(super) fn restore(&mut self, saved: Painting) {
         *self = Self {
             path: self.path,
             clips: self.clips,
+            text_clip: self.text_clip,
             ..saved
         };
     }
