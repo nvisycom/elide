@@ -330,6 +330,44 @@ mod tests {
         String::from_utf8(read_part(package, name).unwrap()).unwrap()
     }
 
+    /// A picture's payload, a VML picture bullet, and an SVG image survive
+    /// the schema rebuild.
+    #[test]
+    fn pictures_and_svg_images_are_kept() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{W}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:drawing><wp:inline><wp:extent cx="1" cy="1"/><wp:docPr id="1" name="Picture 1"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="logo.svg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r><w:r><w:pict><v:shape id="s" style="width:9pt"><v:imagedata r:id="rId1"/></v:shape></w:pict></w:r></w:p></w:body></w:document>"#
+        );
+        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="svg" ContentType="image/svg+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.svg"/></Relationships>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><text>Jane Roe</text></svg>"#;
+        let package = pack_parts(&[
+            ("[Content_Types].xml", types.as_bytes()),
+            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("word/document.xml", body.as_bytes()),
+            ("word/_rels/document.xml.rels", rels.as_bytes()),
+            ("word/media/logo.svg", svg.as_bytes()),
+        ]);
+        let (out, stripped) =
+            sanitize(&package, HiddenContentPolicy::default(), &WordFormat).unwrap();
+        let out = out.unwrap_or(package);
+        let document = part(&out, "word/document.xml");
+        assert!(
+            document.contains(r#"<a:blip r:embed="rId1"/>"#),
+            "{document}"
+        );
+        assert!(
+            document.contains(r#"<v:imagedata r:id="rId1"/>"#),
+            "{document}"
+        );
+        assert_eq!(part(&out, "word/media/logo.svg"), svg);
+        assert!(
+            stripped
+                .iter()
+                .all(|entry| entry.content != HiddenContent::ApplicationData),
+            "{stripped:?}"
+        );
+    }
+
     #[test]
     fn a_redacted_bookmark_is_fitted_and_its_hyperlinks_follow() {
         let body = format!(

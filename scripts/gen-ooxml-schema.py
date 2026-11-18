@@ -21,8 +21,12 @@ where `<schemas>` holds:
   people) have roots of their own.
 
 Markup compatibility (`mc:AlternateContent`) is resolved by the rebuild itself,
-so its schema is not read. A wildcard (`xsd:any`) allows nothing: what it would
-admit is outside the schema.
+so its schema is not read. A wildcard (`xsd:any`) that names its namespaces
+(`w:pict` admits VML) allows the global elements of those namespaces; one open
+to any namespace allows nothing, what it would admit being outside the schema,
+except `a:graphicData`, whose standard payloads (`PAYLOADS`) are listed here.
+`xml:space` is allowed on every element that holds text: the schemas leave it
+off SpreadsheetML's strings, where Excel writes it.
 """
 
 import sys
@@ -31,7 +35,33 @@ from pathlib import Path
 
 XSD = "{http://www.w3.org/2001/XMLSchema}"
 MCE = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+XML = "http://www.w3.org/XML/1998/namespace"
+A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 OUT = Path(__file__).resolve().parent.parent / "crates/elide-office/src/opc/schema/table.rs"
+
+# The standard payloads of `a:graphicData`, whose schema admits any element:
+# a picture, chart, SmartArt diagram, locked canvas, table, and OLE object.
+PAYLOADS = [
+    ("http://schemas.openxmlformats.org/drawingml/2006/picture", "pic"),
+    ("http://schemas.openxmlformats.org/drawingml/2006/chart", "chart"),
+    ("http://schemas.openxmlformats.org/drawingml/2006/diagram", "relIds"),
+    ("http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas", "lockedCanvas"),
+    (A, "tbl"),
+    ("http://schemas.openxmlformats.org/presentationml/2006/main", "oleObj"),
+]
+
+# Roots the Rust dispatch names, which a complete schema set defines.
+REQUIRED_ROOTS = [
+    ("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "document"),
+    ("http://schemas.openxmlformats.org/presentationml/2006/main", "presentation"),
+    ("http://schemas.openxmlformats.org/spreadsheetml/2006/main", "workbook"),
+    (A, "theme"),
+    ("urn:schemas-microsoft-com:vml", "shape"),
+    ("http://schemas.microsoft.com/office/word/2012/wordml", "commentsEx"),
+    ("http://schemas.microsoft.com/office/word/2012/wordml", "people"),
+    ("http://schemas.microsoft.com/office/word/2016/wordml/cid", "commentsIds"),
+    ("http://schemas.microsoft.com/office/word/2018/wordml/cex", "commentsExtensible"),
+]
 
 
 class Schema:
@@ -41,7 +71,7 @@ class Schema:
         self.path = path
         # ElementTree drops namespace declarations, so read them first.
         # The `xml` prefix is bound without a declaration.
-        self.prefixes = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        self.prefixes = {"xml": XML}
         for _, (prefix, uri) in ET.iterparse(path, events=["start-ns"]):
             self.prefixes.setdefault(prefix, uri)
         self.root = ET.parse(path).getroot()
@@ -175,7 +205,16 @@ class Generator:
             for child in node:
                 self.particles(schema, child, resolved)
         elif tag == XSD + "any":
-            resolved["wildcard"] = True
+            namespaces = node.get("namespace", "##any").split()
+            named = [ns for ns in namespaces if not ns.startswith("##")]
+            if named and len(named) == len(namespaces):
+                # A wildcard naming its namespaces admits their global
+                # elements, each read against its own type.
+                for key, (owner, element) in sorted(self.elements.items()):
+                    if key[0] in named:
+                        resolved["children"][key] = self.type_of_element(owner, element)
+            else:
+                resolved["wildcard"] = True
         elif tag == XSD + "element":
             if node.get("ref"):
                 name = schema.qname(node.get("ref"))
@@ -216,6 +255,20 @@ class Generator:
             if name[0] == MCE:
                 continue
             roots[name] = self.type_of_element(schema, node)
+        missing = [f"{{{ns}}}{local}" for ns, local in REQUIRED_ROOTS if (ns, local) not in roots]
+        if missing:
+            sys.exit(f"incomplete schema set: no root {', '.join(missing)}")
+
+        # The payloads `a:graphicData` holds.
+        graphic_data = self.types[("ct", A, "CT_GraphicalObjectData")]
+        for name in PAYLOADS:
+            graphic_data["children"][name] = roots[name]
+        graphic_data["wildcard"] = False
+
+        # `xml:space` on every element holding text.
+        for t in self.types.values():
+            if t["text"]:
+                t["attributes"].add((XML, "space"))
 
         # Number the types, folding identical ones together; type 0 is plain
         # text.
@@ -231,7 +284,7 @@ class Generator:
 
         signature = {}
         ids = {"text": 0}
-        bodies = [(True, False, (), ())]
+        bodies = [(True, False, ((ns_index[XML], "space"),), ())]
 
         def number(key):
             if key in ids:
@@ -295,7 +348,7 @@ class Generator:
             w(f'    "{ns}",')
         w("];")
         w("")
-        w("/// Every element type, by index; 0 holds text alone.")
+        w("/// Every element type, by index; 0 holds text alone, with `xml:space`.")
         w(f"pub(super) static TYPES: [Type; {len(types)}] = [")
         for text, wildcard, attributes, children in types:
             attrs = ", ".join(f'({n}, "{l}")' for n, l in attributes)
@@ -319,10 +372,12 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     base = Path(sys.argv[1])
-    paths = sorted((base / "ISO-IEC29500-4_2016").glob("*.xsd"))
-    paths += sorted((base / "microsoft").glob("*.xsd"))
-    if not paths:
-        sys.exit(f"no schemas under {base}")
+    paths = []
+    for directory in ("ISO-IEC29500-4_2016", "microsoft"):
+        found = sorted((base / directory).glob("*.xsd"))
+        if not found:
+            sys.exit(f"no schemas under {base / directory}")
+        paths += found
     Generator([Schema(path) for path in paths]).run()
 
 

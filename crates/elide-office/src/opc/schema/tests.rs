@@ -132,17 +132,62 @@ fn a_vml_drawing_keeps_its_shapes() {
 }
 
 #[test]
-fn processing_instructions_and_cdata_go() {
-    let raw = word("<?app data?><w:p><w:r><w:t><![CDATA[Jane]]></w:t></w:r></w:p>");
+fn processing_instructions_go() {
+    let raw = word("<?app data?><w:p><w:r><w:t>Jane</w:t></w:r></w:p>");
     let (text, removed) = rebuilt(&raw, DOCUMENT);
-    assert_eq!(text, word("<w:p><w:r><w:t></w:t></w:r></w:p>"));
+    assert_eq!(text, word("<w:p><w:r><w:t>Jane</w:t></w:r></w:p>"));
+    assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
+}
+
+/// CDATA where text shows is written as the text it stands for; elsewhere it
+/// goes.
+#[test]
+fn cdata_is_kept_as_text_where_text_shows() {
+    let raw = word("<w:p><w:r><w:t><![CDATA[R&D <b>]]></w:t></w:r><![CDATA[Jane]]></w:p>");
+    let (text, removed) = rebuilt(&raw, DOCUMENT);
     assert_eq!(
-        removed,
-        [
-            (HiddenContent::ApplicationData, 1),
-            (HiddenContent::Undisplayed, 1)
-        ]
+        text,
+        word("<w:p><w:r><w:t>R&amp;D &lt;b&gt;</w:t></w:r></w:p>")
     );
+    assert_eq!(removed, [(HiddenContent::Undisplayed, 1)]);
+}
+
+/// A namespace an unwrapped `mc:Fallback` declares is declared again on the
+/// children it held, unless they declare it themselves.
+#[test]
+fn a_fallback_hands_its_namespaces_to_its_children() {
+    let raw = format!(
+        r#"<w:document xmlns:w="{W}" xmlns:mc="{MCE}"><w:body><w:p><mc:AlternateContent xmlns:v="urn:schemas-microsoft-com:vml"><mc:Fallback xmlns:x="{W}"><x:r><x:t>Roe</x:t></x:r><x:r xmlns:v="urn:other"/></mc:Fallback></mc:AlternateContent></w:p></w:body></w:document>"#
+    );
+    let (text, _) = rebuilt(&raw, DOCUMENT);
+    assert_eq!(
+        text,
+        format!(
+            r#"<w:document xmlns:w="{W}" xmlns:mc="{MCE}"><w:body><w:p><x:r xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="{W}"><x:t>Roe</x:t></x:r><x:r xmlns:x="{W}" xmlns:v="urn:other"/></w:p></w:body></w:document>"#
+        )
+    );
+}
+
+/// A picture inside `a:graphicData` is a payload the allowlist names.
+#[test]
+fn a_graphic_keeps_its_picture() {
+    let raw = format!(
+        r#"<p:sld xmlns:p="{P}" xmlns:a="{A}" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="t"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm/><a:graphic><a:graphicData uri="u"><pic:pic/><a:tbl><a:tr h="1"><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Jane</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl><s:x xmlns:s="urn:vendor"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>"#
+    );
+    let (text, removed) = rebuilt(&raw, Root::Element(P, "sld"));
+    assert!(text.contains("<pic:pic/>"), "{text}");
+    assert!(text.contains("<a:t>Jane</a:t>"), "{text}");
+    assert!(!text.contains("urn:vendor"), "{text}");
+    assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
+}
+
+/// Excel writes `xml:space` on a string's text, which its schema leaves off.
+#[test]
+fn spreadsheet_strings_keep_their_spacing() {
+    let raw = format!(
+        r#"<sst xmlns="{X}"><si><r><t xml:space="preserve">Jane </t></r><t xml:space="preserve"> Roe</t></si></sst>"#
+    );
+    assert!(rebuild(&raw, Root::Element(X, "sst")).unwrap().is_none());
 }
 
 #[test]

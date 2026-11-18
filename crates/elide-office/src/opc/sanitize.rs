@@ -308,12 +308,17 @@ fn edit_part(
 }
 
 /// Whether a kept part of `kind` is rebuilt from its schema. The manifest and
-/// relationships parts are written by their own readers, and a property part
-/// keeps only the fields detection surfaces.
+/// relationships parts are written by their own readers, a property part
+/// keeps only the fields detection surfaces, and an embedding (an SVG image
+/// is XML) is surfaced as a blob of its own format.
 fn rebuilt(kind: PartKind) -> bool {
     !matches!(
         kind,
-        PartKind::Relationships | PartKind::Properties | PartKind::CustomXml
+        PartKind::Relationships
+            | PartKind::Properties
+            | PartKind::CustomXml
+            | PartKind::Embedding(_)
+            | PartKind::Font
     )
 }
 

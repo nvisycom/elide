@@ -16,9 +16,11 @@
 //! - markup compatibility is resolved as a reader without extensions resolves
 //!   it: an `mc:AlternateContent` is replaced by its `mc:Fallback`'s children,
 //!   read as its parent's, and every `mc:Choice` goes, as do the `mc:`
-//!   attributes that name ignorable or understood namespaces;
-//! - text in an element whose type holds none, a CDATA section, and a
-//!   processing instruction go.
+//!   attributes that name ignorable or understood namespaces; a namespace the
+//!   unwrapped tags declare is declared again on each child they held;
+//! - text in an element whose type holds none, a CDATA section there, and a
+//!   processing instruction go; a CDATA section in an element that holds text
+//!   is written as the escaped text it stands for.
 //!
 //! Each removal is recorded: what the schema does not name as
 //! [`ApplicationData`](HiddenContent::ApplicationData), text no reader shows
@@ -28,18 +30,24 @@
 //! re-serializing what it keeps, so a kept element round-trips byte for byte,
 //! and rebuilding a rebuilt part changes nothing.
 //!
+//! The schemas admit no `xml:space` on SpreadsheetML's strings, where Excel
+//! writes it, so the generator allows it on every element that holds text.
+//!
 //! A strict part is read against the transitional schema, its namespaces
 //! mapped onto the transitional ones.
 
 #[rustfmt::skip]
 mod table;
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use quick_xml::NsReader;
+use quick_xml::escape::partial_escape;
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
@@ -367,10 +375,16 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     let mut reader = NsReader::from_str(raw);
     let bom = usize::from(raw.starts_with('\u{feff}')) * 3;
     let mut last = bom;
-    let mut cuts: Vec<Range<usize>> = Vec::new();
+    // Each span of the source the rebuild replaces, with what replaces it:
+    // nothing for what it leaves out.
+    let mut cuts: Vec<(Range<usize>, String)> = Vec::new();
     let mut removed: BTreeMap<HiddenContent, usize> = BTreeMap::new();
     let mut record = |content| *removed.entry(content).or_insert(0) += 1;
     let mut open: Vec<Frame> = Vec::new();
+    // For each open frame, the namespace declarations its unwrapped tags and
+    // those around it carried, as (attribute name, source): the children of an
+    // unwrapped frame declare them again.
+    let mut carried: Vec<Vec<(String, String)>> = Vec::new();
     // An element being left out: its start byte and the open depth inside it.
     let mut removing: Option<(usize, usize)> = None;
     let mut seen_root = false;
@@ -391,7 +405,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                 Event::End(_) => {
                     *depth -= 1;
                     if *depth == 0 {
-                        cuts.push(*start..span.end);
+                        cuts.push((*start..span.end, String::new()));
                         removing = None;
                     }
                 }
@@ -413,30 +427,37 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
             // Comments are cut by their own edit.
             Event::Comment(_) => {}
             Event::PI(_) => {
-                cuts.push(span);
+                cuts.push((span, String::new()));
                 record(HiddenContent::ApplicationData);
             }
+            // CDATA is text written another way: where text shows, it is
+            // written as the text it stands for, which extraction reads.
+            Event::CData(ref text) if holds_text(scope) => {
+                let text: &str = text.as_ref();
+                cuts.push((span, partial_escape(text).into_owned()));
+            }
             Event::CData(_) => {
-                cuts.push(span);
+                cuts.push((span, String::new()));
                 record(HiddenContent::Undisplayed);
             }
             Event::Text(ref text) => {
                 let text: &str = text.as_ref();
                 let blank = text.bytes().all(|byte| byte.is_ascii_whitespace());
                 if !blank && !holds_text(scope) {
-                    cuts.push(span);
+                    cuts.push((span, String::new()));
                     record(HiddenContent::Undisplayed);
                 }
             }
             Event::GeneralRef(_) => {
                 if !holds_text(scope) {
-                    cuts.push(span);
+                    cuts.push((span, String::new()));
                     record(HiddenContent::Undisplayed);
                 }
             }
             Event::End(_) => {
+                carried.pop();
                 if open.pop().is_some_and(Frame::unwrapped) {
-                    cuts.push(span);
+                    cuts.push((span, String::new()));
                 }
             }
             Event::Start(ref e) | Event::Empty(ref e) => {
@@ -448,16 +469,39 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                 } else {
                     decide(scope, namespace.as_deref(), local, &open)
                 };
+                // What the unwrapped frame around this element declared.
+                let around = match open.last() {
+                    Some(frame) if frame.unwrapped() => carried.last().cloned().unwrap_or_default(),
+                    _ => Vec::new(),
+                };
                 match decision {
                     Decision::Keep(frame) => {
+                        let mut declares = Vec::new();
                         if let Frame::Typed(ty) = frame {
                             attributes(&reader, raw, e, ty, &mut cuts, &mut record)?;
+                            let own = declarations(raw, e)?;
+                            let missing: String = around
+                                .iter()
+                                .filter(|(key, _)| own.iter().all(|(own, _)| own != key))
+                                .map(|(_, source)| format!(" {source}"))
+                                .collect();
+                            if !missing.is_empty() {
+                                let at = span.start + 1 + e.name().into_inner().len();
+                                cuts.push((at..at, missing));
+                            }
                         } else if frame.unwrapped() {
-                            // The unwrapped tag goes whole.
-                            cuts.push(span.clone());
+                            // The unwrapped tag goes whole, its declarations
+                            // carried to the children it held.
+                            cuts.push((span.clone(), String::new()));
+                            declares = around;
+                            for (key, source) in declarations(raw, e)? {
+                                declares.retain(|(other, _)| *other != key);
+                                declares.push((key, source));
+                            }
                         }
                         if is_start {
                             open.push(frame);
+                            carried.push(declares);
                         }
                     }
                     Decision::Drop(content) => {
@@ -465,7 +509,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                         if is_start {
                             removing = Some((span.start, 1));
                         } else {
-                            cuts.push(span);
+                            cuts.push((span, String::new()));
                         }
                     }
                 }
@@ -476,13 +520,15 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     if cuts.is_empty() {
         return Ok(None);
     }
-    cuts.sort_by_key(|range| range.start);
+    // An insertion sorts ahead of a cut starting where it does.
+    cuts.sort_by_key(|(range, _)| (range.start, range.end));
     let mut text = String::with_capacity(raw.len());
     let mut cursor = 0;
-    for cut in cuts {
+    for (cut, replacement) in cuts {
         // An attribute cut never overlaps another: an element left out whole
         // is cut before its attributes are read.
         text.push_str(&raw[cursor..cut.start.max(cursor)]);
+        text.push_str(&replacement);
         cursor = cursor.max(cut.end);
     }
     text.push_str(&raw[cursor..]);
@@ -569,11 +615,10 @@ fn attributes(
     raw: &str,
     e: &BytesStart<'_>,
     ty: u16,
-    cuts: &mut Vec<Range<usize>>,
+    cuts: &mut Vec<(Range<usize>, String)>,
     record: &mut impl FnMut(HiddenContent),
 ) -> Result<()> {
     let ty = &TYPES[usize::from(ty)];
-    let base = raw.as_ptr() as usize;
     for attr in e.attributes() {
         let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
         let key = attr.key.into_inner();
@@ -591,27 +636,50 @@ fn attributes(
         if declared {
             continue;
         }
-        // The attribute from the whitespace before it to past its closing
-        // quote.
-        let key_start = (key.as_ptr() as usize)
-            .checked_sub(base)
-            .filter(|&at| at <= raw.len())
-            .ok_or_else(|| Error::malformed("malformed part XML: attribute outside the part"))?;
-        let value_end = match &attr.value {
-            std::borrow::Cow::Borrowed(value) => (value.as_ptr() as usize - base) + value.len(),
-            std::borrow::Cow::Owned(_) => {
-                return Err(Error::malformed(
-                    "malformed part XML: attribute without a source",
-                ));
-            }
-        };
-        let start = raw[..key_start]
+        // The attribute from the whitespace before it.
+        let source = source(raw, &attr)?;
+        let start = raw[..source.start]
             .trim_end_matches(|c: char| c.is_ascii_whitespace())
             .len();
-        cuts.push(start..value_end + 1);
+        cuts.push((start..source.end, String::new()));
         record(HiddenContent::ApplicationData);
     }
     Ok(())
+}
+
+/// The namespace declarations of `e`, as (attribute name, source).
+fn declarations(raw: &str, e: &BytesStart<'_>) -> Result<Vec<(String, String)>> {
+    let mut declarations = Vec::new();
+    for attr in e.attributes() {
+        let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        let key = attr.key.into_inner();
+        if key == "xmlns" || key.starts_with("xmlns:") {
+            declarations.push((key.to_owned(), raw[source(raw, &attr)?].to_owned()));
+        }
+    }
+    Ok(declarations)
+}
+
+/// Where the attribute `attr` is written in `raw`: from its name to past its
+/// closing quote.
+fn source(raw: &str, attr: &Attribute<'_>) -> Result<Range<usize>> {
+    let base = raw.as_ptr() as usize;
+    let outside = || Error::malformed("malformed part XML: attribute outside the part");
+    let start = (attr.key.into_inner().as_ptr() as usize)
+        .checked_sub(base)
+        .filter(|&at| at <= raw.len())
+        .ok_or_else(outside)?;
+    let Cow::Borrowed(value) = &attr.value else {
+        return Err(Error::malformed(
+            "malformed part XML: attribute without a source",
+        ));
+    };
+    let end = (value.as_ptr() as usize)
+        .checked_sub(base)
+        .map(|at| at + value.len() + 1)
+        .filter(|&at| at <= raw.len())
+        .ok_or_else(outside)?;
+    Ok(start..end)
 }
 
 #[cfg(test)]
