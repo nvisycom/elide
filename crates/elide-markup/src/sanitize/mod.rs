@@ -63,6 +63,7 @@ use self::html::{Element, RCDATA_ELEMENTS, Space, VOID_ELEMENTS};
 use self::url::css_loads_remote;
 use crate::engine::parser::{bom_len, end_name, start_name};
 use crate::engine::tag::{HtmlAttribute, HtmlTagExt};
+use crate::references::{CharacterReferences, decode_references};
 
 /// The XInclude namespace, whose `include` element pulls in another document.
 const XINCLUDE: &str = "http://www.w3.org/2001/XInclude";
@@ -288,7 +289,16 @@ impl<'a> Rebuild<'a> {
                         self.copy_xml_text(span);
                     }
                 }
-                Event::GeneralRef(_) => self.copy(span),
+                Event::GeneralRef(_) => {
+                    // A style sheet in SVG or MathML is markup, whose
+                    // references a browser decodes before reading the CSS.
+                    if let Some(sheet) = self.style.as_mut() {
+                        let (decoded, _) =
+                            decode_references(&raw[span.clone()], 0, CharacterReferences::Html);
+                        sheet.css.push_str(&decoded);
+                    }
+                    self.copy(span);
+                }
                 Event::CData(text) => {
                     // A browser reads a CDATA section as one only in SVG and
                     // MathML; in HTML it is a comment.
@@ -429,7 +439,13 @@ impl<'a> Rebuild<'a> {
     /// a removal joins `]` to `]>` its `>` is written as a reference.
     fn copy_xml_text(&mut self, span: Range<usize>) {
         let text = &self.raw[span];
-        let before = self.out.bytes().rev().take_while(|&b| b == b']').count();
+        let before = self
+            .out
+            .bytes()
+            .rev()
+            .take(2)
+            .take_while(|&b| b == b']')
+            .count();
         let lead = text.bytes().take_while(|&b| b == b']').count();
         if before > 0 && before + lead >= 2 && text.as_bytes().get(lead) == Some(&b'>') {
             self.out.push_str(&text[..lead]);
@@ -479,6 +495,13 @@ impl<'a> Rebuild<'a> {
                     sheet.css.push_str(text.as_ref());
                 }
             }
+            // An HTML style sheet is raw text: a reference in it is read as
+            // written.
+            Event::GeneralRef(_) => {
+                if let Some(sheet) = self.style.as_mut() {
+                    sheet.css.push_str(&self.raw[span.clone()]);
+                }
+            }
             _ => {}
         }
         self.copy(span);
@@ -503,9 +526,11 @@ impl<'a> Rebuild<'a> {
         let space = self.space();
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
         // Whether the element holds what follows: a browser ignores the
-        // self-closing flag on a non-void HTML element.
+        // self-closing flag on a non-void HTML element, but not on the root of
+        // SVG or MathML, kept or not.
+        let foreign_root = matches!(name.as_str(), "svg" | "math");
         let opens = match element {
-            Element::Keep | Element::Drop(_) if space == Space::Html => {
+            Element::Keep | Element::Drop(_) if space == Space::Html && !foreign_root => {
                 !VOID_ELEMENTS.contains(&name.as_str())
             }
             _ => is_start,

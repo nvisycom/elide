@@ -504,3 +504,28 @@ fn a_removed_first_attribute_is_not_replaced_by_a_repeat() {
         r#"<img alt="x">"#
     );
 }
+
+/// A reference in an SVG style sheet is decoded before the remote-load check,
+/// as a browser decodes it; one in an HTML style sheet is read as written.
+#[test]
+fn a_remote_import_spelled_with_references_in_svg_goes() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        "<svg><style>@import url(https&#58;//t/a.css);</style></svg>",
+        r#"<svg><style>@import "https&#x3a;//t/a.css";</style></svg>"#,
+    ] {
+        assert_eq!(sanitize(html(policy), raw), "<svg></svg>", "{raw}");
+    }
+    let raw = "<style>p { content: 'https&#58;//t' }</style>";
+    assert_eq!(sanitize(html(policy), raw), raw);
+}
+
+/// The root of SVG or MathML honours its self-closing flag, even removed.
+#[test]
+fn a_removed_self_closing_svg_root_holds_nothing() {
+    let raw = "<svg hidden/><math hidden/><p>Visible</p>";
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        "<p>Visible</p>"
+    );
+}
