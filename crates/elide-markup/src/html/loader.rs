@@ -1,8 +1,8 @@
 //! HTML loader: runs the XML markup engine over HTML with lenient parsing.
 //!
-//! HTML has no engine of its own. Its hidden content (scripts and other active
-//! content, comments, `<meta>` fields) is cut out first by the
-//! [`MarkupSanitizer`]; then the shared XML engine ([`build_items`]) reads the
+//! HTML has no engine of its own. The [`MarkupSanitizer`] first rebuilds the
+//! document from what renders, leaving out scripts and other active content,
+//! comments, `<meta>` fields, and anything else it does not name; then the shared XML engine ([`build_items`]) reads the
 //! rest leniently (tolerating void elements, stray end tags, and bare `&`) with
 //! the two HTML vocabularies it takes as plain element-name lists: the block
 //! elements that group sibling text for context hints, and the `<style>` bodies

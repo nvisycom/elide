@@ -1,4 +1,5 @@
-//! XML loader: sanitizes decoded content (its comments, under the policy) and
+//! XML loader: rebuilds decoded content as parsed (without processing
+//! instructions, its document type, XInclude, or, under the policy, comments) and
 //! wires the rest through the shared [`parser`] into a leaf [`Document`] whose
 //! body is an [`ExtractStream`] re-serialised by [`MarkupDocument`].
 //!

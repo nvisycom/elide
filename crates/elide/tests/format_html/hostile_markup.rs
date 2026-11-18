@@ -42,9 +42,12 @@ async fn html_reads_tags_as_a_browser_does() -> Result<()> {
         "jane.roe@example.com",
         "555-0142",
     );
-    assert_tokens_present!(redacted, "[email_address]", "[phone_number]");
+    // The phone number sat in a `data-*` attribute no reader sees, which the
+    // rebuild leaves out rather than redacts.
+    assert_tokens_present!(redacted, "[email_address]");
     assert_content_preserved!(
         redacted,
+        "<span>the office</span>",
         "<a>Profile</a>",
         r#"<a title="Account">Card</a>"#,
         "<a>Pay</a>",
