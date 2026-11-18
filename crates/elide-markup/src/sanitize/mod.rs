@@ -20,6 +20,11 @@
 //!     as a comment: a CDATA section or processing instruction in HTML;
 //!   - **external references**: a `<base>`, a remote `<link>` or style sheet.
 //!
+//!   A `<textarea>` or `<title>` whose body holds markup, which a browser reads
+//!   as text, is refused. An element left out ends where a browser ends it:
+//!   at its end tag, at a start tag that closes it when HTML lets its end tag
+//!   be left out, or where HTML breaks out of SVG and MathML.
+//!
 //!   Of a kept element's attributes, `on*` event handlers and URLs that run
 //!   script (`javascript:`, `vbscript:`, `data:text/html`, read the way a
 //!   browser reads them), what the page loads from a server when opened, a
@@ -29,7 +34,8 @@
 //!   [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential)
 //!   metadata.
 //! - **XML**: the document as parsed, without processing instructions, its
-//!   document type, or XInclude.
+//!   document type, or XInclude (whose namespace is compared with its
+//!   references decoded); a document whose root is an XInclude is refused.
 //! - **Comments** go under
 //!   [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential)
 //!   collaboration; a conditional comment, markup an old browser runs, always.
@@ -53,7 +59,7 @@ use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 
-use self::html::{Element, Space, VOID_ELEMENTS};
+use self::html::{Element, RCDATA_ELEMENTS, Space, VOID_ELEMENTS};
 use self::url::css_loads_remote;
 use crate::engine::parser::{bom_len, end_name, start_name};
 use crate::engine::tag::{HtmlAttribute, HtmlTagExt};
@@ -156,8 +162,23 @@ struct Rebuild<'a> {
     dropping: Option<Region>,
     /// The `<style>` element being read.
     style: Option<StyleSheet>,
-    /// The SVG and MathML a page has entered, innermost last.
+    /// The SVG and MathML a page has entered, and the HTML read inside them,
+    /// innermost last.
     spaces: Vec<Foreign>,
+    /// The HTML `<textarea>` or `<title>` whose body is being read.
+    rcdata: Option<String>,
+    /// How many XML elements are open.
+    depth: usize,
+}
+
+/// Where an event falls against the element being left out.
+enum Skip {
+    /// Inside it, left out with it.
+    Inside,
+    /// After it: the event ends it and is read on its own.
+    Outside,
+    /// The document ended inside it.
+    End,
 }
 
 impl<'a> Rebuild<'a> {
@@ -170,6 +191,8 @@ impl<'a> Rebuild<'a> {
             dropping: None,
             style: None,
             spaces: Vec::new(),
+            rcdata: None,
+            depth: 0,
         }
     }
 
@@ -212,16 +235,19 @@ impl<'a> Rebuild<'a> {
             let (namespace, event) = reader
                 .read_resolved_event()
                 .map_err(|e| Error::malformed(format!("malformed markup: {e}")))?;
-            let in_xinclude =
-                matches!(namespace, ResolveResult::Bound(Namespace(uri)) if uri == XINCLUDE);
+            let in_xinclude = match namespace {
+                ResolveResult::Bound(Namespace(uri)) => is_xinclude(uri)?,
+                _ => false,
+            };
             let span = last..reader.buffer_position() as usize + bom;
             last = span.end;
 
             if self.dropping.is_some() {
-                if self.skip(&event)? {
-                    break;
+                match self.skip(&event)? {
+                    Skip::Inside => continue,
+                    Skip::End => break,
+                    Skip::Outside => {}
                 }
-                continue;
             }
             if self.style.as_ref().is_some_and(|sheet| sheet.raw) {
                 if self.style_text(&event, span)? {
@@ -236,13 +262,31 @@ impl<'a> Rebuild<'a> {
                     "a browser ends this HTML {construct} at an earlier `>`, so markup inside it renders"
                 )));
             }
+            // A browser reads a `<textarea>` or `<title>` body as text, so
+            // markup this reader sees inside it would be rebuilt as what it
+            // is not.
+            if let Some(element) = self.rcdata.as_deref() {
+                match &event {
+                    Event::Text(_) | Event::GeneralRef(_) | Event::Eof => {}
+                    Event::End(e) if end_name(e, raw, true)? == element => self.rcdata = None,
+                    _ => {
+                        return Err(Error::malformed(format!(
+                            "a browser reads the markup inside this HTML <{element}> as its text"
+                        )));
+                    }
+                }
+            }
             match &event {
                 Event::Eof => break,
                 Event::Text(text) => {
                     if let Some(sheet) = self.style.as_mut() {
                         sheet.css.push_str(text.as_ref());
                     }
-                    self.copy(span);
+                    if html {
+                        self.copy(span);
+                    } else {
+                        self.copy_xml_text(span);
+                    }
                 }
                 Event::GeneralRef(_) => self.copy(span),
                 Event::CData(text) => {
@@ -295,11 +339,18 @@ impl<'a> Rebuild<'a> {
                     if html {
                         self.html_start(e, span, is_start)?;
                     } else if in_xinclude {
+                        if self.depth == 0 {
+                            return Err(Error::malformed(
+                                "the XML document element is an XInclude, which leaves no document",
+                            ));
+                        }
                         self.record(HiddenContent::Link);
                         if is_start {
-                            self.dropping = Some(Region::new(start_name(e, raw, false)?));
+                            self.dropping =
+                                Some(Region::new(start_name(e, raw, false)?, Space::Html));
                         }
                     } else {
+                        self.depth += usize::from(is_start);
                         self.copy(span);
                     }
                 }
@@ -307,6 +358,7 @@ impl<'a> Rebuild<'a> {
                     if html {
                         self.html_end(e.html5_tag(raw)?.name);
                     } else {
+                        self.depth = self.depth.saturating_sub(1);
                         self.copy(span);
                     }
                 }
@@ -317,29 +369,94 @@ impl<'a> Rebuild<'a> {
         Ok(())
     }
 
-    /// Follow `event` inside the element being left out: only that element's
-    /// own depth counts. Returns whether the document ended.
-    fn skip(&mut self, event: &Event<'_>) -> Result<bool> {
+    /// Follow `event` inside the element being left out, which ends at its
+    /// own end tag past the elements opened inside it, or where a browser
+    /// ends it without one:
+    ///
+    /// - in HTML, at a start tag that closes it when nothing inside it is
+    ///   open (`<p hidden>a<p>b` closes the first paragraph);
+    /// - in SVG or MathML, at an element that breaks out to HTML, unless an
+    ///   element inside it reads its content as HTML.
+    fn skip(&mut self, event: &Event<'_>) -> Result<Skip> {
         let html = self.html();
+        let raw = self.raw;
         let Some(region) = self.dropping.as_mut() else {
-            return Ok(false);
+            return Ok(Skip::Outside);
         };
         match event {
-            Event::Start(e) if start_name(e, self.raw, html)? == region.name => {
-                region.depth += 1;
+            // An element left open by lenient HTML runs to the end of the
+            // document.
+            Event::Eof => return Ok(Skip::End),
+            Event::Start(e) | Event::Empty(e) if html => {
+                let tag = e.html5_tag(raw)?;
+                let name = tag.name.to_ascii_lowercase();
+                let ends = if region.space == Space::Html {
+                    region.open.is_empty() && html::closes(&region.name, &name)
+                } else {
+                    html::breaks_out(region.space, &name, &tag.attributes)
+                        && !html::integration_point(region.space, &region.name)
+                        && !region.open.iter().any(|open| {
+                            html::integration_point(Space::Svg, open)
+                                || html::integration_point(Space::Math, open)
+                        })
+                };
+                if ends {
+                    self.dropping = None;
+                    return Ok(Skip::Outside);
+                }
+                // A browser ignores the self-closing flag on a non-void HTML
+                // element.
+                let void = VOID_ELEMENTS.contains(&name.as_str());
+                if matches!(event, Event::Start(_)) || (region.space == Space::Html && !void) {
+                    region.open.push(name);
+                }
             }
-            Event::End(e) if end_name(e, self.raw, html)? == region.name => {
-                region.depth -= 1;
-                if region.depth == 0 {
+            Event::Start(e) => region.open.push(start_name(e, raw, false)?),
+            Event::End(e) => {
+                let name = end_name(e, raw, html)?;
+                if let Some(at) = region.open.iter().rposition(|open| *open == name) {
+                    region.open.truncate(at);
+                } else if name == region.name {
                     self.dropping = None;
                 }
             }
-            // An element left open by lenient HTML runs to the end of the
-            // document.
-            Event::Eof => return Ok(true),
             _ => {}
         }
-        Ok(false)
+        Ok(Skip::Inside)
+    }
+
+    /// Copy the XML text at `span`. A `]]>` is not allowed in text, so where
+    /// a removal joins `]` to `]>` its `>` is written as a reference.
+    fn copy_xml_text(&mut self, span: Range<usize>) {
+        let text = &self.raw[span];
+        let before = self.out.bytes().rev().take_while(|&b| b == b']').count();
+        let lead = text.bytes().take_while(|&b| b == b']').count();
+        if before > 0 && before + lead >= 2 && text.as_bytes().get(lead) == Some(&b'>') {
+            self.out.push_str(&text[..lead]);
+            self.out.push_str("&gt;");
+            self.out.push_str(&text[lead + 1..]);
+        } else {
+            self.out.push_str(text);
+        }
+    }
+
+    /// Leave the SVG and MathML the reader is in, back to the HTML around
+    /// them, closing a style sheet read inside them. Returns whether there
+    /// was any to leave.
+    fn leave_foreign(&mut self) -> bool {
+        let mut left = false;
+        while self
+            .spaces
+            .last()
+            .is_some_and(|foreign| foreign.space != Space::Html)
+        {
+            self.spaces.pop();
+            left = true;
+        }
+        if left {
+            self.close_style();
+        }
+        left
     }
 
     /// Copy `event` inside an HTML `<style>`, whose body a browser reads as
@@ -382,16 +499,26 @@ impl<'a> Rebuild<'a> {
     fn html_start(&mut self, e: &BytesStart<'_>, span: Range<usize>, is_start: bool) -> Result<()> {
         let tag = e.html5_tag(self.raw)?;
         let name = tag.name.to_ascii_lowercase();
-        if html::breaks_out(self.space(), &name, &tag.attributes) {
-            self.spaces.clear();
-        }
+        let left = html::breaks_out(self.space(), &name, &tag.attributes) && self.leave_foreign();
         let space = self.space();
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
+        // Whether the element holds what follows: a browser ignores the
+        // self-closing flag on a non-void HTML element.
+        let opens = match element {
+            Element::Keep | Element::Drop(_) if space == Space::Html => {
+                !VOID_ELEMENTS.contains(&name.as_str())
+            }
+            _ => is_start,
+        };
         if let Element::Drop(content) = element {
             self.record(content);
-            let void = space == Space::Html && VOID_ELEMENTS.contains(&name.as_str());
-            if is_start && !void {
-                self.dropping = Some(Region::new(name));
+            if left {
+                // The output leaves SVG or MathML where the source does, so a
+                // rebuild of it reads what follows the same way.
+                self.out.push_str("<span></span>");
+            }
+            if opens {
+                self.dropping = Some(Region::new(name, space));
             }
             return Ok(());
         };
@@ -418,14 +545,18 @@ impl<'a> Rebuild<'a> {
         for attr in &tag.attributes {
             let key = attr.name.to_ascii_lowercase();
             // A browser reads the first of a repeated attribute and ignores
-            // the rest, which still carry their value.
-            let content = html::attribute(attributes_space, &name, attr)
-                .or_else(|| seen.contains(&key).then_some(HiddenContent::Undisplayed));
+            // the rest, which still carry their value, even when the first is
+            // left out.
+            let content = if seen.contains(&key) {
+                Some(HiddenContent::Undisplayed)
+            } else {
+                seen.push(key);
+                html::attribute(attributes_space, &name, attr)
+            };
             if let Some(content) = content {
                 self.record(content);
                 continue;
             }
-            seen.push(key);
             self.out.push(' ');
             self.out.push_str(attr.source);
             last = Some(attr);
@@ -439,7 +570,7 @@ impl<'a> Rebuild<'a> {
             self.out.push('>');
         }
 
-        if !is_start {
+        if !opens {
             return Ok(());
         }
         match element {
@@ -454,7 +585,19 @@ impl<'a> Rebuild<'a> {
                 {
                     foreign.depth += 1;
                 }
+                // Inside an SVG `desc` or a MathML `mi`, a browser reads HTML
+                // until the element ends.
+                if html::integration_point(space, &name) {
+                    self.spaces.push(Foreign {
+                        space: Space::Html,
+                        root: name.clone(),
+                        depth: 1,
+                    });
+                }
             }
+        }
+        if space == Space::Html && RCDATA_ELEMENTS.contains(&name.as_str()) {
+            self.rcdata = Some(name.clone());
         }
         if name == "style" {
             self.style = Some(StyleSheet {
@@ -497,17 +640,22 @@ impl<'a> Rebuild<'a> {
     }
 }
 
-/// An element being left out with its subtree: its lowercased name, and the
-/// open depth of that same name, so a nested one resolves to the matching
-/// close.
+/// An element being left out with its subtree: its lowercased name, the
+/// vocabulary it was read in, and the elements open inside it, so its own end
+/// tag is told from theirs.
 struct Region {
     name: String,
-    depth: usize,
+    space: Space,
+    open: Vec<String>,
 }
 
 impl Region {
-    fn new(name: String) -> Self {
-        Self { name, depth: 1 }
+    fn new(name: String, space: Space) -> Self {
+        Self {
+            name,
+            space,
+            open: Vec::new(),
+        }
     }
 }
 
@@ -520,8 +668,8 @@ struct StyleSheet {
     raw: bool,
 }
 
-/// SVG or MathML entered by its root element, and the open depth of that
-/// root's name.
+/// SVG or MathML entered by its root element, or HTML read inside an element
+/// of theirs, and the open depth of that element's name.
 struct Foreign {
     space: Space,
     root: String,
@@ -548,6 +696,17 @@ fn ends_early(event: &Event<'_>) -> Option<&'static str> {
         Event::DocType(text) => text.as_ref().contains('>').then_some("document type"),
         _ => None,
     }
+}
+
+/// Whether the namespace `uri`, as written, is XInclude's once its character
+/// references are decoded.
+fn is_xinclude(uri: &str) -> Result<bool> {
+    if !uri.contains('&') {
+        return Ok(uri == XINCLUDE);
+    }
+    let decoded = quick_xml::escape::unescape(uri)
+        .map_err(|e| Error::malformed(format!("malformed markup: namespace {e}")))?;
+    Ok(decoded == XINCLUDE)
 }
 
 /// Whether a comment's `text` is a conditional comment (`[if IE]>…`), markup

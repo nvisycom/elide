@@ -808,7 +808,7 @@ pub(super) fn element(
         attributes
             .iter()
             .find(|attr| attr.name.eq_ignore_ascii_case(key))
-            .map(|attr| normalized(attr.value.unwrap_or_default()))
+            .map(|attr| keyword(attr.value.unwrap_or_default()))
     };
     if value("hidden").is_some_and(|hidden| hidden != "until-found") {
         return Element::Drop(HiddenContent::Undisplayed);
@@ -819,9 +819,7 @@ pub(super) fn element(
             "script" => Element::Drop(HiddenContent::Script),
             _ if SVG_ANIMATIONS.contains(&name) => Element::Drop(HiddenContent::Action),
             "metadata" => Element::Drop(HiddenContent::Properties),
-            _ if value("display").as_deref() == Some("none") => {
-                Element::Drop(HiddenContent::Undisplayed)
-            }
+            _ if undisplayed_svg(&value) => Element::Drop(HiddenContent::Undisplayed),
             _ if SVG_ELEMENTS.contains(&name) => Element::Keep,
             _ => Element::Drop(HiddenContent::ApplicationData),
         },
@@ -865,11 +863,19 @@ fn html_element(
         "input" if value("type").as_deref() == Some("hidden") => {
             Element::Drop(HiddenContent::Undisplayed)
         }
+        // The root of SVG is read in SVG, where `display` is a property.
+        "svg" if undisplayed_svg(value) => Element::Drop(HiddenContent::Undisplayed),
         "svg" => Element::Enter(Space::Svg),
         "math" => Element::Enter(Space::Math),
         _ if HTML_ELEMENTS.contains(&name) => Element::Keep,
         _ => Element::Drop(HiddenContent::ApplicationData),
     }
+}
+
+/// Whether an SVG element whose attributes `value` reads is not displayed:
+/// its `display` property, read as CSS, is `none`.
+fn undisplayed_svg(value: &dyn Fn(&str) -> Option<String>) -> bool {
+    value("display").is_some_and(|display| display.trim() == "none")
 }
 
 /// Whether an attribute of `attributes` is written twice.
@@ -967,9 +973,88 @@ pub(super) fn attribute(
     (!allowed && !key.starts_with("aria-")).then_some(HiddenContent::ApplicationData)
 }
 
-/// An attribute value as a browser compares a keyword: character references
-/// decoded, trimmed, lowercased.
-fn normalized(value: &str) -> String {
+/// An attribute value as a browser compares an enumerated keyword: character
+/// references decoded and lowercased, but not trimmed, so `" hidden "` is no
+/// keyword at all.
+fn keyword(value: &str) -> String {
     let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
-    decoded.trim().to_ascii_lowercase()
+    decoded.to_ascii_lowercase()
 }
+
+/// The HTML elements whose body a browser reads as text with references
+/// decoded (RCDATA), never as markup.
+pub(super) const RCDATA_ELEMENTS: [&str; 2] = ["textarea", "title"];
+
+/// Whether the SVG or MathML element `name` (lowercased) read in `space` is
+/// one whose content a browser reads as HTML: an SVG `foreignObject`, `desc`,
+/// or `title`, and a MathML token element.
+pub(super) fn integration_point(space: Space, name: &str) -> bool {
+    match space {
+        Space::Html => false,
+        Space::Svg => matches!(name, "foreignobject" | "desc" | "title"),
+        Space::Math => matches!(name, "mi" | "mo" | "mn" | "ms" | "mtext"),
+    }
+}
+
+/// Whether the start tag `start` (lowercased) closes an open HTML element
+/// `open` that holds nothing else open: the end tags HTML lets a document
+/// leave out.
+pub(super) fn closes(open: &str, start: &str) -> bool {
+    match open {
+        "p" => P_CLOSERS.contains(&start),
+        "li" => start == "li",
+        "dt" | "dd" => matches!(start, "dt" | "dd"),
+        "option" => matches!(start, "option" | "optgroup"),
+        "optgroup" => start == "optgroup",
+        "rb" | "rt" | "rp" | "rtc" => matches!(start, "rb" | "rt" | "rp" | "rtc"),
+        "tr" => start == "tr",
+        "td" | "th" => matches!(start, "td" | "th" | "tr"),
+        "thead" | "tbody" | "tfoot" => matches!(start, "thead" | "tbody" | "tfoot"),
+        _ => false,
+    }
+}
+
+/// The start tags that close an open `<p>`.
+const P_CLOSERS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "center",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hgroup",
+    "hr",
+    "li",
+    "listing",
+    "main",
+    "menu",
+    "nav",
+    "ol",
+    "p",
+    "plaintext",
+    "pre",
+    "search",
+    "section",
+    "summary",
+    "table",
+    "ul",
+    "xmp",
+];

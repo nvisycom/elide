@@ -254,13 +254,14 @@ fn svg_draws_and_its_active_parts_go() {
 }
 
 /// An HTML element a browser does not allow inside SVG ends it, and what
-/// follows is read as HTML again.
+/// follows is read as HTML again: there a `<circle/>` is an unknown element
+/// the self-closing flag does not close, holding the rest.
 #[test]
 fn an_html_element_ends_svg() {
-    let raw = r#"<svg><p onclick="x()">a</p><circle r="1"/></svg>"#;
+    let raw = r#"<svg><p onclick="x()">a</p><circle r="1"/></svg>b"#;
     assert_eq!(
         sanitize(html(HiddenContentPolicy::default()), raw),
-        "<svg><p>a</p></svg>"
+        "<svg><p>a</p>"
     );
 }
 
@@ -365,4 +366,141 @@ fn check_refuses_what_a_rebuild_would_change() {
 fn a_rebuild_keeps_text_and_references_as_written() {
     let raw = "\u{feff}<p title=\"a&amp;b\">Jane&nbsp;Roe &lt; x</p><br><br/><img alt=x>";
     assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+}
+
+/// An enumerated keyword is compared untrimmed: `" hidden "` is no input type
+/// and no `hidden` value a browser knows, so the first input shows and the
+/// paragraph is hidden outright.
+#[test]
+fn keywords_are_compared_as_written() {
+    let raw = r#"<input type=" hidden " value="Draft"><input type="HIDDEN" value="x"><p hidden=" until-found ">Jane</p>"#;
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        r#"<input type=" hidden " value="Draft">"#
+    );
+}
+
+#[test]
+fn an_undisplayed_svg_root_goes() {
+    let raw = r#"<svg display=" none "><text>Jane</text></svg><p>Roe</p>"#;
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        "<p>Roe</p>"
+    );
+}
+
+/// A reference standing for the comma between candidates still separates them.
+#[test]
+fn a_remote_srcset_candidate_behind_a_reference_goes() {
+    let raw =
+        r#"<img srcset="a.png&#44;https://t/p.png 2x" alt="x"><img srcset="a.png 1x, b.png 2x">"#;
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        r#"<img alt="x"><img srcset="a.png 1x, b.png 2x">"#
+    );
+}
+
+#[test]
+fn markup_inside_a_textarea_or_title_is_refused() {
+    let sanitizer = html(HiddenContentPolicy::default());
+    for raw in [
+        "<textarea><x-note>Draft</x-note></textarea>",
+        "<title>a<b>b</b></title>",
+        "<textarea/><i>Draft</i></textarea>",
+    ] {
+        assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw}");
+    }
+    let raw = "<title>Jane &amp; Roe</title><textarea>notes</textarea>";
+    assert_eq!(sanitize(sanitizer, raw), raw);
+}
+
+/// A removal never joins text into a `]]>`, which XML forbids in text.
+#[test]
+fn xml_text_stays_well_formed_across_a_removal() {
+    let raw = "<doc>]]<!-- c -->></doc>";
+    assert_eq!(
+        sanitize(xml(HiddenContentPolicy::default()), raw),
+        "<doc>]]&gt;</doc>"
+    );
+}
+
+#[test]
+fn an_xinclude_namespace_spelled_with_references_is_still_caught() {
+    let raw = r#"<doc xmlns:xi="&#x68;ttp://www.w3.org/2001/XInclude"><xi:include href="secret.xml"/><p>x</p></doc>"#;
+    assert_eq!(
+        sanitize(xml(HiddenContentPolicy::default()), raw),
+        r#"<doc xmlns:xi="&#x68;ttp://www.w3.org/2001/XInclude"><p>x</p></doc>"#
+    );
+}
+
+#[test]
+fn an_xinclude_root_is_refused() {
+    let raw = r#"<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="secret.xml"/>"#;
+    assert!(
+        xml(HiddenContentPolicy::default())
+            .sanitize(raw.to_owned())
+            .is_err()
+    );
+}
+
+/// A hidden element ends where a browser ends it, not only at its end tag;
+/// and a self-closing flag does not end a non-void one.
+#[test]
+fn a_hidden_element_ends_where_a_browser_ends_it() {
+    let policy = HiddenContentPolicy::default();
+    assert_eq!(
+        sanitize(html(policy), "<p hidden>Draft<p>Published</p>"),
+        "<p>Published</p>"
+    );
+    assert_eq!(
+        sanitize(html(policy), "<ul><li hidden>Jane<li>Roe</ul>"),
+        "<ul><li>Roe</ul>"
+    );
+    assert_eq!(sanitize(html(policy), "<div hidden/>Jane</div>Roe"), "Roe");
+    assert_eq!(
+        sanitize(
+            html(policy),
+            r#"<svg><g display="none"><text>Jane</text><p>Roe</p>"#
+        ),
+        "<svg><p>Roe</p>"
+    );
+}
+
+/// When the element that leaves SVG is left out, the output still leaves SVG
+/// there, so a rebuild of it reads what follows as HTML too.
+#[test]
+fn leaving_svg_through_a_removed_element_is_kept() {
+    let raw = r#"<svg><p hidden></p><a title="Label">x</a></svg>"#;
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        r#"<svg><span></span><a title="Label">x</a></svg>"#
+    );
+}
+
+/// An SVG style sheet a breakout ends is closed there, so what follows stays.
+#[test]
+fn a_breakout_closes_an_svg_style_sheet() {
+    let raw = "<svg><style>@import url(https://t/a.css);<p>Roe</p>";
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        "<svg><p>Roe</p>"
+    );
+}
+
+/// HTML inside an SVG `desc` stays in SVG, which resumes after it.
+#[test]
+fn html_inside_an_integration_point_stays_in_svg() {
+    let raw = r#"<svg><desc><span>Note</span></desc><circle r="5"/></svg><math><mi><b>x</b></mi><mn>1</mn></math>"#;
+    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+}
+
+/// A browser reads the first of a repeated attribute, so a removed first one
+/// does not hand its place to the next.
+#[test]
+fn a_removed_first_attribute_is_not_replaced_by_a_repeat() {
+    let raw = r#"<img src="https://t/p.png" src="/local.png" alt="x">"#;
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        r#"<img alt="x">"#
+    );
 }
