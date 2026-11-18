@@ -260,7 +260,9 @@ pub(crate) trait DictionaryExt {
 
     /// The embedded-file stream this file specification names in its `/EF`,
     /// under the first of the keys its name is read under that holds one,
-    /// and the file's name: its name under that same key, else its name.
+    /// and the file's name: for the portable stream its `/UF`, else its
+    /// `/F`; for a legacy platform stream its name under that same key;
+    /// else its name.
     fn embedded_file(&self, doc: &Document) -> Option<(ObjectId, Option<String>)>;
 }
 
@@ -287,14 +289,25 @@ impl DictionaryExt for Dictionary {
 
     fn embedded_file(&self, doc: &Document) -> Option<(ObjectId, Option<String>)> {
         let files = doc.resolve_dict(self.get(b"EF").ok()?)?;
-        let (key, stream) = FILE_KEYS
-            .iter()
-            .find_map(|&key| Some((key, files.get(key).ok()?.as_reference().ok()?)))?;
-        let named = self
-            .get(key)
-            .ok()
-            .and_then(|name| doc.resolve(name))
-            .and_then(|name| decode_text_string(name).ok());
+        // The stream is named by the object its reference chain ends at, so
+        // two references to one stream name it alike.
+        let (key, stream) = FILE_KEYS.iter().find_map(|&key| {
+            let reference = files.get(key).ok()?;
+            let (Some(id), Object::Stream(_)) = doc.dereference(reference).ok()? else {
+                return None;
+            };
+            Some((key, id))
+        })?;
+        // The portable stream (`/F` or `/UF`) is named by the Unicode name
+        // first, as a viewer names it; a legacy platform stream by its own.
+        let names: &[&[u8]] = match key {
+            b"UF" | b"F" => &[b"UF", b"F"],
+            key => &[key],
+        };
+        let named = names.iter().find_map(|key| {
+            let name = doc.resolve(self.get(key).ok()?)?;
+            decode_text_string(name).ok()
+        });
         Some((stream, named.or_else(|| self.file_name(doc))))
     }
 }

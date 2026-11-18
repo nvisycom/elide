@@ -88,6 +88,9 @@ pub(super) struct Painting {
     /// The text rendering mode (`Tr`, 9.3.6): whether text fills, strokes,
     /// both, or neither.
     render: u8,
+    /// The extent of the text shown so far in the open text object under a
+    /// clipping rendering mode (4 to 7), which clips what follows its `ET`.
+    text_clip: Option<DeviceRect>,
     /// Whether fills, and strokes, are fully transparent (`/ca 0`, `/CA 0`),
     /// so paint nothing.
     fill_clear: bool,
@@ -189,21 +192,53 @@ impl Painting {
         self.clip = self.clipped(area).map_or(Clip::Nothing, Clip::Within);
     }
 
-    /// Where text shown in `extent` paints with a pattern, within the clip:
-    /// filled, stroked, or both, as the rendering mode draws it; text the
-    /// mode does not draw paints nothing.
-    pub(super) fn text(&self, extent: DeviceRect) -> Vec<Painted> {
+    /// Where text shown in `extent`, under the transform `ctm`, paints with
+    /// a pattern, within the clip: filled over its glyphs, stroked as far as
+    /// the stroke reaches past them, or both, as the rendering mode draws
+    /// it; text the mode does not draw paints nothing. Text shown under a
+    /// clipping mode adds to the clip its text object sets at `ET`.
+    pub(super) fn text(&mut self, extent: DeviceRect, ctm: Matrix) -> Vec<Painted> {
+        if self.render >= 4 {
+            self.text_clip = Some(match self.text_clip {
+                Some(clip) => clip.union(extent),
+                None => extent,
+            });
+        }
         let fills = matches!(self.render, 0 | 2 | 4 | 6) && !self.fill_clear;
         let strokes = matches!(self.render, 1 | 2 | 5 | 6) && !self.stroke_clear;
-        [(fills, self.fill), (strokes, self.stroke)]
+        let stroked = self.stroke_extent(extent, ctm);
+        [(fills, self.fill, extent), (strokes, self.stroke, stroked)]
             .into_iter()
-            .filter_map(|(paints, paint)| {
+            .filter_map(|(paints, paint, extent)| {
                 Some(Painted {
                     paint: paint.filter(|_| paints)?,
                     region: self.clipped(extent)?,
                 })
             })
             .collect()
+    }
+
+    /// Open a text object: no text has been shown in it to clip with.
+    pub(super) fn begin_text(&mut self) {
+        self.text_clip = None;
+    }
+
+    /// Close the text object: the text it showed under a clipping mode
+    /// clips what follows (9.3.6).
+    pub(super) fn end_text(&mut self) {
+        if let Some(clip) = self.text_clip.take() {
+            self.clip_to(clip);
+        }
+    }
+
+    /// The part of the glyph box `rect` the clip shows, or `None` when it
+    /// hides all of it.
+    pub(super) fn visible(&self, rect: DeviceRect) -> Option<DeviceRect> {
+        match self.clip {
+            Clip::Whole => Some(rect),
+            Clip::Within(clip) => rect.within(clip),
+            Clip::Nothing => None,
+        }
     }
 
     /// Where a fill of `extent` paints with a pattern, within the clip: a

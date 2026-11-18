@@ -82,7 +82,14 @@ impl UnicodeMap {
 
     /// Each destination written as [`readable`] text; one that is not UTF-16
     /// stays as it is.
-    pub(crate) fn readable(mut self) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+    /// the destinations, so written, hold more than [`MAX_UNITS`] UTF-16
+    /// units together, so the map written would not be read again.
+    pub(crate) fn readable(mut self) -> Result<Self> {
+        let mut units_left = MAX_UNITS;
         for units in self.codes.values_mut() {
             if let Ok(text) = String::from_utf16(units) {
                 let written = readable(&text);
@@ -90,8 +97,13 @@ impl UnicodeMap {
                     *units = written.encode_utf16().collect();
                 }
             }
+            units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
+                Error::resource_limit(format!(
+                    "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
+                ))
+            })?;
         }
-        self
+        Ok(self)
     }
 
     /// Unmap every code of one of `values`, at any length: the code text
@@ -375,7 +387,7 @@ mod tests {
     /// ideograph, a ligature as its letters.
     #[test]
     fn destinations_are_written_as_readable_text() {
-        let map = read(&source()).readable();
+        let map = read(&source()).readable().unwrap();
         assert_eq!(text(&map, 2, 0x20).as_deref(), Some("山"));
         assert_eq!(text(&map, 2, 0x04).as_deref(), Some("fi"));
         assert_eq!(read(&map.write()), map);
@@ -430,6 +442,38 @@ mod tests {
         let map = read(&stream.content);
         assert_eq!(text(&map, 1, 0x41).as_deref(), Some("A"));
         assert_eq!(text(&map, 2, 0x41), None);
+    }
+
+    /// A map whose destinations, written as readable text, outgrow the unit
+    /// limit is refused, as reading what is written would be.
+    #[test]
+    fn a_map_outgrowing_its_limit_when_readable_is_refused() {
+        let ligatures: String = "\u{FB01}".repeat(16);
+        let destination: String = ligatures
+            .encode_utf16()
+            .map(|unit| format!("{unit:04X}"))
+            .collect();
+        let count = MAX_UNITS / 16 - 1;
+        let entries: String = (0..count)
+            .map(|code| format!("<{code:04X}> <{destination}>\n"))
+            .collect();
+        let sections: String = entries
+            .lines()
+            .collect::<Vec<_>>()
+            .chunks(100)
+            .map(|chunk| {
+                format!(
+                    "{} beginbfchar\n{}\nendbfchar\n",
+                    chunk.len(),
+                    chunk.join("\n")
+                )
+            })
+            .collect();
+        let map = read(&cmap(&format!(
+            "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n{sections}"
+        )));
+        let error = map.readable().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
 
     /// Nothing but the map is written: a comment does not survive, and an

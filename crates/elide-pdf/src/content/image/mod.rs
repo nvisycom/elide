@@ -20,6 +20,7 @@ use elide_core::Result;
 use lopdf::ObjectId;
 
 pub(crate) use self::read::{is_surfaceable, raw_samples};
+pub(crate) use self::samples::stencil_extent;
 use crate::pdf::{Edit, Pdf, Read, Redact};
 
 /// The identity of an image XObject within a PDF: its indirect-object id

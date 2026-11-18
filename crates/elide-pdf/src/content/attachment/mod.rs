@@ -106,7 +106,7 @@ impl Redact for AttachmentRedaction<'_> {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Dictionary, Document, Object, Stream, dictionary};
+    use lopdf::{Dictionary, Document, Object, Stream, dictionary, text_string};
 
     use super::*;
     use crate::fixtures::{with_attachments, with_pages};
@@ -193,6 +193,34 @@ mod tests {
             names(&pdf),
             [("LEGACY.PDF".to_owned(), b"Jane Roe".to_vec())]
         );
+    }
+
+    /// A file held under `/EF /F` is named by its Unicode `/UF` first.
+    #[test]
+    fn a_portable_file_takes_its_unicode_name() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let stream = doc.add_object(Stream::new(
+            dictionary! { "Type" => "EmbeddedFile" },
+            b"<a/>".to_vec(),
+        ));
+        let spec = doc.add_object(dictionary! {
+            "Type" => "Filespec", "F" => Object::string_literal("invoice"),
+            "UF" => text_string("請求書.xml"),
+            "EF" => dictionary! { "F" => stream },
+        });
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! {
+                "EmbeddedFiles" => dictionary! {
+                    "Names" => vec![Object::string_literal("key"), spec.into()],
+                },
+            },
+        );
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let pdf = Pdf::open(&bytes).unwrap();
+        assert_eq!(names(&pdf)[0].0, "請求書.xml");
     }
 
     /// A one-page PDF whose page associates `on_page` through an inline `/AF`

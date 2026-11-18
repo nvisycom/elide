@@ -615,7 +615,7 @@ mod tests {
             vec![0; 8],
         ));
         let parameters = doc.add_object(vec![Object::Dictionary(dictionary! {
-            "ColorTransform" => 0,
+            "ColorTransform" => 0, "Note" => Object::string_literal("Jane Roe"),
         })]);
         let jpeg = doc.add_object(
             Stream::new(
@@ -649,6 +649,7 @@ mod tests {
             .get(b"DecodeParms")
             .and_then(Object::as_dict)
             .unwrap();
+        assert_eq!(parameters.len(), 1);
         assert_eq!(
             parameters.get(b"ColorTransform").unwrap(),
             &Object::Integer(0)
@@ -1048,13 +1049,16 @@ mod tests {
             dictionary! { "Type" => "EmbeddedFile" },
             b"Jane Roe".to_vec(),
         ));
-        let spec = |doc: &mut Document, name: &str| {
+        // One name reaches the stream through a reference to its reference.
+        let alias = doc.add_object(Object::Reference(stream));
+        let spec = |doc: &mut Document, name: &str, file: ObjectId| {
             doc.add_object(dictionary! {
                 "Type" => "Filespec", "F" => Object::string_literal(name),
-                "EF" => dictionary! { "F" => stream },
+                "EF" => dictionary! { "F" => file },
             })
         };
-        let (pdf, txt) = (spec(&mut doc, "report.pdf"), spec(&mut doc, "notes.txt"));
+        let pdf = spec(&mut doc, "report.pdf", stream);
+        let txt = spec(&mut doc, "notes.txt", alias);
         doc.catalog_mut().unwrap().set(
             "Names",
             dictionary! {
@@ -1477,6 +1481,19 @@ mod tests {
         assert!(text.contains("Page") && !text.contains("Before"), "{text}");
     }
 
+    /// A print box outside the media box is not written, and is recorded.
+    #[test]
+    fn a_print_box_dropped_is_recorded() {
+        let (doc, _) = document(
+            show("Hello"),
+            Dictionary::new(),
+            dictionary! { "TrimBox" => vec![500.into(), 500.into(), 600.into(), 600.into()] },
+        );
+        let (out, stripped) = rebuilt(&doc);
+        assert!(page_dict(&out).get(b"TrimBox").is_err());
+        assert_eq!(count(&stripped, HiddenContent::Properties), 1);
+    }
+
     /// A page transition the rebuild does not copy is recorded, so the
     /// check refuses a document still carrying one.
     #[test]
@@ -1764,10 +1781,24 @@ mod tests {
             "AFRelationship" => "Source",
             "EF" => dictionary! { "F" => stream },
         });
-        source.catalog_mut().unwrap().set("AF", vec![other.into()]);
+        // A string in `/AF` names a file elsewhere: dropped, as a path.
+        source.catalog_mut().unwrap().set(
+            "AF",
+            vec![
+                other.into(),
+                Object::string_literal("C:/Users/jane/report.pdf"),
+            ],
+        );
 
-        let (out, _) = rebuilt(&source);
+        let (out, stripped) = rebuilt(&source);
+        assert_eq!(count(&stripped, HiddenContent::FilePath), 1);
         let catalog = out.catalog().unwrap();
+        assert_eq!(
+            out.resolve_array(catalog.get(b"AF").unwrap())
+                .unwrap()
+                .len(),
+            1
+        );
         let associated = out
             .resolve_dict(&out.resolve_array(catalog.get(b"AF").unwrap()).unwrap()[0])
             .unwrap();
@@ -2715,19 +2746,27 @@ mod tests {
     }
 
     /// An `ET` closing a text object in which a written sequence and, inside
-    /// it, a hidden one were opened closes both: the written one with one
-    /// `EMC`, and what follows is drawn again.
+    /// it, a hidden one were opened closes the written one, with one `EMC`;
+    /// the hidden one still hides, until its own `EMC`, what follows.
     #[test]
-    fn a_text_object_closes_the_hidden_sequences_begun_in_it() {
-        let (operators, _) = hidden_layer_rebuild(vec![
+    fn a_text_object_closes_only_the_written_sequences_begun_in_it() {
+        let fill = || {
+            [
+                Operation::new("re", vec![0.into(), 0.into(), 1.into(), 1.into()]),
+                Operation::new("f", vec![]),
+            ]
+        };
+        let mut ops = vec![
             Operation::new("BT", vec![]),
             Operation::new("BMC", vec!["Span".into()]),
             Operation::new("BDC", vec!["OC".into(), "L".into()]),
             Operation::new("ET", vec![]),
-            Operation::new("re", vec![0.into(), 0.into(), 1.into(), 1.into()]),
-            Operation::new("f", vec![]),
-        ]);
-        assert_eq!(operators, ["BT", "BMC", "EMC", "ET", "re", "f"]);
+        ];
+        ops.extend(fill());
+        ops.push(Operation::new("EMC", vec![]));
+        ops.extend(fill());
+        let (operators, _) = hidden_layer_rebuild(ops);
+        assert_eq!(operators, ["BT", "BMC", "EMC", "ET", "re", "n", "re", "f"]);
     }
 
     /// What a hidden sequence draws is cut, but the state it sets holds

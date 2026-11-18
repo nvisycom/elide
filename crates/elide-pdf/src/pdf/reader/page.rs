@@ -65,9 +65,10 @@ impl DeviceRect {
         (out.min_x < out.max_x && out.min_y < out.max_y).then_some(out)
     }
 
-    /// The part of the box within `clip`, edges included, or `None` when it
-    /// lies outside: a box of no width or height (a glyph whose advance is
-    /// unknown) on or inside `clip` is kept.
+    /// The part of the box within `clip`, or `None` when it lies outside: it
+    /// must overlap `clip` along each axis it extends along, while along an
+    /// axis it has no extent (a glyph whose advance is unknown) lying on or
+    /// inside `clip` is enough. A box only touching `clip`'s edge is outside.
     pub(crate) fn within(self, clip: DeviceRect) -> Option<DeviceRect> {
         let out = DeviceRect {
             min_x: self.min_x.max(clip.min_x),
@@ -75,7 +76,16 @@ impl DeviceRect {
             max_x: self.max_x.min(clip.max_x),
             max_y: self.max_y.min(clip.max_y),
         };
-        (out.min_x <= out.max_x && out.min_y <= out.max_y).then_some(out)
+        let overlaps = |extent: f64, low: f64, high: f64| {
+            if extent > 0.0 {
+                low < high
+            } else {
+                low <= high
+            }
+        };
+        (overlaps(self.max_x - self.min_x, out.min_x, out.max_x)
+            && overlaps(self.max_y - self.min_y, out.min_y, out.max_y))
+        .then_some(out)
     }
 
     /// The box covering this one once `matrix` maps it.
@@ -591,5 +601,21 @@ mod tests {
             .unwrap()
             .set("Rotate", rotation);
         assert_eq!(page_frame(&doc, page).unwrap().rotate, 90);
+    }
+
+    /// A box overlapping a clip keeps its overlap; one only touching its
+    /// edge does not; one of no width on the clip is kept.
+    #[test]
+    fn within_needs_overlap_along_each_extent() {
+        let rect = |min_x, min_y, max_x, max_y| DeviceRect {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        };
+        let clip = rect(0.0, 0.0, 10.0, 10.0);
+        assert!(rect(5.0, 2.0, 15.0, 8.0).within(clip).is_some());
+        assert!(rect(10.0, 2.0, 20.0, 8.0).within(clip).is_none());
+        assert!(rect(10.0, 2.0, 10.0, 8.0).within(clip).is_some());
     }
 }

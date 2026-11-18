@@ -14,7 +14,7 @@ use super::paint::{Paint, Painting};
 use super::{TextRun, Walk};
 use crate::content::text::{FontEntry, StreamTarget};
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
-use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, ObjectExt, Scope};
+use crate::pdf::reader::{DeviceRect, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope};
 
 /// The numeric operand at `index` as `f64`, or `0.0` when absent or non-numeric
 /// (a malformed operator reads as its zero, never a hard error — positioning is
@@ -242,8 +242,11 @@ impl<'d> Walk<'_, 'd> {
                 // and the next object's first is judged by the same rule. Many
                 // producers emit one `BT`/`ET` per positioned field, so nulling
                 // the pen here would run every field into the next.
-                "BT" => cursor = Cursor::new(),
-                "ET" => {}
+                "BT" => {
+                    cursor = Cursor::new();
+                    painting.begin_text();
+                }
+                "ET" => painting.end_text(),
 
                 // Text state parameters.
                 "Tc" => state.char_spacing = operand_f64(&op.operands, 0),
@@ -325,13 +328,29 @@ impl<'d> Walk<'_, 'd> {
                         font: selected.slot,
                     };
                     run.show(text, operands, op_idx, base)?;
+                    // A glyph shows only where the clip lets it, a form's or
+                    // a pattern cell's `/BBox` included; one it hides has no
+                    // box, though its text is still read.
+                    let shown_glyphs: Vec<GlyphRect> = self
+                        .accum
+                        .rects
+                        .drain(shown..)
+                        .filter_map(|glyph| {
+                            Some(GlyphRect {
+                                rect: painting.visible(glyph.rect)?,
+                                ..glyph
+                            })
+                        })
+                        .collect();
+                    self.accum.rects.extend(shown_glyphs);
                     // Text drawn with a pattern paints it where it shows.
                     if let Some(extent) = self.accum.rects[shown..]
                         .iter()
                         .map(|glyph| glyph.rect)
                         .reduce(DeviceRect::union)
                     {
-                        self.paint(painting.text(extent));
+                        let painted = painting.text(extent, state.ctm);
+                        self.paint(painted);
                     }
                 }
 

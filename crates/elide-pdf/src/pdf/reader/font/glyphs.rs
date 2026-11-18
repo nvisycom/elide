@@ -184,24 +184,28 @@ fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Code
                 b"Identity-V" => Some((CMap::identity_v(), Codespace::identity())),
                 name => load_embedded(CMapName::from_bytes(name)).and_then(read),
             },
-            // A base CMap given as a stream (`/UseCMap`) is not followed:
+            // A base CMap the stream's dictionary names (`/UseCMap`, 9.7.5.3)
+            // is followed as the `usecmap` the stream itself could have
+            // written, when it is predefined. One given as a stream is not:
             // hayro-cmap resolves a base by name alone, so the font's codes
             // are not read without it.
-            Some(Object::Stream(stream))
-                if stream
+            Some(Object::Stream(stream)) => {
+                let base = match stream
                     .dict
                     .get(b"UseCMap")
                     .ok()
-                    .and_then(|base| doc.resolve(base))
-                    .is_some_and(|base| matches!(base, Object::Stream(_))) =>
-            {
-                None
+                    .and_then(|b| doc.resolve(b))
+                {
+                    None => Vec::new(),
+                    Some(Object::Name(name)) => [b"/", name.as_slice(), b" usecmap\n"].concat(),
+                    Some(_) => return Ok(None),
+                };
+                match stream.decoded() {
+                    Ok(data) => read(&[base, data].concat()),
+                    Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
+                    Err(_) => None,
+                }
             }
-            Some(Object::Stream(stream)) => match stream.decoded() {
-                Ok(data) => read(&data),
-                Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
-                Err(_) => None,
-            },
             _ => None,
         },
     )
@@ -647,9 +651,20 @@ mod tests {
     }
 
     /// An encoding whose base CMap is a stream (`/UseCMap`) is not followed,
-    /// so the font's codes are not read.
+    /// so the font's codes are not read; one naming a predefined base reads
+    /// through it.
     #[test]
     fn an_encoding_on_a_stream_base_is_refused() {
+        let named = Object::Stream(Stream::new(
+            dictionary! { "Type" => "CMap", "UseCMap" => "90ms-RKSJ-H" },
+            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
+              endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
+                .to_vec(),
+        ));
+        assert_eq!(
+            composite(named, true, b"\x41\x81\x40").unwrap().unwrap(),
+            ["J", "a"]
+        );
         let base = Stream::new(
             dictionary! { "Type" => "CMap" },
             b"begincmap\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\nendcmap".to_vec(),

@@ -68,6 +68,12 @@ impl Builder<'_> {
         };
         let mut out = Vec::new();
         for spec in specs {
+            // A file specification given as a string is a path to a file
+            // elsewhere, not a file the document embeds.
+            if source.resolve_dict(spec).is_none() {
+                self.record(HiddenContent::FilePath);
+                continue;
+            }
             match self.copy(Kind::FileSpec, spec, At::top(&Scope::default()))? {
                 Some(spec) => out.push(spec),
                 None => self.residue += 1,

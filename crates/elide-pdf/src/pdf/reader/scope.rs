@@ -12,22 +12,34 @@ use crate::pdf::reader::DocumentExt;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Scope<'a>(Vec<&'a Dictionary>);
 
+/// How many page-tree levels a page's resources are looked for in.
+const MAX_TREE_DEPTH: usize = 64;
+
 impl<'a> Scope<'a> {
     /// A scope of `resources`, nearest first.
     pub(crate) fn new(resources: impl IntoIterator<Item = &'a Dictionary>) -> Self {
         Self(resources.into_iter().collect())
     }
 
-    /// The scope of page `page`: its own resources, then those it inherits,
-    /// nearest first; empty when the page cannot be read.
+    /// The scope of page `page`: its `/Resources`, else the nearest page-tree
+    /// ancestor's, taken whole (7.7.3.4): an entry is inherited as a value,
+    /// so a page's own dictionary, even an empty one, hides its ancestors'.
+    /// Empty when no dictionary is found.
     pub(crate) fn page(doc: &'a Document, page: ObjectId) -> Self {
-        let Ok((own, inherited)) = doc.get_page_resources(page) else {
-            return Self::default();
-        };
-        let inherited = inherited
-            .into_iter()
-            .filter_map(|id| doc.get_dictionary(id).ok());
-        Self::new(own.into_iter().chain(inherited))
+        let mut node = doc.get_dictionary(page).ok();
+        for _ in 0..MAX_TREE_DEPTH {
+            let Some(dict) = node else {
+                break;
+            };
+            if let Ok(resources) = dict.get(b"Resources") {
+                return Self(doc.resolve_dict(resources).into_iter().collect());
+            }
+            node = dict
+                .get(b"Parent")
+                .ok()
+                .and_then(|parent| doc.resolve_dict(parent));
+        }
+        Self::default()
     }
 
     /// The resources of the content `dict` (a form, tiling pattern or Type3
@@ -93,5 +105,41 @@ impl<'a> Scope<'a> {
     /// The resource dictionaries, nearest first.
     pub(crate) fn dictionaries(&self) -> &[&'a Dictionary] {
         &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::dictionary;
+
+    use super::*;
+
+    /// A page's own `/Resources`, even empty, is its scope whole; one with
+    /// none inherits its parent's.
+    #[test]
+    fn a_page_inherits_resources_whole() {
+        let mut doc = Document::with_version("1.7");
+        let parent_resources = doc.add_object(dictionary! {
+            "ColorSpace" => dictionary! { "DefaultRGB" => "DeviceGray" },
+        });
+        let pages = doc.new_object_id();
+        let own = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Resources" => dictionary! {},
+        });
+        let inheriting = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![own.into(), inheriting.into()], "Count" => 2,
+                "Resources" => parent_resources,
+            }),
+        );
+        let lookup = |page| {
+            Scope::page(&doc, page)
+                .lookup(&doc, b"ColorSpace", b"DefaultRGB")
+                .is_some()
+        };
+        assert!(!lookup(own));
+        assert!(lookup(inheriting));
     }
 }

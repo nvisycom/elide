@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Object, ObjectId};
@@ -59,9 +60,16 @@ impl Builder<'_> {
             if boxes.unit != 1.0 {
                 page.set("UserUnit", Object::Real(boxes.unit as f32));
             }
+            // A print box the page sets that is not a box within its media
+            // box is not written, and is recorded as a property dropped.
+            let own = source.get_dictionary(id).ok();
             for (key, print) in PRINT_BOXES.into_iter().zip(boxes.print) {
-                if let Some(print) = print {
-                    page.set(key, rect(print));
+                match print {
+                    Some(print) => page.set(key, rect(print)),
+                    None if own.is_some_and(|own| own.get(key).is_ok()) => {
+                        self.record(HiddenContent::Properties);
+                    }
+                    None => {}
                 }
             }
         }

@@ -12,6 +12,7 @@ use super::paint::{Painted, Painting};
 use super::run::gap;
 use super::stream::Frame;
 use super::{Inherited, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
+use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
 use crate::pdf::reader::{
     DeviceRect, DictionaryExt, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt,
@@ -55,12 +56,12 @@ struct Placements {
 }
 
 /// One tile a pattern paints: the transform taking its cell, as walked, onto
-/// it, and the device-space extent the regions painting it cover there,
-/// which bounds what of the cell shows.
-#[derive(Debug, Clone, Copy)]
+/// it, and the device-space regions painting it there, each apart, which
+/// bound what of the cell shows.
+#[derive(Debug, Clone)]
 struct Tile {
     transform: Matrix,
-    coverage: DeviceRect,
+    coverage: Vec<DeviceRect>,
 }
 
 /// How a tiling pattern lays its tiles out: its `/Matrix`, its cell
@@ -103,8 +104,7 @@ impl Selected<'_> {
 
 impl Layout {
     /// The tiles, laid out in `space`, whose cell overlaps one of `regions`,
-    /// each once, by column and row, with the extent of the regions that
-    /// overlap it; `None` past `limit` tiles, when the regions name more
+    /// each once, by column and row, with the regions that overlap it; `None` past `limit` tiles, when the regions name more
     /// than [`MAX_TILE_CANDIDATES`] together with those counted in
     /// `candidates` already, or tiles too far out to place.
     fn tiles<'r>(
@@ -113,8 +113,8 @@ impl Layout {
         regions: impl IntoIterator<Item = &'r DeviceRect>,
         limit: usize,
         candidates: &mut f64,
-    ) -> Option<BTreeMap<(i64, i64), DeviceRect>> {
-        let mut placed: BTreeMap<(i64, i64), DeviceRect> = BTreeMap::new();
+    ) -> Option<BTreeMap<(i64, i64), Vec<DeviceRect>>> {
+        let mut placed: BTreeMap<(i64, i64), Vec<DeviceRect>> = BTreeMap::new();
         // A space that flattens the pattern shows no tile.
         let Some(to_cell) = self.matrix.then(space).inverse() else {
             return Some(placed);
@@ -148,10 +148,15 @@ impl Layout {
             }
             for column in first_column as i64..=last_column as i64 {
                 for row in first_row as i64..=last_row as i64 {
+                    // A region painted again over the same tile counts once.
                     match placed.get_mut(&(column, row)) {
-                        Some(coverage) => *coverage = coverage.union(*region),
+                        Some(coverage) => {
+                            if !coverage.contains(region) {
+                                coverage.push(*region);
+                            }
+                        }
                         None => {
-                            placed.insert((column, row), *region);
+                            placed.insert((column, row), vec![*region]);
                             if placed.len() > limit {
                                 return None;
                             }
@@ -197,8 +202,8 @@ impl<'d> Walk<'_, 'd> {
             return Ok(());
         };
         // Only Form XObjects carry content to walk; an image is no text, but
-        // a stencil mask paints its unit square with the fill colour, which
-        // may be a pattern whose text it then shows (8.9.6.2).
+        // a stencil mask paints its samples with the fill colour, which may
+        // be a pattern whose text it then shows (8.9.6.2).
         if stream.dict.is_subtype(doc, b"Image") {
             let stencil = stream
                 .dict
@@ -206,16 +211,17 @@ impl<'d> Walk<'_, 'd> {
                 .ok()
                 .and_then(|mask| doc.resolve(mask))
                 .is_some_and(|mask| matches!(mask.as_bool(), Ok(true)));
-            let unit = DeviceRect {
-                min_x: 0.0,
-                min_y: 0.0,
-                max_x: 1.0,
-                max_y: 1.0,
-            };
             if stencil
-                && let Some(painted) = inherited
-                    .painting
-                    .fill_area(unit.mapped(inherited.state.ctm))
+                && let Some([min_x, min_y, max_x, max_y]) = stencil_extent(doc, stream)
+                && let Some(painted) = inherited.painting.fill_area(
+                    DeviceRect {
+                        min_x,
+                        min_y,
+                        max_x,
+                        max_y,
+                    }
+                    .mapped(inherited.state.ctm),
+                )
             {
                 self.paint(vec![painted]);
             }
@@ -360,7 +366,7 @@ impl<'d> Walk<'_, 'd> {
                     .extend(cell.glyphs.iter().filter_map(|glyph| {
                         Some(GlyphRect {
                             chars: glyph.chars.clone(),
-                            rect: glyph.rect.mapped(tile.transform).within(tile.coverage)?,
+                            rect: covered(glyph.rect.mapped(tile.transform), &tile.coverage)?,
                         })
                     }));
             }
@@ -424,12 +430,11 @@ impl<'d> Walk<'_, 'd> {
                 // Painted in the outer cell, it paints on each of its tiles,
                 // as far as that tile shows.
                 for outer_tile in outer_tiles {
-                    if let Some(region) = painted
-                        .region
-                        .mapped(outer_tile.transform)
-                        .intersection(outer_tile.coverage)
-                    {
-                        add(painted.paint.space.then(outer_tile.transform), region);
+                    let region = painted.region.mapped(outer_tile.transform);
+                    for coverage in &outer_tile.coverage {
+                        if let Some(region) = region.intersection(*coverage) {
+                            add(painted.paint.space.then(outer_tile.transform), region);
+                        }
                     }
                 }
             }
@@ -536,5 +541,38 @@ impl<'d> Walk<'_, 'd> {
         );
         self.active.remove(&id);
         result
+    }
+}
+
+/// The part of the glyph box `rect` the regions `coverage` paint, each apart,
+/// or `None` when none of them does: a glyph between two regions is not
+/// painted by either.
+fn covered(rect: DeviceRect, coverage: &[DeviceRect]) -> Option<DeviceRect> {
+    coverage
+        .iter()
+        .filter_map(|region| rect.within(*region))
+        .reduce(DeviceRect::union)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(min_x: f64, max_x: f64) -> DeviceRect {
+        DeviceRect {
+            min_x,
+            min_y: 0.0,
+            max_x,
+            max_y: 10.0,
+        }
+    }
+
+    /// A glyph between two regions painting a tile is painted by neither;
+    /// one inside a region is painted there.
+    #[test]
+    fn a_glyph_between_regions_is_not_covered() {
+        let coverage = [rect(0.0, 5.0), rect(40.0, 45.0)];
+        assert!(covered(rect(20.0, 25.0), &coverage).is_none());
+        assert!(covered(rect(41.0, 43.0), &coverage).is_some());
     }
 }

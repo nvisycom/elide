@@ -351,8 +351,9 @@ impl<'a> Builder<'a> {
             return Ok(None);
         };
         dict.set("Filter", Object::Name(filter.to_vec()));
-        // The one filter's parameters: a dictionary, or the one in a
-        // one-item array; a null is none.
+        // The one filter's parameters (a dictionary, or the one in a
+        // one-item array): a JPEG's colour transform, 0 or 1, is the only
+        // one either file filter takes (7.4.8), so it alone is written.
         let source = self.source;
         let parameters = match stream
             .dict
@@ -363,10 +364,16 @@ impl<'a> Builder<'a> {
             Some(Object::Array(parameters)) => parameters.first().and_then(|p| source.resolve(p)),
             parameters => parameters,
         };
-        if let Some(parameters @ Object::Dictionary(_)) = parameters
-            && let Some(parameters) = self.copy(Kind::DecodeParms, parameters, at.deeper())?
-        {
-            dict.set("DecodeParms", parameters);
+        let transform = parameters
+            .and_then(|p| p.as_dict().ok())
+            .and_then(|p| source.resolve(p.get(b"ColorTransform").ok()?))
+            .and_then(|t| t.as_i64().ok())
+            .filter(|t| *filter == b"DCTDecode" && matches!(t, 0 | 1));
+        if let Some(transform) = transform {
+            dict.set(
+                "DecodeParms",
+                Dictionary::from_iter([("ColorTransform", Object::Integer(transform))]),
+            );
         }
         image_xobject(&mut dict);
         Ok(Some(Object::Stream(
@@ -613,7 +620,7 @@ impl<'a> Builder<'a> {
     ///
     /// # Errors
     ///
-    /// As [`UnicodeMap::read`], and
+    /// As [`UnicodeMap::read`] and [`UnicodeMap::readable`], and
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the CMaps written across the document take more than
     /// [`MAX_CONTENT_BYTES`](crate::pdf::reader::MAX_CONTENT_BYTES).
@@ -625,7 +632,7 @@ impl<'a> Builder<'a> {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
         };
-        let content = map.readable().write();
+        let content = map.readable()?.write();
         self.cmap_budget = self
             .cmap_budget
             .checked_sub(content.len())

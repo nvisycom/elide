@@ -350,13 +350,27 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         Some(marked)
     }
 
-    /// End the open text object: each sequence begun inside it closes first,
-    /// with an `EMC` for each one written.
+    /// End the open text object: each sequence written inside it closes
+    /// first, with an `EMC`, so the output stays balanced. A hidden sequence
+    /// begun inside it stays open, and hiding, until the source's own `EMC`:
+    /// a misplaced `ET` does not show what the layer hides.
     fn close_text(&mut self) {
-        while self.open.last().is_some_and(|open| open.in_text) {
-            if self.pop() == Some(Marked::Written) {
-                self.kept.push(Operation::new("EMC", Vec::new()));
+        let mut kept = Vec::with_capacity(self.open.len());
+        let mut closed = 0;
+        for open in self.open.drain(..).rev() {
+            if open.in_text && open.marked == Marked::Written {
+                closed += 1;
+            } else {
+                kept.push(Open {
+                    in_text: false,
+                    ..open
+                });
             }
+        }
+        kept.reverse();
+        self.open = kept;
+        for _ in 0..closed {
+            self.kept.push(Operation::new("EMC", Vec::new()));
         }
         self.in_text = false;
     }

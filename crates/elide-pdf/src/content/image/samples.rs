@@ -148,15 +148,39 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
         if ![1, 2, 4, 8].contains(&bits) {
             return None;
         }
+        let colours = doc.resolve(dict.get(b"ColorSpace").ok()?)?;
+        let indexed = colours.as_array().is_ok_and(|array| {
+            array
+                .first()
+                .and_then(|family| doc.resolve(family)?.as_name().ok())
+                .is_some_and(|family| matches!(family, b"Indexed" | b"I"))
+        });
+        // An index's decode array is `[0 2^bits-1]` unless it says otherwise
+        // (8.9.5.2), not a colour's `[0 1]`; one that maps indexes elsewhere
+        // is not read.
+        let inverted = if indexed {
+            Some(false)
+        } else {
+            decode_array(doc, dict)
+        };
+        let space = space(doc, colours, inverted)?;
+        if indexed && let Ok(decode) = dict.get(b"Decode") {
+            let identity = [0.0, ((1u32 << bits) - 1) as f64];
+            let values: Option<Vec<f64>> = doc.resolve_array(decode).map(|values| {
+                values
+                    .iter()
+                    .filter_map(|v| doc.resolve_number(v))
+                    .collect()
+            });
+            if values.as_deref() != Some(&identity[..]) {
+                return None;
+            }
+        }
         Layout {
             width,
             height,
             bits: bits as usize,
-            space: space(
-                doc,
-                doc.resolve(dict.get(b"ColorSpace").ok()?)?,
-                decode_array(doc, dict),
-            )?,
+            space,
         }
     };
     let samples = layout.row_bytes().checked_mul(height as usize)?;
@@ -194,14 +218,23 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
 /// viewer draws them, and bytes past it dropped, so nothing rides along
 /// after the image. An indexed image's index past its last colour is
 /// written as that colour's, as a viewer clamps it (8.9.5.2), so the
-/// samples kept are the colours drawn.
+/// samples kept are the colours drawn, unless a colour key masks the image
+/// by its raw samples.
 ///
 /// # Errors
 ///
 /// As [`decode`].
 pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
     let (layout, mut samples) = read(doc, stream)?;
-    if let Some(last) = layout.space.last_index() {
+    // A colour key masks by the raw sample, before any clamp (8.9.6.4), so
+    // a keyed image's samples are kept as they are.
+    let keyed = stream
+        .dict
+        .get(b"Mask")
+        .ok()
+        .and_then(|mask| doc.resolve(mask))
+        .is_some_and(|mask| matches!(mask, Object::Array(_)));
+    if !keyed && let Some(last) = layout.space.last_index() {
         let count = layout.width as usize * layout.space.components();
         for row in samples.chunks_exact_mut(layout.row_bytes()) {
             let values = unpack(row, layout.bits, count);
@@ -212,6 +245,44 @@ pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
         }
     }
     Ok(samples)
+}
+
+/// Where the stencil mask `stream` in `doc` paints, as a box `[x0 y0 x1 y1]`
+/// in its unit square (y up, its first row at the top): around the samples
+/// its decode array paints, `None` when it paints none, and the whole square
+/// when its samples cannot be read.
+pub(crate) fn stencil_extent(doc: &Document, stream: &Stream) -> Option<[f64; 4]> {
+    let Ok((layout, samples)) = read(doc, stream) else {
+        return Some([0.0, 0.0, 1.0, 1.0]);
+    };
+    let Space::Gray { inverted } = layout.space else {
+        return Some([0.0, 0.0, 1.0, 1.0]);
+    };
+    // A 0 paints under the default decode array, a 1 under `[1 0]`.
+    let paints = u8::from(inverted);
+    let width = layout.width as usize;
+    let mut extent: Option<(usize, usize, usize, usize)> = None;
+    for (row, bits) in samples.chunks_exact(layout.row_bytes()).enumerate() {
+        let values = unpack(bits, layout.bits, width);
+        let (Some(first), Some(last)) = (
+            values.iter().position(|&v| v == paints),
+            values.iter().rposition(|&v| v == paints),
+        ) else {
+            continue;
+        };
+        extent = Some(match extent {
+            None => (first, row, last, row),
+            Some((x0, y0, x1, _)) => (x0.min(first), y0, x1.max(last), row),
+        });
+    }
+    let (x0, first_row, x1, last_row) = extent?;
+    let (w, h) = (f64::from(layout.width), f64::from(layout.height));
+    Some([
+        x0 as f64 / w,
+        1.0 - (last_row + 1) as f64 / h,
+        (x1 + 1) as f64 / w,
+        1.0 - first_row as f64 / h,
+    ])
 }
 
 /// The layout of `stream` and its samples, exactly as many as it takes.
@@ -488,6 +559,37 @@ mod tests {
             vec![0b00_01_10_11],
         );
         assert_eq!(samples(&doc, &packed).unwrap(), [0b00_01_01_01]);
+
+        // A colour key reads the raw sample, so a keyed image keeps it.
+        let mut keyed = indexed.clone();
+        keyed.dict.set("Mask", vec![1.into(), 1.into()]);
+        assert_eq!(samples(&doc, &keyed).unwrap(), [1, 2]);
+        // An index decode array other than the identity is not read.
+        let mut decoded = indexed.clone();
+        decoded.dict.set("Decode", vec![0.into(), 1.into()]);
+        assert!(samples(&doc, &decoded).is_err());
+        decoded.dict.set("Decode", vec![0.into(), 255.into()]);
+        assert!(samples(&doc, &decoded).is_ok());
+    }
+
+    /// A stencil paints where its samples paint: around them, nothing when
+    /// none does, and the inverse samples under `[1 0]`.
+    #[test]
+    fn a_stencil_paints_where_its_samples_do() {
+        let doc = Document::new();
+        let stencil = |samples: Vec<u8>, decode: Option<Vec<Object>>| {
+            let mut dict = dictionary! { "Width" => 2, "Height" => 2, "ImageMask" => true };
+            if let Some(decode) = decode {
+                dict.set("Decode", decode);
+            }
+            image(dict, samples)
+        };
+        // Row 0 (the top) paints its right sample; row 1 paints nothing.
+        let extent = stencil_extent(&doc, &stencil(vec![0b1000_0000, 0b1100_0000], None));
+        assert_eq!(extent, Some([0.5, 0.5, 1.0, 1.0]));
+        assert_eq!(stencil_extent(&doc, &stencil(vec![0xC0, 0xC0], None)), None);
+        let inverted = stencil(vec![0xC0, 0xC0], Some(vec![1.into(), 0.into()]));
+        assert_eq!(stencil_extent(&doc, &inverted), Some([0.0, 0.0, 1.0, 1.0]));
     }
 
     /// An image whose packed samples fit the bound but whose pixels do not is

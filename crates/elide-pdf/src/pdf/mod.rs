@@ -15,7 +15,7 @@ use bytes::Bytes;
 use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::xref::XrefEntry;
-use lopdf::{Document, Object};
+use lopdf::{Dictionary, Document, Object};
 
 use self::reader::{DictionaryExt, DocumentExt};
 pub(crate) use self::writer::Edit;
@@ -278,22 +278,30 @@ fn own_file_filter(doc: &Document, bytes: &[u8]) -> bool {
 }
 
 /// Whether `object`, or a value it holds up to [`MAX_ENCRYPT_DEPTH`] levels
-/// down, is a file specification embedding a file (it has `/EF`) or an
-/// embedded file stream.
+/// down, is a file specification embedding a file (its `/EF` names a
+/// stream) or an embedded file stream.
 fn embeds_files(doc: &Document, object: &Object, depth: usize) -> bool {
     if depth > MAX_ENCRYPT_DEPTH {
         return false;
     }
+    let embeds = |dict: &Dictionary| {
+        dict.get(b"EF")
+            .ok()
+            .and_then(|files| doc.resolve_dict(files))
+            .is_some_and(|files| {
+                files
+                    .iter()
+                    .any(|(_, file)| matches!(doc.resolve(file), Some(Object::Stream(_))))
+            })
+    };
     match object {
         Object::Dictionary(dict) => {
-            dict.get(b"EF").is_ok()
+            embeds(dict)
                 || dict
                     .iter()
                     .any(|(_, value)| embeds_files(doc, value, depth + 1))
         }
-        Object::Stream(stream) => {
-            stream.dict.get(b"EF").is_ok() || stream.dict.is_type(doc, b"EmbeddedFile")
-        }
+        Object::Stream(stream) => embeds(&stream.dict) || stream.dict.is_type(doc, b"EmbeddedFile"),
         Object::Array(items) => items.iter().any(|item| embeds_files(doc, item, depth + 1)),
         _ => false,
     }

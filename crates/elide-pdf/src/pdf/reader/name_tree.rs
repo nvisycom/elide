@@ -60,6 +60,9 @@ impl<'a> NameTree<'a> {
             return reader.out;
         };
         match root {
+            // A root that is null, or refers to null or nothing, is no tree.
+            Object::Null => {}
+            Object::Reference(_) if matches!(doc.resolve(root), None | Some(Object::Null)) => {}
             Object::Reference(id) => reader.walk(Node::Object(*id), 0),
             Object::Dictionary(_) => reader.walk(Node::InlineRoot(names_id), 0),
             _ => reader.out.complete = false,
@@ -95,10 +98,13 @@ impl<'a> Reader<'a, '_> {
             return;
         };
         self.out.nodes.push(node);
-        // A null entry, or one referring to null, is no entry.
-        let present = |value: &Object| !matches!(self.doc.resolve(value), Some(Object::Null));
+        // A null entry, or one referring to null, is no entry; so is a
+        // `/Names` referring to nothing, which holds no pairs. `/Kids`
+        // referring to nothing loses a subtree, so it is read and fails.
+        let null = |value: &Object| matches!(self.doc.resolve(value), Some(Object::Null));
         if let Ok(names) = dict.get(b"Names")
-            && present(names)
+            && !null(names)
+            && self.doc.resolve(names).is_some()
         {
             let Some(names) = self.array(names) else {
                 return;
@@ -110,7 +116,7 @@ impl<'a> Reader<'a, '_> {
                 .extend(pairs.iter().map(|[key, value]| (key, value)));
         }
         if let Ok(kids) = dict.get(b"Kids")
-            && present(kids)
+            && !null(kids)
         {
             let Some(kids) = self.array(kids) else {
                 return;
@@ -275,5 +281,30 @@ mod tests {
         let tree = NameTree::read(&doc, b"Dests");
         assert!(tree.complete);
         assert_eq!(tree.pairs.len(), 1);
+    }
+
+    /// A `/Names` referring to nothing holds no pairs, and the kids are
+    /// still read; a null root is no tree, read whole.
+    #[test]
+    fn a_dangling_names_entry_and_a_null_root_are_absent() {
+        let mut doc = Document::with_version("1.7");
+        with_pages(&mut doc, [Dictionary::new()]);
+        let leaf = doc.add_object(dictionary! {
+            "Names" => vec![Object::string_literal("a"), 1.into()],
+        });
+        doc.catalog_mut().unwrap().set(
+            "Names",
+            dictionary! {
+                "Dests" => dictionary! {
+                    "Names" => Object::Reference((9999, 0)), "Kids" => vec![leaf.into()],
+                },
+                "EmbeddedFiles" => Object::Null,
+            },
+        );
+        let tree = NameTree::read(&doc, b"Dests");
+        assert!(tree.complete);
+        assert_eq!(tree.pairs.len(), 1);
+        let files = NameTree::read(&doc, b"EmbeddedFiles");
+        assert!(files.complete && files.pairs.is_empty());
     }
 }

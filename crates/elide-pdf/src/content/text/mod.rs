@@ -451,6 +451,23 @@ mod tests {
         assert!(tiled_rects(b"/Clear gs /Pattern cs /P0 scn 0 0 50 20 re f").is_empty());
     }
 
+    /// A glyph the clip hides has no box, though its text is read; text
+    /// shown under a clipping mode clips what follows its text object.
+    #[test]
+    fn clips_bound_glyphs_and_text_clips_what_follows() {
+        let clipped = tiled_block(b"0 0 1 1 re W n BT /F2 12 Tf 50 50 Td (xx) Tj ET");
+        assert!(clipped.text.contains("xx") && clipped.rects.is_empty());
+        let after_text_clip =
+            tiled_rects(b"BT /F2 12 Tf 0 50 Td 7 Tr (x) Tj ET /Pattern cs /P0 scn 0 0 50 20 re f");
+        assert_eq!(
+            after_text_clip
+                .iter()
+                .filter(|g| g.rect.min_y < 40.0)
+                .count(),
+            0
+        );
+    }
+
     /// A stencil mask paints its unit square with the fill pattern.
     #[test]
     fn a_stencil_mask_paints_with_the_pattern() {
