@@ -22,6 +22,7 @@ pub mod props;
 pub(crate) mod references;
 pub(crate) mod relationships;
 pub(crate) mod sanitize;
+pub(crate) mod schema;
 mod store;
 pub(crate) mod vocabulary;
 pub(crate) mod xml_edit;

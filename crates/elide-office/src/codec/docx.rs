@@ -56,7 +56,7 @@ mod tests {
     /// A minimal one-part `.docx` whose body carries `body_text` in a `w:t` run.
     fn docx_with_body(body_text: &str) -> ContentData {
         let body = format!(
-            r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
+            r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
         );
         let package = fixtures::pack_parts(&[
             ("[Content_Types].xml", CONTENT_TYPES),
@@ -86,7 +86,7 @@ mod tests {
         // The body text is `Alice &amp; Bob`, decoded to `Alice & Bob`. A finding
         // over the whole decoded text must point back at the raw bytes including
         // the `&amp;`, one contiguous raw range, entity bytes and all.
-        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let doc = decode(docx_with_body("Alice &amp; Bob"));
         let stream = &doc.body;
         let chunk = chunk_for(stream, "Alice & Bob");
@@ -110,7 +110,7 @@ mod tests {
     async fn source_span_of_just_the_decoded_entity_char_is_the_entity_raw() {
         // Redacting only the decoded `&` (offset 6..7) must point at all 5 raw
         // bytes of `&amp;`, never an empty or partial range.
-        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let doc = decode(docx_with_body("Alice &amp; Bob"));
         let stream = &doc.body;
         let chunk = chunk_for(stream, "Alice & Bob");
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn source_span_of_a_finding_before_the_entity_is_one_run() {
-        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let doc = decode(docx_with_body("Alice &amp; Bob"));
         let stream = &doc.body;
         let chunk = chunk_for(stream, "Alice & Bob");
@@ -152,7 +152,7 @@ mod tests {
         use elide_core::modality::text::TextReplacement;
         use elide_core::redaction::Redactions;
 
-        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let mut doc = decode(docx_with_body("Alice Bob"));
 
         // The raw span of "Bob" in the part, what a DOM selection yields. The

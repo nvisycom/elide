@@ -49,10 +49,14 @@ async fn the_note_goes_with_its_comment_by_default() {
     assert!(!vml.contains("ClientData"), "{vml}");
 }
 
+/// A scanned note keeps its shape. Its text box's markup is outside the VML
+/// schema, so the rebuild leaves it out; Excel reads a note's text from its
+/// comment.
 #[tokio::test]
-async fn a_scanned_note_keeps_its_text() {
+async fn a_scanned_note_keeps_its_shape_without_its_markup() {
     let vml = drawing(Disposition::ScanAsContent).await;
-    assert!(vml.contains("private note"), "{vml}");
+    assert!(vml.contains(r#"ObjectType="Note""#), "{vml}");
+    assert!(!vml.contains("private note"), "{vml}");
 }
 
 #[tokio::test]

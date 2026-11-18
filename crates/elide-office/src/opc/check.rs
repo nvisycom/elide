@@ -2,7 +2,8 @@
 //! should not ship.
 //!
 //! The check a document runs on its output before returning it: sanitizing
-//! the output again removes nothing, every relationship and every element
+//! the output again removes nothing (so every XML part is a fixed point of
+//! its schema rebuild), every relationship and every element
 //! naming one resolves, every XML part speaks only reviewed vocabularies, and
 //! no part the format never extracts carries text.
 

@@ -347,7 +347,7 @@ mod tests {
         );
         let shape = |kind: &str| {
             format!(
-                r##""<v:shape id="s{kind}" type="#_x0000_t202"><v:textbox><div>{kind}</div></v:textbox><x:ClientData ObjectType="{kind}"><x:Row>0</x:Row></x:ClientData></v:shape>""##
+                r##"<v:shape id="s{kind}" type="#_x0000_t202"><v:textbox><div>{kind}</div></v:textbox><x:ClientData ObjectType="{kind}"><x:Row>0</x:Row></x:ClientData></v:shape>"##
             )
         };
         let vml = format!(
@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn redacted_threaded_comments_keep_their_text_and_authors_only() {
+    fn threaded_comments_go_under_every_policy() {
         let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/threadedComments/threadedComment1.xml" ContentType="application/vnd.ms-excel.threadedcomments+xml"/><Override PartName="/xl/persons/person.xml" ContentType="application/vnd.ms-excel.person+xml"/></Types>"#;
         let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}"/>"#);
         let comments = format!(
@@ -391,21 +391,18 @@ mod tests {
             ("xl/persons/person.xml", persons.as_bytes()),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, _) = sanitize(&package, policy, &SheetClassifier).unwrap();
+        let (out, stripped) = sanitize(&package, policy, &SheetClassifier).unwrap();
         let out = out.unwrap();
-        let comments =
-            String::from_utf8(read_part(&out, "xl/threadedComments/threadedComment1.xml").unwrap())
-                .unwrap();
+        // No schema describes a threaded comment or its people, so neither
+        // can be rebuilt, and both go.
+        let names = part_names(&out);
         assert!(
-            !comments.contains("dT=") && !comments.contains("mention"),
-            "{comments}"
+            !names
+                .iter()
+                .any(|name| name.contains("threaded") || name.contains("person")),
+            "{names:?}"
         );
-
-        let markup = crate::xlsx::Xlsx::open(&out).unwrap().markup();
-        let texts: Vec<&str> = markup.blocks.iter().map(|b| b.text.as_str()).collect();
-        for text in ["@Jane Roe please check", "Jane Roe", "jane@example.com"] {
-            assert!(texts.contains(&text), "{text} not in {texts:?}");
-        }
+        assert_eq!(count(&stripped, HiddenContent::ApplicationData), 2);
         crate::opc::check::check(&out, policy, &SheetClassifier).unwrap();
     }
 
@@ -474,7 +471,9 @@ mod tests {
         assert!(!vml.contains("<div>Note</div>"), "{vml}");
         assert!(vml.contains(r#"ObjectType="Note""#), "{vml}");
         assert!(vml.contains("<x:Row>0</x:Row>"), "{vml}");
-        assert!(vml.contains("<div>Button</div>"), "{vml}");
+        // A text box's legacy markup is outside the VML schema, so a button's
+        // label goes in the rebuild.
+        assert!(!vml.contains("<div>"), "{vml}");
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
     }
 }

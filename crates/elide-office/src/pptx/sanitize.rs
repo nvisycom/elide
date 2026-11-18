@@ -83,17 +83,19 @@ impl Sanitizer for SlideFormat {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::redaction::{Disposition, HiddenContentPolicy};
+    use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, read_part};
+    use crate::fixtures::{pack_parts, part_names, read_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::sanitize::sanitize;
 
     const PML_NS: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 
+    /// A modern comment and its authors, whose schema this crate does not
+    /// hold.
     #[test]
-    fn a_modern_comment_keeps_a_neutral_creation_date() {
+    fn modern_comments_go_under_every_policy() {
         const P188: &str = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
         const PC: &str = "http://schemas.microsoft.com/office/powerpoint/2013/main/command";
         let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/comments/modernComment1.xml" ContentType="application/vnd.ms-powerpoint.comments+xml"/><Override PartName="/ppt/authors.xml" ContentType="application/vnd.ms-powerpoint.authors+xml"/></Types>"#;
@@ -111,26 +113,23 @@ mod tests {
             ("ppt/authors.xml", authors.as_bytes()),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
+        let (out, stripped) = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
-        let comments =
-            String::from_utf8(read_part(&out, "ppt/comments/modernComment1.xml").unwrap()).unwrap();
-        assert_eq!(comments.matches(NEUTRAL_DATE).count(), 2, "{comments}");
+        // No schema describes a modern comment or its authors, so neither
+        // can be rebuilt, and both go.
+        let names = part_names(&out);
         assert!(
-            !comments.contains("2024") && !comments.contains("startDate"),
-            "{comments}"
+            !names
+                .iter()
+                .any(|name| name.contains("omment") || name.contains("authors")),
+            "{names:?}"
         );
-
-        let texts: Vec<String> = OoxmlPackage::<SlideFormat>::open(&out)
-            .unwrap()
-            .extract()
-            .blocks
+        let removed: usize = stripped
             .iter()
-            .map(|block| block.text.to_string())
-            .collect();
-        for text in ["For Jane Roe", "Jane Roe", "jane@example.com"] {
-            assert!(texts.iter().any(|t| t == text), "{text} not in {texts:?}");
-        }
+            .filter(|entry| entry.content == HiddenContent::ApplicationData)
+            .map(|entry| entry.count)
+            .sum();
+        assert_eq!(removed, 2);
         crate::opc::check::check(&out, policy, &SlideFormat).unwrap();
     }
 

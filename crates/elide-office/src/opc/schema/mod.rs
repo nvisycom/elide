@@ -1,0 +1,618 @@
+//! [`rebuild`]: write an OOXML part from what its schema allows.
+//!
+//! The allowlist is generated from the ISO/IEC 29500-4 transitional schemas
+//! (ECMA-376 Part 4) and the [MS-DOCX] extension schemas by
+//! `scripts/gen-ooxml-schema.py` into [`table`]: each element type, the child
+//! elements it allows (each with its own type), the attributes it declares,
+//! and whether it holds text. A part's content type names the root element it
+//! must have ([`root`]), and from there each element is copied only if its
+//! parent's type allows it, keeping only the attributes its own type declares:
+//!
+//! - an element its parent does not allow goes with everything inside it, as
+//!   does one whose type holds nothing but a schema wildcard (an extension's
+//!   payload, `a:ext` and its kin);
+//! - an attribute its type does not declare goes; namespace declarations stay,
+//!   holding no content;
+//! - markup compatibility is resolved as a reader without extensions resolves
+//!   it: an `mc:AlternateContent` is replaced by its `mc:Fallback`'s children,
+//!   read as its parent's, and every `mc:Choice` goes, as do the `mc:`
+//!   attributes that name ignorable or understood namespaces;
+//! - text in an element whose type holds none, a CDATA section, and a
+//!   processing instruction go.
+//!
+//! Each removal is recorded: what the schema does not name as
+//! [`ApplicationData`](HiddenContent::ApplicationData), text no reader shows
+//! as [`Undisplayed`](HiddenContent::Undisplayed).
+//!
+//! The rebuild cuts what it leaves out of the source rather than
+//! re-serializing what it keeps, so a kept element round-trips byte for byte,
+//! and rebuilding a rebuilt part changes nothing.
+//!
+//! A strict part is read against the transitional schema, its namespaces
+//! mapped onto the transitional ones.
+
+#[rustfmt::skip]
+mod table;
+
+use std::collections::BTreeMap;
+use std::ops::Range;
+
+use elide_core::redaction::HiddenContent;
+use elide_core::{Error, Result};
+use quick_xml::NsReader;
+use quick_xml::events::{BytesStart, Event};
+
+use self::table::{NAMESPACES, ROOTS, TYPES};
+use crate::opc::xml_edit::bound;
+
+/// An element type of the schema.
+#[derive(Debug)]
+pub(crate) struct Type {
+    /// Whether the element holds text.
+    text: bool,
+    /// Whether the type admits a schema wildcard, whose content is outside
+    /// the schema.
+    wildcard: bool,
+    /// The attributes it declares, as (namespace index, local name), sorted.
+    attributes: &'static [(u8, &'static str)],
+    /// The child elements it allows, sorted.
+    children: &'static [Child],
+}
+
+/// An element a type allows: (namespace index, local name, type index).
+#[derive(Debug)]
+pub(crate) struct Child(u8, &'static str, u16);
+
+impl Type {
+    /// The type of the child `local` in the namespace indexed `namespace`, if
+    /// this type allows it.
+    fn child(&self, namespace: u8, local: &str) -> Option<u16> {
+        self.children
+            .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(namespace, local)))
+            .ok()
+            .map(|at| self.children[at].2)
+    }
+
+    /// Whether this type declares the attribute `local` in the namespace
+    /// indexed `namespace`.
+    fn declares(&self, namespace: u8, local: &str) -> bool {
+        self.attributes
+            .binary_search_by(|(n, l)| (*n, *l).cmp(&(namespace, local)))
+            .is_ok()
+    }
+
+    /// Whether the type holds nothing but what a wildcard admits.
+    fn only_wildcard(&self) -> bool {
+        self.wildcard && self.children.is_empty() && !self.text
+    }
+}
+
+/// The markup compatibility namespace.
+const MCE: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+
+/// The namespace of namespace declarations.
+const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
+
+/// The namespaces of a legacy VML drawing's shapes.
+const VML: &[&str] = &[
+    "urn:schemas-microsoft-com:vml",
+    "urn:schemas-microsoft-com:office:office",
+    "urn:schemas-microsoft-com:office:excel",
+    "urn:schemas-microsoft-com:office:powerpoint",
+    "urn:schemas-microsoft-com:office:word",
+];
+
+/// The strict namespaces and the transitional ones their schema follows.
+const STRICT: &[(&str, &str)] = &[
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/relationships",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/math",
+        "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/sharedTypes",
+        "http://schemas.openxmlformats.org/officeDocument/2006/sharedTypes",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/extendedProperties",
+        "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/customProperties",
+        "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes",
+        "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/wordprocessingml/main",
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/presentationml/main",
+        "http://schemas.openxmlformats.org/presentationml/2006/main",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/spreadsheetml/main",
+        "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/main",
+        "http://schemas.openxmlformats.org/drawingml/2006/main",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing",
+        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing",
+        "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/picture",
+        "http://schemas.openxmlformats.org/drawingml/2006/picture",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/chart",
+        "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/chartDrawing",
+        "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/diagram",
+        "http://schemas.openxmlformats.org/drawingml/2006/diagram",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/lockedCanvas",
+        "http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas",
+    ),
+];
+
+/// The index of `namespace` in [`NAMESPACES`] (0 for none), a strict one read
+/// as its transitional twin, or `None` when the schemas never name it.
+fn namespace_index(namespace: Option<&str>) -> Option<u8> {
+    let Some(namespace) = namespace else {
+        return Some(0);
+    };
+    let namespace = STRICT
+        .iter()
+        .find(|(strict, _)| *strict == namespace)
+        .map_or(namespace, |(_, transitional)| transitional);
+    NAMESPACES[1..]
+        .binary_search(&namespace)
+        .ok()
+        .and_then(|at| u8::try_from(at + 1).ok())
+}
+
+/// The root element a part must have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Root {
+    /// This element, by namespace and local name.
+    Element(&'static str, &'static str),
+    /// A legacy VML drawing: an unqualified `<xml>` holding VML shapes.
+    Vml,
+}
+
+const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const X: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const C: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+const DGM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+const XDR: &str = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
+const W16CID: &str = "http://schemas.microsoft.com/office/word/2016/wordml/cid";
+const W16CEX: &str = "http://schemas.microsoft.com/office/word/2018/wordml/cex";
+
+/// The root a part of `content_type` must have, or `None` when no schema this
+/// crate holds describes the part, so it cannot be rebuilt.
+pub(crate) fn root(content_type: &str) -> Option<Root> {
+    const WML: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
+    const PML: &str = "application/vnd.openxmlformats-officedocument.presentationml.";
+    const SML: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
+    const DML: &str = "application/vnd.openxmlformats-officedocument.drawingml.";
+    let content_type = content_type.to_ascii_lowercase();
+    let element = |namespace, local| Some(Root::Element(namespace, local));
+    if let Some(name) = content_type.strip_prefix(WML) {
+        return match name {
+            "document.main+xml" | "template.main+xml" => element(W, "document"),
+            "header+xml" => element(W, "hdr"),
+            "footer+xml" => element(W, "ftr"),
+            "footnotes+xml" => element(W, "footnotes"),
+            "endnotes+xml" => element(W, "endnotes"),
+            "document.glossary+xml" => element(W, "glossaryDocument"),
+            "comments+xml" => element(W, "comments"),
+            "styles+xml" => element(W, "styles"),
+            "settings+xml" => element(W, "settings"),
+            "websettings+xml" => element(W, "webSettings"),
+            "fonttable+xml" => element(W, "fonts"),
+            "numbering+xml" => element(W, "numbering"),
+            _ => None,
+        };
+    }
+    if let Some(name) = content_type.strip_prefix(PML) {
+        return match name {
+            "presentation.main+xml" | "slideshow.main+xml" | "template.main+xml" => {
+                element(P, "presentation")
+            }
+            "slide+xml" => element(P, "sld"),
+            "slidelayout+xml" => element(P, "sldLayout"),
+            "slidemaster+xml" => element(P, "sldMaster"),
+            "notesslide+xml" => element(P, "notes"),
+            "notesmaster+xml" => element(P, "notesMaster"),
+            "handoutmaster+xml" => element(P, "handoutMaster"),
+            "comments+xml" => element(P, "cmLst"),
+            "commentauthors+xml" => element(P, "cmAuthorLst"),
+            "presprops+xml" => element(P, "presentationPr"),
+            "viewprops+xml" => element(P, "viewPr"),
+            "tablestyles+xml" => element(A, "tblStyleLst"),
+            _ => None,
+        };
+    }
+    if let Some(name) = content_type.strip_prefix(SML) {
+        return match name {
+            "sheet.main+xml" | "template.main+xml" => element(X, "workbook"),
+            "worksheet+xml" => element(X, "worksheet"),
+            "chartsheet+xml" => element(X, "chartsheet"),
+            "dialogsheet+xml" => element(X, "dialogsheet"),
+            "sharedstrings+xml" => element(X, "sst"),
+            "comments+xml" => element(X, "comments"),
+            "styles+xml" => element(X, "styleSheet"),
+            "calcchain+xml" => element(X, "calcChain"),
+            "table+xml" => element(X, "table"),
+            "sheetmetadata+xml" => element(X, "metadata"),
+            "volatiledependencies+xml" => element(X, "volTypes"),
+            _ => None,
+        };
+    }
+    if let Some(name) = content_type.strip_prefix(DML) {
+        return match name {
+            "chart+xml" => element(C, "chartSpace"),
+            "chartshapes+xml" => element(C, "userShapes"),
+            "diagramdata+xml" => element(DGM, "dataModel"),
+            "diagramlayout+xml" => element(DGM, "layoutDef"),
+            "diagramstyle+xml" => element(DGM, "styleDef"),
+            "diagramcolors+xml" => element(DGM, "colorsDef"),
+            _ => None,
+        };
+    }
+    match content_type.as_str() {
+        "application/vnd.openxmlformats-officedocument.theme+xml" => element(A, "theme"),
+        "application/vnd.openxmlformats-officedocument.themeoverride+xml" => {
+            element(A, "themeOverride")
+        }
+        "application/vnd.openxmlformats-officedocument.drawing+xml" => element(XDR, "wsDr"),
+        "application/vnd.openxmlformats-officedocument.vmldrawing" => Some(Root::Vml),
+        "application/vnd.ms-word.styleswitheffects+xml" => element(W, "styles"),
+        "application/vnd.ms-word.commentsextended+xml" => element(W15, "commentsEx"),
+        "application/vnd.ms-word.commentsids+xml" => element(W16CID, "commentsIds"),
+        "application/vnd.ms-word.commentsextensible+xml" => element(W16CEX, "commentsExtensible"),
+        "application/vnd.ms-word.people+xml" => element(W15, "people"),
+        "application/vnd.ms-word.document.macroenabled.main+xml"
+        | "application/vnd.ms-word.template.macroenabledtemplate.main+xml" => {
+            element(W, "document")
+        }
+        "application/vnd.ms-powerpoint.presentation.macroenabled.main+xml"
+        | "application/vnd.ms-powerpoint.slideshow.macroenabled.main+xml"
+        | "application/vnd.ms-powerpoint.template.macroenabled.main+xml" => {
+            element(P, "presentation")
+        }
+        "application/vnd.ms-excel.sheet.macroenabled.main+xml"
+        | "application/vnd.ms-excel.template.macroenabled.main+xml" => element(X, "workbook"),
+        _ => None,
+    }
+}
+
+/// A part rebuilt from its schema: its new text, and what was left out.
+#[derive(Debug)]
+pub(crate) struct Rebuilt {
+    pub(crate) text: String,
+    pub(crate) removed: BTreeMap<HiddenContent, usize>,
+}
+
+/// Where the reader is: inside an element of a schema type, at the top of a
+/// VML drawing, or inside markup compatibility it unwraps.
+#[derive(Debug, Clone, Copy)]
+enum Frame {
+    /// An element of this type.
+    Typed(u16),
+    /// The root of a VML drawing.
+    Vml,
+    /// An `mc:AlternateContent`, read in this scope.
+    Alternate(Scope),
+    /// Its `mc:Fallback`, whose content is read as the enclosing scope's.
+    Fallback(Scope),
+}
+
+/// What an element's content is read against.
+#[derive(Debug, Clone, Copy)]
+enum Scope {
+    /// The schema type.
+    Typed(u16),
+    /// The top of a VML drawing.
+    Vml,
+    /// Nothing yet: before the root.
+    Document,
+}
+
+impl Frame {
+    fn scope(self) -> Scope {
+        match self {
+            Self::Typed(ty) => Scope::Typed(ty),
+            Self::Vml => Scope::Vml,
+            Self::Alternate(scope) | Self::Fallback(scope) => scope,
+        }
+    }
+
+    /// Whether the frame's own tags go, its content kept.
+    fn unwrapped(self) -> bool {
+        matches!(self, Self::Alternate(_) | Self::Fallback(_))
+    }
+}
+
+/// `raw` rebuilt from its schema, the part's root required to be `root`, or
+/// `None` when nothing is left out.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// `raw` is not well-formed XML, or its root is not `root`.
+pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
+    let mut reader = NsReader::from_str(raw);
+    let bom = usize::from(raw.starts_with('\u{feff}')) * 3;
+    let mut last = bom;
+    let mut cuts: Vec<Range<usize>> = Vec::new();
+    let mut removed: BTreeMap<HiddenContent, usize> = BTreeMap::new();
+    let mut record = |content| *removed.entry(content).or_insert(0) += 1;
+    let mut open: Vec<Frame> = Vec::new();
+    // An element being left out: its start byte and the open depth inside it.
+    let mut removing: Option<(usize, usize)> = None;
+    let mut seen_root = false;
+
+    loop {
+        let (namespace, event) = {
+            let (resolved, event) = reader
+                .read_resolved_event()
+                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+            (bound(&resolved), event)
+        };
+        let span = last..reader.buffer_position() as usize + bom;
+        last = span.end;
+
+        if let Some((start, depth)) = &mut removing {
+            match event {
+                Event::Start(_) => *depth += 1,
+                Event::End(_) => {
+                    *depth -= 1;
+                    if *depth == 0 {
+                        cuts.push(*start..span.end);
+                        removing = None;
+                    }
+                }
+                Event::Eof => return Err(Error::malformed("malformed part XML: unclosed element")),
+                _ => {}
+            }
+            continue;
+        }
+
+        let scope = open.last().map_or(Scope::Document, |frame| frame.scope());
+        match event {
+            Event::Eof => break,
+            Event::Decl(_) => {}
+            Event::DocType(_) => {
+                return Err(Error::malformed(
+                    "malformed part XML: a document type declaration",
+                ));
+            }
+            // Comments are cut by their own edit.
+            Event::Comment(_) => {}
+            Event::PI(_) => {
+                cuts.push(span);
+                record(HiddenContent::ApplicationData);
+            }
+            Event::CData(_) => {
+                cuts.push(span);
+                record(HiddenContent::Undisplayed);
+            }
+            Event::Text(ref text) => {
+                let text: &str = text.as_ref();
+                let blank = text.bytes().all(|byte| byte.is_ascii_whitespace());
+                if !blank && !holds_text(scope) {
+                    cuts.push(span);
+                    record(HiddenContent::Undisplayed);
+                }
+            }
+            Event::GeneralRef(_) => {
+                if !holds_text(scope) {
+                    cuts.push(span);
+                    record(HiddenContent::Undisplayed);
+                }
+            }
+            Event::End(_) => {
+                if open.pop().is_some_and(Frame::unwrapped) {
+                    cuts.push(span);
+                }
+            }
+            Event::Start(ref e) | Event::Empty(ref e) => {
+                let is_start = matches!(event, Event::Start(_));
+                let local = e.local_name().into_inner();
+                let decision = if !seen_root {
+                    seen_root = true;
+                    root_frame(root, namespace.as_deref(), local)?
+                } else {
+                    decide(scope, namespace.as_deref(), local, &open)
+                };
+                match decision {
+                    Decision::Keep(frame) => {
+                        if let Frame::Typed(ty) = frame {
+                            attributes(&reader, raw, e, ty, &mut cuts, &mut record)?;
+                        } else if frame.unwrapped() {
+                            // The unwrapped tag goes whole.
+                            cuts.push(span.clone());
+                        }
+                        if is_start {
+                            open.push(frame);
+                        }
+                    }
+                    Decision::Drop(content) => {
+                        record(content);
+                        if is_start {
+                            removing = Some((span.start, 1));
+                        } else {
+                            cuts.push(span);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if cuts.is_empty() {
+        return Ok(None);
+    }
+    cuts.sort_by_key(|range| range.start);
+    let mut text = String::with_capacity(raw.len());
+    let mut cursor = 0;
+    for cut in cuts {
+        // An attribute cut never overlaps another: an element left out whole
+        // is cut before its attributes are read.
+        text.push_str(&raw[cursor..cut.start.max(cursor)]);
+        cursor = cursor.max(cut.end);
+    }
+    text.push_str(&raw[cursor..]);
+    Ok(Some(Rebuilt { text, removed }))
+}
+
+/// Whether text is shown in `scope`.
+fn holds_text(scope: Scope) -> bool {
+    match scope {
+        Scope::Typed(ty) => TYPES[usize::from(ty)].text,
+        Scope::Vml | Scope::Document => false,
+    }
+}
+
+/// What the rebuild does with an element.
+enum Decision {
+    /// Copy it, reading its content in this frame.
+    Keep(Frame),
+    /// Leave it out with everything inside it, as this hidden content.
+    Drop(HiddenContent),
+}
+
+/// The frame of the root element `local` in `namespace`, which must be `root`.
+fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decision> {
+    let mismatch = || {
+        Error::malformed(format!(
+            "malformed part XML: the root element `{local}` is not the one its content type names"
+        ))
+    };
+    match root {
+        Root::Vml if namespace.is_none() && local == "xml" => Ok(Decision::Keep(Frame::Vml)),
+        Root::Vml => Err(mismatch()),
+        Root::Element(expected_namespace, expected_local) => {
+            let index = namespace_index(namespace).ok_or_else(mismatch)?;
+            let expected = namespace_index(Some(expected_namespace)).ok_or_else(mismatch)?;
+            if index != expected || local != expected_local {
+                return Err(mismatch());
+            }
+            let at = ROOTS
+                .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(index, local)))
+                .map_err(|_| mismatch())?;
+            Ok(Decision::Keep(Frame::Typed(ROOTS[at].2)))
+        }
+    }
+}
+
+/// What the rebuild does with the element `local` in `namespace` met in
+/// `scope`, inside the `open` frames.
+fn decide(scope: Scope, namespace: Option<&str>, local: &str, open: &[Frame]) -> Decision {
+    let parent = open.last().copied();
+    if namespace == Some(MCE) {
+        return match (local, parent) {
+            ("AlternateContent", _) => Decision::Keep(Frame::Alternate(scope)),
+            ("Fallback", Some(Frame::Alternate(_))) => Decision::Keep(Frame::Fallback(scope)),
+            // Every Choice needs an extension this rebuild does not keep.
+            _ => Decision::Drop(HiddenContent::ApplicationData),
+        };
+    }
+    // An AlternateContent holds its choices and fallback alone.
+    if matches!(parent, Some(Frame::Alternate(_))) {
+        return Decision::Drop(HiddenContent::ApplicationData);
+    }
+    let Some(index) = namespace_index(namespace) else {
+        return Decision::Drop(HiddenContent::ApplicationData);
+    };
+    let ty = match scope {
+        Scope::Typed(parent) => TYPES[usize::from(parent)].child(index, local),
+        // A VML drawing holds the global VML shapes.
+        Scope::Vml if namespace.is_some_and(|namespace| VML.contains(&namespace)) => ROOTS
+            .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(index, local)))
+            .ok()
+            .map(|at| ROOTS[at].2),
+        Scope::Vml | Scope::Document => None,
+    };
+    match ty {
+        Some(ty) if !TYPES[usize::from(ty)].only_wildcard() => Decision::Keep(Frame::Typed(ty)),
+        _ => Decision::Drop(HiddenContent::ApplicationData),
+    }
+}
+
+/// Cut each attribute of `e` its type `ty` does not declare, recording it.
+fn attributes(
+    reader: &NsReader<&[u8]>,
+    raw: &str,
+    e: &BytesStart<'_>,
+    ty: u16,
+    cuts: &mut Vec<Range<usize>>,
+    record: &mut impl FnMut(HiddenContent),
+) -> Result<()> {
+    let ty = &TYPES[usize::from(ty)];
+    let base = raw.as_ptr() as usize;
+    for attr in e.attributes() {
+        let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        let key = attr.key.into_inner();
+        if key == "xmlns" || key.starts_with("xmlns:") {
+            continue;
+        }
+        let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
+        let namespace = bound(&resolved);
+        if namespace.as_deref() == Some(XMLNS) {
+            continue;
+        }
+        let local = local.into_inner();
+        let declared =
+            namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local));
+        if declared {
+            continue;
+        }
+        // The attribute from the whitespace before it to past its closing
+        // quote.
+        let key_start = (key.as_ptr() as usize)
+            .checked_sub(base)
+            .filter(|&at| at <= raw.len())
+            .ok_or_else(|| Error::malformed("malformed part XML: attribute outside the part"))?;
+        let value_end = match &attr.value {
+            std::borrow::Cow::Borrowed(value) => (value.as_ptr() as usize - base) + value.len(),
+            std::borrow::Cow::Owned(_) => {
+                return Err(Error::malformed(
+                    "malformed part XML: attribute without a source",
+                ));
+            }
+        };
+        let start = raw[..key_start]
+            .trim_end_matches(|c: char| c.is_ascii_whitespace())
+            .len();
+        cuts.push(start..value_end + 1);
+        record(HiddenContent::ApplicationData);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

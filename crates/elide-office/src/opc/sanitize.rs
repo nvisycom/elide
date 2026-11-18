@@ -19,12 +19,19 @@
 //!   and, in every kept part, alternative text, tooltips, and XML comments.
 //! - **Refused**: a part the table does not recognize, or one it recognizes but
 //!   cannot redact.
+//! - **Without a schema**: a kept XML part whose content type names no root
+//!   element of the schemas this crate holds (a chart style, a SmartArt
+//!   drawing, a threaded or modern comment) cannot be rebuilt, so it is
+//!   removed as [`ApplicationData`](HiddenContent::ApplicationData).
 //!
 //! Removing a part removes every relationship that targets it, and every
 //! element that names a removed relationship, so no reference dangles. The
-//! format's element edits then strip what hides inside the parts that stay:
-//! revision marks, comment anchors, editor fingerprints. Everything else is
-//! repacked byte-for-byte.
+//! format's element edits then strip what hides inside the parts that stay,
+//! recorded by what it is: revision marks, comment anchors, editor
+//! fingerprints. Last, each kept XML part but the manifest, the relationships,
+//! and the properties is rebuilt from its schema ([`schema`]): an element or
+//! attribute its parent's type does not allow, an extension, and markup
+//! compatibility's choices go, so nothing the schema does not name ships.
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,6 +50,7 @@ use crate::opc::part::PartPath;
 use crate::opc::props::UnsurfacedProperties;
 use crate::opc::references::References;
 use crate::opc::relationships::{self, HYPERLINK};
+use crate::opc::schema::{self, Root};
 use crate::opc::xml_edit::{self, Edit, XmlComments};
 
 /// A list of element edits, each naming the hidden content it removes through
@@ -82,10 +90,25 @@ pub(crate) fn sanitize(
         .map(|(path, _)| (path, index.kind(path)))
         .collect();
     let mut gone: HashSet<PartPath> = HashSet::new();
+    let mut roots: HashMap<PartPath, Root> = HashMap::new();
     for (&path, &kind) in &kinds {
         if let Some(content) = removal(kind, policy, path)? {
             stripped.record(content, Some(local_id(path)), 1);
             gone.insert(path.clone());
+            continue;
+        }
+        if !index.is_xml(path) || !rebuilt(kind) {
+            continue;
+        }
+        // A part no schema here describes cannot be rebuilt, so it goes.
+        match index.content_type(path).and_then(schema::root) {
+            Some(root) => {
+                roots.insert(path.clone(), root);
+            }
+            None => {
+                stripped.record(HiddenContent::ApplicationData, Some(local_id(path)), 1);
+                gone.insert(path.clone());
+            }
         }
     }
 
@@ -100,7 +123,7 @@ pub(crate) fn sanitize(
         }
         edits
     };
-    let bytes = repack(document, &index, gone, &edits, &mut stripped)?;
+    let bytes = repack(document, &index, gone, &edits, &roots, &mut stripped)?;
     Ok((bytes, stripped))
 }
 
@@ -121,6 +144,7 @@ pub(crate) fn remove_parts(document: &[u8], parts: HashSet<PartPath>) -> Result<
         &index,
         parts,
         &|_| Vec::new(),
+        &HashMap::new(),
         &mut StrippedContent::new(),
     )
 }
@@ -129,14 +153,16 @@ pub(crate) fn remove_parts(document: &[u8], parts: HashSet<PartPath>) -> Result<
 /// relationships go with it, every relationship that targets a removed part or
 /// leaves the package other than as a hyperlink is dropped from its source, and
 /// every kept XML part gets the element `edits` for its path plus the removal of
-/// the elements naming a dropped relationship. Each external relationship
-/// dropped and each element edit is recorded in `stripped`. Returns the new
-/// bytes, or `None` when nothing changes.
+/// the elements naming a dropped relationship, and is then rebuilt from its
+/// schema when `roots` names its root. Each external relationship dropped,
+/// each element edit, and each removal of the rebuild is recorded in
+/// `stripped`. Returns the new bytes, or `None` when nothing changes.
 fn repack(
     document: &[u8],
     index: &Index,
     mut gone: HashSet<PartPath>,
     edits: &dyn Fn(&PartPath) -> Edits<'static>,
+    roots: &HashMap<PartPath, Root>,
     stripped: &mut StrippedContent,
 ) -> Result<Option<Vec<u8>>> {
     let mut dropped: HashMap<PartPath, HashSet<String>> = HashMap::new();
@@ -199,7 +225,11 @@ fn repack(
             if xml {
                 part_edits.push(&XmlComments);
             }
-            edit_part(path, bytes, None, part_edits, stripped)?
+            let edited = edit_part(path, bytes, None, part_edits, stripped)?;
+            match roots.get(path) {
+                Some(&root) => rebuild_part(path, bytes, edited, root, stripped)?,
+                None => edited,
+            }
         };
         if let Some(edited) = edited {
             changed.insert(path.clone(), edited.into_bytes());
@@ -275,6 +305,36 @@ fn edit_part(
         }
     }
     Ok(current)
+}
+
+/// Whether a kept part of `kind` is rebuilt from its schema. The manifest and
+/// relationships parts are written by their own readers, and a property part
+/// keeps only the fields detection surfaces.
+fn rebuilt(kind: PartKind) -> bool {
+    !matches!(
+        kind,
+        PartKind::Relationships | PartKind::Properties | PartKind::CustomXml
+    )
+}
+
+/// The kept XML part `path`, `edited` already or else as `bytes`, rebuilt from
+/// its schema with `root`, recording in `stripped` what was left out, or
+/// `edited` when the rebuild leaves nothing out.
+fn rebuild_part(
+    path: &PartPath,
+    bytes: &Bytes,
+    edited: Option<String>,
+    root: Root,
+    stripped: &mut StrippedContent,
+) -> Result<Option<String>> {
+    let source = edited.as_deref().map_or_else(|| text(path, bytes), Ok)?;
+    let Some(rebuilt) = schema::rebuild(source, root)? else {
+        return Ok(edited);
+    };
+    for (content, count) in rebuilt.removed {
+        stripped.record(content, Some(local_id(path)), count);
+    }
+    Ok(Some(rebuilt.text))
 }
 
 /// The container-local id of the package part `path`, the place a record
