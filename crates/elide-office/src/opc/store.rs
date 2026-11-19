@@ -9,8 +9,10 @@ use hipstr::HipStr;
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::{Block, IssueKind, Replacement};
+use crate::opc::index;
 use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
+use crate::opc::xml_edit::check_cuts;
 use crate::opc::xml_span::{
     BlockKind, PRESERVE_SPACE, Span, attribute_spans, cell_markup_spans, preserve_space_at,
     relationship_spans, text_spans,
@@ -70,9 +72,14 @@ impl StoredPart {
         self.role
     }
 
-    /// The part's bytes as UTF-8 text, or `None` when they are not.
-    pub(crate) fn text(&self) -> Option<&str> {
-        self.as_text().ok()
+    /// The part's bytes as UTF-8 text.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// they are not UTF-8.
+    pub(crate) fn utf8(&self) -> Result<&str> {
+        index::text(&self.path, &self.bytes)
     }
 
     /// The part's raw bytes (a cheap ref-counted share).
@@ -153,37 +160,10 @@ impl StoredPart {
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
     pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
-        let raw = self
-            .as_text()
-            .map_err(|_| Error::malformed(format!("part `{}` not UTF-8", self.path)))?;
+        let raw = self.utf8()?;
         let mut ordered = replacements.to_vec();
         ordered.sort_by_key(|r| (r.start, r.end));
-
-        let mut prev_end = 0usize;
-        for r in &ordered {
-            if r.start > r.end || r.end > raw.len() {
-                return Err(Error::processing(format!(
-                    "span {}..{} out of bounds in `{}` (len {})",
-                    r.start,
-                    r.end,
-                    r.part,
-                    raw.len()
-                )));
-            }
-            if !raw.is_char_boundary(r.start) || !raw.is_char_boundary(r.end) {
-                return Err(Error::processing(format!(
-                    "span {}..{} falls mid-character in `{}`",
-                    r.start, r.end, r.part
-                )));
-            }
-            if r.start < prev_end {
-                return Err(Error::processing(format!(
-                    "span {}..{} overlaps an earlier one in `{}`",
-                    r.start, r.end, r.part
-                )));
-            }
-            prev_end = r.end;
-        }
+        check_cuts(raw, &self.path, ordered.iter().map(|r| r.start..r.end))?;
 
         // Recover each span's event kind so the replacement text is escaped for
         // its context (text content, attribute value) or validated against
@@ -251,7 +231,7 @@ mod tests {
         let part = element(
             r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Roe and</w:t></w:r></w:p>"#,
         );
-        let raw = part.text().unwrap();
+        let raw = part.utf8().unwrap();
         let start = raw.find("Roe and").unwrap();
         let replacement = Replacement {
             part: part.path().clone(),

@@ -44,6 +44,11 @@ pub use self::names::Names;
 pub use self::part::{PartClassifier, PartPath, PartRole};
 use self::store::StoredPart;
 
+/// A part's XML failing to read, as `e` says.
+pub(crate) fn malformed_xml(e: impl std::fmt::Display) -> Error {
+    Error::malformed(format!("malformed part XML: {e}"))
+}
+
 /// An opened OOXML package: every part read once and classified, ready to
 /// [`extract`](Package::extract) the text of every text-bearing part or
 /// [`rewrite_with_parts`](Package::rewrite_with_parts) them back to bytes.
@@ -260,10 +265,7 @@ impl Package {
             if !part.is_text() || part.role() == PartRole::RelationshipTargets {
                 continue;
             }
-            let text = part
-                .text()
-                .ok_or_else(|| Error::malformed(format!("part `{}` not UTF-8", part.path())))?;
-            texts.push((part.path(), text));
+            texts.push((part.path(), part.utf8()?));
         }
         names::fit_names(self.names, texts.iter().copied(), replacements)
     }

@@ -13,7 +13,7 @@ use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::bom_len;
+use crate::opc::xml_edit::without_elements;
 
 /// The manifest's own part path.
 pub(crate) const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -99,34 +99,9 @@ pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<St
         .iter()
         .map(|part| part.as_str().to_ascii_lowercase())
         .collect();
-    let mut reader = Reader::from_str(xml);
-    let bom = bom_len(xml);
-    let mut out = String::with_capacity(xml.len());
-    let mut cursor = 0;
-    let mut last = bom;
-    loop {
-        let event = reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
-        let element = match event {
-            Event::Eof => break,
-            Event::Empty(e) if e.local_name().as_ref() == "Override" => e,
-            _ => continue,
-        };
-        let part_name = element
-            .attributes()
-            .flatten()
-            .find(|attr| attr.key.local_name().as_ref() == "PartName")
-            .and_then(|attr| unescape(&attr.value).ok().map(|v| v.to_ascii_lowercase()));
-        if part_name.is_some_and(|name| removed.contains(name.trim_start_matches('/'))) {
-            out.push_str(&xml[cursor..span.start]);
-            cursor = span.end;
-        }
-    }
-    out.push_str(&xml[cursor..]);
-    Ok(out)
+    without_elements(xml, CONTENT_TYPES_PART, "Override", "PartName", |name| {
+        removed.contains(name.to_ascii_lowercase().trim_start_matches('/'))
+    })
 }
 
 #[cfg(test)]

@@ -11,13 +11,18 @@
 //! prefix is still recognized.
 
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
+use quick_xml::escape::unescape;
+use quick_xml::events::attributes::Attribute as XmlAttribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Reader};
+
+use crate::opc::malformed_xml;
 
 /// A namespace-qualified element or attribute name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,33 +122,24 @@ impl Edit for XmlComments {
         if !raw.contains("<!--") {
             return Ok(None);
         }
-        let mut reader = Reader::from_str(raw);
-        let bom = bom_len(raw);
-        let mut last = bom;
-        let mut text = String::new();
-        let mut cursor = 0;
-        let mut count = 0;
+        let mut reader = SpannedReader::new(raw);
+        let mut cuts = Vec::new();
         loop {
-            let event = reader
-                .read_event()
-                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-            let span = last..reader.buffer_position() as usize + bom;
-            last = span.end;
+            let (event, span) = reader.read_event().map_err(malformed_xml)?;
             match event {
                 Event::Eof => break,
-                Event::Comment(_) => {
-                    text.push_str(&raw[cursor..span.start]);
-                    cursor = span.end;
-                    count += 1;
-                }
+                Event::Comment(_) => cuts.push((span, "")),
                 _ => {}
             }
         }
-        if count == 0 {
+        if cuts.is_empty() {
             return Ok(None);
         }
-        text.push_str(&raw[cursor..]);
-        Ok(Some(Edited { text, count }))
+        let count = cuts.len();
+        Ok(Some(Edited {
+            text: splice(raw, cuts),
+            count,
+        }))
     }
 }
 
@@ -279,11 +275,7 @@ pub(crate) fn expect_edit(raw: &str, edit: &(impl Edit + ?Sized)) -> Edited {
 /// [`MAX_DEPTH`], or declares a document type: a DTD's entities expand into
 /// text no extraction reads, and OOXML never uses one.
 pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
-    let mut reader = NsReader::from_str(raw);
-    // quick-xml reports positions past a leading BOM, but the ranges index the
-    // original bytes.
-    let bom = bom_len(raw);
-    let mut last = bom;
+    let mut reader = SpannedReader::new_ns(raw);
     // Each byte range cut, and what takes its place (nothing, or a neutral
     // attribute value).
     let mut cuts: Vec<(Range<usize>, &str)> = Vec::new();
@@ -292,31 +284,16 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     let mut count = 0;
     // The open elements' actions, to know what an end tag closes.
     let mut open: Vec<Action> = Vec::new();
-    // A removed element in progress: its start byte and the open depth inside it.
-    let mut removing: Option<(usize, usize)> = None;
+    // A removed element in progress.
+    let mut removing: Option<Skipped> = None;
 
     loop {
-        let (namespace, event) = {
-            let (resolved, event) = reader
-                .read_resolved_event()
-                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-            (bound(&resolved), event)
-        };
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
+        let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
 
-        if let Some((start, depth)) = &mut removing {
-            match event {
-                Event::Start(_) => *depth += 1,
-                Event::End(_) => {
-                    *depth -= 1;
-                    if *depth == 0 {
-                        cuts.push((*start..span.end, ""));
-                        removing = None;
-                    }
-                }
-                Event::Eof => return Err(Error::malformed("malformed part XML: unclosed element")),
-                _ => {}
+        if let Some(skipped) = &mut removing {
+            if let Some(whole) = skipped.read(&event, span.end)? {
+                cuts.push((whole, ""));
+                removing = None;
             }
             continue;
         }
@@ -324,28 +301,24 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
         match event {
             Event::Eof => break,
             Event::DocType(_) => {
-                return Err(Error::malformed(
-                    "malformed part XML: a document type declaration",
-                ));
+                return Err(malformed_xml("a document type declaration"));
             }
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let is_start = matches!(event, Event::Start(_));
                 if is_start && open.len() >= MAX_DEPTH {
-                    return Err(Error::malformed(
-                        "malformed part XML: elements nest too deep",
-                    ));
+                    return Err(malformed_xml("elements nest too deep"));
                 }
                 let local = e.local_name();
                 let name = Name {
                     namespace: namespace.as_deref(),
                     local: local.into_inner(),
                 };
-                let owned = attributes(&reader, raw, e)?;
+                let owned = attributes(&reader.reader, raw, e)?;
                 let attributes: Vec<Attribute<'_>> =
                     owned.iter().map(OwnedAttribute::view).collect();
                 match rules.element(name, &attributes) {
                     Action::Remove if is_start => {
-                        removing = Some((span.start, 1));
+                        removing = Some(Skipped::new(span.start));
                         count += 1;
                     }
                     Action::Remove | Action::Unwrap => {
@@ -389,16 +362,10 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     }
     // An attribute cut never overlaps another cut: an element removed whole is
     // cut before its attributes are looked at.
-    cuts.sort_by_key(|(range, _)| range.start);
-    let mut out = String::with_capacity(raw.len());
-    let mut cursor = 0;
-    for (cut, with) in cuts {
-        out.push_str(&raw[cursor..cut.start]);
-        out.push_str(with);
-        cursor = cut.end;
-    }
-    out.push_str(&raw[cursor..]);
-    Ok(Some(Edited { text: out, count }))
+    Ok(Some(Edited {
+        text: splice(raw, cuts),
+        count,
+    }))
 }
 
 /// An attribute with its namespace resolved into an owned string, so it
@@ -439,36 +406,21 @@ fn attributes<'a>(
     raw: &'a str,
     e: &BytesStart<'a>,
 ) -> Result<Vec<OwnedAttribute<'a>>> {
-    let base = raw.as_ptr() as usize;
-    let offset = |slice: &str| {
-        (slice.as_ptr() as usize)
-            .checked_sub(base)
-            .filter(|&at| at + slice.len() <= raw.len())
-            .ok_or_else(|| Error::malformed("malformed part XML: attribute outside the part"))
-    };
     let mut out = Vec::new();
     for attr in e.attributes() {
-        let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-        let key = attr.key.into_inner();
-        let key_start = offset(key)?;
-        let Cow::Borrowed(value) = attr.value else {
-            return Err(Error::malformed(
-                "malformed part XML: attribute without a source",
-            ));
-        };
-        let value_start = offset(value)?;
-        let value_end = value_start + value.len();
+        let attr = attr.map_err(malformed_xml)?;
+        let (key, value) = attribute_source(raw, &attr)?;
         let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-        let start = raw[..key_start]
+        let start = raw[..key.start]
             .trim_end_matches(|c: char| c.is_ascii_whitespace())
             .len();
         out.push(OwnedAttribute {
             namespace: bound(&resolved),
-            local: &raw[key_start + key.len() - local.into_inner().len()..key_start + key.len()],
-            value: &raw[value_start..value_end],
+            local: &raw[key.end - local.into_inner().len()..key.end],
+            value: &raw[value.clone()],
             // Past the closing quote.
-            range: start..value_end + 1,
-            value_range: value_start..value_end,
+            range: start..value.end + 1,
+            value_range: value,
         });
     }
     Ok(out)
@@ -477,8 +429,243 @@ fn attributes<'a>(
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
 /// skips it and reports positions past it, so spans over the original bytes must
 /// add it back.
-pub(crate) fn bom_len(raw: &str) -> usize {
+fn bom_len(raw: &str) -> usize {
     if raw.starts_with('\u{feff}') { 3 } else { 0 }
+}
+
+/// A quick-xml reader over a part that gives each event with its byte span in
+/// the part's own bytes, a leading BOM included.
+pub(crate) struct SpannedReader<R> {
+    /// The reader, for what else it tells (a namespace resolver).
+    pub(crate) reader: R,
+    /// The byte length of the part's BOM, which quick-xml's positions leave out.
+    bom: usize,
+    /// Where the last event read ended.
+    last: usize,
+}
+
+impl<R> SpannedReader<R> {
+    /// `reader` over `raw`.
+    fn over(reader: R, raw: &str) -> Self {
+        let bom = bom_len(raw);
+        Self {
+            reader,
+            bom,
+            last: bom,
+        }
+    }
+
+    /// The span of the event read up to the reader's `position`.
+    fn span(&mut self, position: u64) -> Range<usize> {
+        let span = self.last..position as usize + self.bom;
+        self.last = span.end;
+        span
+    }
+}
+
+impl<'a> SpannedReader<Reader<&'a [u8]>> {
+    /// A reader over `raw`.
+    pub(crate) fn new(raw: &'a str) -> Self {
+        Self::over(Reader::from_str(raw), raw)
+    }
+
+    /// The next event and its span.
+    pub(crate) fn read_event(&mut self) -> quick_xml::Result<(Event<'a>, Range<usize>)> {
+        let event = self.reader.read_event()?;
+        let span = self.span(self.reader.buffer_position());
+        Ok((event, span))
+    }
+}
+
+impl<'a> SpannedReader<NsReader<&'a [u8]>> {
+    /// A namespace-aware reader over `raw`.
+    pub(crate) fn new_ns(raw: &'a str) -> Self {
+        Self::over(NsReader::from_str(raw), raw)
+    }
+
+    /// The next event, the namespace URI its name is bound to, and its span.
+    pub(crate) fn read_resolved_event(
+        &mut self,
+    ) -> quick_xml::Result<(Option<String>, Event<'a>, Range<usize>)> {
+        let (resolved, event) = self.reader.read_resolved_event()?;
+        let namespace = bound(&resolved);
+        let span = self.span(self.reader.buffer_position());
+        Ok((namespace, event, span))
+    }
+}
+
+/// An element being skipped with everything inside it, read event by event.
+pub(crate) struct Skipped {
+    /// Where its start tag begins.
+    start: usize,
+    /// How many elements are open inside it, itself included.
+    depth: usize,
+}
+
+impl Skipped {
+    /// The element whose start tag begins at `start`.
+    pub(crate) fn new(start: usize) -> Self {
+        Self { start, depth: 1 }
+    }
+
+    /// Read `event`, ending at `end`, inside the element: the element's whole
+    /// span once its end tag is read, else `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// the part ends inside it.
+    pub(crate) fn read(&mut self, event: &Event<'_>, end: usize) -> Result<Option<Range<usize>>> {
+        match event {
+            Event::Start(_) => self.depth += 1,
+            Event::End(_) => {
+                self.depth -= 1;
+                if self.depth == 0 {
+                    return Ok(Some(self.start..end));
+                }
+            }
+            Event::Eof => return Err(malformed_xml("unclosed element")),
+            _ => {}
+        }
+        Ok(None)
+    }
+}
+
+/// `raw` with each of `cuts` replaced by its text, cuts applied in order of
+/// where they start (an insertion ahead of a cut starting where it does). A
+/// cut may nest in or overlap one before it: only the part past what is
+/// already cut goes, and its text is still written.
+pub(crate) fn splice<S: AsRef<str>>(raw: &str, cuts: Vec<(Range<usize>, S)>) -> String {
+    splice_with(raw, cuts, String::push_str)
+}
+
+/// [`splice`], writing each kept span of `raw` with `keep`.
+pub(crate) fn splice_with<S: AsRef<str>>(
+    raw: &str,
+    mut cuts: Vec<(Range<usize>, S)>,
+    mut keep: impl FnMut(&mut String, &str),
+) -> String {
+    cuts.sort_by_key(|(range, _)| (range.start, range.end));
+    let mut out = String::with_capacity(raw.len());
+    let mut cursor = 0;
+    for (cut, with) in cuts {
+        keep(&mut out, &raw[cursor..cut.start.max(cursor)]);
+        out.push_str(with.as_ref());
+        cursor = cursor.max(cut.end);
+    }
+    keep(&mut out, &raw[cursor..]);
+    out
+}
+
+/// [`splice`] for cuts that must not overlap, into the part `part`, checked
+/// first with [`check_cuts`].
+///
+/// # Errors
+///
+/// As [`check_cuts`].
+pub(crate) fn splice_checked<S: AsRef<str>>(
+    raw: &str,
+    part: impl Display,
+    mut cuts: Vec<(Range<usize>, S)>,
+) -> Result<String> {
+    cuts.sort_by_key(|(range, _)| (range.start, range.end));
+    check_cuts(raw, part, cuts.iter().map(|(range, _)| range.clone()))?;
+    Ok(splice(raw, cuts))
+}
+
+/// Check that each of `ranges`, in order of where they start, lies within
+/// `raw` on character boundaries and clear of the one before it, for a splice
+/// into the part `part`.
+///
+/// # Errors
+///
+/// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) naming the
+/// first range that does not.
+pub(crate) fn check_cuts(
+    raw: &str,
+    part: impl Display,
+    ranges: impl IntoIterator<Item = Range<usize>>,
+) -> Result<()> {
+    let mut prev_end = 0;
+    for Range { start, end } in ranges {
+        if start > end || end > raw.len() {
+            return Err(Error::processing(format!(
+                "span {start}..{end} out of bounds in `{part}` (len {})",
+                raw.len()
+            )));
+        }
+        if !raw.is_char_boundary(start) || !raw.is_char_boundary(end) {
+            return Err(Error::processing(format!(
+                "span {start}..{end} falls mid-character in `{part}`"
+            )));
+        }
+        if start < prev_end {
+            return Err(Error::processing(format!(
+                "span {start}..{end} overlaps an earlier one in `{part}`"
+            )));
+        }
+        prev_end = end;
+    }
+    Ok(())
+}
+
+/// Where the attribute `attr`, read from `raw`, is written in it: its name,
+/// and its value inside the quotes.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// `attr` was not read straight out of `raw`.
+pub(crate) fn attribute_source(
+    raw: &str,
+    attr: &XmlAttribute<'_>,
+) -> Result<(Range<usize>, Range<usize>)> {
+    let outside = || malformed_xml("attribute outside the part");
+    let key = raw
+        .substr_range(attr.key.into_inner())
+        .ok_or_else(outside)?;
+    let Cow::Borrowed(value) = &attr.value else {
+        return Err(malformed_xml("attribute without a source"));
+    };
+    let value = raw.substr_range(value).ok_or_else(outside)?;
+    Ok((Range::from(key), Range::from(value)))
+}
+
+/// `xml` without each empty element `local` whose attribute `attribute`,
+/// unescaped, `drops` accepts, byte-for-byte otherwise.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput), as
+/// `what` malformed, if `xml` is not well-formed.
+pub(crate) fn without_elements(
+    xml: &str,
+    what: &str,
+    local: &str,
+    attribute: &str,
+    drops: impl Fn(&str) -> bool,
+) -> Result<String> {
+    let mut reader = SpannedReader::new(xml);
+    let mut cuts = Vec::new();
+    loop {
+        let (event, span) = reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("{what} malformed: {e}")))?;
+        let element = match event {
+            Event::Eof => break,
+            Event::Empty(e) if e.local_name().as_ref() == local => e,
+            _ => continue,
+        };
+        let value = element
+            .attributes()
+            .flatten()
+            .find(|attr| attr.key.local_name().as_ref() == attribute)
+            .and_then(|attr| unescape(&attr.value).ok().map(Cow::into_owned));
+        if value.is_some_and(|value| drops(&value)) {
+            cuts.push((span, ""));
+        }
+    }
+    Ok(splice(xml, cuts))
 }
 
 #[cfg(test)]
@@ -547,5 +734,66 @@ mod tests {
         );
         assert!(check(&deep).is_err());
         assert!(check("<a><b/></a>").is_ok());
+    }
+
+    #[test]
+    fn spans_index_the_bytes_past_a_byte_order_mark() {
+        let raw = "\u{feff}<a>x</a>";
+        let mut reader = SpannedReader::new(raw);
+        let mut spans = Vec::new();
+        loop {
+            let (event, span) = reader.read_event().unwrap();
+            if matches!(event, Event::Eof) {
+                break;
+            }
+            spans.push(&raw[span]);
+        }
+        assert_eq!(spans, ["<a>", "x", "</a>"]);
+    }
+
+    #[test]
+    fn a_skipped_element_spans_its_subtree() {
+        let raw = "<a><b><c/></b><d/></a>";
+        let mut reader = SpannedReader::new(raw);
+        let mut skipped: Option<Skipped> = None;
+        loop {
+            let (event, span) = reader.read_event().unwrap();
+            if let Some(skip) = &mut skipped {
+                if let Some(whole) = skip.read(&event, span.end).unwrap() {
+                    assert_eq!(&raw[whole], "<b><c/></b>");
+                    return;
+                }
+            } else if matches!(&event, Event::Start(e) if e.local_name().as_ref() == "b") {
+                skipped = Some(Skipped::new(span.start));
+            }
+        }
+    }
+
+    #[test]
+    fn a_skipped_element_left_open_is_refused() {
+        let mut skipped = Skipped::new(0);
+        assert!(skipped.read(&Event::Eof, 0).is_err());
+    }
+
+    #[test]
+    fn splice_tolerates_nested_cuts_and_inserts_ahead() {
+        assert_eq!(
+            splice(
+                "abcdef",
+                vec![(1..5, ""), (2..3, ""), (1..1, "X"), (5..6, "Y")]
+            ),
+            "aXY"
+        );
+    }
+
+    #[test]
+    fn a_checked_splice_refuses_overlaps_and_split_characters() {
+        assert_eq!(
+            splice_checked("abcdef", "p", vec![(4..5, "Y"), (0..1, "X")]).unwrap(),
+            "XbcdYf"
+        );
+        assert!(splice_checked("abcdef", "p", vec![(0..3, ""), (2..4, "")]).is_err());
+        assert!(splice_checked("é", "p", vec![(1..2, "")]).is_err());
+        assert!(splice_checked("ab", "p", vec![(1..3, "")]).is_err());
     }
 }

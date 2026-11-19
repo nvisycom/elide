@@ -6,6 +6,7 @@
 //! can never disagree about what a part is.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str;
 
 use bytes::Bytes;
@@ -149,6 +150,6 @@ impl Index {
 }
 
 /// The part `path`'s bytes as UTF-8 text.
-pub(crate) fn text<'a>(path: &PartPath, bytes: &'a Bytes) -> Result<&'a str> {
+pub(crate) fn text(path: impl Display, bytes: &[u8]) -> Result<&str> {
     str::from_utf8(bytes).map_err(|_| Error::malformed(format!("part `{path}` is not UTF-8")))
 }

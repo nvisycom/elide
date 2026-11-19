@@ -16,7 +16,7 @@ use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::bom_len;
+use crate::opc::xml_edit::without_elements;
 
 /// The relationship type of an external hyperlink, the one external target that
 /// is visible content (a link a reader follows) rather than a hidden reference.
@@ -95,34 +95,9 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
-    let mut reader = Reader::from_str(xml);
-    let bom = bom_len(xml);
-    let mut out = String::with_capacity(xml.len());
-    let mut cursor = 0;
-    let mut last = bom;
-    loop {
-        let event = reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
-        let element = match event {
-            Event::Eof => break,
-            Event::Empty(e) if e.local_name().as_ref() == "Relationship" => e,
-            _ => continue,
-        };
-        let id = element
-            .attributes()
-            .flatten()
-            .find(|attr| attr.key.local_name().as_ref() == "Id")
-            .and_then(|attr| unescape(&attr.value).ok().map(|v| v.into_owned()));
-        if id.is_some_and(|id| removed.contains(&id)) {
-            out.push_str(&xml[cursor..span.start]);
-            cursor = span.end;
-        }
-    }
-    out.push_str(&xml[cursor..]);
-    Ok(out)
+    without_elements(xml, "relationships part", "Relationship", "Id", |id| {
+        removed.contains(id)
+    })
 }
 
 /// The source part of the relationships part `rels`: `word/document.xml` for

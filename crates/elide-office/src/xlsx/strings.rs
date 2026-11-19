@@ -8,11 +8,10 @@
 use std::ops::Range;
 
 use elide_core::{Error, Result};
-use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
-use crate::opc::xml_edit::bom_len;
+use crate::opc::xml_edit::SpannedReader;
 
 /// The decoded strings of a shared-string table, indexed as the cells reference
 /// them. Index `i` is the text of the `i`-th `<si>` in document order.
@@ -42,9 +41,7 @@ pub(crate) struct SharedItem {
 /// The shared-string table with each entry's `<si>` inner byte range, in
 /// document order. Index `i` is the `i`-th `<si>`.
 pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
-    let mut reader = Reader::from_str(raw);
-    let bom = bom_len(raw);
-    let mut last = bom;
+    let mut reader = SpannedReader::new(raw);
     let mut items = Vec::new();
     let mut item_open: Option<usize> = None;
     let mut text_open: Option<usize> = None;
@@ -54,11 +51,9 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
     let mut phonetic_depth = 0u32;
 
     loop {
-        let event = reader
+        let (event, span) = reader
             .read_event()
             .map_err(|e| Error::malformed(format!("sharedStrings.xml malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
 
         match event {
             Event::Eof => break,

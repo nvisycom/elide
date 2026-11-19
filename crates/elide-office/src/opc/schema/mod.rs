@@ -44,12 +44,11 @@
 #[rustfmt::skip]
 mod table;
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use elide_core::{Error, Result};
 use quick_xml::escape::partial_escape;
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
@@ -57,7 +56,8 @@ use quick_xml::{NsReader, XmlVersion};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
 use crate::opc::archive::MAX_PART_BYTES;
-use crate::opc::xml_edit::bound;
+use crate::opc::malformed_xml;
+use crate::opc::xml_edit::{Skipped, SpannedReader, attribute_source, bound, splice_with};
 
 /// An element type of the schema.
 #[derive(Debug)]
@@ -383,9 +383,7 @@ impl Frame {
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// `raw` is not well-formed XML, or its root is not `root`.
 pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
-    let mut reader = NsReader::from_str(raw);
-    let bom = usize::from(raw.starts_with('\u{feff}')) * 3;
-    let mut last = bom;
+    let mut reader = SpannedReader::new_ns(raw);
     // Each span of the source the rebuild replaces, with what replaces it:
     // nothing for what it leaves out.
     let mut cuts: Vec<(Range<usize>, String)> = Vec::new();
@@ -396,35 +394,20 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     // those around it carried, as (attribute name, source): the children of an
     // unwrapped frame declare them again.
     let mut carried: Vec<Vec<(String, String)>> = Vec::new();
-    // An element being left out: its start byte and the open depth inside it.
-    let mut removing: Option<(usize, usize)> = None;
+    // An element being left out.
+    let mut removing: Option<Skipped> = None;
     let mut seen_root = false;
     // The bytes the rebuild adds, which must keep the part within the size a
     // package read allows.
     let mut added = 0usize;
 
     loop {
-        let (namespace, event) = {
-            let (resolved, event) = reader
-                .read_resolved_event()
-                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-            (bound(&resolved), event)
-        };
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
+        let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
 
-        if let Some((start, depth)) = &mut removing {
-            match event {
-                Event::Start(_) => *depth += 1,
-                Event::End(_) => {
-                    *depth -= 1;
-                    if *depth == 0 {
-                        cuts.push((*start..span.end, String::new()));
-                        removing = None;
-                    }
-                }
-                Event::Eof => return Err(Error::malformed("malformed part XML: unclosed element")),
-                _ => {}
+        if let Some(skipped) = &mut removing {
+            if let Some(whole) = skipped.read(&event, span.end)? {
+                cuts.push((whole, String::new()));
+                removing = None;
             }
             continue;
         }
@@ -434,9 +417,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
             Event::Eof => break,
             Event::Decl(_) => {}
             Event::DocType(_) => {
-                return Err(Error::malformed(
-                    "malformed part XML: a document type declaration",
-                ));
+                return Err(malformed_xml("a document type declaration"));
             }
             // Comments are cut by their own edit.
             Event::Comment(_) => {}
@@ -501,7 +482,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                     Decision::Keep(frame) => {
                         let mut declares = Vec::new();
                         if let Frame::Typed(ty) | Frame::Graphic(ty, _) = frame {
-                            attributes(&reader, raw, e, Some(ty), &mut cuts, &mut record)?;
+                            attributes(&reader.reader, raw, e, Some(ty), &mut cuts, &mut record)?;
                             let own = declarations(raw, e)?;
                             let missing: String = around
                                 .iter()
@@ -511,16 +492,16 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                             if !missing.is_empty() {
                                 added += missing.len();
                                 if (raw.len() + added) as u64 > MAX_PART_BYTES {
-                                    return Err(Error::malformed(
-                                        "malformed part XML: declaring the namespaces of markup \
-                                         compatibility again outgrows the part size limit",
+                                    return Err(malformed_xml(
+                                        "declaring the namespaces of markup compatibility again \
+                                         outgrows the part size limit",
                                     ));
                                 }
                                 let at = span.start + 1 + e.name().into_inner().len();
                                 cuts.push((at..at, missing));
                             }
                         } else if let Frame::Vml = frame {
-                            attributes(&reader, raw, e, None, &mut cuts, &mut record)?;
+                            attributes(&reader.reader, raw, e, None, &mut cuts, &mut record)?;
                         } else if frame.unwrapped() {
                             // The unwrapped tag goes whole, its declarations
                             // carried to the children it held.
@@ -539,7 +520,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                     Decision::Drop(content) => {
                         record(content);
                         if is_start {
-                            removing = Some((span.start, 1));
+                            removing = Some(Skipped::new(span.start));
                         } else {
                             cuts.push((span, String::new()));
                         }
@@ -552,18 +533,10 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     if cuts.is_empty() {
         return Ok(None);
     }
-    // An insertion sorts ahead of a cut starting where it does.
-    cuts.sort_by_key(|(range, _)| (range.start, range.end));
-    let mut text = String::with_capacity(raw.len());
-    let mut cursor = 0;
-    for (cut, replacement) in cuts {
-        // An attribute cut never overlaps another: an element left out whole
-        // is cut before its attributes are read.
-        push_joined(&mut text, &raw[cursor..cut.start.max(cursor)]);
-        text.push_str(&replacement);
-        cursor = cursor.max(cut.end);
-    }
-    push_joined(&mut text, &raw[cursor..]);
+    // An insertion sorts ahead of a cut starting where it does. An attribute
+    // cut never overlaps another: an element left out whole is cut before its
+    // attributes are read.
+    let text = splice_with(raw, cuts, push_joined);
     Ok(Some(Rebuilt { text, removed }))
 }
 
@@ -615,16 +588,14 @@ const PAYLOADS: &[(&str, &str, &str, &str)] = &[
 /// The payload the `uri` of the `a:graphicData` `e` names, transitional or
 /// strict, or `None` for one this rebuild does not keep.
 fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
-    let uri = e
-        .try_get_attribute("uri")
-        .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+    let uri = e.try_get_attribute("uri").map_err(malformed_xml)?;
     let Some(uri) = uri else {
         return Ok(None);
     };
     // A reference in the value stands for the character it names.
     let uri = uri
         .normalized_value(XmlVersion::Implicit1_0)
-        .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        .map_err(malformed_xml)?;
     let uri: &str = &uri;
     Ok(PAYLOADS
         .iter()
@@ -661,8 +632,8 @@ enum Decision {
 /// The frame of the root element `local` in `namespace`, which must be `root`.
 fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decision> {
     let mismatch = || {
-        Error::malformed(format!(
-            "malformed part XML: the root element `{local}` is not the one its content type names"
+        malformed_xml(format_args!(
+            "the root element `{local}` is not the one its content type names"
         ))
     };
     match root {
@@ -734,7 +705,7 @@ fn attributes(
 ) -> Result<()> {
     let ty = ty.map(|ty| &TYPES[usize::from(ty)]);
     for attr in e.attributes() {
-        let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        let attr = attr.map_err(malformed_xml)?;
         let key = attr.key.into_inner();
         if key == "xmlns" || key.starts_with("xmlns:") {
             continue;
@@ -766,7 +737,7 @@ fn attributes(
 fn declarations(raw: &str, e: &BytesStart<'_>) -> Result<Vec<(String, String)>> {
     let mut declarations = Vec::new();
     for attr in e.attributes() {
-        let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        let attr = attr.map_err(malformed_xml)?;
         let key = attr.key.into_inner();
         if key == "xmlns" || key.starts_with("xmlns:") {
             declarations.push((key.to_owned(), raw[source(raw, &attr)?].to_owned()));
@@ -778,23 +749,8 @@ fn declarations(raw: &str, e: &BytesStart<'_>) -> Result<Vec<(String, String)>> 
 /// Where the attribute `attr` is written in `raw`: from its name to past its
 /// closing quote.
 fn source(raw: &str, attr: &Attribute<'_>) -> Result<Range<usize>> {
-    let base = raw.as_ptr() as usize;
-    let outside = || Error::malformed("malformed part XML: attribute outside the part");
-    let start = (attr.key.into_inner().as_ptr() as usize)
-        .checked_sub(base)
-        .filter(|&at| at <= raw.len())
-        .ok_or_else(outside)?;
-    let Cow::Borrowed(value) = &attr.value else {
-        return Err(Error::malformed(
-            "malformed part XML: attribute without a source",
-        ));
-    };
-    let end = (value.as_ptr() as usize)
-        .checked_sub(base)
-        .map(|at| at + value.len() + 1)
-        .filter(|&at| at <= raw.len())
-        .ok_or_else(outside)?;
-    Ok(start..end)
+    let (key, value) = attribute_source(raw, attr)?;
+    Ok(key.start..value.end + 1)
 }
 
 #[cfg(test)]

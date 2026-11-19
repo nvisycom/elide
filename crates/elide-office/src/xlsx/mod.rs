@@ -25,6 +25,8 @@ use quick_xml::escape::escape;
 use self::sheet::{CellSource, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
+use crate::opc::index::text;
+use crate::opc::xml_edit::{splice, splice_checked};
 use crate::opc::{
     Extraction, Names, Package, PartClassifier, PartKind, PartPath, PartReplacement, PartRole,
     Replacement, TextAttribute,
@@ -385,30 +387,19 @@ impl Xlsx {
             }
         }
 
-        // Blank each now-unreferenced, non-empty entry, highest offset first so
-        // earlier spans stay valid.
-        let mut orphans: Vec<&Range<usize>> = items
+        // Blank each now-unreferenced, non-empty entry, its index kept.
+        let orphans: Vec<(Range<usize>, &str)> = items
             .iter()
             .zip(&referenced)
             .filter(|(item, keep)| !**keep && !item.text.is_empty())
-            .map(|(item, _)| &item.inner)
+            .map(|(item, _)| (item.inner.clone(), "<t></t>"))
             .collect();
         if orphans.is_empty() {
             return Ok(None);
         }
-        orphans.sort_by_key(|range| range.start);
-
-        let mut out = String::with_capacity(raw.len());
-        let mut cursor = 0usize;
-        for inner in orphans {
-            out.push_str(&raw[cursor..inner.start]);
-            out.push_str("<t></t>");
-            cursor = inner.end;
-        }
-        out.push_str(&raw[cursor..]);
         Ok(Some(PartReplacement::new(
             PartPath::from(SHARED_STRINGS_PART),
-            out.into_bytes(),
+            splice(&raw, orphans).into_bytes(),
         )))
     }
 
@@ -421,8 +412,7 @@ impl Xlsx {
     }
 
     /// Splice `edits` into one sheet's `raw` bytes: inline cells in place, shared
-    /// cells de-shared. Edits are applied right-to-left so each edit's length
-    /// delta leaves earlier spans valid; overlapping cells are rejected.
+    /// cells de-shared. Overlapping cells are rejected.
     fn splice_sheet(
         &self,
         part: &str,
@@ -430,7 +420,7 @@ impl Xlsx {
         edits: &HashMap<(u32, u32), &CellEdit>,
     ) -> Result<String> {
         // Resolve each edited cell to a splice (a byte range + its new bytes),
-        // then apply from the highest offset down.
+        // then apply them in order of where they start.
         let cells = parse_cells(raw)?;
         let mut splices: Vec<(Range<usize>, String)> = Vec::new();
         let mut matched = 0usize;
@@ -468,37 +458,8 @@ impl Xlsx {
         }
 
         // Reject overlapping splices (two edits landing on the same/nested span)
-        // and apply highest-first so byte offsets stay valid as the string grows
-        // or shrinks.
-        splices.sort_by_key(|(range, _)| range.start);
-        let mut prev_end = 0usize;
-        for (range, _) in &splices {
-            if range.start < prev_end {
-                return Err(Error::processing(format!(
-                    "overlapping cell edits in `{part}`"
-                )));
-            }
-            if range.end > raw.len()
-                || !raw.is_char_boundary(range.start)
-                || !raw.is_char_boundary(range.end)
-            {
-                return Err(Error::processing(format!(
-                    "cell edit span {}..{} out of bounds in `{part}`",
-                    range.start, range.end
-                )));
-            }
-            prev_end = range.end;
-        }
-
-        let mut out = String::with_capacity(raw.len());
-        let mut cursor = 0usize;
-        for (range, text) in splices {
-            out.push_str(&raw[cursor..range.start]);
-            out.push_str(&text);
-            cursor = range.end;
-        }
-        out.push_str(&raw[cursor..]);
-        Ok(out)
+        // and ones off the sheet's character boundaries.
+        splice_checked(raw, part, splices)
     }
 }
 
@@ -514,9 +475,7 @@ fn part_text(package: &Package, path: &str) -> Result<String> {
 ///
 /// [`ErrorKind::MalformedInput`]: elide_core::ErrorKind::MalformedInput
 fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
-    std::str::from_utf8(bytes)
-        .map(str::to_owned)
-        .map_err(|_| Error::malformed(format!("part `{path}` is not UTF-8")))
+    text(path, bytes).map(str::to_owned)
 }
 
 #[cfg(test)]

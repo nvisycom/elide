@@ -19,7 +19,7 @@ use crate::opc::part::PartPath;
 use crate::opc::references::References;
 use crate::opc::sanitize::{Sanitizer, sanitize};
 use crate::opc::vocabulary::Vocabulary;
-use crate::opc::{PartKind, PartRole, xml_edit};
+use crate::opc::{PartKind, PartRole, malformed_xml, xml_edit};
 
 /// Check that the package `document` carries no hidden content `policy` and
 /// `sanitizer` would remove, that every reference in it resolves, that its XML
@@ -120,9 +120,7 @@ pub(crate) fn check(
 fn stray_text(raw: &str) -> Result<Option<String>> {
     let mut reader = Reader::from_str(raw);
     loop {
-        let event = reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        let event = reader.read_event().map_err(malformed_xml)?;
         match event {
             Event::Eof => return Ok(None),
             Event::Text(text) if !text.trim().is_empty() => {

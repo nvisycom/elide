@@ -18,15 +18,14 @@
 
 use std::ops::Range;
 
+use elide_core::Result;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
-use elide_core::{Error, Result};
-use quick_xml::NsReader;
 use quick_xml::events::Event;
 
 use super::SheetClassifier;
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bom_len, bound};
-use crate::opc::{Collaboration, Ns, PartKind, StripAttributes, TextAttribute};
+use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader, splice};
+use crate::opc::{Collaboration, Ns, PartKind, StripAttributes, TextAttribute, malformed_xml};
 
 /// The SpreadsheetML main namespace.
 const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -143,21 +142,14 @@ impl Edit for CommentNoteText {
 /// `raw` without its comment notes: each `whole` shape, or else the text of each
 /// one's text box. The count is of the notes changed.
 fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
-    let mut reader = NsReader::from_str(raw);
-    let bom = bom_len(raw);
-    let mut last = bom;
+    let mut reader = SpannedReader::new_ns(raw);
     let mut shapes: Vec<OpenShape> = Vec::new();
     // What each open element is.
     let mut open: Vec<(bool, bool)> = Vec::new();
     let mut cuts: Vec<Range<usize>> = Vec::new();
     let mut count = 0;
     loop {
-        let (resolved, event) = reader
-            .read_resolved_event()
-            .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-        let namespace = bound(&resolved);
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
+        let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
         match event {
             Event::Eof => break,
             Event::Start(ref e) | Event::Empty(ref e) => {
@@ -210,26 +202,15 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
             _ => {}
         }
     }
-    Ok(cut(raw, cuts).map(|text| Edited { text, count }))
-}
-
-/// `raw` without the `cuts`, which may nest (a crafted drawing can put a shape
-/// inside another), or `None` when there are none.
-fn cut(raw: &str, mut cuts: Vec<Range<usize>>) -> Option<String> {
     if cuts.is_empty() {
-        return None;
+        return Ok(None);
     }
-    cuts.sort_unstable_by_key(|cut| cut.start);
-    let mut text = String::with_capacity(raw.len());
-    let mut cursor = 0;
-    for cut in cuts {
-        if cut.start >= cursor {
-            text.push_str(&raw[cursor..cut.start]);
-        }
-        cursor = cursor.max(cut.end);
-    }
-    text.push_str(&raw[cursor..]);
-    Some(text)
+    // The cuts may nest: a crafted drawing can put a shape inside another.
+    let cuts = cuts.into_iter().map(|cut| (cut, "")).collect();
+    Ok(Some(Edited {
+        text: splice(raw, cuts),
+        count,
+    }))
 }
 
 /// A sheet's name, shown on its tab.

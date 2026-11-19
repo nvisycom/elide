@@ -22,12 +22,13 @@ use elide_codec::extract::{OffsetMap, Passage};
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
 use quick_xml::escape::{escape, partial_escape, unescape};
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{NsReader, Reader};
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
-use crate::opc::xml_edit::{Name, bom_len, bound};
+use crate::opc::xml_edit::{Name, SpannedReader, attribute_source, bound};
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -191,20 +192,14 @@ fn text_spans_where(
     raw: &str,
     keep: impl Fn(&[String]) -> bool,
 ) -> std::result::Result<Vec<Span>, ()> {
-    let mut reader = Reader::from_str(raw);
+    let mut reader = SpannedReader::new(raw);
     let mut spans = Vec::new();
-    // quick-xml reports positions relative to the text *after* a leading BOM, but
-    // our spans index the original bytes, so shift every span past the BOM.
-    let bom = bom_len(raw);
-    let mut last = bom;
     let mut run: Option<Range<usize>> = None;
     let mut open: Vec<String> = Vec::new();
     let mut passages = Passages::default();
 
     loop {
-        let event = reader.read_event().map_err(|_| ())?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
+        let (event, span) = reader.read_event().map_err(|_| ())?;
 
         match event {
             // Extend (or open) the current text run across text and entities.
@@ -298,10 +293,7 @@ pub(crate) fn attribute_spans(
             {
                 spans.push(Span {
                     collaboration: named.collaboration,
-                    ..Span::new(
-                        sub_slice_range(raw, attr.value.as_ref())?,
-                        BlockKind::Attribute,
-                    )
+                    ..Span::new(value_source(raw, &attr)?, BlockKind::Attribute)
                 });
             }
         }
@@ -348,7 +340,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
             match attr.key.local_name().as_ref() {
                 "Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK_TYPE,
                 "TargetMode" => is_external = attr.value.as_ref() == "External",
-                "Target" => target = Some(sub_slice_range(raw, attr.value.as_ref())?),
+                "Target" => target = Some(value_source(raw, &attr)?),
                 _ => {}
             }
         }
@@ -362,13 +354,14 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
     Ok(spans)
 }
 
-/// The byte range of `value` within `raw`, where `value` is a slice quick-xml
-/// borrowed out of `raw` (its attribute values are the raw source text, entity
-/// spellings intact, borrowed straight from the buffer). Errs, fail-closed, if
-/// `value` is not a sub-slice of `raw`, so a caller surfaces the part as an issue
-/// rather than dropping a redaction.
-fn sub_slice_range(raw: &str, value: &str) -> std::result::Result<Range<usize>, ()> {
-    raw.substr_range(value).map(Range::from).ok_or(())
+/// The byte range of the value of `attr` within `raw`, which quick-xml
+/// borrowed out of it (its attribute values are the raw source text, entity
+/// spellings intact). Errs, fail-closed, if it was not, so a caller surfaces
+/// the part as an issue rather than dropping a redaction.
+fn value_source(raw: &str, attr: &Attribute<'_>) -> std::result::Result<Range<usize>, ()> {
+    attribute_source(raw, attr)
+        .map(|(_, value)| value)
+        .map_err(|_| ())
 }
 
 /// Emit the pending text run as a `Text` span in its passage, then clear it. A

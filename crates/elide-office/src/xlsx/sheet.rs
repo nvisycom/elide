@@ -13,11 +13,11 @@
 use std::ops::Range;
 
 use elide_core::{Error, Result};
+use quick_xml::XmlVersion;
 use quick_xml::events::Event;
 use quick_xml::events::attributes::Attribute;
-use quick_xml::{Reader, XmlVersion};
 
-use crate::opc::xml_edit::bom_len;
+use crate::opc::xml_edit::SpannedReader;
 use crate::xlsx::cellref::parse_cell_ref;
 
 /// The entity-decoded value of an attribute, for comparison or parsing.
@@ -85,9 +85,7 @@ pub(crate) struct SheetCell {
 /// quick-xml reports byte positions relative to the text after a leading BOM, so
 /// every recorded span is shifted back onto the original bytes.
 pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
-    let mut reader = Reader::from_str(raw);
-    let bom = bom_len(raw);
-    let mut last = bom;
+    let mut reader = SpannedReader::new(raw);
     let mut cells = Vec::new();
     let mut open: Option<OpenCell> = None;
     // Row/column tracking so a cell with an omitted `r` reference can be placed:
@@ -97,11 +95,9 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
     let mut next_column: u32 = 0;
 
     loop {
-        let event = reader
+        let (event, span) = reader
             .read_event()
             .map_err(|e| Error::malformed(format!("worksheet malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
 
         match event {
             Event::Eof => break,
