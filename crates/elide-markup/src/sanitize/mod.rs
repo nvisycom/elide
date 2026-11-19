@@ -485,24 +485,13 @@ impl<'a> Rebuild<'a> {
                 self.close_style();
                 return Ok(false);
             }
-            Event::Text(text) => {
-                if let Some(sheet) = self.style.as_mut() {
-                    sheet.css.push_str(text.as_ref());
-                }
-            }
-            Event::CData(text) => {
-                if let Some(sheet) = self.style.as_mut() {
-                    sheet.css.push_str(text.as_ref());
-                }
-            }
-            // An HTML style sheet is raw text: a reference in it is read as
-            // written.
-            Event::GeneralRef(_) => {
+            // The body is raw text, read as written: a comment, a tag or a
+            // reference in it is text too.
+            _ => {
                 if let Some(sheet) = self.style.as_mut() {
                     sheet.css.push_str(&self.raw[span.clone()]);
                 }
             }
-            _ => {}
         }
         self.copy(span);
         Ok(false)
@@ -552,7 +541,14 @@ impl<'a> Rebuild<'a> {
                 self.out.push_str("<span></span>");
             }
             if opens {
-                self.dropping = Some(Region::new(name, space));
+                // A root's content is read in its own vocabulary, so an HTML
+                // element in it ends it as it would end the kept root.
+                let inside = match name.as_str() {
+                    "svg" if space == Space::Html => Space::Svg,
+                    "math" if space == Space::Html => Space::Math,
+                    _ => space,
+                };
+                self.dropping = Some(Region::new(name, inside));
             }
             return Ok(());
         };

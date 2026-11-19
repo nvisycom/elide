@@ -521,7 +521,15 @@ fn a_remote_import_spelled_with_references_in_svg_goes() {
         r#"<style>p { background: url("https&#58;//local.png") }</style>"#,
     ] {
         assert_eq!(sanitize(html(policy), raw), raw, "{raw}");
+    } // A comment or a tag in an HTML style sheet is text the CSS reads.
+    for raw in [
+        "<style><!-- @import url(https://t/a.css); --></style><p>a</p>",
+        "<style><b>@import url(https://t/a.css);</b></style><p>a</p>",
+    ] {
+        assert_eq!(sanitize(html(policy), raw), "<p>a</p>", "{raw}");
     }
+    let raw = "<style><!-- p { color: red } --></style>";
+    assert_eq!(sanitize(html(policy), raw), raw);
 }
 
 /// The root of SVG or MathML honours its self-closing flag, even removed.
@@ -532,10 +540,16 @@ fn a_removed_self_closing_svg_root_holds_nothing() {
         sanitize(html(HiddenContentPolicy::default()), raw),
         "<p>Visible</p>"
     );
-    // The `/` belongs to the unquoted value, so the root holds what follows.
-    let raw = r#"<svg display="none" id=x/>Secret</svg><p>Visible</p>"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<p>Visible</p>"
-    );
+    // The `/` belongs to the unquoted value, so the root holds what follows,
+    // up to its end tag or an HTML element that breaks out of it.
+    for raw in [
+        r#"<svg display="none" id=x/>Secret</svg><p>Visible</p>"#,
+        r#"<svg display="none" id=x/>Secret<p>Visible</p>"#,
+    ] {
+        assert_eq!(
+            sanitize(html(HiddenContentPolicy::default()), raw),
+            "<p>Visible</p>",
+            "{raw}"
+        );
+    }
 }
