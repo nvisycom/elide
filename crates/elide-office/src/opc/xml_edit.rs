@@ -691,8 +691,7 @@ pub(crate) fn without_elements(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    use crate::opc::ns::W;
 
     /// Remove `w:del`, unwrap `w:ins`, and drop `w:rsid*` attributes.
     struct Revisions;

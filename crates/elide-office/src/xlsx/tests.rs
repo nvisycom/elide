@@ -2,6 +2,7 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::*;
 use crate::fixtures::{pack_parts, read_text_part};
+use crate::opc::ns::X;
 
 /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
 /// and two data rows of PII (names, emails, phones, cards, IBANs, SSNs, IPs)
@@ -14,9 +15,6 @@ const SAMPLE: &[u8] = include_bytes!("../../testdata/xlsx/shared_string_cells.xl
 /// and orphan-prune tests, which a single-sheet workbook cannot exercise.
 const SHARED: &[u8] = include_bytes!("../../testdata/xlsx/shared_across_sheets.xlsx");
 
-/// SpreadsheetML's main namespace, declared on the hand-built parts.
-const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
 /// A hand-built workbook carrying text outside its cells: sheets named after
 /// people, a defined name holding a literal, a sheet with a header, a data
 /// validation's prompt and list, and a formula literal, a hyperlink to the
@@ -25,17 +23,17 @@ const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 fn markup_workbook() -> Vec<u8> {
     let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>"#;
     let workbook = format!(
-        r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Jane Roe" sheetId="1" r:id="rId1"/><sheet name="John Doe" sheetId="2" r:id="rId2"/></sheets><definedNames><definedName name="Owner">"Jane Roe"</definedName></definedNames></workbook>"#
+        r#"<?xml version="1.0"?><workbook xmlns="{X}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Jane Roe" sheetId="1" r:id="rId1"/><sheet name="John Doe" sheetId="2" r:id="rId2"/></sheets><definedNames><definedName name="Owner">"Jane Roe"</definedName></definedNames></workbook>"#
     );
     let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>"#;
     let sheet = format!(
-        r#"<?xml version="1.0"?><worksheet xmlns="{SML_NS}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>jane@example.com</t></is></c><c r="C1"><f>IF(A1="Jane Roe",1,0)</f><v>1</v></c></row></sheetData><dataValidations count="1"><dataValidation type="list" sqref="D1" prompt="Ask Jane Roe"><formula1>"Jane Roe,John Doe"</formula1></dataValidation></dataValidations><headerFooter><oddHeader>Prepared by Jane Roe</oddHeader></headerFooter></worksheet>"#
+        r#"<?xml version="1.0"?><worksheet xmlns="{X}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>jane@example.com</t></is></c><c r="C1"><f>IF(A1="Jane Roe",1,0)</f><v>1</v></c></row></sheetData><dataValidations count="1"><dataValidation type="list" sqref="D1" prompt="Ask Jane Roe"><formula1>"Jane Roe,John Doe"</formula1></dataValidation></dataValidations><headerFooter><oddHeader>Prepared by Jane Roe</oddHeader></headerFooter></worksheet>"#
     );
     let linked = format!(
-        r#"<?xml version="1.0"?><worksheet xmlns="{SML_NS}"><sheetData/><hyperlinks><hyperlink ref="A1" location="'Jane Roe'!A1"/></hyperlinks></worksheet>"#
+        r#"<?xml version="1.0"?><worksheet xmlns="{X}"><sheetData/><hyperlinks><hyperlink ref="A1" location="'Jane Roe'!A1"/></hyperlinks></worksheet>"#
     );
     let strings = format!(
-        r#"<?xml version="1.0"?><sst xmlns="{SML_NS}" count="1" uniqueCount="1"><si><t>Roe</t><rPh sb="0" eb="3"><t>ロウ ジェーン</t></rPh></si></sst>"#
+        r#"<?xml version="1.0"?><sst xmlns="{X}" count="1" uniqueCount="1"><si><t>Roe</t><rPh sb="0" eb="3"><t>ロウ ジェーン</t></rPh></si></sst>"#
     );
     pack_parts(&[
         ("[Content_Types].xml", types.as_bytes()),

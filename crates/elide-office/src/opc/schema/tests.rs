@@ -16,7 +16,7 @@ fn rebuilt(raw: &str, root: Root) -> (String, Vec<(HiddenContent, usize)>) {
 
 fn word(body: &str) -> String {
     format!(
-        r#"<w:document xmlns:w="{W}" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:mc="{MCE}" xmlns:v="urn:vendor:secret"><w:body>{body}</w:body></w:document>"#
+        r#"<w:document xmlns:w="{W}" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:mc="{MC}" xmlns:v="urn:vendor:secret"><w:body>{body}</w:body></w:document>"#
     )
 }
 
@@ -80,12 +80,12 @@ fn alternate_content_without_a_fallback_goes() {
 #[test]
 fn ignorable_markers_go() {
     let raw = format!(
-        r#"<w:document xmlns:w="{W}" xmlns:mc="{MCE}" mc:Ignorable="w14"><w:body/></w:document>"#
+        r#"<w:document xmlns:w="{W}" xmlns:mc="{MC}" mc:Ignorable="w14"><w:body/></w:document>"#
     );
     let (text, removed) = rebuilt(&raw, DOCUMENT);
     assert_eq!(
         text,
-        format!(r#"<w:document xmlns:w="{W}" xmlns:mc="{MCE}"><w:body/></w:document>"#)
+        format!(r#"<w:document xmlns:w="{W}" xmlns:mc="{MC}"><w:body/></w:document>"#)
     );
     assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
 }
@@ -157,13 +157,13 @@ fn cdata_is_kept_as_text_where_text_shows() {
 #[test]
 fn a_fallback_hands_its_namespaces_to_its_children() {
     let raw = format!(
-        r#"<w:document xmlns:w="{W}" xmlns:mc="{MCE}"><w:body><w:p><mc:AlternateContent xmlns:v="urn:schemas-microsoft-com:vml"><mc:Fallback xmlns:x="{W}"><x:r><x:t>Roe</x:t></x:r><x:r xmlns:v="urn:other"/></mc:Fallback></mc:AlternateContent></w:p></w:body></w:document>"#
+        r#"<w:document xmlns:w="{W}" xmlns:mc="{MC}"><w:body><w:p><mc:AlternateContent xmlns:v="urn:schemas-microsoft-com:vml"><mc:Fallback xmlns:x="{W}"><x:r><x:t>Roe</x:t></x:r><x:r xmlns:v="urn:other"/></mc:Fallback></mc:AlternateContent></w:p></w:body></w:document>"#
     );
     let (text, _) = rebuilt(&raw, DOCUMENT);
     assert_eq!(
         text,
         format!(
-            r#"<w:document xmlns:w="{W}" xmlns:mc="{MCE}"><w:body><w:p><x:r xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="{W}"><x:t>Roe</x:t></x:r><x:r xmlns:x="{W}" xmlns:v="urn:other"/></w:p></w:body></w:document>"#
+            r#"<w:document xmlns:w="{W}" xmlns:mc="{MC}"><w:body><w:p><x:r xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="{W}"><x:t>Roe</x:t></x:r><x:r xmlns:x="{W}" xmlns:v="urn:other"/></w:p></w:body></w:document>"#
         )
     );
 }

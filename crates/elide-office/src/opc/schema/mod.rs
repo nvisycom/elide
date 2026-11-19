@@ -56,7 +56,12 @@ use quick_xml::{NsReader, XmlVersion};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
 use crate::opc::archive::MAX_PART_BYTES;
+use crate::opc::ct::{self, DML, PML, SML, WML};
 use crate::opc::malformed_xml;
+use crate::opc::ns::{
+    A, C, CUSTOM_PROPERTIES, DGM, DOC_PROPS_VTYPES, EXTENDED_PROPERTIES, LC, MC, P, PIC, R, VML,
+    VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15, W16CEX, W16CID, X, XDR, XMLNS,
+};
 use crate::opc::xml_edit::{Skipped, SpannedReader, attribute_source, bound, splice_with};
 
 /// An element type of the schema.
@@ -101,27 +106,12 @@ impl Type {
     }
 }
 
-/// The markup compatibility namespace.
-const MCE: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
-
-/// The namespace of namespace declarations.
-const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
-
 /// The namespaces of a legacy VML drawing's shapes.
-const VML: &[&str] = &[
-    "urn:schemas-microsoft-com:vml",
-    "urn:schemas-microsoft-com:office:office",
-    "urn:schemas-microsoft-com:office:excel",
-    "urn:schemas-microsoft-com:office:powerpoint",
-    "urn:schemas-microsoft-com:office:word",
-];
+const VML_SHAPES: &[&str] = &[VML, VML_OFFICE, VML_EXCEL, VML_POWERPOINT, VML_WORD];
 
 /// The strict namespaces and the transitional ones their schema follows.
 const STRICT: &[(&str, &str)] = &[
-    (
-        "http://purl.oclc.org/ooxml/officeDocument/relationships",
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-    ),
+    ("http://purl.oclc.org/ooxml/officeDocument/relationships", R),
     (
         "http://purl.oclc.org/ooxml/officeDocument/math",
         "http://schemas.openxmlformats.org/officeDocument/2006/math",
@@ -132,61 +122,46 @@ const STRICT: &[(&str, &str)] = &[
     ),
     (
         "http://purl.oclc.org/ooxml/officeDocument/extendedProperties",
-        "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+        EXTENDED_PROPERTIES,
     ),
     (
         "http://purl.oclc.org/ooxml/officeDocument/customProperties",
-        "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
+        CUSTOM_PROPERTIES,
     ),
     (
         "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes",
-        "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+        DOC_PROPS_VTYPES,
     ),
-    (
-        "http://purl.oclc.org/ooxml/wordprocessingml/main",
-        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/presentationml/main",
-        "http://schemas.openxmlformats.org/presentationml/2006/main",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/spreadsheetml/main",
-        "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/main",
-        "http://schemas.openxmlformats.org/drawingml/2006/main",
-    ),
+    ("http://purl.oclc.org/ooxml/wordprocessingml/main", W),
+    ("http://purl.oclc.org/ooxml/presentationml/main", P),
+    ("http://purl.oclc.org/ooxml/spreadsheetml/main", X),
+    ("http://purl.oclc.org/ooxml/drawingml/main", A),
     (
         "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing",
         "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     ),
     (
         "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing",
-        "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+        XDR,
     ),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/picture",
-        "http://schemas.openxmlformats.org/drawingml/2006/picture",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/chart",
-        "http://schemas.openxmlformats.org/drawingml/2006/chart",
-    ),
+    ("http://purl.oclc.org/ooxml/drawingml/picture", PIC),
+    ("http://purl.oclc.org/ooxml/drawingml/chart", C),
     (
         "http://purl.oclc.org/ooxml/drawingml/chartDrawing",
         "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing",
     ),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/diagram",
-        "http://schemas.openxmlformats.org/drawingml/2006/diagram",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/lockedCanvas",
-        "http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas",
-    ),
+    ("http://purl.oclc.org/ooxml/drawingml/diagram", DGM),
+    ("http://purl.oclc.org/ooxml/drawingml/lockedCanvas", LC),
 ];
+
+/// The transitional twin of the strict `namespace`, or `namespace` itself when
+/// it is not a strict one.
+pub(crate) fn transitional(namespace: &str) -> &str {
+    STRICT
+        .iter()
+        .find(|(strict, _)| *strict == namespace)
+        .map_or(namespace, |(_, transitional)| transitional)
+}
 
 /// The index of `namespace` in [`NAMESPACES`] (0 for none), a strict one read
 /// as its transitional twin, or `None` when the schemas never name it.
@@ -194,10 +169,7 @@ fn namespace_index(namespace: Option<&str>) -> Option<u8> {
     let Some(namespace) = namespace else {
         return Some(0);
     };
-    let namespace = STRICT
-        .iter()
-        .find(|(strict, _)| *strict == namespace)
-        .map_or(namespace, |(_, transitional)| transitional);
+    let namespace = transitional(namespace);
     NAMESPACES[1..]
         .binary_search(&namespace)
         .ok()
@@ -213,24 +185,9 @@ pub(crate) enum Root {
     Vml,
 }
 
-const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
-const X: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
-const C: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
-const DGM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
-const XDR: &str = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
-const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
-const W16CID: &str = "http://schemas.microsoft.com/office/word/2016/wordml/cid";
-const W16CEX: &str = "http://schemas.microsoft.com/office/word/2018/wordml/cex";
-
 /// The root a part of `content_type` must have, or `None` when no schema this
 /// crate holds describes the part, so it cannot be rebuilt.
 pub(crate) fn root(content_type: &str) -> Option<Root> {
-    const WML: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
-    const PML: &str = "application/vnd.openxmlformats-officedocument.presentationml.";
-    const SML: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
-    const DML: &str = "application/vnd.openxmlformats-officedocument.drawingml.";
     let content_type = content_type.to_ascii_lowercase();
     let element = |namespace, local| Some(Root::Element(namespace, local));
     if let Some(name) = content_type.strip_prefix(WML) {
@@ -302,7 +259,7 @@ pub(crate) fn root(content_type: &str) -> Option<Root> {
             element(A, "themeOverride")
         }
         "application/vnd.openxmlformats-officedocument.drawing+xml" => element(XDR, "wsDr"),
-        "application/vnd.openxmlformats-officedocument.vmldrawing" => Some(Root::Vml),
+        ct::VML_DRAWING => Some(Root::Vml),
         "application/vnd.ms-word.styleswitheffects+xml" => element(W, "styles"),
         "application/vnd.ms-word.commentsextended+xml" => element(W15, "commentsEx"),
         "application/vnd.ms-word.commentsids+xml" => element(W16CID, "commentsIds"),
@@ -567,20 +524,10 @@ struct Payload(u8, &'static str);
 /// The payloads `a:graphicData` may hold, by the `uri` naming each: its
 /// vocabulary and name in the URI, and its element.
 const PAYLOADS: &[(&str, &str, &str, &str)] = &[
-    (
-        "drawingml",
-        "picture",
-        "http://schemas.openxmlformats.org/drawingml/2006/picture",
-        "pic",
-    ),
+    ("drawingml", "picture", PIC, "pic"),
     ("drawingml", "chart", C, "chart"),
     ("drawingml", "diagram", DGM, "relIds"),
-    (
-        "drawingml",
-        "lockedCanvas",
-        "http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas",
-        "lockedCanvas",
-    ),
+    ("drawingml", "lockedCanvas", LC, "lockedCanvas"),
     ("drawingml", "table", A, "tbl"),
     ("presentationml", "ole", P, "oleObj"),
 ];
@@ -657,7 +604,7 @@ fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decisi
 /// `scope`, inside the `open` frames.
 fn decide(scope: Scope, namespace: Option<&str>, local: &str, open: &[Frame]) -> Decision {
     let parent = open.last().copied();
-    if namespace == Some(MCE) {
+    if namespace == Some(MC) {
         return match (local, parent) {
             ("AlternateContent", _) => Decision::Keep(Frame::Alternate(scope)),
             ("Fallback", Some(Frame::Alternate(_))) => Decision::Keep(Frame::Fallback(scope)),
@@ -681,7 +628,7 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, open: &[Frame]) ->
         }
         Scope::Graphic(..) => None,
         // A VML drawing holds the global VML shapes.
-        Scope::Vml if namespace.is_some_and(|namespace| VML.contains(&namespace)) => ROOTS
+        Scope::Vml if namespace.is_some_and(|namespace| VML_SHAPES.contains(&namespace)) => ROOTS
             .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(index, local)))
             .ok()
             .map(|at| ROOTS[at].2),

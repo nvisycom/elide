@@ -13,6 +13,7 @@ use elide_codec::extract::ItemFlag;
 use elide_core::entity::builtins;
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
 
+use crate::opc::ns::{VML, VML_OFFICE};
 use crate::opc::xml_edit::{Action, Attribute, Local, Name, Rules};
 
 /// The namespace a [`TextAttribute`] part matches.
@@ -181,7 +182,7 @@ pub(crate) const ALTERNATIVE_TEXT: HiddenAttributes = HiddenAttributes::strip(
         TextAttribute::new((Ns::In(VML), Local::Any), (Ns::None, "title")),
         TextAttribute::new(
             (Ns::In(VML), Local::Exact("imagedata")),
-            (Ns::In(OFFICE), "title"),
+            (Ns::In(VML_OFFICE), "title"),
         ),
     ],
 );
@@ -195,11 +196,6 @@ pub(crate) const TOOLTIPS: HiddenAttributes = HiddenAttributes::strip(
         TextAttribute::new((Ns::Any, Local::Exact("hlinkHover")), (Ns::None, "tooltip")),
     ],
 );
-
-/// The legacy VML namespace.
-const VML: &str = "urn:schemas-microsoft-com:vml";
-/// The legacy Office drawing namespace.
-const OFFICE: &str = "urn:schemas-microsoft-com:office:office";
 
 #[cfg(test)]
 mod tests {

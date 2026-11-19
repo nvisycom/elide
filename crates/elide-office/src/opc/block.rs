@@ -6,8 +6,6 @@
 use bytes::Bytes;
 use elide_codec::extract::{ItemFlag, OffsetMap, Passage};
 use hipstr::HipStr;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::opc::part::PartPath;
 
@@ -16,7 +14,6 @@ use crate::opc::part::PartPath;
 /// [`embeddings`](Extraction::embeddings) surfaced for redaction, and any
 /// [`issues`](Extraction::issues) that left a part un-extracted.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Extraction {
     /// The redactable text blocks, in part-then-document order. Each carries the
     /// part it came from and its byte span within that part.
@@ -44,7 +41,6 @@ impl Extraction {
 /// One redactable unit of text, addressed by the part it came from and its
 /// byte span within that part's XML.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Block {
     /// The package part this text is in.
     pub part: PartPath,
@@ -62,24 +58,16 @@ pub struct Block {
     /// accounting for entity substitutions. Its raw offsets are absolute in the
     /// part, so they line up with [`start`](Block::start) and
     /// [`end`](Block::end).
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub offsets: OffsetMap,
     /// How the block joins the passage of the block before it.
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub passage: Passage,
     /// What the block is when it is collaboration content (a comment, its
     /// author, a tracked deletion); `None` for visible content.
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub flag: Option<ItemFlag>,
 }
 
 /// The kind of binary embedding a part holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[non_exhaustive]
 pub enum EmbeddingKind {
     /// An embedded image (e.g. an image in `word/media/*`).
@@ -95,7 +83,6 @@ pub enum EmbeddingKind {
 /// One binary embedding surfaced for redaction (an image, audio or video clip,
 /// or embedded object), addressed by its part.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Embedding {
     /// The package part holding the embedding.
     pub part: PartPath,
@@ -113,7 +100,6 @@ pub struct Embedding {
 /// a caller does not silently ship a document with an un-redacted part, the
 /// dangerous failure mode for redaction. A clean extraction produces none.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Issue {
     /// The part that could not be extracted.
     pub part: PartPath,
@@ -123,11 +109,6 @@ pub struct Issue {
 
 /// Why a text-bearing part could not be extracted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[non_exhaustive]
 pub enum IssueKind {
     /// The part's bytes are not valid UTF-8.
@@ -142,7 +123,6 @@ pub enum IssueKind {
 /// The span is a byte range into the named part's XML, as carried on a
 /// [`Block`] from the same part.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Replacement {
     /// The part to rewrite.
     pub part: PartPath,
@@ -157,7 +137,6 @@ pub struct Replacement {
 /// One binary part replacement: overwrite `part`'s bytes with `bytes` (e.g. a
 /// redacted image).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PartReplacement {
     /// The part to replace.
     pub part: PartPath,

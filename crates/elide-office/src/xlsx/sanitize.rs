@@ -26,12 +26,11 @@ use super::SheetClassifier;
 use super::names::{
     DEFINED_NAME, HYPERLINK_LOCATION, SHEET_NAME, TABLE_COLUMN_NAME, TABLE_DISPLAY_NAME, TABLE_NAME,
 };
+use crate::opc::ns::{VML, VML_EXCEL, X};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader, splice};
 use crate::opc::{Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, malformed_xml};
 
-/// The SpreadsheetML main namespace.
-const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 /// The Excel 2010 application-compatibility namespace (the saved-to path).
 const X15AC: &str = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac";
 /// The Excel revision-id namespaces.
@@ -55,12 +54,11 @@ const EDITING_SESSION_IDS: Declared =
 const FILE_PATH: Declared = Declared::removing(HiddenContent::FilePath, &[(X15AC, "absPath")]);
 
 /// The file-sharing reservation: a user name and a password hash.
-const CREDENTIALS: Declared =
-    Declared::removing(HiddenContent::Credential, &[(SML, "fileSharing")]);
+const CREDENTIALS: Declared = Declared::removing(HiddenContent::Credential, &[(X, "fileSharing")]);
 
 /// The workbook's list of linked external workbooks.
 const EXTERNAL_WORKBOOKS: Declared =
-    Declared::removing(HiddenContent::Link, &[(SML, "externalReferences")]);
+    Declared::removing(HiddenContent::Link, &[(X, "externalReferences")]);
 
 /// The threaded-comments namespace.
 const THREADED: &str = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
@@ -76,12 +74,6 @@ const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
 
 /// A threaded comment's mentions.
 const MENTIONS: Declared = Declared::removing(HiddenContent::Comment, &[(THREADED, "mentions")]);
-
-/// The legacy VML namespace.
-const VML: &str = "urn:schemas-microsoft-com:vml";
-/// The legacy Excel drawing namespace, whose `ClientData` says what a VML
-/// shape is.
-const EXCEL: &str = "urn:schemas-microsoft-com:office:excel";
 
 /// The VML shapes that draw comment notes: a `v:shape` whose `x:ClientData`
 /// has `ObjectType="Note"`. A shape's kind is in a child, so this edit reads
@@ -137,7 +129,7 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
                 let local = e.local_name();
                 let local = local.into_inner();
                 let in_ns = |ns: &str| namespace.as_deref() == Some(ns);
-                if in_ns(EXCEL) && local == "ClientData" {
+                if in_ns(VML_EXCEL) && local == "ClientData" {
                     let note = e.attributes().flatten().any(|attr| {
                         attr.key.local_name().as_ref() == "ObjectType"
                             && attr.value.as_ref() == "Note"
@@ -272,15 +264,13 @@ mod tests {
     use crate::opc::sanitize::sanitize;
     use crate::opc::xml_edit::expect_edit;
 
-    const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
     /// A workbook with a revision log and a legacy drawing holding one comment
     /// note and one button.
     fn workbook() -> Vec<u8> {
         let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/revisions/revisionHeaders.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.revisionHeaders+xml"/></Types>"#;
-        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}"/>"#);
+        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
         let revisions = format!(
-            r#"<?xml version="1.0"?><headers xmlns="{SML_NS}"><header userName="Jane Roe"/></headers>"#
+            r#"<?xml version="1.0"?><headers xmlns="{X}"><header userName="Jane Roe"/></headers>"#
         );
         let shape = |kind: &str| {
             format!(
@@ -311,7 +301,7 @@ mod tests {
     #[test]
     fn threaded_comments_go_under_every_policy() {
         let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/threadedComments/threadedComment1.xml" ContentType="application/vnd.ms-excel.threadedcomments+xml"/><Override PartName="/xl/persons/person.xml" ContentType="application/vnd.ms-excel.person+xml"/></Types>"#;
-        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}"/>"#);
+        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
         let comments = format!(
             r#"<?xml version="1.0"?><ThreadedComments xmlns="{THREADED}"><threadedComment ref="A1" dT="2024-01-02T03:04:05.00" personId="{{P}}" id="{{C}}"><text>@Jane Roe please check</text><mentions><mention mentionpersonId="{{P}}" mentionId="{{M}}" startIndex="0" length="9"/></mentions></threadedComment></ThreadedComments>"#
         );

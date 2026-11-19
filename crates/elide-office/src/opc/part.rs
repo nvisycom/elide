@@ -5,8 +5,6 @@
 use std::fmt;
 
 use hipstr::HipStr;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::opc::attributes::TextAttribute;
 use crate::opc::block::EmbeddingKind;
@@ -21,7 +19,6 @@ use crate::opc::names::Names;
 /// [`Replacement`](crate::opc::Replacement) targets one. Held as a [`HipStr`]
 /// so a path clones cheaply (short paths inline; longer ones share).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(transparent))]
 pub struct PartPath(HipStr<'static>);
 
 impl PartPath {
@@ -132,6 +129,23 @@ pub enum PartRole {
 }
 
 impl PartRole {
+    /// The role of a part of `kind` that every format treats alike: comments,
+    /// charts, SmartArt, and drawings carry element text, a relationships part
+    /// its external hyperlink targets, an embedding is binary, the document
+    /// properties a property part, and everything else structure. A format
+    /// places its own main part and stories before falling back on this.
+    pub(crate) fn common(kind: PartKind) -> Self {
+        match kind {
+            PartKind::Comments | PartKind::Chart | PartKind::Diagram | PartKind::Drawing => {
+                Self::ElementText
+            }
+            PartKind::Relationships => Self::RelationshipTargets,
+            PartKind::Embedding(kind) => Self::Binary(kind),
+            PartKind::Properties => Self::Property,
+            _ => Self::Structure,
+        }
+    }
+
     /// Whether a whole-part byte replacement may target this part: a binary
     /// embedding is replaced wholesale, and a property or cell part is rewritten
     /// out of band. A text part is only ever spliced, and a structure part

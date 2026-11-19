@@ -20,17 +20,18 @@ use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 use quick_xml::{Reader, XmlVersion};
 
+use crate::opc::ns::{CORE_PROPERTIES, CUSTOM_PROPERTIES, DC, DCTERMS, EXTENDED_PROPERTIES};
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules, bom_len};
 
 /// The OOXML namespaces whose elements are property fields: core properties,
 /// the Dublin Core and DC terms elements core properties use, extended (app)
 /// properties, and custom properties.
 const PROPERTY_NAMESPACES: [&str; 5] = [
-    "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
-    "http://purl.org/dc/elements/1.1/",
-    "http://purl.org/dc/terms/",
-    "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
-    "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
+    CORE_PROPERTIES,
+    DC,
+    DCTERMS,
+    EXTENDED_PROPERTIES,
+    CUSTOM_PROPERTIES,
 ];
 
 /// The root elements of the property parts, which hold the fields rather than
@@ -71,10 +72,6 @@ const LISTS: [&str; 2] = ["TitlesOfParts", "HeadingPairs"];
 
 /// A custom property's element, named by its `name` attribute.
 const CUSTOM_PROPERTY: &str = "property";
-
-/// The custom-properties namespace.
-const CUSTOM_NAMESPACE: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties";
 
 /// Where a field's value sits in its part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +138,7 @@ impl Rules for UnsurfacedProperties {
         };
         let surfaced = ELEMENT_FIELDS.contains(&name.local)
             || LISTS.contains(&name.local)
-            || (name.local == CUSTOM_PROPERTY && name.in_namespace(CUSTOM_NAMESPACE) && named());
+            || (name.local == CUSTOM_PROPERTY && name.in_namespace(CUSTOM_PROPERTIES) && named());
         if property && !PROPERTY_ROOTS.contains(&name.local) && !surfaced {
             Action::Remove
         } else {

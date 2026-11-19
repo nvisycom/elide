@@ -28,16 +28,10 @@ use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::WordFormat;
 use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
+use crate::opc::ns::{W, W14, W15};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
 use crate::opc::{Collaboration, HiddenAttributes, Names, Ns, PartKind, TextAttribute};
-
-/// The WordprocessingML main namespace.
-const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-/// The Word 2010 extension namespace (paragraph and text ids, document id).
-const W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
-/// The Word 2012 extension namespace (document id).
-const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
 
 /// The editing-session ids: the `rsid` table and attributes, and the paragraph
 /// and text ids.

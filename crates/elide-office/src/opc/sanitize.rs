@@ -311,7 +311,7 @@ fn edit_part(
 /// relationships parts are written by their own readers, a property part
 /// keeps only the fields detection surfaces, and an embedding (an SVG image
 /// is XML) is surfaced as a blob of its own format.
-fn rebuilt(kind: PartKind) -> bool {
+pub(crate) fn rebuilt(kind: PartKind) -> bool {
     !matches!(
         kind,
         PartKind::Relationships

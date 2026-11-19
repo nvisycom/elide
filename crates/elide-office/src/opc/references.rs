@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContent;
 
-use crate::opc::relationships::RELATIONSHIP_ATTRIBUTES;
+use crate::opc::ns::R;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
 
 /// Element rules over the relationship-naming attributes (`r:id`, `r:embed`,
@@ -54,7 +54,7 @@ impl Rules for References<'_> {
     fn element(&self, _name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
         let named = attributes
             .iter()
-            .filter(|attribute| attribute.name.in_namespace(RELATIONSHIP_ATTRIBUTES));
+            .filter(|attribute| attribute.name.in_namespace(R));
         for attribute in named {
             match self.ids {
                 Ids::Drop(ids) if ids.contains(attribute.value) => return Action::Remove,

@@ -21,21 +21,14 @@ use crate::opc::{PartClassifier, PartKind, PartRole, TextAttribute};
 /// embedding is binary; the document properties are a property part; the
 /// presentation part and everything else is structure. Section and custom-show
 /// names and comment authors are text attributes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SlideFormat;
 
 impl PartClassifier for SlideFormat {
     fn role(&self, kind: PartKind) -> PartRole {
         match kind {
-            PartKind::Story
-            | PartKind::Comments
-            | PartKind::Chart
-            | PartKind::Diagram
-            | PartKind::Drawing => PartRole::ElementText,
-            PartKind::Relationships => PartRole::RelationshipTargets,
-            PartKind::Embedding(kind) => PartRole::Binary(kind),
-            PartKind::Properties => PartRole::Property,
-            _ => PartRole::Structure,
+            PartKind::Story => PartRole::ElementText,
+            kind => PartRole::common(kind),
         }
     }
 
@@ -46,10 +39,6 @@ impl PartClassifier for SlideFormat {
 
 impl OoxmlFormat for SlideFormat {
     const MAIN_LABEL: &'static str = "presentation";
-
-    fn classifier() -> Self {
-        Self
-    }
 }
 
 #[cfg(test)]

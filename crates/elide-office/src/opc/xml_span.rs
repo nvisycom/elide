@@ -28,6 +28,9 @@ use quick_xml::{NsReader, Reader};
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
+use crate::opc::ns::{W, X};
+use crate::opc::relationships::HYPERLINK;
+use crate::opc::schema;
 use crate::opc::xml_edit::{Name, SpannedReader, attribute_source, bound};
 
 /// The XML construct a redactable span lives inside, which determines how a
@@ -355,10 +358,6 @@ fn visit_attributes(
 /// relationships (styles, headers, fonts, …) target other package parts and
 /// hold no user data, so they are left untouched.
 pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
-    /// The OPC relationship type of an external hyperlink.
-    const HYPERLINK_TYPE: &str =
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
-
     let mut reader = Reader::from_str(raw);
     let mut spans = Vec::new();
 
@@ -382,7 +381,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
         for attr in elem.attributes() {
             let attr = attr.map_err(|_| ())?;
             match attr.key.local_name().as_ref() {
-                "Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK_TYPE,
+                "Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK,
                 "TargetMode" => is_external = attr.value.as_ref() == "External",
                 "Target" => target = Some(value_source(raw, &attr)?),
                 _ => {}
@@ -457,13 +456,9 @@ const RUN_TEXT_ELEMENTS: &[&str] = &["t", "instrText", "delText", "delInstrText"
 
 /// The namespaces whose run text drops leading and trailing whitespace unless
 /// its element says `xml:space="preserve"`: WordprocessingML and SpreadsheetML,
-/// transitional and strict. DrawingML text keeps its whitespace as written.
-const SPACE_COLLAPSING_NAMESPACES: &[&str] = &[
-    "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-    "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "http://purl.oclc.org/ooxml/wordprocessingml/main",
-    "http://purl.oclc.org/ooxml/spreadsheetml/main",
-];
+/// a strict namespace read as its transitional twin. DrawingML text keeps its
+/// whitespace as written.
+const SPACE_COLLAPSING_NAMESPACES: &[&str] = &[W, X];
 
 /// The attribute that keeps a run text element's leading and trailing
 /// whitespace.
@@ -503,7 +498,7 @@ pub(crate) fn preserve_space_at(raw: &str, start: usize, text: &str) -> Option<u
     let uri_start = raw.find(&declaration)? + declaration.len();
     let uri = &raw[uri_start..uri_start + raw[uri_start..].find('"')?];
     SPACE_COLLAPSING_NAMESPACES
-        .contains(&uri)
+        .contains(&schema::transitional(uri))
         .then_some(start - 1)
 }
 

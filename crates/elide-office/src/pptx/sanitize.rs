@@ -82,9 +82,8 @@ mod tests {
     use super::*;
     use crate::fixtures::{pack_parts, part_names, read_text_part};
     use crate::ooxml::OoxmlPackage;
+    use crate::opc::ns::P;
     use crate::opc::sanitize::sanitize;
-
-    const PML_NS: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 
     /// A modern comment and its authors, whose schema this crate does not
     /// hold.
@@ -93,7 +92,7 @@ mod tests {
         const P188: &str = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
         const PC: &str = "http://schemas.microsoft.com/office/powerpoint/2013/main/command";
         let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/comments/modernComment1.xml" ContentType="application/vnd.ms-powerpoint.comments+xml"/><Override PartName="/ppt/authors.xml" ContentType="application/vnd.ms-powerpoint.authors+xml"/></Types>"#;
-        let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{PML_NS}"/>"#);
+        let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{P}"/>"#);
         let comments = format!(
             r#"<?xml version="1.0"?><p188:cmLst xmlns:p188="{P188}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pc="{PC}"><p188:cm id="{{C}}" authorId="{{A}}" created="2024-01-02T03:04:05.123" startDate="2024-01-03T00:00:00" title="For Jane Roe"><pc:sldMkLst><pc:docMk/><pc:sldMk cId="1" sldId="256"/></pc:sldMkLst><p188:replyLst><p188:reply id="{{R}}" authorId="{{A}}" created="2024-01-04T00:00:00"><p188:txBody><a:bodyPr/><a:p><a:r><a:t>done</a:t></a:r></a:p></p188:txBody></p188:reply></p188:replyLst><p188:txBody><a:bodyPr/><a:p><a:r><a:t>check</a:t></a:r></a:p></p188:txBody></p188:cm></p188:cmLst>"#
         );
@@ -130,12 +129,12 @@ mod tests {
     #[test]
     fn comment_authors_are_surfaced_and_dates_dropped() {
         let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/commentAuthors.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml"/><Override PartName="/ppt/comments/comment1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.comments+xml"/></Types>"#;
-        let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{PML_NS}"/>"#);
+        let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{P}"/>"#);
         let authors = format!(
-            r#"<?xml version="1.0"?><p:cmAuthorLst xmlns:p="{PML_NS}"><p:cmAuthor id="0" name="Jane Roe" initials="JR" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>"#
+            r#"<?xml version="1.0"?><p:cmAuthorLst xmlns:p="{P}"><p:cmAuthor id="0" name="Jane Roe" initials="JR" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>"#
         );
         let comments = format!(
-            r#"<?xml version="1.0"?><p:cmLst xmlns:p="{PML_NS}"><p:cm authorId="0" dt="2024-01-02T03:04:05.000" idx="1"><p:text>check</p:text></p:cm></p:cmLst>"#
+            r#"<?xml version="1.0"?><p:cmLst xmlns:p="{P}"><p:cm authorId="0" dt="2024-01-02T03:04:05.000" idx="1"><p:text>check</p:text></p:cm></p:cmLst>"#
         );
         let package = pack_parts(&[
             ("[Content_Types].xml", types.as_bytes()),

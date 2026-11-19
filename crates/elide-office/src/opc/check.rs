@@ -2,10 +2,11 @@
 //! should not ship.
 //!
 //! The check a document runs on its output before returning it: sanitizing
-//! the output again changes nothing (so every XML part is a fixed point of
-//! its schema rebuild), every relationship and every element
-//! naming one resolves, every XML part speaks only reviewed vocabularies, and
-//! no part the format never extracts carries text.
+//! the output again changes nothing (so every XML part rebuilt from its schema
+//! is a fixed point of the rebuild, and holds only the schema's namespaces),
+//! every relationship and every element naming one resolves, every property
+//! part, kept but never rebuilt, speaks only reviewed vocabularies, and no
+//! part the format never extracts carries text.
 
 use std::collections::HashSet;
 
@@ -17,14 +18,14 @@ use quick_xml::events::Event;
 use crate::opc::index::{Index, text};
 use crate::opc::part::PartPath;
 use crate::opc::references::References;
-use crate::opc::sanitize::{Sanitizer, sanitize};
+use crate::opc::sanitize::{Sanitizer, rebuilt, sanitize};
 use crate::opc::vocabulary::Vocabulary;
 use crate::opc::{PartKind, PartRole, malformed_xml, xml_edit};
 
 /// Check that the package `document` carries no hidden content `policy` and
-/// `sanitizer` would remove, that every reference in it resolves, that its XML
-/// uses only reviewed vocabularies, and that no part the format does not
-/// extract carries text.
+/// `sanitizer` would remove, that every reference in it resolves, that its
+/// property parts use only reviewed vocabularies, and that no part the format
+/// does not extract carries text.
 ///
 /// # Errors
 ///
@@ -97,11 +98,13 @@ pub(crate) fn check(
         if matches!(kind, PartKind::Embedding(_) | PartKind::Font) {
             continue;
         }
-        let vocabulary = if index.is_vml(path) {
-            Vocabulary::vml()
-        } else {
-            Vocabulary::default()
-        };
+        // A part rebuilt from its schema holds only the schema's namespaces:
+        // the fixed point above already vouches for it. What is left is the
+        // property parts (custom XML never ships).
+        if rebuilt(kind) {
+            continue;
+        }
+        let vocabulary = Vocabulary::default();
         xml_edit::edit(raw, &vocabulary)?;
         if let Some(namespace) = vocabulary.unknown() {
             return Err(Error::sanitization(format!(

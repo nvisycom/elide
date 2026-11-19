@@ -23,11 +23,6 @@ use crate::opc::xml_edit::without_elements;
 pub(crate) const HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
-/// The namespace of the attributes (`r:id`, `r:embed`, `r:link`, …) by which an
-/// XML part names one of its relationships.
-pub(crate) const RELATIONSHIP_ATTRIBUTES: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-
 /// One relationship: its id, its type URI, its raw target, and whether the
 /// target lies outside the package.
 #[derive(Debug, Clone, PartialEq, Eq)]

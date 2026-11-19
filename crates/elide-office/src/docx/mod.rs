@@ -19,22 +19,14 @@ use crate::opc::{Names, PartClassifier, PartKind, PartRole, TextAttribute};
 /// targets; an embedding is binary; the document properties are a property
 /// part; everything else is structure. Comment and change authors, dropdown
 /// entries, and field instructions are text attributes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct WordFormat;
 
 impl PartClassifier for WordFormat {
     fn role(&self, kind: PartKind) -> PartRole {
         match kind {
-            PartKind::Main
-            | PartKind::Story
-            | PartKind::Comments
-            | PartKind::Chart
-            | PartKind::Diagram
-            | PartKind::Drawing => PartRole::ElementText,
-            PartKind::Relationships => PartRole::RelationshipTargets,
-            PartKind::Embedding(kind) => PartRole::Binary(kind),
-            PartKind::Properties => PartRole::Property,
-            _ => PartRole::Structure,
+            PartKind::Main | PartKind::Story => PartRole::ElementText,
+            kind => PartRole::common(kind),
         }
     }
 
@@ -49,8 +41,4 @@ impl PartClassifier for WordFormat {
 
 impl OoxmlFormat for WordFormat {
     const MAIN_LABEL: &'static str = "body";
-
-    fn classifier() -> Self {
-        Self
-    }
 }

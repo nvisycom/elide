@@ -51,7 +51,8 @@ impl StoredPart {
     }
 
     /// Whether the part's text is read into blocks and spliced: every XML part
-    /// but a property part, which is redacted whole, and a relationships part.
+    /// but a property part, which is redacted whole. A relationships part is
+    /// one, its text the external hyperlink targets.
     pub(crate) fn is_text(&self) -> bool {
         self.attributes.is_some() && self.role != PartRole::Property
             || self.role == PartRole::RelationshipTargets

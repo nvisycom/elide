@@ -57,15 +57,8 @@ impl PartClassifier for SheetClassifier {
     fn role(&self, kind: PartKind) -> PartRole {
         match kind {
             PartKind::Story => PartRole::Cells,
-            PartKind::Main
-            | PartKind::Comments
-            | PartKind::Chart
-            | PartKind::Diagram
-            | PartKind::Drawing => PartRole::ElementText,
-            PartKind::Relationships => PartRole::RelationshipTargets,
-            PartKind::Embedding(kind) => PartRole::Binary(kind),
-            PartKind::Properties => PartRole::Property,
-            _ => PartRole::Structure,
+            PartKind::Main => PartRole::ElementText,
+            kind => PartRole::common(kind),
         }
     }
 
