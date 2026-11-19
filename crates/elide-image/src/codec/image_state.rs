@@ -4,13 +4,12 @@
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use elide_core::Result;
 use elide_core::modality::metadata::MetadataData;
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
 
 use crate::ImageBuffer;
 use crate::modality::{Image, ImageData, ImageLocation};
-use crate::primitive::Dimensions;
 
 /// The decoded image, shared between the pixel stream and the EXIF stream, which
 /// both edit the one buffer: a redaction on either is in the image the
@@ -25,9 +24,9 @@ impl ImageState {
         Self(Arc::new(Mutex::new(buffer)))
     }
 
-    /// The image's pixel dimensions.
-    pub(super) fn dimensions(&self) -> Dimensions<u32> {
-        self.0.lock().unwrap().dimensions()
+    /// The location of the whole image.
+    pub(super) fn frame(&self) -> ImageLocation {
+        self.0.lock().unwrap().frame()
     }
 
     /// Encode the current pixels to bytes with the source's metadata.
@@ -46,61 +45,19 @@ impl ImageState {
         self.0.lock().unwrap().edit_metadata(fields)
     }
 
-    /// The whole decoded frame as an [`ImageData`]: the decoded pixels plus the
-    /// re-encoded bytes as its source.
-    pub(super) fn image_data(&self) -> Result<ImageData> {
-        let buffer = self.0.lock().unwrap();
-        let source = buffer.encode()?;
-        Ok(ImageData::new(buffer.raster().clone(), source))
+    /// The whole image as an [`ImageData`]; see [`ImageBuffer::data`].
+    pub(super) fn data(&self) -> Result<ImageData> {
+        self.0.lock().unwrap().data()
     }
 
-    /// Crop the region `location` addresses into an [`ImageData`].
-    ///
-    /// # Errors
-    ///
-    /// [`MalformedInput`] when the region falls outside the image.
-    ///
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(super) fn crop_encode(&self, location: &ImageLocation) -> Result<ImageData> {
-        let buffer = self.0.lock().unwrap();
-        let cropped = location
-            .bounding_box
-            .to_pixels(buffer.dimensions())
-            .and_then(|region| buffer.crop(region))
-            .ok_or_else(outside_the_image)?;
-        let source = cropped.encode()?;
-        Ok(ImageData::new(cropped, source))
+    /// The region `location` addresses; see [`ImageBuffer::read_at`].
+    pub(super) fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
+        self.0.lock().unwrap().read_at(location)
     }
 
-    /// Redact every region in `redactions`, in place.
-    ///
-    /// # Errors
-    ///
-    /// [`MalformedInput`] when a region falls outside the image; nothing is
-    /// painted then.
-    ///
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    /// Redact every region in `redactions`, in place; see
+    /// [`ImageBuffer::redact_all`].
     pub(super) fn redact(&self, redactions: Redactions<Image>) -> Result<()> {
-        let mut buffer = self.0.lock().unwrap();
-        let dims = buffer.dimensions();
-        let regions = redactions
-            .into_iter()
-            .map(|(location, replacement)| {
-                let region = location
-                    .bounding_box
-                    .to_pixels(dims)
-                    .ok_or_else(outside_the_image)?;
-                Ok((region, replacement))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        for (region, replacement) in regions {
-            buffer.redact(region, &replacement);
-        }
-        Ok(())
+        self.0.lock().unwrap().redact_all(redactions).map(drop)
     }
-}
-
-/// The error for a region no pixel of the image falls in.
-fn outside_the_image() -> Error {
-    Error::malformed("the region falls outside the image")
 }

@@ -179,11 +179,13 @@ mod tests {
 
     use super::*;
     use crate::codec::state::Pages;
-    use crate::document::Pdf;
+    use crate::content::text::Text;
+    use crate::fixtures::with_pages;
+    use crate::pdf::Pdf;
     #[cfg(feature = "render")]
-    use crate::render::PageObservation;
+    use crate::pdf::reader::{DeviceRect, GlyphRect, PageFrame};
     #[cfg(feature = "render")]
-    use crate::text::{DeviceRect, GlyphRect, PageFrame};
+    use crate::pdf::render::PageObservation;
 
     /// The body stream of a one-page document showing `Jane Roe`.
     fn body() -> PdfStream {
@@ -201,22 +203,16 @@ mod tests {
             dictionary! {},
             Content { operations }.encode().unwrap(),
         ));
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
-            "Type" => "Page", "Parent" => pages, "Contents" => content,
-            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
-        });
-        doc.objects.insert(
-            pages,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
-            }),
+        with_pages(
+            &mut doc,
+            [dictionary! {
+                "Contents" => content,
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            }],
         );
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
-        doc.trailer.set("Root", catalog);
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
-        let blocks = Pdf::open(&bytes).unwrap().text().unwrap();
+        let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
         PdfStream {
             state: PdfState::new(Pages::Glyph(blocks)),
         }
@@ -241,6 +237,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body.state.detections().len(), 1);
+    }
+
+    /// An empty span is checked like any other before it is skipped: on a
+    /// page the document doesn't have, or reversed, it fails the batch.
+    #[tokio::test]
+    async fn an_empty_span_is_checked_before_it_is_skipped() {
+        let mut body = body();
+        let missing = Redactions::from([redaction(1, 0..4), redaction(2, 0..0)]);
+        assert!(body.write_at(missing).await.is_err());
+        assert!(body.state.detections().is_empty());
+        #[allow(clippy::reversed_empty_ranges)]
+        let reversed = Redactions::from([redaction(1, 0..4), redaction(1, 4..2)]);
+        assert!(body.write_at(reversed).await.is_err());
+        assert!(body.state.detections().is_empty());
+
+        body.write_at(Redactions::from([redaction(1, 2..2)]))
+            .await
+            .unwrap();
+        assert!(body.state.detections().is_empty());
     }
 
     /// A reviewer's mark on a flattened page resolves through PDFium's glyph

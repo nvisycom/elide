@@ -8,6 +8,7 @@ mod raster;
 use bytes::Bytes;
 #[cfg(feature = "exif")]
 use elide_core::modality::metadata::MetadataData;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 pub use self::raster::RasterImage;
@@ -23,8 +24,8 @@ pub struct StrippedMetadata {
 }
 #[cfg(feature = "exif")]
 use crate::exif::{Scrubbed, Source};
-use crate::modality::{ImageFormat, ImageReplacement};
-use crate::primitive::{BoundingBox, Dimensions};
+use crate::modality::{Image, ImageData, ImageFormat, ImageLocation, ImageReplacement};
+use crate::primitive::{BoundingBox, Dimensions, Point};
 
 /// An opened image source, the single entry point into the crate.
 ///
@@ -122,6 +123,12 @@ impl ImageBuffer {
     #[must_use]
     pub fn raster(&self) -> &RasterImage {
         &self.raster
+    }
+
+    /// The decoded pixels, the source and its metadata let go.
+    #[must_use]
+    pub fn into_raster(self) -> RasterImage {
+        self.raster
     }
 
     /// The image's pixel dimensions.
@@ -280,6 +287,75 @@ impl ImageBuffer {
             self.dirty = true;
         }
     }
+
+    /// The location of the whole image.
+    #[must_use]
+    pub fn frame(&self) -> ImageLocation {
+        let size = self.dimensions();
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(0.0, 0.0),
+            Dimensions::new(f64::from(size.width), f64::from(size.height)),
+        ))
+    }
+
+    /// The whole image as [`ImageData`]: its pixels and their encoded bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`encode`](Self::encode).
+    pub fn data(&self) -> Result<ImageData> {
+        Ok(ImageData::new(self.raster.clone(), self.encode()?))
+    }
+
+    /// The region `location` addresses, cropped out as [`ImageData`].
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// if no pixel of the image falls in the region, and as
+    /// [`RasterImage::encode`].
+    pub fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
+        let cropped = location
+            .bounding_box
+            .to_pixels(self.dimensions())
+            .and_then(|region| self.crop(region))
+            .ok_or_else(outside_the_image)?;
+        let source = cropped.encode()?;
+        Ok(ImageData::new(cropped, source))
+    }
+
+    /// Paint every redaction in `redactions` in place, returning each as the
+    /// pixel region it painted.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// if a region falls outside the image; nothing is painted then.
+    pub fn redact_all(
+        &mut self,
+        redactions: Redactions<Image>,
+    ) -> Result<Vec<(BoundingBox<u32>, ImageReplacement)>> {
+        let size = self.dimensions();
+        let regions = redactions
+            .into_iter()
+            .map(|(location, replacement)| {
+                let region = location
+                    .bounding_box
+                    .to_pixels(size)
+                    .ok_or_else(outside_the_image)?;
+                Ok((region, replacement))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for (region, replacement) in &regions {
+            self.redact(*region, replacement);
+        }
+        Ok(regions)
+    }
+}
+
+/// The error for a region no pixel of the image falls in.
+fn outside_the_image() -> Error {
+    Error::malformed("the region falls outside the image")
 }
 
 #[cfg(all(test, feature = "png"))]

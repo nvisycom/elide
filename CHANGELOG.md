@@ -39,8 +39,9 @@ and this project adheres to
   document nothing was redacted in keeps its original bytes, and an embedded
   file no codec can read is removed
 - Optional PDF page rendering via the native PDFium library (`pdf-render`
-  feature): scanned pages are rendered for OCR and replaced by their redacted
-  image, and `RasterMode::Always` replaces every page by an image with the
+  feature): scanned pages are rendered for OCR, each replaced by a render of
+  it with its redacted embedded images and every region redacted on it painted
+  over, and `RasterMode::Always` replaces every page by an image with the
   detected text painted over, rendered at its configured DPI
 
 #### Detection
@@ -118,17 +119,31 @@ and this project adheres to
 - Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
   read from, and an EXIF tag goes with its group when another of the group is
   redacted
-- PDF: a document encrypted with a user password is refused; catalog, page,
-  and trailer entries are kept by allowlist; marked content's alternate text
-  is stripped; kept internal links are reduced to their navigation; embedded
-  files get neutral names; every image is surfaced to the image pipeline,
-  wherever it is drawn from, and one that cannot be (fax, JBIG2, stencil
-  masks, inline images) is removed rather than shipped unscanned; the
-  document is always re-serialized, so a prior revision's superseded objects
-  never ship; a page whose content cannot be read, text drawn in a tiling
-  pattern or before a font is selected, forms nested too deep, an embedded
-  file outside the attachment tree, and an encode naming a part the document
-  never surfaced are refused rather than passed through
+- PDF: decode rebuilds the document, copying only what draws its pages, its
+  internal links, and its attached files: page content is re-encoded through
+  the operator set (hidden layers, marked-content property lists, inline
+  images, and undefined operators cut), every resource is copied with the
+  keys its kind defines and its values resolved, a resource no page draws is
+  left behind, a visible form field's appearance is drawn into its page (with
+  its annotation's blend mode and opacity) so its answer is detected like any
+  text, and what the rebuild does not copy is recorded by category; encode
+  checks its output and refuses one a rebuild would change. A document
+  encrypted with a user password, or whose attached files are encrypted under
+  a crypt filter of their own, is refused; attached files get neutral names;
+  every image, stencil masks included, is surfaced to the image pipeline
+  wherever it is drawn from, and one that cannot be (fax, JBIG2, inline
+  images, external data) is removed rather than shipped unscanned; text in a
+  tiling pattern or a form is detected and deleted like the page's; a glyph
+  reads as its font's `/ToUnicode` gives it, ahead of its encoding, as a
+  viewer reads it, and a `/ToUnicode` the reader cannot parse is dropped; text a
+  font maps to a presentation form (a Kangxi radical, a ligature, an Arabic
+  presentation form, a CJK compatibility ideograph) is read as the text it
+  writes, and the output's `/ToUnicode` CMaps map it the same way, so copy
+  and search in a viewer give that text; a page whose content cannot be read,
+  text drawn before a font is selected, content nested too deep, and an
+  encode naming a part the document never surfaced are refused rather than
+  passed through. The output is untagged (its structure tree carried
+  alternate text), and embedded font programs are copied as stored
 - Office documents surface the text they keep in attributes and outside a
   workbook's cells (authors, sheet, table, and defined names, bookmarks,
   dropdown entries, validation messages, headers and footers, formulas,

@@ -8,10 +8,12 @@ use elide_core::{Error, Result};
 
 #[cfg(feature = "render")]
 use super::SCAN_DPI;
-use crate::document::{Pdf, Redaction};
+use super::plan::Plan;
+use crate::content::text::{Detection, TextBlock};
+use crate::pdf::Pdf;
+use crate::pdf::reader::PageGeometry;
 #[cfg(feature = "render")]
-use crate::render::PageObservation;
-use crate::text::{Detection, PageGeometry, TextBlock};
+use crate::pdf::render::PageObservation;
 
 /// A decoded PDF's pages, as the redaction mode reads them.
 #[derive(Debug)]
@@ -119,50 +121,48 @@ impl PdfState {
         &mut self,
         spans: impl IntoIterator<Item = (u32, Range<usize>)>,
     ) -> Result<()> {
-        let detections = spans
-            .into_iter()
-            .map(|(number, range)| {
-                let text = self.text(number)?;
-                let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone()))
-                else {
-                    return Err(Error::malformed(format!(
-                        "range {}..{} is outside page {number}'s text or splits a character",
-                        range.start, range.end
-                    )));
-                };
-                // Glyphs address characters, so the byte range is measured in
-                // character offsets.
-                let start = before.chars().count();
-                let end = start + text[range].chars().count();
-                Ok(Detection::new(number, start, end))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut detections = Vec::new();
+        for (number, range) in spans {
+            let text = self.text(number)?;
+            let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone())) else {
+                return Err(Error::malformed(format!(
+                    "range {}..{} is outside page {number}'s text or splits a character",
+                    range.start, range.end
+                )));
+            };
+            // An empty range covers no character, so it redacts nothing;
+            // within a ligature it would otherwise select the glyph around it.
+            if range.is_empty() {
+                continue;
+            }
+            // Glyphs address characters, so the byte range is measured in
+            // character offsets.
+            let start = before.chars().count();
+            let end = start + text[range].chars().count();
+            detections.push(Detection::new(number, start, end));
+        }
         self.detections.extend(detections);
         Ok(())
     }
 
-    /// `document` with the recorded redactions and `redaction`'s blobs
-    /// applied; the document itself when nothing changes.
+    /// The decoded `pdf` with the recorded redactions and `plan`'s
+    /// blobs applied, as bytes; the document itself when nothing changes.
     ///
     /// # Errors
     ///
-    /// As [`Pdf::apply`], and on the flatten path as `Pdf::flatten`.
-    pub(super) fn redact(&self, document: &Bytes, mut redaction: Redaction) -> Result<Bytes> {
+    /// As [`Plan::apply`], and on the flatten path as
+    /// `Plan::flatten`.
+    pub(super) fn redact(&self, pdf: &Pdf, mut plan: Plan) -> Result<Bytes> {
+        plan.text.clone_from(&self.detections);
         match &self.pages {
             Pages::Glyph(blocks) => {
-                redaction.text.clone_from(&self.detections);
-                if redaction.is_empty() {
-                    return Ok(document.clone());
+                if plan.is_empty() {
+                    return Ok(pdf.bytes());
                 }
-                Ok(Bytes::from(Pdf::open(document)?.apply(blocks, &redaction)?))
+                Ok(plan.apply(pdf, blocks)?.bytes())
             }
             #[cfg(feature = "render")]
-            Pages::Flatten { pages, scale } => Ok(Bytes::from(Pdf::open(document)?.flatten(
-                pages,
-                *scale,
-                &self.detections,
-                redaction,
-            )?)),
+            Pages::Flatten { pages, scale } => Ok(plan.flatten(pdf, pages, *scale)?.bytes()),
         }
     }
 }
