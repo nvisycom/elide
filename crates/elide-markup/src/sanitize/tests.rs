@@ -545,6 +545,8 @@ fn a_removed_self_closing_svg_root_holds_nothing() {
     for raw in [
         r#"<svg display="none" id=x/>Secret</svg><p>Visible</p>"#,
         r#"<svg display="none" id=x/>Secret<p>Visible</p>"#,
+        // The `/` belongs to `id`, so `desc` stays open and holds the `p`.
+        r#"<svg hidden><desc id=x/><p>Secret</p></desc></svg><p>Visible</p>"#,
     ] {
         assert_eq!(
             sanitize(html(HiddenContentPolicy::default()), raw),
@@ -552,4 +554,13 @@ fn a_removed_self_closing_svg_root_holds_nothing() {
             "{raw}"
         );
     }
+    // An SVG `mi` is not a MathML integration point, so the `p` breaks out;
+    // a browser ignores the `</svg>` left after it.
+    assert_eq!(
+        sanitize(
+            html(HiddenContentPolicy::default()),
+            "<svg hidden><mi>Secret<p>Visible</p></svg>"
+        ),
+        "<p>Visible</p></svg>"
+    );
 }

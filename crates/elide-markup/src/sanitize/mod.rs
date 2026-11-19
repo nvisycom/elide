@@ -244,7 +244,7 @@ impl<'a> Rebuild<'a> {
             last = span.end;
 
             if self.dropping.is_some() {
-                match self.skip(&event)? {
+                match self.skip(&event, &span)? {
                     Skip::Inside => continue,
                     Skip::End => break,
                     Skip::Outside => {}
@@ -387,7 +387,7 @@ impl<'a> Rebuild<'a> {
     ///   open (`<p hidden>a<p>b` closes the first paragraph);
     /// - in SVG or MathML, at an element that breaks out to HTML, unless an
     ///   element inside it reads its content as HTML.
-    fn skip(&mut self, event: &Event<'_>) -> Result<Skip> {
+    fn skip(&mut self, event: &Event<'_>, span: &Range<usize>) -> Result<Skip> {
         let html = self.html();
         let raw = self.raw;
         let Some(region) = self.dropping.as_mut() else {
@@ -405,19 +405,22 @@ impl<'a> Rebuild<'a> {
                 } else {
                     html::breaks_out(region.space, &name, &tag.attributes)
                         && !html::integration_point(region.space, &region.name)
-                        && !region.open.iter().any(|open| {
-                            html::integration_point(Space::Svg, open)
-                                || html::integration_point(Space::Math, open)
-                        })
+                        && !region
+                            .open
+                            .iter()
+                            .any(|open| html::integration_point(region.space, open))
                 };
                 if ends {
                     self.dropping = None;
                     return Ok(Skip::Outside);
                 }
                 // A browser ignores the self-closing flag on a non-void HTML
-                // element.
+                // element, and reads a `/` an unquoted value took as its own.
                 let void = VOID_ELEMENTS.contains(&name.as_str());
-                if matches!(event, Event::Start(_)) || (region.space == Space::Html && !void) {
+                let is_start = matches!(event, Event::Start(_));
+                if !self_closing(raw, span, &tag.attributes, is_start)
+                    || (region.space == Space::Html && !void)
+                {
                     region.open.push(name);
                 }
             }
@@ -514,15 +517,7 @@ impl<'a> Rebuild<'a> {
         let left = html::breaks_out(self.space(), &name, &tag.attributes) && self.leave_foreign();
         let space = self.space();
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
-        // A `/` before the `>` is the self-closing flag unless an unquoted
-        // value read it as its own.
-        let slash = span.end.saturating_sub(2);
-        let self_closing = !is_start
-            && !tag.attributes.last().is_some_and(|attr| {
-                self.raw
-                    .substr_range(attr.source)
-                    .is_some_and(|range| range.end > slash)
-            });
+        let self_closing = self_closing(self.raw, &span, &tag.attributes, is_start);
         // Whether the element holds what follows: a browser ignores the
         // self-closing flag on a non-void HTML element, but not on the root of
         // SVG or MathML, kept or not.
@@ -659,6 +654,23 @@ impl<'a> Rebuild<'a> {
             self.out.push('>');
         }
     }
+}
+
+/// Whether the HTML tag read at `span`, with `attributes`, carries the
+/// self-closing flag: a `/` before the `>`, unless an unquoted value read it
+/// as its own.
+fn self_closing(
+    raw: &str,
+    span: &Range<usize>,
+    attributes: &[HtmlAttribute<'_>],
+    is_start: bool,
+) -> bool {
+    let slash = span.end.saturating_sub(2);
+    !is_start
+        && !attributes.last().is_some_and(|attr| {
+            raw.substr_range(attr.source)
+                .is_some_and(|range| range.end > slash)
+        })
 }
 
 /// An element being left out with its subtree: its lowercased name, the
