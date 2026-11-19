@@ -30,6 +30,17 @@ pub struct Extraction {
     pub issues: Vec<Issue>,
 }
 
+#[cfg(test)]
+impl Extraction {
+    /// The text of every block, in order, for a test asserting on it.
+    pub(crate) fn texts(&self) -> Vec<String> {
+        self.blocks
+            .iter()
+            .map(|block| block.text.to_string())
+            .collect()
+    }
+}
+
 /// One redactable unit of text, addressed by the part it came from and its
 /// byte span within that part's XML.
 #[derive(Debug, Clone, PartialEq, Eq)]

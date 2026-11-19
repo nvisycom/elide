@@ -19,7 +19,7 @@ use quick_xml::escape::unescape;
 use crate::opc::attributes::TextAttribute;
 use crate::opc::block::Replacement;
 use crate::opc::part::PartPath;
-use crate::opc::xml_span::attribute_spans;
+use crate::opc::xml_span::attribute_ranges;
 
 /// A format's names and the attributes referring to them.
 #[derive(Debug, Clone, Copy)]
@@ -122,9 +122,11 @@ pub(crate) fn fit_names<'a>(
 
     // Every name, with the redaction that lands in it.
     let mut found: Vec<Found> = Vec::new();
+    let rule_attributes: Vec<TextAttribute> = names.rules.iter().map(|r| r.attribute).collect();
     for (part, raw) in parts.clone() {
-        for rule in names.rules {
-            for range in spans(part, raw, rule.attribute)? {
+        let ranges = spans(part, raw, &rule_attributes)?;
+        for (rule, ranges) in names.rules.iter().zip(ranges) {
+            for range in ranges {
                 let (inside, outside) = take_inside(pending, &range);
                 pending = outside;
                 found.push(Found {
@@ -178,9 +180,12 @@ pub(crate) fn fit_names<'a>(
     // that may refer to names of several groups is retargeted once.
     if !renamed.is_empty() {
         let mut retargeted: HashSet<(PartPath, usize)> = HashSet::new();
+        let reference_attributes: Vec<TextAttribute> =
+            names.references.iter().map(|r| r.attribute).collect();
         for (part, raw) in parts {
-            for reference in names.references {
-                for range in spans(part, raw, reference.attribute)? {
+            let ranges = spans(part, raw, &reference_attributes)?;
+            for (reference, ranges) in names.references.iter().zip(ranges) {
+                for range in ranges {
                     if retargeted.contains(&(part.clone(), range.start)) {
                         continue;
                     }
@@ -206,10 +211,14 @@ pub(crate) fn fit_names<'a>(
     Ok(out)
 }
 
-/// The value ranges of `attribute` in `raw`.
-fn spans(part: &PartPath, raw: &str, attribute: TextAttribute) -> Result<Vec<Range<usize>>> {
-    attribute_spans(raw, &[attribute])
-        .map(|spans| spans.into_iter().map(|span| span.range).collect())
+/// The value ranges in `raw` of each of `attributes`, one list per attribute,
+/// read in one pass over the part.
+fn spans(
+    part: &PartPath,
+    raw: &str,
+    attributes: &[TextAttribute],
+) -> Result<Vec<Vec<Range<usize>>>> {
+    attribute_ranges(raw, attributes)
         .map_err(|()| Error::malformed(format!("`{part}` malformed XML")))
 }
 

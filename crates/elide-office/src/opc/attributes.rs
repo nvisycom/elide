@@ -7,7 +7,7 @@
 //! for detection like element text, through the format's
 //! [`PartClassifier::text_attributes`](crate::opc::PartClassifier::text_attributes).
 //! A hidden one (alternative text, a tooltip) is stripped by
-//! [`StripAttributes`] and recorded.
+//! [`HiddenAttributes`] and recorded.
 
 use elide_codec::extract::ItemFlag;
 use elide_core::entity::builtins;
@@ -94,15 +94,54 @@ impl Collaboration {
     }
 }
 
-/// Element rules that remove the attributes `attributes` from every element,
-/// all of them the one item of hidden content `content`.
+/// Element rules for the hidden attributes `attributes`, all of them the one
+/// item of hidden content `content`: each is removed from every element, or,
+/// for attributes a format requires and so cannot remove, given the neutral
+/// `value`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct StripAttributes {
+pub(crate) struct HiddenAttributes {
     pub(crate) content: HiddenContent,
     pub(crate) attributes: &'static [TextAttribute],
+    /// The neutral value each attribute is given, or `None` to remove it.
+    pub(crate) value: Option<&'static str>,
 }
 
-impl Rules for StripAttributes {
+impl HiddenAttributes {
+    /// Rules removing `attributes`, the hidden content `content`.
+    pub(crate) const fn strip(
+        content: HiddenContent,
+        attributes: &'static [TextAttribute],
+    ) -> Self {
+        Self {
+            content,
+            attributes,
+            value: None,
+        }
+    }
+
+    /// Rules giving `attributes` the neutral `value`, the hidden content
+    /// `content`.
+    pub(crate) const fn neutralize(
+        content: HiddenContent,
+        attributes: &'static [TextAttribute],
+        value: &'static str,
+    ) -> Self {
+        Self {
+            content,
+            attributes,
+            value: Some(value),
+        }
+    }
+
+    /// Whether `attribute` on `element` is one of these.
+    fn matches(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool {
+        self.attributes
+            .iter()
+            .any(|text| text.matches(element, attribute.name))
+    }
+}
+
+impl Rules for HiddenAttributes {
     fn content(&self) -> Option<HiddenContent> {
         Some(self.content)
     }
@@ -112,33 +151,7 @@ impl Rules for StripAttributes {
     }
 
     fn removes_attribute(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool {
-        self.attributes
-            .iter()
-            .any(|text| text.matches(element, attribute.name))
-    }
-}
-
-/// Element rules that give the attributes `attributes` the neutral `value`, for
-/// attributes a format requires and so cannot remove, all of them the one item
-/// of hidden content `content`.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NeutralizeAttributes {
-    pub(crate) content: HiddenContent,
-    pub(crate) attributes: &'static [TextAttribute],
-    pub(crate) value: &'static str,
-}
-
-impl Rules for NeutralizeAttributes {
-    fn content(&self) -> Option<HiddenContent> {
-        Some(self.content)
-    }
-
-    fn element(&self, _name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
-        Action::Keep
-    }
-
-    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
-        false
+        self.value.is_none() && self.matches(element, attribute)
     }
 
     fn neutralizes_attribute(
@@ -146,10 +159,7 @@ impl Rules for NeutralizeAttributes {
         element: Name<'_>,
         attribute: &Attribute<'_>,
     ) -> Option<&'static str> {
-        self.attributes
-            .iter()
-            .any(|text| text.matches(element, attribute.name))
-            .then_some(self.value)
+        self.value.filter(|_| self.matches(element, attribute))
     }
 }
 
@@ -160,9 +170,9 @@ pub(crate) const NEUTRAL_DATE: &str = "1970-01-01T00:00:00Z";
 /// Alternative text, in every format: the description and title of a drawing
 /// or picture, and a legacy VML shape's alternative text and title, which may
 /// hold the file name the picture was inserted from.
-pub(crate) const ALTERNATIVE_TEXT: StripAttributes = StripAttributes {
-    content: HiddenContent::AlternativeText,
-    attributes: &[
+pub(crate) const ALTERNATIVE_TEXT: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::AlternativeText,
+    &[
         TextAttribute::new((Ns::Any, Local::Exact("docPr")), (Ns::None, "descr")),
         TextAttribute::new((Ns::Any, Local::Exact("docPr")), (Ns::None, "title")),
         TextAttribute::new((Ns::Any, Local::Exact("cNvPr")), (Ns::None, "descr")),
@@ -174,17 +184,17 @@ pub(crate) const ALTERNATIVE_TEXT: StripAttributes = StripAttributes {
             (Ns::In(OFFICE), "title"),
         ),
     ],
-};
+);
 
 /// Tooltips, in every format: the text a hyperlink shows on hover.
-pub(crate) const TOOLTIPS: StripAttributes = StripAttributes {
-    content: HiddenContent::AlternativeText,
-    attributes: &[
+pub(crate) const TOOLTIPS: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::AlternativeText,
+    &[
         TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::Any, "tooltip")),
         TextAttribute::new((Ns::Any, Local::Exact("hlinkClick")), (Ns::None, "tooltip")),
         TextAttribute::new((Ns::Any, Local::Exact("hlinkHover")), (Ns::None, "tooltip")),
     ],
-};
+);
 
 /// The legacy VML namespace.
 const VML: &str = "urn:schemas-microsoft-com:vml";
@@ -205,10 +215,7 @@ mod tests {
     fn strips_a_named_attribute_from_any_namespace() {
         let raw =
             r#"<p:cNvPr xmlns:p="urn:p" id="2" name="Picture 1" descr="C:\Users\jane\photo.jpg"/>"#;
-        let rules = StripAttributes {
-            content: HiddenContent::AlternativeText,
-            attributes: DESCRIPTION,
-        };
+        let rules = HiddenAttributes::strip(HiddenContent::AlternativeText, DESCRIPTION);
         let edited = expect_edit(raw, &rules);
         assert_eq!(edited.count, 1);
         assert_eq!(
@@ -223,11 +230,7 @@ mod tests {
             (Ns::Any, Local::Exact("cm")),
             (Ns::None, "created"),
         )];
-        let rules = NeutralizeAttributes {
-            content: HiddenContent::Comment,
-            attributes: CREATED,
-            value: NEUTRAL_DATE,
-        };
+        let rules = HiddenAttributes::neutralize(HiddenContent::Comment, CREATED, NEUTRAL_DATE);
         let raw = r#"<cm id="1" created="2024-05-06T07:08:09.123"/>"#;
         let edited = expect_edit(raw, &rules);
         assert_eq!(

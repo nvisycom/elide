@@ -23,9 +23,12 @@ use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 use quick_xml::events::Event;
 
 use super::SheetClassifier;
+use super::names::{
+    DEFINED_NAME, HYPERLINK_LOCATION, SHEET_NAME, TABLE_COLUMN_NAME, TABLE_DISPLAY_NAME, TABLE_NAME,
+};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader, splice};
-use crate::opc::{Collaboration, Ns, PartKind, StripAttributes, TextAttribute, malformed_xml};
+use crate::opc::{Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, malformed_xml};
 
 /// The SpreadsheetML main namespace.
 const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -39,62 +42,40 @@ const XR6: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revisi
 const XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
 
 /// The revision ids Excel stamps on the workbook, sheets, and tables.
-const EDITING_SESSION_IDS: Declared = Declared {
-    content: HiddenContent::EditingSessionId,
-    remove: &[(XR, "revisionPtr")],
-    unwrap: &[],
-    attributes: &[
+const EDITING_SESSION_IDS: Declared =
+    Declared::removing(HiddenContent::EditingSessionId, &[(XR, "revisionPtr")]).with_attributes(&[
         (XR, Local::Any),
         (XR2, Local::Any),
         (XR3, Local::Any),
         (XR6, Local::Any),
         (XR10, Local::Any),
-    ],
-};
+    ]);
 
 /// The absolute path the workbook was last saved to.
-const FILE_PATH: Declared = Declared {
-    content: HiddenContent::FilePath,
-    remove: &[(X15AC, "absPath")],
-    unwrap: &[],
-    attributes: &[],
-};
+const FILE_PATH: Declared = Declared::removing(HiddenContent::FilePath, &[(X15AC, "absPath")]);
 
 /// The file-sharing reservation: a user name and a password hash.
-const CREDENTIALS: Declared = Declared {
-    content: HiddenContent::Credential,
-    remove: &[(SML, "fileSharing")],
-    unwrap: &[],
-    attributes: &[],
-};
+const CREDENTIALS: Declared =
+    Declared::removing(HiddenContent::Credential, &[(SML, "fileSharing")]);
 
 /// The workbook's list of linked external workbooks.
-const EXTERNAL_WORKBOOKS: Declared = Declared {
-    content: HiddenContent::Link,
-    remove: &[(SML, "externalReferences")],
-    unwrap: &[],
-    attributes: &[],
-};
+const EXTERNAL_WORKBOOKS: Declared =
+    Declared::removing(HiddenContent::Link, &[(SML, "externalReferences")]);
 
 /// The threaded-comments namespace.
 const THREADED: &str = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 
 /// When a threaded comment was written.
-const COMMENT_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::Comment,
-    attributes: &[TextAttribute::new(
+const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::Comment,
+    &[TextAttribute::new(
         (Ns::In(THREADED), Local::Exact("threadedComment")),
         (Ns::None, "dT"),
     )],
-};
+);
 
 /// A threaded comment's mentions.
-const MENTIONS: Declared = Declared {
-    content: HiddenContent::Comment,
-    remove: &[(THREADED, "mentions")],
-    unwrap: &[],
-    attributes: &[],
-};
+const MENTIONS: Declared = Declared::removing(HiddenContent::Comment, &[(THREADED, "mentions")]);
 
 /// The legacy VML namespace.
 const VML: &str = "urn:schemas-microsoft-com:vml";
@@ -213,31 +194,6 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
     }))
 }
 
-/// A sheet's name, shown on its tab.
-pub(super) const SHEET_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("sheet")), (Ns::None, "name"));
-
-/// A defined name.
-pub(super) const DEFINED_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("definedName")), (Ns::None, "name"));
-
-/// A table's name.
-pub(super) const TABLE_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("table")), (Ns::None, "name"));
-
-/// A table's display name, the one formulas use.
-pub(super) const TABLE_DISPLAY_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("table")), (Ns::None, "displayName"));
-
-/// A table column's name, its header.
-pub(super) const TABLE_COLUMN_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("tableColumn")), (Ns::None, "name"));
-
-/// Where a hyperlink inside the workbook goes: a defined name or a
-/// sheet-qualified cell.
-pub(super) const HYPERLINK_LOCATION: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "location"));
-
 /// The text attributes a workbook surfaces for detection: its sheet, defined,
 /// table, and table column names and the hyperlink locations that refer to
 /// them (all fitted to Excel's rules when redacted, see
@@ -312,7 +268,7 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, part_names, read_part};
+    use crate::fixtures::{pack_parts, part_names, read_text_part};
     use crate::opc::sanitize::sanitize;
     use crate::opc::xml_edit::expect_edit;
 
@@ -407,18 +363,14 @@ mod tests {
             &SheetClassifier,
         )
         .unwrap();
-        let vml =
-            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
-                .unwrap();
+        let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(!vml.contains("Note") && vml.contains("Button"), "{vml}");
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
 
         // Redacted comments keep their notes.
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
-        let vml =
-            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
-                .unwrap();
+        let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(vml.contains("Note"), "{vml}");
     }
 
@@ -446,9 +398,7 @@ mod tests {
     fn flagging_every_comment_empties_each_note_and_keeps_its_shape() {
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
         let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
-        let vml =
-            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
-                .unwrap();
+        let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(!vml.contains("<div>Note</div>"), "{vml}");
         assert!(vml.contains(r#"ObjectType="Note""#), "{vml}");
         assert!(vml.contains("<x:Row>0</x:Row>"), "{vml}");

@@ -50,6 +50,18 @@ pub fn read_part(package: &[u8], name: &str) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+/// Read one text part out of an OPC package by its full name, as UTF-8.
+///
+/// # Panics
+///
+/// Panics if the package cannot be opened, the part is absent, or it is not
+/// valid UTF-8: a test reading a part it expects to be there.
+#[must_use]
+pub fn read_text_part(package: &[u8], name: &str) -> String {
+    let bytes = read_part(package, name).unwrap_or_else(|| panic!("part `{name}` is missing"));
+    String::from_utf8(bytes).unwrap_or_else(|_| panic!("part `{name}` is not valid UTF-8"))
+}
+
 /// Every part name in the package, in archive order.
 ///
 /// Useful to sweep the whole package for leaked values.

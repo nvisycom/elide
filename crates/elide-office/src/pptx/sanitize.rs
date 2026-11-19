@@ -14,41 +14,35 @@ use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 use super::SlideFormat;
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
-use crate::opc::{
-    Collaboration, NEUTRAL_DATE, NeutralizeAttributes, Ns, PartKind, StripAttributes, TextAttribute,
-};
+use crate::opc::{Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns, PartKind, TextAttribute};
 
 /// The PowerPoint 2010 extension namespace (slide creation ids).
 const P14: &str = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 
 /// The creation id each slide carries.
-const EDITING_SESSION_IDS: Declared = Declared {
-    content: HiddenContent::EditingSessionId,
-    remove: &[(P14, "creationId")],
-    unwrap: &[],
-    attributes: &[],
-};
+const EDITING_SESSION_IDS: Declared =
+    Declared::removing(HiddenContent::EditingSessionId, &[(P14, "creationId")]);
 
 /// When a legacy comment was written, and a modern comment's start and due
 /// dates.
-const COMMENT_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::Comment,
-    attributes: &[
+const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::Comment,
+    &[
         TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "dt")),
         TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "startDate")),
         TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "dueDate")),
     ],
-};
+);
 
 /// When a modern comment or reply was written, a date the format requires.
-const CREATION_DATES: NeutralizeAttributes = NeutralizeAttributes {
-    content: HiddenContent::Comment,
-    attributes: &[
+const CREATION_DATES: HiddenAttributes = HiddenAttributes::neutralize(
+    HiddenContent::Comment,
+    &[
         TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "created")),
         TextAttribute::new((Ns::Any, Local::Exact("reply")), (Ns::None, "created")),
     ],
-    value: NEUTRAL_DATE,
-};
+    NEUTRAL_DATE,
+);
 
 /// The text attributes a presentation surfaces for detection: its section and
 /// custom-show names, a comment's title, and the names, initials, and accounts
@@ -86,7 +80,7 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, part_names, read_part};
+    use crate::fixtures::{pack_parts, part_names, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::sanitize::sanitize;
 
@@ -152,17 +146,13 @@ mod tests {
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
-        let comments =
-            String::from_utf8(read_part(&out, "ppt/comments/comment1.xml").unwrap()).unwrap();
+        let comments = read_text_part(&out, "ppt/comments/comment1.xml");
         assert!(!comments.contains("dt="), "{comments}");
 
-        let texts: Vec<String> = OoxmlPackage::<SlideFormat>::open(&out)
+        let texts = OoxmlPackage::<SlideFormat>::open(&out)
             .unwrap()
             .extract()
-            .blocks
-            .iter()
-            .map(|block| block.text.to_string())
-            .collect();
+            .texts();
         assert!(texts.iter().any(|text| text == "Jane Roe"), "{texts:?}");
         assert!(texts.iter().any(|text| text == "JR"), "{texts:?}");
     }

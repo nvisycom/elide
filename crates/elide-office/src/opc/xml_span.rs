@@ -263,8 +263,62 @@ pub(crate) fn attribute_spans(
     if attributes.is_empty() {
         return Ok(Vec::new());
     }
-    let mut reader = NsReader::from_str(raw);
     let mut spans = Vec::new();
+    visit_attributes(raw, |element, attribute, attr| {
+        let named = attributes
+            .iter()
+            .find(|text| text.matches(element, attribute));
+        if let Some(named) = named
+            && !attr.value.is_empty()
+        {
+            spans.push(Span {
+                collaboration: named.collaboration,
+                ..Span::new(value_source(raw, attr)?, BlockKind::Attribute)
+            });
+        }
+        Ok(())
+    })?;
+    Ok(spans)
+}
+
+/// The value ranges of the attributes of `raw` that `attributes` names, one
+/// list per entry of `attributes`, each in document order, read in one pass;
+/// an empty value is skipped, and an attribute two entries name is in both
+/// lists. Errs on malformed XML.
+pub(crate) fn attribute_ranges(
+    raw: &str,
+    attributes: &[TextAttribute],
+) -> std::result::Result<Vec<Vec<Range<usize>>>, ()> {
+    let mut ranges = vec![Vec::new(); attributes.len()];
+    if attributes.is_empty() {
+        return Ok(ranges);
+    }
+    visit_attributes(raw, |element, attribute, attr| {
+        let mut named = attributes
+            .iter()
+            .zip(&mut ranges)
+            .filter(|(text, _)| text.matches(element, attribute))
+            .peekable();
+        if named.peek().is_none() || attr.value.is_empty() {
+            return Ok(());
+        }
+        let value = value_source(raw, attr)?;
+        for (_, ranges) in named {
+            ranges.push(value.clone());
+        }
+        Ok(())
+    })?;
+    Ok(ranges)
+}
+
+/// Call `visit` with every attribute of `raw`: the element it sits on, its own
+/// name, both resolved, and the attribute as read. Errs on malformed XML, or
+/// when `visit` does.
+fn visit_attributes(
+    raw: &str,
+    mut visit: impl FnMut(Name<'_>, Name<'_>, &Attribute<'_>) -> std::result::Result<(), ()>,
+) -> std::result::Result<(), ()> {
+    let mut reader = NsReader::from_str(raw);
     loop {
         let (resolved, event) = reader.read_resolved_event().map_err(|_| ())?;
         let element_ns = bound(&resolved);
@@ -285,20 +339,10 @@ pub(crate) fn attribute_spans(
                 namespace: attribute_ns.as_deref(),
                 local: local.into_inner(),
             };
-            let named = attributes
-                .iter()
-                .find(|text| text.matches(element, attribute));
-            if let Some(named) = named
-                && !attr.value.is_empty()
-            {
-                spans.push(Span {
-                    collaboration: named.collaboration,
-                    ..Span::new(value_source(raw, &attr)?, BlockKind::Attribute)
-                });
-            }
+            visit(element, attribute, &attr)?;
         }
     }
-    Ok(spans)
+    Ok(())
 }
 
 /// The external-hyperlink `Target` attribute *value* spans of a relationships

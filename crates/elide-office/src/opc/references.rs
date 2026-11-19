@@ -68,8 +68,4 @@ impl Rules for References<'_> {
         }
         Action::Keep
     }
-
-    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
-        false
-    }
 }

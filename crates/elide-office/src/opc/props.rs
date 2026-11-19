@@ -20,7 +20,7 @@ use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 use quick_xml::{Reader, XmlVersion};
 
-use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
+use crate::opc::xml_edit::{Action, Attribute, Name, Rules, bom_len};
 
 /// The OOXML namespaces whose elements are property fields: core properties,
 /// the Dublin Core and DC terms elements core properties use, extended (app)
@@ -148,10 +148,6 @@ impl Rules for UnsurfacedProperties {
             Action::Keep
         }
     }
-
-    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
-        false
-    }
 }
 
 /// A field an element holds: its key in the part, where its value sits, what
@@ -271,7 +267,7 @@ struct Reading {
 #[must_use]
 pub fn fields(xml: &[u8]) -> Vec<Field> {
     // Not valid UTF-8: no fields are readable (a property part is always UTF-8).
-    let Some(text) = strip_bom(xml) else {
+    let Some((_, text)) = split_bom(xml) else {
         return Vec::new();
     };
     let mut reader = Reader::from_str(text);
@@ -287,7 +283,7 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
                 // A custom property holding a list reads one entry per line,
                 // so no match runs from one entry into the next.
                 if let Some(open) = &mut reading
-                    && TEXT_TYPES.contains(&local_name(&elem).as_str())
+                    && is_text_type(&elem)
                     && !open.value.is_empty()
                 {
                     open.value.push('\n');
@@ -375,10 +371,9 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
 /// metadata part that cannot be rewritten is better left intact than corrupted.
 #[must_use]
 pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
-    let had_bom = xml.starts_with(BOM);
     // Not valid UTF-8: fail closed by preserving the original bytes rather than
     // emitting a blank part. A property part is always UTF-8 XML in practice.
-    let Some(text) = strip_bom(xml) else {
+    let Some((bom, text)) = split_bom(xml) else {
         return Bytes::copy_from_slice(xml);
     };
     let value_of = |key: &str| {
@@ -389,7 +384,8 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
     };
     let mut reader = Reader::from_str(text);
     reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::new());
+    // The output keeps the part's BOM, written ahead of everything else.
+    let mut writer = Writer::new(bom.as_bytes().to_vec());
     let mut walk = Walk::default();
     // Depth inside a field being cleared, so nested text is dropped and the
     // elements re-emit empty.
@@ -422,7 +418,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
         }
         if let Some((property, value)) = held.take() {
             match event {
-                Event::Start(elem) if TEXT_TYPES.contains(&local_name(&elem).as_str()) => {
+                Event::Start(elem) if is_text_type(&elem) => {
                     walk.enter(&elem);
                     let _ = writer.write_event(Event::Start(property));
                     let _ = writer.write_event(Event::Start(elem));
@@ -512,14 +508,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
         }
     }
 
-    let mut out = writer.into_inner();
-    if had_bom {
-        let mut with_bom = Vec::with_capacity(out.len() + BOM.len());
-        with_bom.extend_from_slice(BOM);
-        with_bom.append(&mut out);
-        out = with_bom;
-    }
-    Bytes::from(out)
+    Bytes::from(writer.into_inner())
 }
 
 /// `elem` with its `name` attribute set to `name`, every other attribute as it
@@ -536,14 +525,19 @@ fn renamed(elem: &BytesStart<'_>, name: &str) -> BytesStart<'static> {
     renamed
 }
 
-/// The UTF-8 byte-order mark some Office parts carry.
-const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+/// `bytes` as `&str`, split into the leading byte-order mark some Office parts
+/// carry (empty when absent) and the text after it, or `None` when the bytes
+/// are not valid UTF-8 so a caller can fail closed rather than silently emit
+/// nothing.
+fn split_bom(bytes: &[u8]) -> Option<(&str, &str)> {
+    let raw = std::str::from_utf8(bytes).ok()?;
+    Some(raw.split_at(bom_len(raw)))
+}
 
-/// `bytes` as `&str`, skipping a leading BOM, or `None` when the bytes are not
-/// valid UTF-8 so a caller can fail closed rather than silently emit nothing.
-fn strip_bom(bytes: &[u8]) -> Option<&str> {
-    let bytes = bytes.strip_prefix(BOM).unwrap_or(bytes);
-    std::str::from_utf8(bytes).ok()
+/// Whether `elem` is a typed value holding text (`vt:lpwstr` and the like),
+/// matched by local name.
+fn is_text_type(elem: &BytesStart<'_>) -> bool {
+    TEXT_TYPES.contains(&elem.local_name().into_inner())
 }
 
 /// The local name of an element, dropping any namespace prefix (`dc:creator` →
@@ -809,6 +803,7 @@ mod tests {
 
     #[test]
     fn strip_preserves_a_leading_bom() {
+        const BOM: &[u8] = "\u{feff}".as_bytes();
         let mut with_bom = BOM.to_vec();
         with_bom.extend_from_slice(CORE);
         let out = rewrite(&with_bom, &[("creator", "")]);

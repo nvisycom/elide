@@ -30,7 +30,7 @@ use super::WordFormat;
 use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
-use crate::opc::{Collaboration, Names, Ns, PartKind, StripAttributes, TextAttribute};
+use crate::opc::{Collaboration, HiddenAttributes, Names, Ns, PartKind, TextAttribute};
 
 /// The WordprocessingML main namespace.
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -41,57 +41,41 @@ const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
 
 /// The editing-session ids: the `rsid` table and attributes, and the paragraph
 /// and text ids.
-const EDITING_SESSION_IDS: Declared = Declared {
-    content: HiddenContent::EditingSessionId,
-    remove: &[(W, "rsids")],
-    unwrap: &[],
-    attributes: &[
+const EDITING_SESSION_IDS: Declared =
+    Declared::removing(HiddenContent::EditingSessionId, &[(W, "rsids")]).with_attributes(&[
         (W, Local::Prefix("rsid")),
         (W14, Local::Exact("paraId")),
         (W14, Local::Exact("textId")),
-    ],
-};
+    ]);
 
 /// The document ids.
-const DOCUMENT_IDS: Declared = Declared {
-    content: HiddenContent::DocumentId,
-    remove: &[(W14, "docId"), (W15, "docId")],
-    unwrap: &[],
-    attributes: &[],
-};
+const DOCUMENT_IDS: Declared =
+    Declared::removing(HiddenContent::DocumentId, &[(W14, "docId"), (W15, "docId")]);
 
 /// Range permissions, which name the users allowed to edit, and document and
 /// write protection, which carry a password hash.
-const CREDENTIALS: Declared = Declared {
-    content: HiddenContent::Credential,
-    remove: &[
+const CREDENTIALS: Declared = Declared::removing(
+    HiddenContent::Credential,
+    &[
         (W, "permStart"),
         (W, "permEnd"),
         (W, "documentProtection"),
         (W, "writeProtection"),
     ],
-    unwrap: &[],
-    attributes: &[],
-};
+);
 
 /// Settings that reach outside the document: the attached template and an XSLT
 /// save transform. Their relationships are external, so the reference cascade
 /// would drop them too; naming them keeps a setting with no relationship from
 /// surviving.
-const LINKS: Declared = Declared {
-    content: HiddenContent::Link,
-    remove: &[(W, "attachedTemplate"), (W, "saveThroughXslt")],
-    unwrap: &[],
-    attributes: &[],
-};
+const LINKS: Declared = Declared::removing(
+    HiddenContent::Link,
+    &[(W, "attachedTemplate"), (W, "saveThroughXslt")],
+);
 
 /// The mail-merge data source, inline or linked.
-const DATA_CONNECTIONS: Declared = Declared {
-    content: HiddenContent::DataConnection,
-    remove: &[(W, "mailMerge")],
-    unwrap: &[],
-    attributes: &[],
-};
+const DATA_CONNECTIONS: Declared =
+    Declared::removing(HiddenContent::DataConnection, &[(W, "mailMerge")]);
 
 /// The elements that accept every tracked revision.
 const REVISIONS: Declared = Declared {
@@ -130,70 +114,54 @@ const REVISIONS: Declared = Declared {
 };
 
 /// The comment anchors in the stories.
-const COMMENT_ANCHORS: Declared = Declared {
-    content: HiddenContent::Comment,
-    remove: &[
+const COMMENT_ANCHORS: Declared = Declared::removing(
+    HiddenContent::Comment,
+    &[
         (W, "commentRangeStart"),
         (W, "commentRangeEnd"),
         (W, "commentReference"),
     ],
-    unwrap: &[],
-    attributes: &[],
-};
+);
 
 /// Document variables: name-value metadata no field surfaces.
-const VARIABLES: Declared = Declared {
-    content: HiddenContent::Properties,
-    remove: &[(W, "docVars")],
-    unwrap: &[],
-    attributes: &[],
-};
+const VARIABLES: Declared = Declared::removing(HiddenContent::Properties, &[(W, "docVars")]);
 
 /// Content-control bindings into the custom XML data store.
-const BINDINGS: Declared = Declared {
-    content: HiddenContent::CustomData,
-    remove: &[(W, "dataBinding")],
-    unwrap: &[],
-    attributes: &[],
-};
+const BINDINGS: Declared = Declared::removing(HiddenContent::CustomData, &[(W, "dataBinding")]);
 
 /// A legacy form field's help and status text, and a content control's title
 /// and tag: labels shown only while editing.
-const FORM_LABELS: Declared = Declared {
-    content: HiddenContent::FormField,
-    remove: &[(W, "helpText"), (W, "statusText"), (W, "alias"), (W, "tag")],
-    unwrap: &[],
-    attributes: &[],
-};
+const FORM_LABELS: Declared = Declared::removing(
+    HiddenContent::FormField,
+    &[(W, "helpText"), (W, "statusText"), (W, "alias"), (W, "tag")],
+);
 
 /// A table's caption and description.
-const TABLE_ALTERNATIVE_TEXT: Declared = Declared {
-    content: HiddenContent::AlternativeText,
-    remove: &[(W, "tblCaption"), (W, "tblDescription")],
-    unwrap: &[],
-    attributes: &[],
-};
+const TABLE_ALTERNATIVE_TEXT: Declared = Declared::removing(
+    HiddenContent::AlternativeText,
+    &[(W, "tblCaption"), (W, "tblDescription")],
+);
 
 /// When a comment was written.
-const COMMENT_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::Comment,
-    attributes: &[
+const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::Comment,
+    &[
         TextAttribute::new((Ns::In(W), Local::Exact("comment")), (Ns::In(W), "date")),
         TextAttribute::new(
             (Ns::Any, Local::Exact("commentExtensible")),
             (Ns::Any, "dateUtc"),
         ),
     ],
-};
+);
 
 /// When a tracked change was made.
-const CHANGE_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::TrackedChange,
-    attributes: &[TextAttribute::new(
+const CHANGE_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::TrackedChange,
+    &[TextAttribute::new(
         (Ns::In(W), Local::Any),
         (Ns::In(W), "date"),
     )],
-};
+);
 
 /// A bookmark's name, which a person may name after anyone.
 const BOOKMARK_NAME: TextAttribute =
@@ -300,7 +268,7 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, read_part};
+    use crate::fixtures::{pack_parts, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
     use crate::opc::check::check;
@@ -326,10 +294,6 @@ mod tests {
         ])
     }
 
-    fn part(package: &[u8], name: &str) -> String {
-        String::from_utf8(read_part(package, name).unwrap()).unwrap()
-    }
-
     /// A picture's payload, a VML picture bullet, and an SVG image survive
     /// the schema rebuild.
     #[test]
@@ -350,7 +314,7 @@ mod tests {
         let (out, stripped) =
             sanitize(&package, HiddenContentPolicy::default(), &WordFormat).unwrap();
         let out = out.unwrap_or(package);
-        let document = part(&out, "word/document.xml");
+        let document = read_text_part(&out, "word/document.xml");
         assert!(
             document.contains(r#"<a:blip r:embed="rId1"/>"#),
             "{document}"
@@ -359,7 +323,7 @@ mod tests {
             document.contains(r#"<v:imagedata r:id="rId1"/>"#),
             "{document}"
         );
-        assert_eq!(part(&out, "word/media/logo.svg"), svg);
+        assert_eq!(read_text_part(&out, "word/media/logo.svg"), svg);
         assert!(
             stripped
                 .iter()
@@ -398,7 +362,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-        let body = part(&out, "word/document.xml");
+        let body = read_text_part(&out, "word/document.xml");
         assert!(body.contains(r#"w:name="PERSON_""#), "{body}");
         assert!(body.contains(r#"w:anchor="PERSON_""#), "{body}");
     }
@@ -408,7 +372,7 @@ mod tests {
         let (out, stripped) =
             sanitize(&document(), HiddenContentPolicy::default(), &WordFormat).unwrap();
         let out = out.unwrap();
-        let body = part(&out, "word/document.xml");
+        let body = read_text_part(&out, "word/document.xml");
         for hidden in [
             "photo.jpg",
             "Jane's page",
@@ -436,15 +400,13 @@ mod tests {
         let (out, _) = sanitize(&document(), policy, &WordFormat).unwrap();
         let out = out.unwrap();
         for name in ["word/document.xml", "word/comments.xml"] {
-            assert!(!part(&out, name).contains("w:date="), "a date in {name}");
+            assert!(
+                !read_text_part(&out, name).contains("w:date="),
+                "a date in {name}"
+            );
         }
         let package = OoxmlPackage::<WordFormat>::open(&out).unwrap();
-        let texts: Vec<String> = package
-            .extract()
-            .blocks
-            .iter()
-            .map(|block| block.text.to_string())
-            .collect();
+        let texts = package.extract().texts();
         for author in ["Jane Roe", "John Doe", "JD"] {
             assert!(
                 texts.iter().any(|text| text == author),

@@ -79,7 +79,9 @@ pub(crate) trait Rules {
     fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action;
 
     /// Whether to remove `attribute` from a kept element `element`.
-    fn removes_attribute(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool;
+    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
+        false
+    }
 
     /// The neutral value to give `attribute` of a kept element `element`, for
     /// one that cannot be removed. An attribute already holding it is left as
@@ -189,6 +191,28 @@ pub(crate) struct Declared {
     pub(crate) attributes: &'static [(&'static str, Local)],
 }
 
+impl Declared {
+    /// Rules removing the elements `remove`, the hidden content `content`.
+    pub(crate) const fn removing(content: HiddenContent, remove: &'static [QName]) -> Self {
+        Self {
+            content,
+            remove,
+            unwrap: &[],
+            attributes: &[],
+        }
+    }
+
+    /// These rules, also removing the attributes `attributes` from every
+    /// element kept.
+    pub(crate) const fn with_attributes(
+        mut self,
+        attributes: &'static [(&'static str, Local)],
+    ) -> Self {
+        self.attributes = attributes;
+        self
+    }
+}
+
 impl Rules for Declared {
     fn content(&self) -> Option<HiddenContent> {
         Some(self.content)
@@ -240,10 +264,6 @@ impl Rules for Unchanged {
 
     fn element(&self, _name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
         Action::Keep
-    }
-
-    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
-        false
     }
 }
 
@@ -429,7 +449,7 @@ fn attributes<'a>(
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
 /// skips it and reports positions past it, so spans over the original bytes must
 /// add it back.
-fn bom_len(raw: &str) -> usize {
+pub(crate) fn bom_len(raw: &str) -> usize {
     if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 

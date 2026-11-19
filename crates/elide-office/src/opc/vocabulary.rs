@@ -205,10 +205,6 @@ impl Rules for Vocabulary {
         }
         Action::Keep
     }
-
-    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
-        false
-    }
 }
 
 #[cfg(test)]
