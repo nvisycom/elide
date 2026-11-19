@@ -21,11 +21,13 @@ use quick_xml::writer::Writer;
 use quick_xml::{Reader, XmlVersion};
 
 use crate::opc::ns::{CORE_PROPERTIES, CUSTOM_PROPERTIES, DC, DCTERMS, EXTENDED_PROPERTIES};
+use crate::opc::schema;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules, bom_len};
 
 /// The OOXML namespaces whose elements are property fields: core properties,
 /// the Dublin Core and DC terms elements core properties use, extended (app)
-/// properties, and custom properties.
+/// properties, and custom properties. A strict namespace is read as its
+/// transitional twin.
 const PROPERTY_NAMESPACES: [&str; 5] = [
     CORE_PROPERTIES,
     DC,
@@ -124,9 +126,8 @@ impl Rules for UnsurfacedProperties {
     }
 
     fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
-        let property = PROPERTY_NAMESPACES
-            .iter()
-            .any(|namespace| name.in_namespace(namespace));
+        let namespace = name.namespace.map(schema::transitional);
+        let property = namespace.is_some_and(|namespace| PROPERTY_NAMESPACES.contains(&namespace));
         // A custom property is a field only by its name, as [`fields`] reads
         // it: one without a readable name is never surfaced.
         let named = || {
@@ -138,7 +139,7 @@ impl Rules for UnsurfacedProperties {
         };
         let surfaced = ELEMENT_FIELDS.contains(&name.local)
             || LISTS.contains(&name.local)
-            || (name.local == CUSTOM_PROPERTY && name.in_namespace(CUSTOM_PROPERTIES) && named());
+            || (name.local == CUSTOM_PROPERTY && namespace == Some(CUSTOM_PROPERTIES) && named());
         if property && !PROPERTY_ROOTS.contains(&name.local) && !surfaced {
             Action::Remove
         } else {
@@ -619,6 +620,21 @@ mod tests {
         let edited = expect_edit(unnamed, &UnsurfacedProperties);
         assert_eq!(edited.count, 1);
         assert!(!edited.text.contains("Jane Roe"));
+    }
+
+    #[test]
+    fn strict_property_parts_keep_only_the_surfaced_fields() {
+        let app = r#"<Properties xmlns="http://purl.oclc.org/ooxml/officeDocument/extendedProperties" xmlns:vt="http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes"><Company>Acme</Company><TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Secret sheet</vt:lpstr></vt:vector></TitlesOfParts><Application>Microsoft Excel</Application></Properties>"#;
+        let edited = expect_edit(app, &UnsurfacedProperties);
+        assert_eq!(edited.count, 1);
+        assert!(edited.text.contains("Acme") && edited.text.contains("Secret sheet"));
+        assert!(!edited.text.contains("Excel"));
+
+        let custom = r#"<Properties xmlns="http://purl.oclc.org/ooxml/officeDocument/customProperties" xmlns:vt="http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3"><vt:lpwstr>Unnamed</vt:lpwstr></property></Properties>"#;
+        let edited = expect_edit(custom, &UnsurfacedProperties);
+        assert_eq!(edited.count, 1);
+        assert!(edited.text.contains("Jane Roe"));
+        assert!(!edited.text.contains("Unnamed"));
     }
 
     const APP: &[u8] = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>Normal.dotm</Template><TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Payroll</vt:lpstr><vt:lpstr/><vt:lpstr>Jane Roe</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#;

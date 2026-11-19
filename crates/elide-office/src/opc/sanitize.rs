@@ -17,6 +17,9 @@
 //!   extensions), links to external data, printer settings, signatures, and
 //!   application-private data; every external relationship but a hyperlink;
 //!   and, in every kept part, alternative text, tooltips, and XML comments.
+//! - **The manifest and the relationships parts** keep only their OPC
+//!   vocabulary ([`package_xml`]): their entries with the entries' own
+//!   attributes, and namespace declarations.
 //! - **Refused**: a part the table does not recognize, or one it recognizes but
 //!   cannot redact.
 //! - **Without a schema**: a kept XML part whose content type names no root
@@ -46,6 +49,7 @@ use crate::opc::attributes::{ALTERNATIVE_TEXT, TOOLTIPS};
 use crate::opc::content_types::{self, CONTENT_TYPES_PART};
 use crate::opc::index::{Index, text};
 use crate::opc::kind::PartKind;
+use crate::opc::package_xml::{self, PackageMarkup, PackageText};
 use crate::opc::part::PartPath;
 use crate::opc::props::UnsurfacedProperties;
 use crate::opc::references::References;
@@ -151,7 +155,8 @@ pub(crate) fn remove_parts(document: &[u8], parts: HashSet<PartPath>) -> Result<
 
 /// Repack `document` without the `gone` parts: a removed part's own
 /// relationships go with it, every relationship that targets a removed part or
-/// leaves the package other than as a hyperlink is dropped from its source, and
+/// leaves the package other than as a hyperlink is dropped from its source, the
+/// manifest and relationships parts are cut to their OPC vocabulary, and
 /// every kept XML part gets the element `edits` for its path plus the removal of
 /// the elements naming a dropped relationship, and is then rebuilt from its
 /// schema when `roots` names its root. Each external relationship dropped,
@@ -191,9 +196,10 @@ fn repack(
         }
     }
 
-    // Rewrite every kept part that changes: the manifest, the relationships
-    // parts that lost entries, and the XML parts with element edits or
-    // references to dropped relationships.
+    // Rewrite every kept part that changes: the manifest and the
+    // relationships parts that lost entries or carry more than their
+    // vocabulary, and the XML parts with element edits or references to
+    // dropped relationships.
     let mut changed: HashMap<PartPath, Vec<u8>> = HashMap::new();
     for (path, bytes) in &index.parts {
         if gone.contains(path) {
@@ -203,13 +209,27 @@ fn repack(
             let edited = (!gone.is_empty())
                 .then(|| content_types::without_parts(text(path, bytes)?, &gone))
                 .transpose()?;
-            edit_part(path, bytes, edited, vec![&XmlComments], stripped)?
+            let allowlist = PackageMarkup(&package_xml::CONTENT_TYPES);
+            edit_part(
+                path,
+                bytes,
+                edited,
+                vec![&XmlComments, &allowlist, &PackageText],
+                stripped,
+            )?
         } else if path.is_relationships() {
             let edited = dropped
                 .get(path)
                 .map(|ids| relationships::without(text(path, bytes)?, ids))
                 .transpose()?;
-            edit_part(path, bytes, edited, vec![&XmlComments], stripped)?
+            let allowlist = PackageMarkup(&package_xml::RELATIONSHIPS);
+            edit_part(
+                path,
+                bytes,
+                edited,
+                vec![&XmlComments, &allowlist, &PackageText],
+                stripped,
+            )?
         } else {
             let xml = index.is_xml(path);
             if xml {

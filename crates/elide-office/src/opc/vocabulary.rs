@@ -139,4 +139,12 @@ mod tests {
         edit(raw, &vocabulary).unwrap();
         assert_eq!(vocabulary.unknown(), None);
     }
+
+    #[test]
+    fn a_strict_custom_property_part_passes() {
+        let vocabulary = Vocabulary::default();
+        let raw = r#"<Properties xmlns="http://purl.oclc.org/ooxml/officeDocument/customProperties" xmlns:vt="http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>x</vt:lpwstr></property></Properties>"#;
+        edit(raw, &vocabulary).unwrap();
+        assert_eq!(vocabulary.unknown(), None);
+    }
 }

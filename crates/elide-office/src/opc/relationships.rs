@@ -6,7 +6,9 @@
 //! image) does so through a relationship in its sidecar `_rels/<name>.rels`
 //! part; the package itself keeps its own in `_rels/.rels`. A relationship's
 //! target is a URI relative to its source part's directory, or, with
-//! `TargetMode="External"`, a URL outside the package.
+//! `TargetMode="External"`, a URL outside the package. The reader is lenient;
+//! what a relationships part may ship is cut down to its OPC vocabulary by
+//! [`package_xml`](super::package_xml).
 
 use std::collections::HashSet;
 

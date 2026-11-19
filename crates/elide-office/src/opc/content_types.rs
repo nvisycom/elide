@@ -4,6 +4,8 @@
 //! OPC types a part by an `<Override PartName="/word/document.xml" …>` for that
 //! exact part, else by a `<Default Extension="xml" …>` for its extension. Part
 //! names and extensions compare ASCII case-insensitively, as OPC requires.
+//! The reader is lenient; what the manifest may ship is cut down to its OPC
+//! vocabulary by [`package_xml`](super::package_xml).
 
 use std::collections::{HashMap, HashSet};
 

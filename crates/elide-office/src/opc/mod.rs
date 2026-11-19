@@ -19,6 +19,7 @@ pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod names;
 pub(crate) mod ns;
+pub(crate) mod package_xml;
 mod part;
 pub mod props;
 pub(crate) mod references;

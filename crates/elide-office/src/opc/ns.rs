@@ -10,6 +10,13 @@ pub(crate) const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
 /// XML Schema instance (`xsi:type` on a core property's date).
 pub(crate) const XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
+/// The content-types manifest, `[Content_Types].xml`.
+pub(crate) const CONTENT_TYPES: &str =
+    "http://schemas.openxmlformats.org/package/2006/content-types";
+/// A relationships part (`*.rels`).
+pub(crate) const RELATIONSHIPS: &str =
+    "http://schemas.openxmlformats.org/package/2006/relationships";
+
 /// Markup compatibility (`mc:`).
 pub(crate) const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
