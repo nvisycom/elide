@@ -9,7 +9,7 @@
 
 use elide_codec::{Format, FormatId};
 
-use super::ooxml::{OoxmlCodec, OoxmlLoader};
+use super::ooxml::{self, OoxmlCodec};
 use crate::docx::WordFormat;
 
 /// The DOCX codec seam: WordprocessingML over the shared OOXML adapter.
@@ -19,20 +19,16 @@ pub(crate) struct DocxCodec;
 impl OoxmlCodec for DocxCodec {
     type Format = WordFormat;
 
+    const CONTENT_TYPE: &'static str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const EXTENSION: &'static str = "docx";
     const FORMAT_ID: FormatId = FormatId::new("elide.document.docx");
     const LABEL: &'static str = "docx";
 }
 
-/// Stable [`FormatId`] for the DOCX codec.
-pub const FORMAT_ID: FormatId = DocxCodec::FORMAT_ID;
-
 /// The DOCX [`Format`]: Word documents, resolved by `.docx`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID, OoxmlLoader::<DocxCodec>::new())
-        .with_extensions(["docx"])
-        .with_content_types([
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ])
+    ooxml::format::<DocxCodec>()
 }
 
 #[cfg(test)]
@@ -53,11 +49,16 @@ mod tests {
     /// A content-types manifest typing the fixture's relationships and body.
     const CONTENT_TYPES: &[u8] = br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
 
+    /// The body part XML carrying `body_text`, as written, in one `w:t` run.
+    fn body_xml(body_text: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
+        )
+    }
+
     /// A minimal one-part `.docx` whose body carries `body_text` in a `w:t` run.
     fn docx_with_body(body_text: &str) -> ContentData {
-        let body = format!(
-            r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
-        );
+        let body = body_xml(body_text);
         let package = fixtures::pack_parts(&[
             ("[Content_Types].xml", CONTENT_TYPES),
             ("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#),
@@ -86,7 +87,7 @@ mod tests {
         // The body text is `Alice &amp; Bob`, decoded to `Alice & Bob`. A finding
         // over the whole decoded text must point back at the raw bytes including
         // the `&amp;`, one contiguous raw range, entity bytes and all.
-        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = body_xml("Alice &amp; Bob");
         let doc = decode(docx_with_body("Alice &amp; Bob"));
         let stream = &doc.body;
         let chunk = chunk_for(stream, "Alice & Bob");
@@ -110,7 +111,7 @@ mod tests {
     async fn source_span_of_just_the_decoded_entity_char_is_the_entity_raw() {
         // Redacting only the decoded `&` (offset 6..7) must point at all 5 raw
         // bytes of `&amp;`, never an empty or partial range.
-        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = body_xml("Alice &amp; Bob");
         let doc = decode(docx_with_body("Alice &amp; Bob"));
         let stream = &doc.body;
         let chunk = chunk_for(stream, "Alice & Bob");
@@ -127,7 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn source_span_of_a_finding_before_the_entity_is_one_run() {
-        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = body_xml("Alice &amp; Bob");
         let doc = decode(docx_with_body("Alice &amp; Bob"));
         let stream = &doc.body;
         let chunk = chunk_for(stream, "Alice & Bob");
@@ -152,7 +153,7 @@ mod tests {
         use elide_core::modality::text::TextReplacement;
         use elide_core::redaction::Redactions;
 
-        let raw = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let raw = body_xml("Alice Bob");
         let mut doc = decode(docx_with_body("Alice Bob"));
 
         // The raw span of "Bob" in the part, what a DOM selection yields. The

@@ -3,7 +3,8 @@
 //!
 //! `xl/workbook.xml` lists `<sheet name=".." r:id="rIdN"/>` in tab order;
 //! `xl/_rels/workbook.xml.rels` maps each `rIdN` to a target path relative to
-//! `xl/`. Joining the two yields the ordered `(name, part path)` sheets.
+//! `xl/`, read and resolved by the shared [`relationships`] reader. Joining the
+//! two yields the ordered `(name, part path)` sheets.
 
 use std::collections::HashMap;
 
@@ -12,6 +13,9 @@ use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
+use super::WORKBOOK_PART;
+use crate::opc::{PartPath, relationships};
+
 /// One worksheet: its display name and the package part path holding its cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Sheet {
@@ -19,7 +23,7 @@ pub(crate) struct Sheet {
     pub(crate) name: String,
     /// The package-absolute path of the sheet's part (e.g.
     /// `xl/worksheets/sheet1.xml`).
-    pub(crate) part: String,
+    pub(crate) part: PartPath,
 }
 
 /// The workbook's sheets in tab order, resolved from the workbook part `raw` and
@@ -29,7 +33,7 @@ pub(crate) struct Sheet {
 /// resolve is an error, not a skipped sheet, a workbook must never report a
 /// successful redaction while an unresolved worksheet's text ships unread.
 pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
-    let targets = relationship_targets(rels)?;
+    let targets = worksheet_targets(rels)?;
     let mut reader = Reader::from_str(raw);
     let mut sheets = Vec::new();
 
@@ -72,81 +76,30 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
         };
         sheets.push(Sheet {
             name,
-            part: normalize_target(target),
+            part: target.clone(),
         });
     }
     Ok(sheets)
 }
 
-/// The `Id -> Target` map of every worksheet relationship in `rels`. Only
-/// worksheet relationships are kept; the shared-strings and styles targets are
+/// The worksheet relationship type.
+const WORKSHEET_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+
+/// The `Id -> part` map of every worksheet relationship in `rels`, each target
+/// resolved against the workbook part. Only internal worksheet relationships
+/// with an id and a target are kept; the shared-strings and styles targets are
 /// resolved by their well-known paths, not through this map.
-fn relationship_targets(rels: &str) -> Result<HashMap<String, String>> {
-    const WORKSHEET_TYPE: &str =
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
-    let mut reader = Reader::from_str(rels);
-    let mut targets = HashMap::new();
-
-    loop {
-        let elem = match reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("workbook.xml.rels malformed: {e}")))?
-        {
-            Event::Eof => break,
-            Event::Empty(e) | Event::Start(e) => e,
-            _ => continue,
-        };
-        if elem.local_name().as_ref() != "Relationship" {
-            continue;
-        }
-        let mut id = None;
-        let mut target = None;
-        let mut is_worksheet = false;
-        for attr in elem.attributes() {
-            let attr =
-                attr.map_err(|e| Error::malformed(format!("workbook.xml.rels attr: {e}")))?;
-            match attr.key.local_name().as_ref() {
-                "Id" => id = Some(decode(attr.value.as_ref())?),
-                "Target" => target = Some(decode(attr.value.as_ref())?),
-                "Type" => is_worksheet = attr.value.as_ref() == WORKSHEET_TYPE,
-                _ => {}
-            }
-        }
-        if is_worksheet && let (Some(id), Some(target)) = (id, target) {
-            targets.insert(id, target);
-        }
-    }
-    Ok(targets)
-}
-
-/// Resolve a workbook-relationship `Target` to a package-absolute part path.
-///
-/// The target is relative to the workbook part's directory (`xl/`), except an
-/// absolute target (`/xl/…`) is package-rooted. Backslash separators are
-/// normalized to `/`, and `.` / `..` segments are collapsed, so a target like
-/// `../xl/worksheets/./sheet1.xml` resolves to `xl/worksheets/sheet1.xml` and
-/// cannot be used to smuggle a mismatched path past the extractor.
-fn normalize_target(target: &str) -> String {
-    let target = target.replace('\\', "/");
-    // An absolute target is rooted at the package; a relative one is joined onto
-    // the workbook part's `xl/` directory.
-    let joined = match target.strip_prefix('/') {
-        Some(absolute) => absolute.to_owned(),
-        None => format!("xl/{target}"),
-    };
-
-    // Collapse `.` and `..` segments against the accumulated path.
-    let mut segments: Vec<&str> = Vec::new();
-    for segment in joined.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                segments.pop();
-            }
-            other => segments.push(other),
-        }
-    }
-    segments.join("/")
+fn worksheet_targets(rels: &str) -> Result<HashMap<String, PartPath>> {
+    let workbook = PartPath::from(WORKBOOK_PART);
+    Ok(relationships::parse(rels)?
+        .into_iter()
+        .filter(|rel| rel.kind == WORKSHEET_TYPE && !rel.id.is_empty() && !rel.target.is_empty())
+        .filter_map(|rel| {
+            let part = rel.target_part(Some(&workbook))?;
+            Some((rel.id, part))
+        })
+        .collect())
 }
 
 /// Decode an attribute value to an unescaped owned `String`.
@@ -205,23 +158,44 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_relative_absolute_and_dotted_targets() {
-        assert_eq!(
-            normalize_target("worksheets/sheet1.xml"),
-            "xl/worksheets/sheet1.xml"
+    fn resolves_relative_absolute_and_dotted_targets() {
+        let rels = concat!(
+            r#"<?xml version="1.0"?><Relationships>"#,
+            r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="./worksheets/sheet1.xml"/>"#,
+            r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet2.xml"/>"#,
+            r#"<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="..\xl\worksheets\sheet3.xml"/>"#,
+            r#"</Relationships>"#,
         );
-        assert_eq!(
-            normalize_target("/xl/worksheets/sheet1.xml"),
-            "xl/worksheets/sheet1.xml"
+        let targets = worksheet_targets(rels).unwrap();
+        let part = |id: &str| targets.get(id).map(PartPath::as_str);
+        assert_eq!(part("rId1"), Some("xl/worksheets/sheet1.xml"));
+        assert_eq!(part("rId2"), Some("xl/worksheets/sheet2.xml"));
+        assert_eq!(part("rId3"), Some("xl/worksheets/sheet3.xml"));
+    }
+
+    #[test]
+    fn an_escaped_worksheet_type_still_resolves() {
+        // The `Type` is compared unescaped, so an entity-written URI still names
+        // a worksheet.
+        let rels = concat!(
+            r#"<?xml version="1.0"?><Relationships>"#,
+            r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/&#119;orksheet" Target="worksheets/sheet1.xml"/>"#,
+            r#"</Relationships>"#,
         );
-        // `.` and `..` segments and backslashes are collapsed.
+        let targets = worksheet_targets(rels).unwrap();
         assert_eq!(
-            normalize_target("./worksheets/sheet1.xml"),
-            "xl/worksheets/sheet1.xml"
+            targets.get("rId1").map(PartPath::as_str),
+            Some("xl/worksheets/sheet1.xml")
         );
-        assert_eq!(
-            normalize_target("..\\xl\\worksheets\\sheet1.xml"),
-            "xl/worksheets/sheet1.xml"
+    }
+
+    #[test]
+    fn an_external_worksheet_target_is_not_a_part() {
+        let rels = concat!(
+            r#"<?xml version="1.0"?><Relationships>"#,
+            r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="https://example.com/sheet1.xml" TargetMode="External"/>"#,
+            r#"</Relationships>"#,
         );
+        assert!(worksheet_targets(rels).unwrap().is_empty());
     }
 }

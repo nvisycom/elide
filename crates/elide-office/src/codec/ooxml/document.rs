@@ -12,9 +12,7 @@ use elide_core::Result;
 use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::{
-    BODY_PART_ID, OoxmlAddress, OoxmlCodec, blob_replacements, replacements, without_removed,
-};
+use super::{BODY_PART_ID, OoxmlAddress, OoxmlCodec, finish, part_replacements, replacements};
 use crate::codec::props::DocProps;
 use crate::ooxml::{OoxmlFormat, OoxmlPackage};
 use crate::opc::check::check;
@@ -54,13 +52,10 @@ impl<C: OoxmlCodec> Native for OoxmlDocument<C> {
         // unredacted one's bytes equal the original, so its replacement is a
         // no-op re-pack.
         let text = replacements(self.body.items());
-        let mut parts = self.properties.replacements();
-        parts.extend(blob_replacements(blobs));
-
+        let parts = part_replacements(&self.properties, blobs);
         let out = OoxmlPackage::<C::Format>::open(&self.archive)
             .and_then(|pkg| pkg.rewrite_with_parts(&text, &parts))?;
-        let out = without_removed(out, removed)?;
-        Ok(ContentData::new(Bytes::from(out)))
+        finish(out, removed)
     }
 
     fn validate(&self, output: &ContentData) -> Result<()> {

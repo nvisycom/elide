@@ -175,13 +175,16 @@ impl Xlsx {
         let shared = self.shared_strings()?;
         let mut cells = Vec::new();
         for sheet in &self.sheets {
-            let bytes = self.package.part_bytes(&sheet.part).ok_or_else(|| {
-                Error::malformed(format!(
-                    "worksheet `{}` referenced by sheet `{}` is missing",
-                    sheet.part, sheet.name
-                ))
-            })?;
-            let raw = decode_part(&sheet.part, &bytes)?;
+            let bytes = self
+                .package
+                .part_bytes(sheet.part.as_str())
+                .ok_or_else(|| {
+                    Error::malformed(format!(
+                        "worksheet `{}` referenced by sheet `{}` is missing",
+                        sheet.part, sheet.name
+                    ))
+                })?;
+            let raw = decode_part(sheet.part.as_str(), &bytes)?;
             for cell in parse_cells(&raw)? {
                 let text = match (cell.shared_index, cell.inline_text) {
                     (Some(index), _) => match shared.get(index) {
@@ -253,27 +256,24 @@ impl Xlsx {
                 elsewhere.push(replacement.clone());
             }
         }
-        let mut spliced: HashMap<String, String> = HashMap::new();
+        let mut spliced: HashMap<PartPath, String> = HashMap::new();
         for (part, replacements) in in_cells {
-            spliced.insert(
-                part.as_str().to_owned(),
-                self.package.splice_part(part, &replacements)?,
-            );
+            spliced.insert(part.clone(), self.package.splice_part(part, &replacements)?);
         }
         // A cell part's text: spliced above, or as the package holds it.
-        let current = |part: &str| -> Result<String> {
+        let current = |part: &PartPath| -> Result<String> {
             if let Some(text) = spliced.get(part) {
                 return Ok(text.clone());
             }
             let bytes = self
                 .package
-                .part_bytes(part)
+                .part_bytes(part.as_str())
                 .ok_or_else(|| Error::processing(format!("part `{part}` not found")))?;
-            decode_part(part, &bytes)
+            decode_part(part.as_str(), &bytes)
         };
 
         // Group edits by the sheet part they land in, keyed by (row, column).
-        let mut by_part: HashMap<String, HashMap<(u32, u32), &CellEdit>> = HashMap::new();
+        let mut by_part: HashMap<&PartPath, HashMap<(u32, u32), &CellEdit>> = HashMap::new();
         for edit in edits {
             let sheet = self
                 .sheets
@@ -283,7 +283,7 @@ impl Xlsx {
                     Error::processing(format!("edit names unknown sheet `{}`", edit.sheet))
                 })?;
             by_part
-                .entry(sheet.part.clone())
+                .entry(&sheet.part)
                 .or_default()
                 .insert((edit.row, edit.column), edit);
         }
@@ -293,11 +293,8 @@ impl Xlsx {
         let mut replacements = Vec::new();
         for (part, cell_edits) in &by_part {
             let raw = current(part)?;
-            let edited = self.splice_sheet(part, &raw, cell_edits)?;
-            replacements.push(PartReplacement::new(
-                PartPath::from(part.clone()),
-                edited.into_bytes(),
-            ));
+            let edited = self.splice_sheet(part.as_str(), &raw, cell_edits)?;
+            replacements.push(PartReplacement::new((*part).clone(), edited));
         }
 
         // De-sharing a `t="s"` cell drops a reference to its pooled string; a
@@ -310,13 +307,10 @@ impl Xlsx {
 
         // A cell part spliced but otherwise unedited goes back as spliced.
         for (part, text) in &spliced {
-            let rewritten =
-                by_part.contains_key(part) || (part == SHARED_STRINGS_PART && pruned.is_some());
+            let rewritten = by_part.contains_key(part)
+                || (part.as_str() == SHARED_STRINGS_PART && pruned.is_some());
             if !rewritten {
-                replacements.push(PartReplacement::new(
-                    PartPath::from(part.clone()),
-                    text.clone().into_bytes(),
-                ));
+                replacements.push(PartReplacement::new(part.clone(), text.clone()));
             }
         }
 
@@ -357,13 +351,14 @@ impl Xlsx {
     /// untouched.
     fn prune_orphaned_strings(
         &self,
-        by_part: &HashMap<String, HashMap<(u32, u32), &CellEdit>>,
-        current: &dyn Fn(&str) -> Result<String>,
+        by_part: &HashMap<&PartPath, HashMap<(u32, u32), &CellEdit>>,
+        current: &dyn Fn(&PartPath) -> Result<String>,
     ) -> Result<Option<PartReplacement>> {
         if !self.package.contains_part(SHARED_STRINGS_PART) {
             return Ok(None);
         }
-        let raw = current(SHARED_STRINGS_PART)?;
+        let shared = PartPath::from(SHARED_STRINGS_PART);
+        let raw = current(&shared)?;
         let items = shared_string_items(&raw)?;
 
         // Count, across every sheet, the `t="s"` cells that still reference each
@@ -371,11 +366,11 @@ impl Xlsx {
         // edit de-shares it (an inline cell never referenced the pool).
         let mut referenced = vec![false; items.len()];
         for path in self.sheets.iter().map(|s| &s.part) {
-            if !self.package.contains_part(path) {
+            if !self.package.contains_part(path.as_str()) {
                 continue;
             }
             let sheet_raw = current(path)?;
-            let edited = by_part.get(path.as_str());
+            let edited = by_part.get(path);
             for cell in parse_cells(&sheet_raw)? {
                 let Some(index) = cell.shared_index else {
                     continue;
@@ -397,10 +392,7 @@ impl Xlsx {
         if orphans.is_empty() {
             return Ok(None);
         }
-        Ok(Some(PartReplacement::new(
-            PartPath::from(SHARED_STRINGS_PART),
-            splice(&raw, orphans).into_bytes(),
-        )))
+        Ok(Some(PartReplacement::new(shared, splice(&raw, orphans))))
     }
 
     /// The shared-string table, or an empty table if the workbook has none.

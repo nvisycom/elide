@@ -27,12 +27,8 @@ use self::loader::XlsxDocumentLoader;
 /// Stable [`FormatId`] for the XLSX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
 
-/// The cell body stream's part id; excluded from the re-packed part
-/// replacements.
-const BODY_PART_ID: &str = "body";
-
-/// The non-cell text stream's part id; excluded from the re-packed part
-/// replacements.
+/// The non-cell text stream's document-local id (not a zip entry), beside the
+/// cell body stream's shared [`BODY_PART_ID`](crate::codec::ooxml::BODY_PART_ID).
 const TEXT_PART_ID: &str = "text";
 
 /// The XLSX [`Format`]: Excel workbooks, resolved by `.xlsx`.
@@ -40,17 +36,4 @@ pub fn format() -> Format {
     Format::with_document_loader(FORMAT_ID, XlsxDocumentLoader)
         .with_extensions(["xlsx"])
         .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
-}
-
-/// One extracted cell: its sheet, zero-based coordinates, and current text.
-#[derive(Debug, Clone)]
-pub(crate) struct XlsxCell {
-    /// Display name of the sheet the cell is on.
-    pub(crate) sheet: String,
-    /// Zero-based row index.
-    pub(crate) row: u32,
-    /// Zero-based column index.
-    pub(crate) column: u32,
-    /// The cell's text, mutated in place as redactions apply.
-    pub(crate) text: String,
 }

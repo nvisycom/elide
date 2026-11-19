@@ -334,21 +334,21 @@ impl Package {
         // Re-pack in archive order: a changed part (spliced text or replaced
         // bytes) is re-deflated; an untouched part is copied straight from the
         // source with its data still compressed, no inflate/deflate round-trip.
-        let mut changed: Vec<(&PartPath, Vec<u8>)> = Vec::new();
+        let mut spliced: HashMap<&PartPath, String> = HashMap::new();
         for part in &self.parts {
-            match by_part.get(part.path()) {
-                Some(edits) => changed.push((part.path(), part.splice(edits)?.into_bytes())),
-                None => {
-                    if let Some(bytes) = part_bytes.get(part.path()) {
-                        changed.push((part.path(), bytes.to_vec()));
-                    }
-                }
+            if let Some(edits) = by_part.get(part.path()) {
+                spliced.insert(part.path(), part.splice(edits)?);
             }
         }
         let entries = self.parts.iter().map(|part| {
-            match changed.iter().find(|(path, _)| *path == part.path()) {
-                Some((path, bytes)) => archive::Entry::Changed(path, bytes),
-                None => archive::Entry::Unchanged(part.path()),
+            let path = part.path();
+            let bytes = match spliced.get(path) {
+                Some(text) => Some(text.as_bytes()),
+                None => part_bytes.get(path).copied(),
+            };
+            match bytes {
+                Some(bytes) => archive::Entry::Changed(path, bytes),
+                None => archive::Entry::Unchanged(path),
             }
         });
         archive::write(&self.source, entries)

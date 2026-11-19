@@ -151,12 +151,15 @@ pub struct PartReplacement {
     /// The part to replace.
     pub part: PartPath,
     /// The new bytes for the part.
-    pub bytes: Vec<u8>,
+    pub bytes: Bytes,
 }
 
 impl PartReplacement {
     /// A replacement overwriting `part`'s bytes with `bytes`.
-    pub fn new(part: PartPath, bytes: Vec<u8>) -> Self {
-        Self { part, bytes }
+    pub fn new(part: PartPath, bytes: impl Into<Bytes>) -> Self {
+        Self {
+            part,
+            bytes: bytes.into(),
+        }
     }
 }

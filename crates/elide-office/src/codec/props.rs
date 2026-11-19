@@ -19,7 +19,7 @@ use elide_codec::{FlaggedItem, FormatId, LocalId, Stream, StreamMut};
 use elide_core::Result;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
+use elide_core::redaction::{Disposition, HiddenContentPolicy, Redactions};
 
 use crate::opc::{PartPath, PartReplacement, props};
 
@@ -39,9 +39,22 @@ const DOCPROPS_PARTS: &[&str] = &[
 pub(crate) struct DocProps(Vec<(LocalId, DocPropsStream)>);
 
 impl DocProps {
+    /// The property parts a package carries when `policy` treats metadata as
+    /// content (scanned or flagged), read through its `part_bytes` accessor;
+    /// none when it keeps only the essential metadata.
+    pub(crate) fn under(
+        policy: HiddenContentPolicy,
+        part_bytes: impl FnMut(&str) -> Option<Bytes>,
+    ) -> Self {
+        match policy.metadata {
+            Disposition::ScanAsContent | Disposition::FlagEverything => Self::read(part_bytes),
+            Disposition::KeepOnlyEssential => Self::default(),
+        }
+    }
+
     /// The property parts a package carries, read through its `part_bytes`
     /// accessor. A part the package lacks is skipped.
-    pub(crate) fn read(mut part_bytes: impl FnMut(&str) -> Option<Bytes>) -> Self {
+    fn read(mut part_bytes: impl FnMut(&str) -> Option<Bytes>) -> Self {
         Self(
             DOCPROPS_PARTS
                 .iter()
@@ -65,7 +78,7 @@ impl DocProps {
         self.0
             .iter()
             .map(|(id, stream)| {
-                PartReplacement::new(PartPath::from(id.as_str()), stream.xml.to_vec())
+                PartReplacement::new(PartPath::from(id.as_str()), stream.xml.clone())
             })
             .collect()
     }
