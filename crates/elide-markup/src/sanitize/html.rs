@@ -985,6 +985,22 @@ fn keyword(value: &str) -> String {
 /// decoded (RCDATA), never as markup.
 pub(super) const RCDATA_ELEMENTS: [&str; 2] = ["textarea", "title"];
 
+/// The HTML elements whose body a browser reads as text up to their end tag,
+/// never as markup: the RCDATA ones and the raw-text ones. A `<plaintext>`
+/// has no end tag, so its text runs to the end of the document.
+pub(super) const TEXT_ELEMENTS: [&str; 10] = [
+    "iframe",
+    "noembed",
+    "noframes",
+    "noscript",
+    "plaintext",
+    "script",
+    "style",
+    "textarea",
+    "title",
+    "xmp",
+];
+
 /// Whether the SVG or MathML element `name` (lowercased) read in `space` is
 /// one whose content a browser reads as HTML: an SVG `foreignObject`, `desc`,
 /// or `title`, and a MathML token element.

@@ -564,3 +564,17 @@ fn a_removed_self_closing_svg_root_holds_nothing() {
         "<p>Visible</p></svg>"
     );
 }
+
+/// A text element inside a removed element reads its body as text up to its
+/// own end tag, so an end tag in that text does not end the removal.
+#[test]
+fn a_text_element_in_a_removed_element_holds_its_end_tags() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        "<svg hidden><desc><textarea></svg>Secret</textarea></desc></svg><p>Visible</p>",
+        "<p hidden><script></p>Secret</script></p><p>Visible</p>",
+        "<script></p>Secret</script><p>Visible</p>",
+    ] {
+        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+    }
+}

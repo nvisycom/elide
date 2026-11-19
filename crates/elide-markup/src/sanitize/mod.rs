@@ -59,7 +59,7 @@ use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 
-use self::html::{Element, RCDATA_ELEMENTS, Space, VOID_ELEMENTS};
+use self::html::{Element, RCDATA_ELEMENTS, Space, TEXT_ELEMENTS, VOID_ELEMENTS};
 use self::url::css_loads_remote;
 use crate::engine::parser::{bom_len, end_name, start_name};
 use crate::engine::tag::{HtmlAttribute, HtmlTagExt};
@@ -393,6 +393,17 @@ impl<'a> Rebuild<'a> {
         let Some(region) = self.dropping.as_mut() else {
             return Ok(Skip::Outside);
         };
+        // Inside a text element, only its own end tag is markup.
+        if let Some(text) = region.text.as_deref() {
+            let ends = match event {
+                Event::End(e) => text != "plaintext" && end_name(e, raw, true)? == text,
+                _ => false,
+            };
+            if !ends && !matches!(event, Event::Eof) {
+                return Ok(Skip::Inside);
+            }
+            region.text = None;
+        }
         match event {
             // An element left open by lenient HTML runs to the end of the
             // document.
@@ -400,6 +411,14 @@ impl<'a> Rebuild<'a> {
             Event::Start(e) | Event::Empty(e) if html => {
                 let tag = e.html5_tag(raw)?;
                 let name = tag.name.to_ascii_lowercase();
+                // Whether the element is read as HTML: in HTML, or past an
+                // element of SVG or MathML that reads its content as HTML.
+                let as_html = region.space == Space::Html
+                    || html::integration_point(region.space, &region.name)
+                    || region
+                        .open
+                        .iter()
+                        .any(|open| html::integration_point(region.space, open));
                 let ends = if region.space == Space::Html {
                     region.open.is_empty() && html::closes(&region.name, &name)
                 } else {
@@ -421,6 +440,9 @@ impl<'a> Rebuild<'a> {
                 if !self_closing(raw, span, &tag.attributes, is_start)
                     || (region.space == Space::Html && !void)
                 {
+                    if as_html && TEXT_ELEMENTS.contains(&name.as_str()) {
+                        region.text = Some(name.clone());
+                    }
                     region.open.push(name);
                 }
             }
@@ -543,7 +565,11 @@ impl<'a> Rebuild<'a> {
                     "math" if space == Space::Html => Space::Math,
                     _ => space,
                 };
-                self.dropping = Some(Region::new(name, inside));
+                let mut region = Region::new(name, inside);
+                if inside == Space::Html && TEXT_ELEMENTS.contains(&region.name.as_str()) {
+                    region.text = Some(region.name.clone());
+                }
+                self.dropping = Some(region);
             }
             return Ok(());
         };
@@ -680,6 +706,9 @@ struct Region {
     name: String,
     space: Space,
     open: Vec<String>,
+    /// The text element, open in it or itself, whose body a browser reads
+    /// as text up to its end tag.
+    text: Option<String>,
 }
 
 impl Region {
@@ -688,6 +717,7 @@ impl Region {
             name,
             space,
             open: Vec::new(),
+            text: None,
         }
     }
 }
