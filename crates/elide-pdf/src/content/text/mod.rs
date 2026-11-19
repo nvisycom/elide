@@ -17,9 +17,8 @@ mod redact;
 use std::ops::Range;
 
 use elide_core::Result;
-use lopdf::ObjectId;
 
-use crate::pdf::reader::{GlyphRect, PageFrame, PageGeometry};
+use crate::pdf::reader::{GlyphRect, ObjectId, PageFrame, PageGeometry};
 use crate::pdf::{Edit, Pdf, Read, Redact};
 
 /// Every page's text, with the map from each character back to the glyph
@@ -275,27 +274,28 @@ impl OffsetMap {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use lopdf::content::{Content, Operation};
-    use lopdf::{Document, Object, Stream, dictionary};
+    use hayro_syntax::object::{Object, Stream as Read};
 
     use super::*;
-    use crate::fixtures::with_pages;
-    use crate::pdf::reader::GlyphRect;
+    use crate::fixtures::{open, save, with_pages};
+    use crate::pdf::content::{Operation, encode};
+    use crate::pdf::object::{Stream, Value, dict};
+    use crate::pdf::reader::{GlyphRect, StreamExt};
+    use crate::pdf::writer::{Changes, Document, write_page_content};
     use crate::sanitize::{Check, Rebuild};
 
     /// Every stream of the PDF `bytes`, decoded, as text.
     fn streams_of(bytes: &[u8]) -> String {
-        let doc = Document::load_mem(bytes).unwrap();
-        doc.objects
-            .values()
-            .filter_map(|object| object.as_stream().ok())
+        let pdf = Pdf::open(bytes).unwrap();
+        pdf.file()
+            .objects()
+            .into_iter()
+            .filter_map(Object::into_stream)
             .map(|stream| {
-                String::from_utf8_lossy(
-                    &stream
-                        .decompressed_content()
-                        .unwrap_or(stream.content.clone()),
-                )
-                .into_owned()
+                let bytes = stream
+                    .plain()
+                    .unwrap_or_else(|_| stream.raw_data().into_owned());
+                String::from_utf8_lossy(&bytes).into_owned()
             })
             .collect()
     }
@@ -327,14 +327,14 @@ mod tests {
     /// the pattern's one stream draws every tile.
     #[test]
     fn text_in_a_tiling_pattern_is_found_and_deleted() {
-        tiling_text(Object::Integer(1), 1);
+        tiling_text(Value::Int(1), 1);
     }
 
     /// A tiling pattern whose `/PatternType` is the real `1.0` is still a
     /// tiling pattern, and its text is still found.
     #[test]
     fn a_real_pattern_type_is_still_a_tiling_pattern() {
-        tiling_text(Object::Real(1.0), 1);
+        tiling_text(Value::Real(1.0), 1);
     }
 
     /// A pattern selected before every fill, more times than the page's walk
@@ -342,7 +342,7 @@ mod tests {
     /// refused.
     #[test]
     fn a_pattern_selected_many_times_is_walked_once() {
-        tiling_text(Object::Integer(1), 5_000);
+        tiling_text(Value::Int(1), 5_000);
     }
 
     /// The glyph boxes of the text a tiling pattern draws, its page painting
@@ -354,7 +354,7 @@ mod tests {
     /// The text block of a page painting with a tiling pattern as `content`
     /// draws.
     fn tiled_block(content: &[u8]) -> TextBlock {
-        let bytes = tiling_document(Object::Integer(1), content.to_vec());
+        let bytes = tiling_document(Value::Int(1), content.to_vec());
         let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
         pdf.read(Text).unwrap().remove(0)
     }
@@ -391,7 +391,7 @@ mod tests {
             &b"/Pattern cs /P0 scn -1000000000000000000000.0 0 2000000000000000000000.0 20 re f"[..],
             b"/Pattern cs /P0 scn 0 0 1000000 1000000 re f",
         ] {
-            let bytes = tiling_document(Object::Integer(1), content.to_vec());
+            let bytes = tiling_document(Value::Int(1), content.to_vec());
             let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
             let error = pdf.read(Text).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::ResourceLimit);
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn a_selected_pattern_reads_apart_from_the_text_around_it() {
         let bytes = tiling_document(
-            Object::Integer(1),
+            Value::Int(1),
             b"BT /F1 12 Tf 10 50 Td (alice@) Tj /Pattern cs /P0 scn (example.com) Tj ET".to_vec(),
         );
         let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
@@ -534,42 +534,40 @@ mod tests {
     /// selection reads as one.
     #[test]
     fn a_pattern_drawing_no_text_leaves_no_gap() {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 5));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        let pattern = doc.add_object(Stream::new(
-            dictionary! {
+        let pattern = doc.add(Stream::new(
+            dict! {
                 "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
                 "BBox" => vec![0.into(), 0.into(), 10.into(), 10.into()],
                 "XStep" => 10, "YStep" => 10,
             },
             b"0 0 5 5 re f".to_vec(),
         ));
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
+        let content = doc.add(Stream::new(
+            dict! {},
             b"BT /F1 12 Tf 10 50 Td (ali) Tj /Pattern cs /P0 scn (ce) Tj ET".to_vec(),
         ));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! {
-                    "Font" => dictionary! { "F1" => font },
-                    "Pattern" => dictionary! { "P0" => pattern },
+                "Resources" => dict! {
+                    "Font" => dict! { "F1" => font },
+                    "Pattern" => dict! { "P0" => pattern },
                 },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let pdf = open(&doc).read(Rebuild).unwrap().pdf;
         assert_eq!(pdf.read(Text).unwrap()[0].text, "alice");
     }
 
     /// Find and delete the text a tiling pattern of `/PatternType` `kind`
     /// draws, the page selecting it `selections` times.
-    fn tiling_text(kind: Object, selections: usize) {
+    fn tiling_text(kind: Value, selections: usize) {
         let bytes = tiling_document(
             kind,
             b"/Pattern cs /P0 scn 0 0 100 100 re f\n".repeat(selections),
@@ -584,7 +582,7 @@ mod tests {
             detections: &[Detection::new(1, 0, 8)],
         })
         .unwrap();
-        let out = edit.finish().unwrap();
+        let out = edit.finish();
         assert!(!streams_of(&out.bytes()).contains("Jane Roe"));
         out.read(Check).unwrap();
     }
@@ -597,42 +595,40 @@ mod tests {
     /// its `/F2` a Helvetica with widths, its `/Sm` a stencil mask, its `/G0`
     /// a pattern of tiny tiles drawing no text, and its `/Clear` a graphics
     /// state painting nothing.
-    fn tiling_document(kind: Object, content: Vec<u8>) -> Vec<u8> {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
+    fn tiling_document(kind: Value, content: Vec<u8>) -> Vec<u8> {
+        let mut doc = Document::new((1, 5));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        let cell = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new("Tj", vec![Object::string_literal("Jane Roe")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let pattern = doc.add_object(Stream::new(
-            dictionary! {
+        let cell = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Tj", vec![Value::string("Jane Roe")]),
+            Operation::new("ET", vec![]),
+        ];
+        let pattern = doc.add(Stream::new(
+            dict! {
                 "Type" => "Pattern", "PatternType" => kind, "PaintType" => 1, "TilingType" => 1,
                 "BBox" => vec![0.into(), 0.into(), 50.into(), 20.into()],
                 "XStep" => 50, "YStep" => 20,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "Resources" => dict! { "Font" => dict! { "F1" => font } },
             },
-            cell.encode().unwrap(),
+            encode(&cell).unwrap(),
         ));
         let cell_box = || vec![0.into(), 0.into(), 50.into(), 20.into()];
-        let filled = doc.add_object(Stream::new(
-            dictionary! {
+        let filled = doc.add(Stream::new(
+            dict! {
                 "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
                 "BBox" => cell_box(), "XStep" => 50, "YStep" => 20,
-                "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+                "Resources" => dict! { "Pattern" => dict! { "P0" => pattern } },
             },
             b"/Pattern cs /P0 scn 0 0 50 20 re f".to_vec(),
         ));
         let form = |doc: &mut Document, content: &[u8]| {
-            doc.add_object(Stream::new(
-                dictionary! {
+            doc.add(Stream::new(
+                dict! {
                     "Type" => "XObject", "Subtype" => "Form", "BBox" => cell_box(),
-                    "Resources" => dictionary! { "Pattern" => dictionary! { "P0" => pattern } },
+                    "Resources" => dict! { "Pattern" => dict! { "P0" => pattern } },
                 },
                 content.to_vec(),
             ))
@@ -640,55 +636,53 @@ mod tests {
         let fills = form(&mut doc, b"0 0 50 20 re f");
         let selects = form(&mut doc, b"/Pattern cs /P0 scn 0 0 50 20 re f");
         let outside = form(&mut doc, b"0 40 50 20 re f");
-        let wide = doc.add_object(dictionary! {
+        let wide = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
             "FirstChar" => 32, "LastChar" => 126,
-            "Widths" => vec![Object::Integer(500); 95],
+            "Widths" => vec![Value::Int(500); 95],
         });
-        let stencil = doc.add_object(Stream::new(
-            dictionary! {
+        let stencil = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
                 "ImageMask" => true,
             },
             vec![0],
         ));
-        let hatch = doc.add_object(Stream::new(
-            dictionary! {
+        let hatch = doc.add(Stream::new(
+            dict! {
                 "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
-                "BBox" => vec![0.into(), 0.into(), Object::Real(0.01), Object::Real(0.01)],
-                "XStep" => Object::Real(0.01), "YStep" => Object::Real(0.01),
-                "Resources" => dictionary! {},
+                "BBox" => vec![0.into(), 0.into(), Value::Real(0.01), Value::Real(0.01)],
+                "XStep" => Value::Real(0.01), "YStep" => Value::Real(0.01),
+                "Resources" => dict! {},
             },
             b"0 0 0.005 0.005 re f".to_vec(),
         ));
-        let content = doc.add_object(Stream::new(dictionary! {}, content));
+        let content = doc.add(Stream::new(dict! {}, content));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! {
-                    "Font" => dictionary! { "F1" => font, "F2" => wide },
-                    "Pattern" => dictionary! { "P0" => pattern, "Q0" => filled, "G0" => hatch },
-                    "XObject" => dictionary! {
+                "Resources" => dict! {
+                    "Font" => dict! { "F1" => font, "F2" => wide },
+                    "Pattern" => dict! { "P0" => pattern, "Q0" => filled, "G0" => hatch },
+                    "XObject" => dict! {
                         "Fm" => fills, "Fs" => selects, "Fo" => outside, "Sm" => stencil,
                     },
-                    "ExtGState" => dictionary! { "Clear" => dictionary! { "ca" => 0, "CA" => 0 } },
+                    "ExtGState" => dict! { "Clear" => dict! { "ca" => 0, "CA" => 0 } },
                 },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        bytes
+        save(&doc).to_vec()
     }
 
     /// Deleting the only glyph a font's `/ToUnicode` maps leaves a CMap of
     /// no code, which the output still reads and passes the check with.
     #[test]
     fn deleting_the_only_mapped_glyph_leaves_a_readable_cmap() {
-        let mut doc = Document::with_version("1.5");
-        let cmap = doc.add_object(Stream::new(
-            dictionary! {},
+        let mut doc = Document::new((1, 5));
+        let cmap = doc.add(Stream::new(
+            dict! {},
             b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
               /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
               /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
@@ -697,24 +691,19 @@ mod tests {
               endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
                 .to_vec(),
         ));
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "ToUnicode" => cmap,
         });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"BT /F1 12 Tf (J) Tj ET".to_vec(),
-        ));
+        let content = doc.add(Stream::new(dict! {}, b"BT /F1 12 Tf (J) Tj ET".to_vec()));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "Resources" => dict! { "Font" => dict! { "F1" => font } },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let pdf = open(&doc).read(Rebuild).unwrap().pdf;
         let blocks = pdf.read(Text).unwrap();
         assert_eq!(blocks[0].text, "J");
         let mut edit = pdf.edit();
@@ -724,18 +713,16 @@ mod tests {
             detections: &[Detection::new(1, 0, 1)],
         })
         .unwrap();
-        let out = edit.finish().unwrap();
+        let out = edit.finish();
         out.read(Check).unwrap();
         assert!(out.read(Text).unwrap()[0].text.is_empty());
-        let doc = out.doc();
-        let cmap = doc
-            .objects
-            .values()
-            .filter_map(|object| object.as_dict().ok())
-            .find_map(|font| font.get(b"ToUnicode").ok())
-            .and_then(|cmap| doc.get_object(cmap.as_reference().ok()?).ok())
-            .and_then(|cmap| cmap.as_stream().ok())
-            .and_then(|cmap| cmap.decompressed_content().ok())
+        let cmap = out
+            .file()
+            .objects()
+            .into_iter()
+            .filter_map(Object::into_dict)
+            .find_map(|font| font.get::<Read<'_>>(b"ToUnicode"))
+            .and_then(|cmap| cmap.plain().ok())
             .map(|cmap| String::from_utf8_lossy(&cmap).to_ascii_uppercase())
             .unwrap();
         assert!(cmap.contains("BEGINCODESPACERANGE"), "{cmap}");
@@ -747,29 +734,29 @@ mod tests {
     /// read bytes back over the change.
     #[test]
     fn a_stream_changed_since_its_text_was_read_is_refused() {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 5));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
+        let content = doc.add(Stream::new(
+            dict! {},
             b"BT /F1 12 Tf (Jane Roe) Tj ET".to_vec(),
         ));
-        let page = with_pages(
+        with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "Resources" => dict! { "Font" => dict! { "F1" => font } },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
-        )[0];
-        let pdf = Edit::of(doc).finish().unwrap();
+        );
+        let pdf = open(&doc);
         let blocks = pdf.read(Text).unwrap();
 
         let mut edit = pdf.edit();
-        edit.doc_mut()
-            .change_page_content(page, b"BT /F1 12 Tf (Jane) Tj ET".to_vec())
-            .unwrap();
+        let mut changes = Changes::new();
+        write_page_content(&pdf.pages()[0], b"BT /F1 12 Tf (Jane) Tj ET", &mut changes).unwrap();
+        edit.apply(changes).unwrap();
         let error = edit
             .redact(TextRedaction {
                 source: &pdf,

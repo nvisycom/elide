@@ -20,9 +20,9 @@ use elide_core::{Error, Result};
 use elide_image::modality::{ImageFormat, ImageReplacement};
 use elide_image::primitive::BoundingBox;
 use elide_image::{ImageBuffer, RasterImage};
-use lopdf::{Stream, dictionary};
 
 pub(crate) use self::read::glyph_boxes;
+use crate::pdf::object::{Stream, dict};
 use crate::pdf::reader::DeviceRect;
 use crate::pdf::writer::compressed;
 use crate::pdf::{Edit, Pdf, Read, Redact};
@@ -156,15 +156,15 @@ impl PageReplacement {
     pub(crate) fn pixels(number: u32, pixels: RasterImage) -> Result<Self> {
         let size = pixels.dimensions();
         let image = compressed(
-            dictionary! {
+            dict! {
                 "Type" => "XObject",
                 "Subtype" => "Image",
-                "Width" => i64::from(size.width),
-                "Height" => i64::from(size.height),
+                "Width" => size.width,
+                "Height" => size.height,
                 "ColorSpace" => "DeviceRGB",
                 "BitsPerComponent" => 8,
             },
-            pixels.into_rgb(),
+            &pixels.into_rgb(),
         )?;
         Ok(Self { number, image })
     }

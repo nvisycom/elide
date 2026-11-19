@@ -3,10 +3,12 @@
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use lopdf::{Document, Object, Stream};
+use hayro_syntax::object::{Object, Stream};
 
 use super::{ImageId, SurfacedImage, samples};
-use crate::pdf::reader::DictionaryExt;
+use crate::pdf::Pdf;
+use crate::pdf::decode::filters;
+use crate::pdf::reader::DictExt;
 
 /// The encoding of an embedded image, from its PDF stream filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,13 +28,15 @@ enum EmbeddingKind {
 impl EmbeddingKind {
     /// The encoding of the image XObject `stream`: the last filter in its chain
     /// determines the sample encoding.
-    fn of(stream: &Stream) -> Self {
+    fn of(stream: &Stream<'_>) -> Self {
         // A filter that is not a name or names is no encoding a codec reads.
-        let filters = match stream.filters() {
-            Ok(filters) => filters,
-            Err(_) if stream.dict.get(b"Filter").is_ok() => return Self::Unreadable,
-            Err(_) => Vec::new(),
+        let Ok(filters) = filters(stream) else {
+            return Self::Unreadable;
         };
+        let filters: Vec<&[u8]> = filters
+            .iter()
+            .map(|filter| filter.name.as_slice())
+            .collect();
         match filters.as_slice() {
             [b"DCTDecode"] => Self::Jpeg,
             [b"JPXDecode"] => Self::Jpeg2000,
@@ -47,10 +51,10 @@ impl EmbeddingKind {
 
 /// Whether the image XObject `stream` can be surfaced to the image pipeline: a
 /// JPEG or JPEG 2000 file as it is, or raw samples the decoder reads.
-pub(crate) fn is_surfaceable(doc: &Document, stream: &Stream) -> bool {
+pub(crate) fn is_surfaceable(stream: &Stream<'_>) -> bool {
     match EmbeddingKind::of(stream) {
         EmbeddingKind::Jpeg | EmbeddingKind::Jpeg2000 => true,
-        EmbeddingKind::Raw => samples::is_supported(doc, &stream.dict),
+        EmbeddingKind::Raw => samples::is_supported(stream.dict()),
         EmbeddingKind::Unreadable => false,
     }
 }
@@ -63,30 +67,33 @@ pub(crate) fn is_surfaceable(doc: &Document, stream: &Stream) -> bool {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// its samples are of an unsupported kind or cannot be decompressed.
-pub(crate) fn raw_samples(doc: &Document, stream: &Stream) -> Result<Option<Vec<u8>>> {
+pub(crate) fn raw_samples(stream: &Stream<'_>) -> Result<Option<Vec<u8>>> {
     match EmbeddingKind::of(stream) {
-        EmbeddingKind::Raw => samples::samples(doc, stream).map(Some),
+        EmbeddingKind::Raw => samples::samples(stream).map(Some),
         _ => Ok(None),
     }
 }
 
 /// Every image XObject of `doc`, as [`Images`] reads them.
-pub(super) fn surfaced(doc: &Document) -> Result<Vec<SurfacedImage>> {
-    doc.objects
-        .iter()
-        .filter_map(|(&id, object)| match object {
-            Object::Stream(stream) if stream.dict.is_subtype(doc, b"Image") => Some((id, stream)),
+pub(super) fn surfaced(pdf: &Pdf) -> Result<Vec<SurfacedImage>> {
+    pdf.file()
+        .objects()
+        .into_iter()
+        .filter_map(|object| match object {
+            Object::Stream(stream) if stream.dict().is_subtype(b"Image") => Some(stream),
             _ => None,
         })
-        .map(|((number, generation), stream)| {
-            let id = ImageId::new(number, generation);
-            let (bytes, hint) = match EmbeddingKind::of(stream) {
-                EmbeddingKind::Jpeg => (Bytes::copy_from_slice(&stream.content), "jpg"),
-                EmbeddingKind::Jpeg2000 => (Bytes::copy_from_slice(&stream.content), "jp2"),
-                EmbeddingKind::Raw => (Bytes::from(samples::png(doc, stream)?), "png"),
+        .map(|stream| {
+            let object = stream.obj_id();
+            let id = ImageId::of(object);
+            let (bytes, hint) = match EmbeddingKind::of(&stream) {
+                EmbeddingKind::Jpeg => (Bytes::from(stream.raw_data().into_owned()), "jpg"),
+                EmbeddingKind::Jpeg2000 => (Bytes::from(stream.raw_data().into_owned()), "jp2"),
+                EmbeddingKind::Raw => (Bytes::from(samples::png(&stream)?), "png"),
                 EmbeddingKind::Unreadable => {
                     return Err(Error::malformed(format!(
-                        "image ({number}, {generation}) cannot be surfaced"
+                        "image ({}, {}) cannot be surfaced",
+                        object.obj_number, object.gen_number
                     )));
                 }
             };

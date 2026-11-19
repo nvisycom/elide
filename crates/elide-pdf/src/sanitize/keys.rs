@@ -360,8 +360,8 @@ pub(super) const CMAP: &[(&[u8], Kind)] = &[
 ];
 
 /// The keys a `/ToUnicode` CMap keeps: a `/UseCMap` base is dropped, since
-/// lopdf, which detection reads text with, does not follow one, but a viewer
-/// would.
+/// the map is written from the CMap's own entries, which detection reads
+/// text with, but a viewer would follow it.
 pub(super) const TO_UNICODE: &[(&[u8], Kind)] = &[
     (b"Type", Value),
     (b"CMapName", Value),

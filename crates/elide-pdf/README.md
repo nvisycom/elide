@@ -33,7 +33,8 @@ over. Redaction fails closed: a page that cannot be read, text that cannot be
 located, or a part the document never surfaced refuses the whole document
 rather than shipping anything unredacted.
 
-The default build is pure Rust on `lopdf`, with no native dependency.
+The default build is pure Rust, reading through `hayro-syntax` and writing
+through `pdf-writer`, with no native dependency.
 
 ## Documentation
 

@@ -4,8 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use elide_core::{Error, Result};
-use lopdf::content::Content;
-use lopdf::{Document, Object, ObjectId, Stream};
+use hayro_syntax::object::{Object, Stream};
 
 use super::geometry::TextState;
 use super::paint::{Painted, Painting};
@@ -14,9 +13,9 @@ use super::stream::Frame;
 use super::{Inherited, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
 use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
+use crate::pdf::content::parse;
 use crate::pdf::reader::{
-    DeviceRect, DictionaryExt, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt,
-    normalize_rect,
+    DeviceRect, DictExt, GlyphRect, Matrix, ObjectId, Scope, StreamExt, normalize_rect,
 };
 
 /// The most glyph boxes a page's tiling patterns place on the tiles they
@@ -37,7 +36,7 @@ const MAX_COVERAGE_CHECKS: usize = 1 << 24;
 /// selected.
 pub(super) struct Selected<'d> {
     id: ObjectId,
-    stream: &'d Stream,
+    stream: Stream<'d>,
     depth: u8,
 }
 
@@ -80,26 +79,18 @@ struct Layout {
 impl Selected<'_> {
     /// The pattern's layout, or `None` when it has no usable cell or step,
     /// and so tiles nothing.
-    fn layout(&self, doc: &Document) -> Option<Layout> {
-        let dict = &self.stream.dict;
+    fn layout(&self) -> Option<Layout> {
+        let dict = self.stream.dict();
         let step = |key: &[u8]| {
-            dict.get(key)
-                .ok()
-                .and_then(|value| doc.resolve_number(value))
+            dict.number(key)
                 .map(f64::abs)
                 .filter(|step| *step > f64::EPSILON)
         };
         Some(Layout {
             matrix: dict
-                .get(b"Matrix")
-                .ok()
-                .and_then(|matrix| doc.resolve_numbers(matrix))
+                .numbers(b"Matrix")
                 .map_or(Matrix::IDENTITY, Matrix::from),
-            cell: dict
-                .get(b"BBox")
-                .ok()
-                .and_then(|bbox| doc.resolve_numbers::<4>(bbox))
-                .map(normalize_rect)?,
+            cell: dict.numbers::<4>(b"BBox").map(normalize_rect)?,
             x_step: step(b"XStep")?,
             y_step: step(b"YStep")?,
         })
@@ -197,30 +188,21 @@ impl<'d> Walk<'_, 'd> {
         depth: u8,
         inherited: Inherited<'_>,
     ) -> Result<()> {
-        let doc = self.doc;
-        let Some(id) = scope
-            .lookup(doc, b"XObject", name)
-            .and_then(|xobject| xobject.as_reference().ok())
-        else {
+        let Some(entry) = scope.lookup(b"XObject", name) else {
             return Ok(());
         };
-        let Ok(Object::Stream(stream)) = doc.get_object(id) else {
+        let (Some(id), Object::Stream(stream)) = (entry.id, entry.value) else {
             return Ok(());
         };
         // Only Form XObjects carry content to walk; an image is no text, but
         // a stencil mask paints its samples with the fill colour, which may
         // be a pattern whose text it then shows (8.9.6.2).
-        if stream.dict.is_subtype(doc, b"Image") {
-            let stencil = stream
-                .dict
-                .get(b"ImageMask")
-                .ok()
-                .and_then(|mask| doc.resolve(mask))
-                .is_some_and(|mask| matches!(mask.as_bool(), Ok(true)));
+        if stream.dict().is_subtype(b"Image") {
+            let stencil = stream.dict().get::<bool>(b"ImageMask") == Some(true);
             // The samples are read only when the fill paints a pattern.
             if stencil
                 && inherited.painting.fills_pattern()
-                && let Some([min_x, min_y, max_x, max_y]) = stencil_extent(doc, stream)
+                && let Some([min_x, min_y, max_x, max_y]) = stencil_extent(&stream)
                 && let Some(painted) = inherited.painting.fill_area(
                     DeviceRect {
                         min_x,
@@ -235,10 +217,10 @@ impl<'d> Walk<'_, 'd> {
             }
             return Ok(());
         }
-        if !stream.dict.is_subtype(doc, b"Form") {
+        if !stream.dict().is_subtype(b"Form") {
             return Ok(());
         }
-        self.walk_nested(id, stream, depth, inherited)
+        self.walk_nested(id, &stream, depth, inherited)
     }
 
     /// The tiling pattern named `name` in `scope`, the pattern a `scn`/`SCN`
@@ -251,20 +233,11 @@ impl<'d> Walk<'_, 'd> {
         scope: &Scope<'d>,
         depth: u8,
     ) -> Option<ObjectId> {
-        let doc = self.doc;
-        let id = scope
-            .lookup(doc, b"Pattern", name)
-            .and_then(|pattern| pattern.as_reference().ok())?;
-        let Ok(Object::Stream(stream)) = doc.get_object(id) else {
+        let entry = scope.lookup(b"Pattern", name)?;
+        let (Some(id), Object::Stream(stream)) = (entry.id, entry.value) else {
             return None;
         };
-        if stream
-            .dict
-            .get(b"PatternType")
-            .ok()
-            .and_then(ObjectExt::as_number)
-            != Some(1.0)
-        {
+        if stream.dict().number(b"PatternType") != Some(1.0) {
             return None;
         }
         if self.patterns.insert(id) {
@@ -302,7 +275,7 @@ impl<'d> Walk<'_, 'd> {
         let cell_start = self.accum.rects.len();
         self.pen = None;
         let outer = self.cell.replace(pattern.id);
-        let walked = self.walk_nested(pattern.id, pattern.stream, pattern.depth, inherited);
+        let walked = self.walk_nested(pattern.id, &pattern.stream, pattern.depth, inherited);
         self.cell = outer;
         walked?;
         let glyphs = self.accum.rects.drain(cell_start..).collect();
@@ -414,7 +387,7 @@ impl<'d> Walk<'_, 'd> {
             return Ok(());
         };
         let mut tiles = Vec::new();
-        if let Some(layout) = cell.pattern.layout(self.doc) {
+        if let Some(layout) = cell.pattern.layout() {
             // The regions painted with it, by the space each was painted in.
             let mut by_space: BTreeMap<[u64; 6], (Matrix, Vec<DeviceRect>)> = BTreeMap::new();
             let mut add = |space: Matrix, region: DeviceRect| {
@@ -482,11 +455,10 @@ impl<'d> Walk<'_, 'd> {
     fn walk_nested(
         &mut self,
         id: ObjectId,
-        stream: &'d Stream,
+        stream: &Stream<'d>,
         depth: u8,
         mut inherited: Inherited<'_>,
     ) -> Result<()> {
-        let doc = self.doc;
         if self.active.contains(&id) {
             return Ok(());
         }
@@ -497,11 +469,10 @@ impl<'d> Walk<'_, 'd> {
                 self.page
             )));
         }
-        let content = Content::decode(&stream.decoded()?)
-            .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
+        let content = parse(&stream.plain()?);
 
         // Its own resources: in a rebuild, every form and pattern has them.
-        let inner_scope = Scope::new(Scope::own(doc, &stream.dict));
+        let inner_scope = Scope::new(Scope::own(stream.dict()));
 
         // Charge the total-walk budget. Exhausting it means a page fans out to
         // more walks than any legitimate document, so fail closed rather than let
@@ -518,21 +489,13 @@ impl<'d> Walk<'_, 'd> {
         // The `/Matrix` maps its content into the space it is drawn in (8.10.1,
         // 8.7.3.1); absent or malformed, it is the identity.
         let matrix = stream
-            .dict
-            .get(b"Matrix")
-            .ok()
-            .and_then(|matrix| doc.resolve_numbers(matrix))
+            .dict()
+            .numbers(b"Matrix")
             .map_or(Matrix::IDENTITY, Matrix::from);
         inherited.state.ctm = matrix.then(inherited.state.ctm);
         // Its content is clipped to its `/BBox`, in the space it is drawn
         // in, within whatever clips its caller (8.10.1).
-        if let Some(bbox) = stream
-            .dict
-            .get(b"BBox")
-            .ok()
-            .and_then(|bbox| doc.resolve_numbers::<4>(bbox))
-            .map(normalize_rect)
-        {
+        if let Some(bbox) = stream.dict().numbers::<4>(b"BBox").map(normalize_rect) {
             let [min_x, min_y, max_x, max_y] = bbox;
             let area = DeviceRect {
                 min_x,

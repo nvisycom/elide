@@ -16,9 +16,9 @@
 
 use std::collections::BTreeMap;
 
-use lopdf::{Dictionary, Document, Object};
+use hayro_syntax::object::{Array, Dict, Object};
 
-use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt};
+use crate::pdf::reader::DictExt;
 
 /// The default glyph width (glyph-space thousandths) when a font declares none:
 /// the PDF default for a composite font's `/DW`, and a reasonable stand-in for a
@@ -60,11 +60,11 @@ impl WidthSource {
     /// A `/Type0` font's widths live on its descendant CIDFont; any other font is
     /// treated as simple (`/Widths` + `/FirstChar`). Anything missing or
     /// unreadable yields [`Unknown`](WidthSource::Unknown).
-    pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> WidthSource {
-        if font.is_subtype(doc, b"Type0") {
-            Self::from_type0(doc, font)
+    pub(crate) fn from_font(font: &Dict<'_>) -> WidthSource {
+        if font.is_subtype(b"Type0") {
+            Self::from_type0(font)
         } else {
-            Self::from_simple(doc, font)
+            Self::from_simple(font)
         }
     }
 
@@ -103,28 +103,21 @@ impl WidthSource {
 
     /// `/Widths` + `/FirstChar` of a simple font, with `/FontDescriptor`
     /// `/MissingWidth` as the out-of-range fallback.
-    fn from_simple(doc: &Document, font: &Dictionary) -> WidthSource {
-        let Some(first_char) = font.get(b"FirstChar").ok().and_then(|o| o.as_i64().ok()) else {
+    fn from_simple(font: &Dict<'_>) -> WidthSource {
+        let Some(first_char) = font.get::<i64>(b"FirstChar") else {
             return WidthSource::Unknown;
         };
-        let Some(widths) = font
-            .get(b"Widths")
-            .ok()
-            .and_then(|o| doc.resolve_array(o))
-            .map(|arr| {
-                arr.iter()
-                    .map(|o| o.as_number().unwrap_or(0.0))
-                    .collect::<Vec<_>>()
-            })
-        else {
+        let Some(widths) = font.get::<Array<'_>>(b"Widths").map(|widths| {
+            widths
+                .iter::<Object<'_>>()
+                .map(|width| width.into_number().map_or(0.0, |n| n.as_f64()))
+                .collect::<Vec<_>>()
+        }) else {
             return WidthSource::Unknown;
         };
         let missing = font
-            .get(b"FontDescriptor")
-            .ok()
-            .and_then(|o| doc.resolve_dict(o))
-            .and_then(|fd| fd.get(b"MissingWidth").ok())
-            .map(|o| o.as_number().unwrap_or(0.0))
+            .get::<Dict<'_>>(b"FontDescriptor")
+            .and_then(|fd| fd.number(b"MissingWidth"))
             .unwrap_or(0.0);
         WidthSource::Simple {
             first_char,
@@ -134,31 +127,64 @@ impl WidthSource {
     }
 
     /// `/W` + `/DW` of a Type0 font's descendant CIDFont.
-    fn from_type0(doc: &Document, font: &Dictionary) -> WidthSource {
+    fn from_type0(font: &Dict<'_>) -> WidthSource {
         // `/DescendantFonts` is a one-element array holding the CIDFont (inline or
         // by reference).
-        let Some(cid_font) = font
-            .get(b"DescendantFonts")
-            .ok()
-            .and_then(|o| doc.resolve_array(o))
-            .and_then(|arr| arr.first())
-            .and_then(|o| doc.resolve_dict(o))
-        else {
+        let Some(cid_font) = descendant(font) else {
             return WidthSource::Unknown;
         };
-
-        let dw = cid_font
-            .get(b"DW")
-            .ok()
-            .map(|o| o.as_number().unwrap_or(0.0))
-            .unwrap_or(DEFAULT_WIDTH);
-
+        let dw = cid_font.number(b"DW").unwrap_or(DEFAULT_WIDTH);
         let mut w = BTreeMap::new();
         let mut ranges = Vec::new();
-        if let Some(entries) = cid_font.get(b"W").ok().and_then(|o| doc.resolve_array(o)) {
-            parse_w_array(entries, &mut w, &mut ranges);
+        if let Some(entries) = cid_font.get::<Array<'_>>(b"W") {
+            let entries: Vec<WEntry> = entries
+                .iter::<Object<'_>>()
+                .map(|entry| match entry {
+                    Object::Number(n) => WEntry::Number(n.as_f64()),
+                    Object::Array(list) => WEntry::List(
+                        list.iter::<Object<'_>>()
+                            .map(|w| w.into_number().map_or(0.0, |n| n.as_f64()))
+                            .collect(),
+                    ),
+                    _ => WEntry::Other,
+                })
+                .collect();
+            parse_w_array(&entries, &mut w, &mut ranges);
         }
         WidthSource::Composite { dw, w, ranges }
+    }
+}
+
+/// The descendant CIDFont of the Type0 `font`.
+fn descendant<'a>(font: &Dict<'a>) -> Option<Dict<'a>> {
+    font.get::<Array<'a>>(b"DescendantFonts")?
+        .iter::<Dict<'a>>()
+        .next()
+}
+
+/// One item of a `/W` array: a number, or a list of widths.
+#[derive(Debug, Clone)]
+enum WEntry {
+    Number(f64),
+    List(Vec<f64>),
+    Other,
+}
+
+impl WEntry {
+    /// The item as an integer, when it is a whole number.
+    fn integer(&self) -> Option<i64> {
+        match *self {
+            Self::Number(n) if n.fract() == 0.0 => Some(n as i64),
+            _ => None,
+        }
+    }
+
+    /// The item as a number.
+    fn number(&self) -> f64 {
+        match *self {
+            Self::Number(n) => n,
+            _ => 0.0,
+        }
     }
 }
 
@@ -205,19 +231,13 @@ impl GlyphMetrics {
     /// Read the glyph box extent from a font dictionary, best-effort (defaults on
     /// any missing piece). A `/Type0` font's descriptor is on its descendant
     /// CIDFont.
-    pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> GlyphMetrics {
-        let descriptor = font_descriptor(doc, font);
+    pub(crate) fn from_font(font: &Dict<'_>) -> GlyphMetrics {
+        let descriptor = font_descriptor(font);
         let Some(fd) = descriptor else {
             return GlyphMetrics::default();
         };
         let default = GlyphMetrics::default();
-        let em = |key: &[u8]| {
-            fd.get(key)
-                .ok()
-                .map(|o| o.as_number().unwrap_or(0.0))
-                .filter(|v| *v != 0.0)
-                .map(|v| v / 1000.0)
-        };
+        let em = |key: &[u8]| fd.number(key).filter(|v| *v != 0.0).map(|v| v / 1000.0);
         // Top: cap height (tight to the drawn glyphs) if present, else ascent.
         let top = em(b"CapHeight")
             .or_else(|| em(b"Ascent"))
@@ -234,20 +254,13 @@ impl GlyphMetrics {
 
 /// Resolve a font's `/FontDescriptor`, following a `/Type0` font to its
 /// descendant CIDFont (whose descriptor carries the metrics).
-fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Dictionary> {
-    let owner = if font.is_subtype(doc, b"Type0") {
-        font.get(b"DescendantFonts")
-            .ok()
-            .and_then(|o| doc.resolve_array(o))
-            .and_then(|arr| arr.first())
-            .and_then(|o| doc.resolve_dict(o))?
+fn font_descriptor<'a>(font: &Dict<'a>) -> Option<Dict<'a>> {
+    let owner = if font.is_subtype(b"Type0") {
+        descendant(font)?
     } else {
-        font
+        font.clone()
     };
-    owner
-        .get(b"FontDescriptor")
-        .ok()
-        .and_then(|o| doc.resolve_dict(o))
+    owner.get::<Dict<'a>>(b"FontDescriptor")
 }
 
 /// Parse a Type0 `/W` array into explicit per-CID widths plus compact ranges.
@@ -258,19 +271,19 @@ fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Di
 /// to every CID in the inclusive range (kept as a [`CidRange`] rather than
 /// expanded — the span is untrusted and may be enormous). A malformed tail is
 /// ignored; widths are best-effort.
-fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut Vec<CidRange>) {
+fn parse_w_array(entries: &[WEntry], out: &mut BTreeMap<u32, f64>, ranges: &mut Vec<CidRange>) {
     let mut i = 0;
     while i < entries.len() {
-        let Some(start) = entries.get(i).and_then(|o| o.as_i64().ok()) else {
+        let Some(start) = entries.get(i).and_then(WEntry::integer) else {
             break;
         };
         match entries.get(i + 1) {
             // `c [w1 w2 …]`: consecutive CIDs from `start`. Safe to expand — the
             // count is the length of the array the document itself supplied.
-            Some(Object::Array(list)) => {
-                for (offset, width) in list.iter().enumerate() {
+            Some(WEntry::List(list)) => {
+                for (offset, &width) in list.iter().enumerate() {
                     if let Ok(cid) = u32::try_from(start + offset as i64) {
-                        out.insert(cid, width.as_number().unwrap_or(0.0));
+                        out.insert(cid, width);
                     }
                 }
                 i += 2;
@@ -278,10 +291,10 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
             // `c_first c_last w`: one width across the inclusive CID range. Kept
             // compact, never expanded, so a huge `last` cannot exhaust memory.
             Some(end_obj) => {
-                let Some(end) = end_obj.as_i64().ok() else {
+                let Some(end) = end_obj.integer() else {
                     break;
                 };
-                let Some(width) = entries.get(i + 2).map(|o| o.as_number().unwrap_or(0.0)) else {
+                let Some(width) = entries.get(i + 2).map(WEntry::number) else {
                     break;
                 };
                 if let (Ok(first), Ok(last)) = (u32::try_from(start), u32::try_from(end))
@@ -300,8 +313,8 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
 mod tests {
     use super::*;
 
-    fn int(n: i64) -> Object {
-        Object::Integer(n)
+    fn int(n: i64) -> WEntry {
+        WEntry::Number(n as f64)
     }
 
     /// The `c [w …]` form expands per CID; the `c_first c_last w` form is kept as
@@ -311,7 +324,7 @@ mod tests {
         // `[ 10 [ 100 200 ] 500 1000 750 ]`: CIDs 10,11 explicit; 500..=1000 ranged.
         let entries = vec![
             int(10),
-            Object::Array(vec![int(100), int(200)]),
+            WEntry::List(vec![100.0, 200.0]),
             int(500),
             int(1000),
             int(750),

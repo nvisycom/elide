@@ -2,9 +2,9 @@
 //! vocabulary the audit records.
 
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Document};
+use hayro_syntax::object::Dict;
 
-use crate::pdf::reader::DictionaryExt;
+use crate::pdf::reader::DictExt;
 
 /// What a catalog entry `key` held. The page tree and the attachments are
 /// rebuilt rather than copied, so they are never recorded.
@@ -96,8 +96,8 @@ pub(super) fn entry(key: &[u8]) -> Option<HiddenContent> {
 
 /// What the annotation `dict` is, by its subtype: a form widget, a link, rich
 /// media, or (every other subtype) a markup annotation.
-pub(super) fn annotation(doc: &Document, dict: &Dictionary) -> HiddenContent {
-    match dict.name(doc, b"Subtype").unwrap_or_default() {
+pub(super) fn annotation(dict: &Dict<'_>) -> HiddenContent {
+    match dict.name(b"Subtype").as_deref().unwrap_or_default() {
         b"Widget" => HiddenContent::FormField,
         b"Link" => HiddenContent::Link,
         b"Screen" | b"RichMedia" | b"Movie" | b"Sound" | b"3D" => HiddenContent::Control,

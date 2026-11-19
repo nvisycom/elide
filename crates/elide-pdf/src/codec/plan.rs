@@ -78,7 +78,7 @@ impl Plan {
         #[cfg(feature = "render")]
         if !self.scanned.is_empty() {
             let pages = if self.redraws_images() {
-                edit.clone().finish()?.read(Repaint {
+                edit.pdf().read(Repaint {
                     scanned: &self.scanned,
                     scale: self.scan_scale,
                 })?
@@ -91,7 +91,7 @@ impl Plan {
             edit.redact(PageRedaction { pages: &pages })?;
         }
         self.redact_attachments(&mut edit)?;
-        edit.finish()
+        Ok(edit.finish())
     }
 
     /// `pdf` with every page replaced by a redacted image of it: a scanned
@@ -111,7 +111,7 @@ impl Plan {
         let drawn = if redraws {
             let mut edit = pdf.edit();
             self.redact_images(&mut edit)?;
-            redacted = edit.finish()?;
+            redacted = edit.finish();
             &redacted
         } else {
             pdf
@@ -142,7 +142,7 @@ impl Plan {
         let mut edit = drawn.edit();
         edit.redact(PageRedaction { pages: &flat })?;
         self.redact_attachments(&mut edit)?;
-        edit.finish()
+        Ok(edit.finish())
     }
 
     /// Whether the redaction changes what an embedded image draws, so a page

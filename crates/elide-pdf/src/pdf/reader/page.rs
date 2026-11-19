@@ -5,9 +5,9 @@
 use std::ops::Range;
 
 use elide_core::primitive::UnitBoundingBox;
-use lopdf::{Document, ObjectId};
+use hayro_syntax::object::Dict;
 
-use super::{DocumentExt, Matrix};
+use super::{DictExt, Matrix};
 
 /// One glyph's box and the decoded character range it drew, so a detected
 /// character span can be resolved back to the page rectangles it covers.
@@ -243,36 +243,25 @@ impl PageBoxes {
 /// `/Rotate` are inheritable, so this walks up `/Parent` for a value the page
 /// itself does not set, resolving references. A missing or junk rotation is
 /// zero, and a missing or non-positive unit is one point.
-pub(crate) fn page_boxes(doc: &Document, page_id: ObjectId) -> Option<PageBoxes> {
-    let media = inherited_rect(doc, page_id, b"MediaBox").map(normalize_rect);
-    let crop = inherited_rect(doc, page_id, b"CropBox").map(normalize_rect);
+pub(crate) fn page_boxes(page: &Dict<'_>) -> Option<PageBoxes> {
+    let media = inherited_rect(page, b"MediaBox").map(normalize_rect);
+    let crop = inherited_rect(page, b"CropBox").map(normalize_rect);
     let (media, crop) = match (media, crop) {
         (Some(media), Some(crop)) => (media, intersect(crop, media).unwrap_or(media)),
         (Some(rect), None) | (None, Some(rect)) => (rect, rect),
         (None, None) => return None,
     };
-    let rotate = doc
-        .inherited(page_id, b"Rotate", |value| {
-            doc.resolve(value)?.as_i64().ok()
-        })
+    let rotate = page
+        .inherited(b"Rotate", |node| node.get::<i64>(b"Rotate"))
         .unwrap_or(0);
     // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
     // defensive against junk).
     let rotate = (rotate.rem_euclid(360) as u32 / 90) * 90;
-    let unit = doc
-        .get_dictionary(page_id)
-        .ok()
-        .and_then(|page| page.get(b"UserUnit").ok())
-        .and_then(|unit| doc.resolve_number(unit))
+    let unit = page
+        .number(b"UserUnit")
         .filter(|unit| *unit > 0.0)
         .unwrap_or(1.0);
-    let print = PRINT_BOXES.map(|key| {
-        let page = doc.get_dictionary(page_id).ok()?;
-        intersect(
-            normalize_rect(doc.resolve_numbers(page.get(key).ok()?)?),
-            media,
-        )
-    });
+    let print = PRINT_BOXES.map(|key| intersect(normalize_rect(page.numbers(key)?), media));
     Some(PageBoxes {
         media,
         crop,
@@ -284,8 +273,8 @@ pub(crate) fn page_boxes(doc: &Document, page_id: ObjectId) -> Option<PageBoxes>
 
 /// Read a page's visible rectangle and display rotation into a [`PageFrame`],
 /// or `None` when the page has no readable box (see [`page_boxes`]).
-pub(crate) fn page_frame(doc: &Document, page_id: ObjectId) -> Option<PageFrame> {
-    let PageBoxes { crop, rotate, .. } = page_boxes(doc, page_id)?;
+pub(crate) fn page_frame(page: &Dict<'_>) -> Option<PageFrame> {
+    let PageBoxes { crop, rotate, .. } = page_boxes(page)?;
     let [x0, y0, x1, y1] = crop;
     Some(PageFrame {
         crop_x0: x0,
@@ -322,8 +311,8 @@ fn intersect(a: [f64; 4], b: [f64; 4]) -> Option<[f64; 4]> {
 /// box with any element that is not a resolvable number is rejected (returns
 /// `None`), so the caller's fallback chain (CropBox → MediaBox → unit frame)
 /// stays available rather than accepting a distorted box.
-fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
-    doc.inherited(page_id, key, |value| doc.resolve_numbers(value))
+fn inherited_rect(page: &Dict<'_>, key: &[u8]) -> Option<[f64; 4]> {
+    page.inherited(key, |node| node.numbers(key))
 }
 
 /// A page's glyph boxes in default user space and the frame that places them
@@ -388,9 +377,24 @@ fn same_line(a: &DeviceRect, b: &DeviceRect) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Object, dictionary};
-
     use super::*;
+    use crate::fixtures::{held, read_id};
+    use crate::pdf::object::{Id, Value, dict};
+    use crate::pdf::writer::Document;
+
+    /// The `key` rectangle the page `page` of `doc` has or inherits.
+    fn rect_of(doc: Document, page: Id, key: &[u8]) -> Option<[f64; 4]> {
+        let pdf = held(doc, &[page]);
+        let dict = pdf.object(read_id(page)).unwrap().into_dict().unwrap();
+        inherited_rect(&dict, key)
+    }
+
+    /// The frame of the page `page` of `doc`.
+    fn frame_of(doc: Document, page: Id) -> Option<PageFrame> {
+        let pdf = held(doc, &[page]);
+        let dict = pdf.object(read_id(page)).unwrap().into_dict().unwrap();
+        page_frame(&dict)
+    }
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -476,13 +480,13 @@ mod tests {
 
     #[test]
     fn inherited_rect_reads_a_direct_array() {
-        let mut doc = Document::with_version("1.7");
-        let page = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 7));
+        let page = doc.add(dict! {
             "Type" => "Page",
             "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
         });
         assert_eq!(
-            inherited_rect(&doc, page, b"MediaBox"),
+            rect_of(doc, page, b"MediaBox"),
             Some([0.0, 0.0, 612.0, 792.0]),
         );
     }
@@ -492,19 +496,19 @@ mod tests {
         // `/MediaBox 3 0 R` with `3 0 obj [ 0 0 612 792 ]` — a valid, common
         // encoding that the direct `.as_array()` could not read, so the page
         // frame fell back to a unit square and geometry stayed in raw points.
-        let mut doc = Document::with_version("1.7");
-        let box_id = doc.add_object(Object::Array(vec![
+        let mut doc = Document::new((1, 7));
+        let box_id = doc.add(Value::Array(vec![
             0.into(),
             0.into(),
             612.into(),
             792.into(),
         ]));
-        let page = doc.add_object(dictionary! {
+        let page = doc.add(dict! {
             "Type" => "Page",
-            "MediaBox" => Object::Reference(box_id),
+            "MediaBox" => Value::Ref(box_id),
         });
         assert_eq!(
-            inherited_rect(&doc, page, b"MediaBox"),
+            rect_of(doc, page, b"MediaBox"),
             Some([0.0, 0.0, 612.0, 792.0]),
             "an indirect MediaBox must dereference to its array",
         );
@@ -514,69 +518,69 @@ mod tests {
     fn inherited_rect_rejects_a_box_with_an_unresolvable_element() {
         // An element that is a dangling reference must fail the whole box (so the
         // caller falls back to MediaBox), not silently resolve to 0.
-        let mut doc = Document::with_version("1.7");
-        let dangling = doc.new_object_id(); // never inserted
-        let page = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 7));
+        let dangling = doc.reserve(); // never written
+        let page = doc.add(dict! {
             "Type" => "Page",
             "CropBox" => vec![
                 0.into(),
                 0.into(),
-                Object::Reference(dangling),
+                Value::Ref(dangling),
                 792.into(),
             ],
         });
-        assert_eq!(inherited_rect(&doc, page, b"CropBox"), None);
+        assert_eq!(rect_of(doc, page, b"CropBox"), None);
     }
 
     #[test]
     fn inherited_rect_rejects_a_non_numeric_element() {
-        let mut doc = Document::with_version("1.7");
-        let page = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 7));
+        let page = doc.add(dict! {
             "Type" => "Page",
             "CropBox" => vec![
                 0.into(),
                 0.into(),
-                Object::Name(b"oops".to_vec()),
+                Value::Name(b"oops".to_vec()),
                 792.into(),
             ],
         });
-        assert_eq!(inherited_rect(&doc, page, b"CropBox"), None);
+        assert_eq!(rect_of(doc, page, b"CropBox"), None);
     }
 
     #[test]
     fn inherited_rect_walks_up_to_an_inherited_box() {
-        let mut doc = Document::with_version("1.7");
-        let pages = doc.new_object_id();
-        let page = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 7));
+        let pages = doc.reserve();
+        let page = doc.add(dict! {
             "Type" => "Page",
             "Parent" => pages,
         });
-        doc.objects.insert(
+        doc.set(
             pages,
-            Object::Dictionary(dictionary! {
+            dict! {
                 "Type" => "Pages",
                 "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
-            }),
+            },
         );
         assert_eq!(
-            inherited_rect(&doc, page, b"MediaBox"),
+            rect_of(doc, page, b"MediaBox"),
             Some([0.0, 0.0, 595.0, 842.0]),
         );
     }
 
     /// A page with `boxes` set on it directly, and its id.
-    fn page_with(boxes: Vec<(&str, Object)>) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.7");
-        let mut page = dictionary! { "Type" => "Page" };
+    fn page_with(boxes: Vec<(&str, Value)>) -> (Document, Id) {
+        let mut doc = Document::new((1, 7));
+        let mut page = dict! { "Type" => "Page" };
         for (key, value) in boxes {
             page.set(key, value);
         }
-        let id = doc.add_object(page);
+        let id = doc.add(page);
         (doc, id)
     }
 
-    fn rect(values: [i64; 4]) -> Object {
-        Object::Array(values.into_iter().map(Object::Integer).collect())
+    fn rect(values: [i64; 4]) -> Value {
+        Value::Array(values.into_iter().map(Value::Int).collect())
     }
 
     /// The visible page is the crop box clipped to the media box.
@@ -586,7 +590,7 @@ mod tests {
             ("MediaBox", rect([0, 0, 600, 800])),
             ("CropBox", rect([-100, 0, 600, 800])),
         ]);
-        let frame = page_frame(&doc, page).unwrap();
+        let frame = frame_of(doc, page).unwrap();
         assert!(
             close(frame.crop_x0, 0.0) && close(frame.crop_w, 600.0),
             "{frame:?}"
@@ -596,11 +600,12 @@ mod tests {
     #[test]
     fn an_indirect_rotation_is_read() {
         let (mut doc, page) = page_with(vec![("MediaBox", rect([0, 0, 600, 800]))]);
-        let rotation = doc.add_object(Object::Integer(90));
-        doc.get_dictionary_mut(page)
+        let rotation = doc.add(Value::Int(90));
+        doc.get_mut(page)
+            .and_then(Value::as_dict_mut)
             .unwrap()
             .set("Rotate", rotation);
-        assert_eq!(page_frame(&doc, page).unwrap().rotate, 90);
+        assert_eq!(frame_of(doc, page).unwrap().rotate, 90);
     }
 
     /// A box overlapping a clip keeps its overlap; one only touching its

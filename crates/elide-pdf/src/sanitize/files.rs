@@ -11,13 +11,14 @@ use std::collections::HashMap;
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Object, ObjectId};
+use hayro_syntax::object::{Dict, MaybeRef, Object};
 
 use super::copy::At;
 use super::keys::Kind;
-use super::{Builder, record};
+use super::{Builder, Src, record};
 use crate::content::attachment::Tree;
-use crate::pdf::reader::{DictionaryExt, DocumentExt, Scope};
+use crate::pdf::object::{Dictionary, Value};
+use crate::pdf::reader::{DictExt, ObjectId, Scope, reference_to};
 
 /// The neutral name every attached file is given.
 const NEUTRAL_PREFIX: &str = "attachment-";
@@ -25,7 +26,7 @@ const NEUTRAL_PREFIX: &str = "attachment-";
 /// The file specification entries the rebuild writes itself.
 const SPEC_KEYS: [&[u8]; 5] = [b"Type", b"F", b"UF", b"EF", b"AFRelationship"];
 
-impl Builder<'_> {
+impl<'a> Builder<'a> {
     /// The attachment tree rebuilt as one leaf of its files, sorted by their
     /// neutral names, or `None` when the document attaches nothing.
     ///
@@ -37,9 +38,11 @@ impl Builder<'_> {
         let tree = Tree::read(self.source)?;
         let mut pairs = Vec::new();
         for entry in &tree.entries {
-            if let Some(spec) =
-                self.copy(Kind::FileSpec, entry.value, At::top(&Scope::default()))?
-            {
+            let spec = match entry.spec_id {
+                Some(spec) => reference_to(spec),
+                None => MaybeRef::NotRef(Object::Dict(entry.spec.clone())),
+            };
+            if let Some(spec) = self.copy(Kind::FileSpec, &spec, At::top(&Scope::default()))? {
                 pairs.push((self.spec_name(&spec), spec));
             }
         }
@@ -48,78 +51,66 @@ impl Builder<'_> {
         }
         pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
         pairs.dedup();
-        let leaf: Vec<Object> = pairs
+        let leaf: Vec<Value> = pairs
             .into_iter()
-            .flat_map(|(name, spec)| [Object::string_literal(name), spec])
+            .flat_map(|(name, spec)| [Value::string(name), spec])
             .collect();
-        Ok(Some(Dictionary::from_iter([(
-            "Names",
-            Object::Array(leaf),
-        )])))
+        Ok(Some(Dictionary::from_iter([("Names", Value::Array(leaf))])))
     }
 
     /// The `/AF` value `af`, each of its file specifications copied, or
     /// `None` when none is kept.
-    pub(super) fn associated(&mut self, af: &Object) -> Result<Option<Object>> {
+    pub(super) fn associated(&mut self, af: &Src<'a>) -> Result<Option<Value>> {
         let source = self.source;
-        let Some(specs) = source.resolve_array(af) else {
+        let Some(specs) = source.resolve(af).and_then(Object::into_array) else {
             self.residue += 1;
             return Ok(None);
         };
         let mut out = Vec::new();
-        for spec in specs {
+        for spec in specs.raw_iter() {
             // A file specification given as a string is a path to a file
             // elsewhere, not a file the document embeds.
-            if source.resolve_dict(spec).is_none() {
+            if !matches!(source.resolve(&spec), Some(Object::Dict(_))) {
                 self.record(HiddenContent::FilePath);
                 continue;
             }
-            match self.copy(Kind::FileSpec, spec, At::top(&Scope::default()))? {
+            match self.copy(Kind::FileSpec, &spec, At::top(&Scope::default()))? {
                 Some(spec) => out.push(spec),
                 None => self.residue += 1,
             }
         }
-        Ok((!out.is_empty()).then_some(Object::Array(out)))
+        Ok((!out.is_empty()).then_some(Value::Array(out)))
     }
 
     /// The file specification `spec` copied, its file under a neutral name of
     /// its own and with its own relationship; the file it embeds is copied
     /// once for each extension the specifications naming it give it, so the
     /// file each name says it is is a file of its own, decoded as that.
-    pub(super) fn file_spec(&mut self, spec: &Dictionary) -> Result<Option<Object>> {
-        let source = self.source;
-        let Some((stream, name)) = spec.embedded_file(source) else {
+    pub(super) fn file_spec(&mut self, spec: &Dict<'a>) -> Result<Option<Value>> {
+        let Some((stream, name)) = spec.embedded_file() else {
             self.residue += 1;
             return Ok(None);
         };
-        for (key, _) in spec.iter() {
-            if !SPEC_KEYS.contains(&key.as_slice()) {
-                self.drop_key(key, record::entry);
+        for key in spec.keys() {
+            if !SPEC_KEYS.contains(&&*key) {
+                self.drop_key(&key, record::entry);
             }
         }
         let name = name.unwrap_or_default();
-        let Some(file) = self.embedded_file(stream, extension(&name))? else {
+        let Some(file) = self.embedded_file(stream.obj_id(), extension(&name))? else {
             return Ok(None);
         };
         let neutral = self.neutral(&name);
         let mut copy = Dictionary::from_iter([
-            ("Type", Object::Name(b"Filespec".to_vec())),
-            ("F", Object::string_literal(neutral.clone())),
-            ("UF", Object::string_literal(neutral)),
-            (
-                "EF",
-                Object::Dictionary(Dictionary::from_iter([("F", file)])),
-            ),
+            ("Type", Value::name("Filespec")),
+            ("F", Value::string(&neutral)),
+            ("UF", Value::string(&neutral)),
+            ("EF", Value::Dict(Dictionary::from_iter([("F", file)]))),
         ]);
-        if let Some(relationship) = spec
-            .get(b"AFRelationship")
-            .ok()
-            .and_then(|r| self.source.resolve(r))
-            .filter(|r| r.as_name().is_ok())
-        {
-            copy.set("AFRelationship", relationship.clone());
+        if let Some(relationship) = spec.name(b"AFRelationship") {
+            copy.set("AFRelationship", Value::name(&*relationship));
         }
-        Ok(Some(Object::Dictionary(copy)))
+        Ok(Some(Value::Dict(copy)))
     }
 
     /// The embedded file `stream` copied for a name of `extension`: the copy
@@ -133,7 +124,7 @@ impl Builder<'_> {
         &mut self,
         stream: ObjectId,
         extension: Option<String>,
-    ) -> Result<Option<Object>> {
+    ) -> Result<Option<Value>> {
         let copies = self.file_copies.get(&stream);
         if let Some(file) = copies.and_then(|copies| copies.get(&extension)) {
             return Ok(Some(file.clone()));
@@ -141,17 +132,13 @@ impl Builder<'_> {
         let scope = Scope::default();
         let first = copies.is_none_or(HashMap::is_empty);
         let file = if first {
-            self.copy(
-                Kind::EmbeddedFile,
-                &Object::Reference(stream),
-                At::top(&scope),
-            )?
+            self.copy(Kind::EmbeddedFile, &reference_to(stream), At::top(&scope))?
         } else {
             // The stream itself, not a reference to it, is copied anew.
-            let Ok(data @ Object::Stream(_)) = self.source.get_object(stream) else {
+            let Some(data @ Object::Stream(_)) = self.source.object(stream) else {
                 return Ok(None);
             };
-            self.copy(Kind::EmbeddedFile, data, At::top(&scope))?
+            self.copy(Kind::EmbeddedFile, &MaybeRef::NotRef(data), At::top(&scope))?
         };
         if let Some(file) = &file {
             self.file_copies
@@ -183,14 +170,14 @@ impl Builder<'_> {
     }
 
     /// The name the copied file specification `spec` gives its file.
-    fn spec_name(&self, spec: &Object) -> String {
+    fn spec_name(&self, spec: &Value) -> String {
         let dict = match spec {
-            Object::Reference(id) => self.out.get_dictionary(*id).ok(),
-            Object::Dictionary(dict) => Some(dict),
+            Value::Ref(id) => self.out.get(*id).and_then(Value::as_dict),
+            Value::Dict(dict) => Some(dict),
             _ => None,
         };
-        dict.and_then(|dict| dict.get(b"F").ok())
-            .and_then(|name| name.as_str().ok())
+        dict.and_then(|dict| dict.get(b"F"))
+            .and_then(Value::as_string)
             .map(|name| String::from_utf8_lossy(name).into_owned())
             .unwrap_or_default()
     }

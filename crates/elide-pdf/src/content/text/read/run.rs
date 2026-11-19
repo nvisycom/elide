@@ -2,12 +2,12 @@
 //! characters and box, and the spaces positioning implies.
 
 use elide_core::Result;
-use lopdf::Object;
 
 use super::geometry::{Cursor, SpaceRule, TextState};
 use crate::content::text::{Address, GlyphBytes, OffsetRun, StreamTarget};
+use crate::pdf::object::Value;
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource, decode_glyphs};
-use crate::pdf::reader::{DeviceRect, GlyphRect, ObjectExt};
+use crate::pdf::reader::{DeviceRect, GlyphRect};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (ISO 32000-1 §9.3.3).
@@ -112,15 +112,15 @@ impl TextRun<'_> {
     /// is 0 when the whole operand list is passed.
     pub(super) fn show(
         &mut self,
-        enc: &FontText<'_>,
-        operands: &[Object],
+        enc: &FontText,
+        operands: &[Value],
         op: usize,
         operand_base: usize,
     ) -> Result<()> {
         for (i, value) in operands.iter().enumerate() {
             let operand = operand_base + i;
             match value {
-                Object::String(bytes, _) => {
+                Value::String(bytes) => {
                     let address = Address {
                         stream: self.stream,
                         op,
@@ -129,7 +129,7 @@ impl TextRun<'_> {
                     };
                     self.show_string(enc, bytes, address)?;
                 }
-                Object::Array(arr) => {
+                Value::Array(arr) => {
                     // A `TJ` array interleaves strings with kerning numbers (glyph-
                     // space thousandths, negated): a positive number moves the pen
                     // *left*, so a large-negative number is a forward gap. Each
@@ -138,7 +138,7 @@ impl TextRun<'_> {
                     // rule — no special threshold for kerns.
                     for (item_idx, item) in arr.iter().enumerate() {
                         match item {
-                            Object::String(bytes, _) => {
+                            Value::String(bytes) => {
                                 let address = Address {
                                     stream: self.stream,
                                     op,
@@ -147,7 +147,7 @@ impl TextRun<'_> {
                                 };
                                 self.show_string(enc, bytes, address)?;
                             }
-                            Object::Integer(_) | Object::Real(_) => {
+                            Value::Int(_) | Value::Real(_) => {
                                 let kern = item.as_number().unwrap_or(0.0);
                                 // Displacement is −kern/1000 × font size × hscale.
                                 let tx = -kern / 1000.0 * self.state.font_size * self.state.h_scale;
@@ -173,7 +173,7 @@ impl TextRun<'_> {
     /// as a word break while glyphs packed at the same origin do not.
     pub(super) fn show_string(
         &mut self,
-        enc: &FontText<'_>,
+        enc: &FontText,
         bytes: &[u8],
         address: Address,
     ) -> Result<()> {

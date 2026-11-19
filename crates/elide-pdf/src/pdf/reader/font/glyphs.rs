@@ -10,15 +10,15 @@
 //! its encoding's character (9.10.2).
 
 use std::iter;
-use std::sync::LazyLock;
 
 use elide_core::{Error, ErrorKind, Result};
 use hayro_cmap::{BfString, CMap, CMapName, CidFamily, load_embedded};
-use lopdf::{Dictionary, Document, Encoding, Object, Stream, dictionary};
+use hayro_syntax::object::{Array, Dict, Object, Stream};
+use pdf_encoding::{ForwardMap, glyphname_to_unicode};
 use unicode_normalization::UnicodeNormalization;
 
-use super::codespace::Codespace;
-use crate::pdf::reader::{DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, StreamExt};
+use super::codespace::{Codespace, mapped};
+use crate::pdf::reader::{DictExt, StreamExt};
 
 /// One decoded glyph within an operand's bytes.
 pub(crate) struct Glyph {
@@ -76,21 +76,21 @@ pub(crate) fn readable(text: &str) -> String {
 const MAX_DESTINATION_UNITS: usize = 256;
 
 /// How a font's codes split into glyphs and read as text (9.10.2).
-pub(crate) enum FontText<'a> {
+pub(crate) enum FontText {
     /// A composite (Type0) font, which reads its codes as [`Composite`]
     /// describes.
     Composite(Box<Composite>),
     /// A simple font, which reads its codes as [`Simple`] describes.
-    Simple(Box<Simple<'a>>),
+    Simple(Box<Simple>),
 }
 
 /// How a simple font's codes read: one byte per code, read through its
 /// `/ToUnicode` where that maps the code, else its encoding.
-pub(crate) struct Simple<'a> {
-    /// The encoding, or `None` for a symbolic font's built-in one, which
-    /// lives in its font program and is not read.
-    encoding: Option<Encoding<'a>>,
-    to_unicode: Option<Encoding<'static>>,
+pub(crate) struct Simple {
+    /// The text of each code under the encoding, or `None` for a font whose
+    /// encoding is its font program's own, which is not read.
+    encoding: Option<Box<[Option<String>; 256]>>,
+    to_unicode: Option<CMap>,
 }
 
 /// How a composite (Type0) font's codes read: split by its encoding CMap,
@@ -103,7 +103,7 @@ pub(crate) struct Composite {
     encoding: CMap,
     /// The encoding's codespace, which splits a string into its codes.
     codespace: Codespace,
-    to_unicode: Option<Encoding<'static>>,
+    to_unicode: Option<CMap>,
     /// Whether the encoding is a predefined Unicode CMap, its codes the
     /// UTF-16 of their text.
     unicode: bool,
@@ -112,7 +112,7 @@ pub(crate) struct Composite {
     collection: Option<CMap>,
 }
 
-impl<'a> FontText<'a> {
+impl FontText {
     /// The text decoding of `font`, or `None` when its codes can't be read:
     /// a simple font's encoding can't be, or a composite font's encoding
     /// CMap can't be read (see [`encoding_cmap`]).
@@ -120,17 +120,19 @@ impl<'a> FontText<'a> {
     /// # Errors
     ///
     /// As [`to_unicode`].
-    pub(crate) fn of(doc: &'a Document, font: &'a Dictionary) -> Result<Option<Self>> {
-        let to_unicode = match font.get(b"ToUnicode").ok().and_then(|c| doc.resolve(c)) {
-            Some(Object::Stream(stream)) => to_unicode(doc, stream)?,
-            _ => None,
+    pub(crate) fn of(font: &Dict<'_>) -> Result<Option<Self>> {
+        let to_unicode = match font.get::<Stream<'_>>(b"ToUnicode") {
+            Some(stream) => to_unicode(&stream)?,
+            None => None,
         };
-        if font.is_subtype(doc, b"Type0") {
-            let unicode = font.name(doc, b"Encoding").is_some_and(is_unicode_cmap);
-            let Some((encoding, codespace)) = encoding_cmap(doc, font)? else {
+        if font.is_subtype(b"Type0") {
+            let unicode = font
+                .name(b"Encoding")
+                .is_some_and(|name| is_unicode_cmap(&name));
+            let Some((encoding, codespace)) = encoding_cmap(font)? else {
                 return Ok(None);
             };
-            let collection = collection_text(doc, font, &encoding);
+            let collection = collection_text(font, &encoding);
             return Ok(Some(Self::Composite(Box::new(Composite {
                 encoding,
                 codespace,
@@ -139,31 +141,125 @@ impl<'a> FontText<'a> {
                 collection,
             }))));
         }
-        let encoding = if let Ok(named) = font.get(b"Encoding") {
-            // A composite encoding is no simple font's, and lopdf would read
-            // one through `/ToUnicode` again, past the guard above.
-            let base = match doc.resolve(named) {
-                Some(Object::Dictionary(dict)) => dict.name(doc, b"BaseEncoding"),
-                Some(Object::Name(name)) => Some(name.as_slice()),
-                _ => None,
-            };
-            if matches!(base, Some(b"Identity-H" | b"Identity-V")) {
-                return Ok(None);
+        let encoding = if font.contains_key(b"Encoding") {
+            match simple_encoding(font) {
+                Some(encoding) => Some(encoding),
+                None => return Ok(None),
             }
-            let Ok(encoding) = font.get_font_encoding_with_limit(doc, MAX_CONTENT_BYTES) else {
-                return Ok(None);
-            };
-            Some(encoding)
         } else {
             // With no `/Encoding`, a code the `/ToUnicode` lacks reads through
             // the font's built-in encoding (9.6.5).
-            built_in(doc, font)
+            built_in(font).map(table)
         };
         Ok(Some(Self::Simple(Box::new(Simple {
             encoding,
             to_unicode,
         }))))
     }
+}
+
+/// The text of each code under the simple `font`'s `/Encoding`: a base
+/// encoding by name, or a dictionary's `/BaseEncoding` (else the font's
+/// built-in one) with its `/Differences` over it; `None` when it names an
+/// encoding not known, a composite one among them, or a built-in one not
+/// read.
+fn simple_encoding(font: &Dict<'_>) -> Option<Box<[Option<String>; 256]>> {
+    if let Some(name) = font.name(b"Encoding") {
+        return base_encoding(&name).map(table);
+    }
+    let dict = font.get::<Dict<'_>>(b"Encoding")?;
+    let base = match dict.name(b"BaseEncoding") {
+        Some(name) => base_encoding(&name)?,
+        None => built_in(font)?,
+    };
+    let mut codes = table(base);
+    if let Some(differences) = dict.get::<Array<'_>>(b"Differences") {
+        let mut code: Option<usize> = None;
+        for item in differences.iter::<Object<'_>>() {
+            match item {
+                Object::Number(number) => {
+                    code = usize::try_from(number.as_i64()).ok().filter(|&c| c < 256);
+                }
+                Object::Name(name) => {
+                    if let Some(at) = code {
+                        codes[at] = glyph_text(&name);
+                        code = Some(at + 1).filter(|&c| c < 256);
+                    }
+                }
+                _ => return None,
+            }
+        }
+    }
+    Some(codes)
+}
+
+/// The base encoding `name` names (Annex D), `None` for one not known.
+fn base_encoding(name: &[u8]) -> Option<&'static ForwardMap> {
+    match name {
+        b"StandardEncoding" => Some(&pdf_encoding::STANDARD),
+        b"WinAnsiEncoding" => Some(&pdf_encoding::WINANSI),
+        b"MacRomanEncoding" => Some(&pdf_encoding::MACROMAN),
+        b"MacExpertEncoding" => Some(&pdf_encoding::MACEXPERT),
+        _ => None,
+    }
+}
+
+/// The text of each code under the base encoding `map`.
+fn table(map: &'static ForwardMap) -> Box<[Option<String>; 256]> {
+    Box::new(std::array::from_fn(|code| {
+        let code = code as u8;
+        standard_text(map, code)
+            .or_else(|| map.get(code))
+            .map(String::from)
+    }))
+}
+
+/// The character the standard encoding's `code` reads as, where
+/// pdf_encoding's table gives the glyph's other Adobe Glyph List code
+/// point: `space` and `hyphen` as the no-break and soft forms, and
+/// `periodcentered` and `fraction` as the bullet and division operators. A
+/// viewer reads each as the first.
+fn standard_text(map: &'static ForwardMap, code: u8) -> Option<char> {
+    if !std::ptr::eq(map, &pdf_encoding::STANDARD) {
+        return None;
+    }
+    match code {
+        0x20 => Some(' '),
+        0x2D => Some('-'),
+        0xA4 => Some('\u{2044}'),
+        0xB4 => Some('\u{00B7}'),
+        _ => None,
+    }
+}
+
+/// The text the glyph name `name` stands for: the Adobe Glyph List's, or
+/// the code points a `uniXXXX` or `uXXXX[XX]` name spells.
+fn glyph_text(name: &[u8]) -> Option<String> {
+    let name = std::str::from_utf8(name).ok()?;
+    // A suffix (`a.alt`) names a variant of the same glyph.
+    let base = name.split('.').next().unwrap_or(name);
+    if let Some(text) = glyphname_to_unicode(base) {
+        return Some(text.to_owned());
+    }
+    let scalar = |hex: &str| char::from_u32(u32::from_str_radix(hex, 16).ok()?);
+    if let Some(hex) = base.strip_prefix("uni")
+        && !hex.is_empty()
+        && hex.len().is_multiple_of(4)
+        && hex.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return hex
+            .as_bytes()
+            .chunks(4)
+            .map(|digits| scalar(std::str::from_utf8(digits).ok()?))
+            .collect();
+    }
+    if let Some(hex) = base.strip_prefix('u')
+        && (4..=6).contains(&hex.len())
+        && hex.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return scalar(hex).map(String::from);
+    }
+    None
 }
 
 /// The encoding CMap of the composite `font`: `Identity-H`/`-V`, a
@@ -175,59 +271,51 @@ impl<'a> FontText<'a> {
 ///
 /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if an
 /// embedded CMap decodes past the content limit.
-fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Codespace)>> {
+fn encoding_cmap(font: &Dict<'_>) -> Result<Option<(CMap, Codespace)>> {
     let read = |data: &[u8]| Some((CMap::parse(data, load_embedded)?, Codespace::read(data)?));
-    Ok(
-        match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
-            Some(Object::Name(name)) => match name.as_slice() {
-                b"Identity-H" => Some((CMap::identity_h(), Codespace::identity())),
-                b"Identity-V" => Some((CMap::identity_v(), Codespace::identity())),
-                name => load_embedded(CMapName::from_bytes(name)).and_then(read),
-            },
-            // A base CMap the stream's dictionary names (`/UseCMap`, 9.7.5.3)
-            // is followed as the `usecmap` the stream itself could have
-            // written, when it is predefined. One given as a stream is not:
-            // hayro-cmap resolves a base by name alone, so the font's codes
-            // are not read without it.
-            Some(Object::Stream(stream)) => {
-                let base = match stream
-                    .dict
-                    .get(b"UseCMap")
-                    .ok()
-                    .and_then(|b| doc.resolve(b))
-                {
-                    None | Some(Object::Null) => Vec::new(),
-                    Some(Object::Name(name)) => [b"/", name.as_slice(), b" usecmap\n"].concat(),
-                    Some(_) => return Ok(None),
-                };
-                match stream.decoded() {
-                    Ok(data) => read(&[base, data].concat()),
-                    Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
-                    Err(_) => None,
-                }
-            }
-            _ => None,
-        },
-    )
+    if let Some(name) = font.name(b"Encoding") {
+        return Ok(match &*name {
+            b"Identity-H" => Some((CMap::identity_h(), Codespace::identity())),
+            b"Identity-V" => Some((CMap::identity_v(), Codespace::identity())),
+            name => load_embedded(CMapName::from_bytes(name)).and_then(read),
+        });
+    }
+    let Some(stream) = font.get::<Stream<'_>>(b"Encoding") else {
+        return Ok(None);
+    };
+    // A base CMap the stream's dictionary names (`/UseCMap`, 9.7.5.3) is
+    // followed as the `usecmap` the stream itself could have written, when
+    // it is predefined. One given as a stream is not: hayro-cmap resolves a
+    // base by name alone, so the font's codes are not read without it.
+    let base = match stream.dict().get::<Object<'_>>(b"UseCMap") {
+        None | Some(Object::Null(_)) => Vec::new(),
+        Some(Object::Name(name)) => [b"/", &*name, b" usecmap\n"].concat(),
+        Some(_) => return Ok(None),
+    };
+    Ok(match stream.plain() {
+        Ok(data) => read(&[base, data].concat()),
+        Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
+        Err(_) => None,
+    })
 }
 
 /// The CMap giving the text of each CID in the composite `font`'s character
 /// collection: the one its descendant CIDFont's `/CIDSystemInfo` names, which
 /// defines its CIDs, else the one its `encoding` names; `None` for a
 /// collection with no such CMap (`Adobe-Identity`, or one of its own).
-fn collection_text(doc: &Document, font: &Dictionary, encoding: &CMap) -> Option<CMap> {
-    let descendant = font
-        .get(b"DescendantFonts")
-        .ok()
-        .and_then(|fonts| doc.resolve_array(fonts))
-        .and_then(|fonts| doc.resolve_dict(fonts.first()?));
-    let named = descendant
-        .and_then(|cid_font| doc.resolve_dict(cid_font.get(b"CIDSystemInfo").ok()?))
+fn collection_text(font: &Dict<'_>, encoding: &CMap) -> Option<CMap> {
+    let named = font
+        .get::<Array<'_>>(b"DescendantFonts")
+        .and_then(|fonts| fonts.iter::<Dict<'_>>().next())
+        .and_then(|cid_font| cid_font.get::<Dict<'_>>(b"CIDSystemInfo"))
         .and_then(|info| {
-            let text = |key: &[u8]| doc.resolve(info.get(key).ok()?)?.as_str().ok();
+            let text = |key: &[u8]| {
+                info.get::<hayro_syntax::object::String<'_>>(key)
+                    .map(|s| s.to_vec())
+            };
             Some(CidFamily::from_registry_ordering(
-                text(b"Registry")?,
-                text(b"Ordering")?,
+                &text(b"Registry")?,
+                &text(b"Ordering")?,
             ))
         });
     let family = named.or_else(|| {
@@ -240,41 +328,36 @@ fn collection_text(doc: &Document, font: &Dictionary, encoding: &CMap) -> Option
     CMap::parse(load_embedded(family.ucs2_cmap()?)?, load_embedded)
 }
 
-/// The standard encoding, which lopdf reads a font with no other by.
-fn standard() -> Encoding<'static> {
-    static PLAIN: LazyLock<(Document, Dictionary)> =
-        LazyLock::new(|| (Document::new(), dictionary! { "Type" => "Font" }));
-    let (doc, font) = &*PLAIN;
-    font.get_font_encoding(doc)
-        .unwrap_or(Encoding::SimpleEncoding(b"StandardEncoding"))
-}
-
 /// The built-in encoding of the simple `font`, which names none: the
-/// standard encoding, or none known for a font whose encoding is its font
-/// program's own (9.6.5.1): a symbolic font (the standard Symbol and
-/// ZapfDingbats, or one flagged symbolic), or a Type1 font it embeds.
-fn built_in(doc: &Document, font: &Dictionary) -> Option<Encoding<'static>> {
-    let base = font
-        .name(doc, b"BaseFont")
+/// standard encoding, the standard Symbol and ZapfDingbats fonts' own, or
+/// none known for a font whose encoding is its font program's own
+/// (9.6.5.1): one flagged symbolic, or a Type1 font it embeds.
+fn built_in(font: &Dict<'_>) -> Option<&'static ForwardMap> {
+    let base = font.name(b"BaseFont");
+    let base = base
+        .as_deref()
         .map(|name| name.split(|&b| b == b'+').next_back().unwrap_or(name));
-    if matches!(base, Some(b"Symbol" | b"ZapfDingbats")) {
-        return None;
+    let descriptor = font.get::<Dict<'_>>(b"FontDescriptor");
+    let embedded = descriptor
+        .as_ref()
+        .is_some_and(|d| d.contains_key(b"FontFile") || d.contains_key(b"FontFile3"));
+    match base {
+        Some(b"Symbol") if !embedded => return Some(&pdf_encoding::SYMBOL),
+        Some(b"ZapfDingbats") if !embedded => return Some(&pdf_encoding::ZDINGBAT),
+        _ => {}
     }
-    let descriptor = font
-        .get(b"FontDescriptor")
-        .ok()
-        .and_then(|descriptor| doc.resolve_dict(descriptor));
-    let embeds_type1 = matches!(font.name(doc, b"Subtype"), Some(b"Type1" | b"MMType1"))
-        && descriptor.is_some_and(|d| d.get(b"FontFile").is_ok() || d.get(b"FontFile3").is_ok());
-    if embeds_type1 {
+    let type1 = font
+        .name(b"Subtype")
+        .is_some_and(|subtype| matches!(&*subtype, b"Type1" | b"MMType1"));
+    if type1 && embedded {
         return None;
     }
     let flags = descriptor
-        .and_then(|descriptor| doc.resolve_number(descriptor.get(b"Flags").ok()?))
+        .and_then(|descriptor| descriptor.number(b"Flags"))
         .map_or(0, |flags| flags as i64);
     // Symbolic (bit 3) and not Nonsymbolic (bit 6), Table 121.
     let symbolic = flags & 4 != 0 && flags & 32 == 0;
-    (!symbolic).then(standard)
+    (!symbolic).then_some(&pdf_encoding::STANDARD)
 }
 
 /// Whether the predefined CMap `name` maps UCS-2 or UTF-16 codes (9.7.5.2).
@@ -288,149 +371,51 @@ fn contains(name: &[u8], part: &[u8]) -> bool {
 }
 
 /// The most codes a `/ToUnicode` CMap may map, its single codes and the
-/// codes its ranges span together. lopdf expands every code of every range
-/// as it parses, so a range of four-byte codes could name billions; and the
-/// count is the same however the codes are written, so a CMap the rebuild
-/// writes back, its single codes gathered into ranges, still fits.
+/// codes its ranges span together. A CMap the rebuild writes back lists
+/// each code it maps, so a range of four-byte codes could name billions;
+/// and the count is the same however the codes are written, so a CMap the
+/// rebuild writes back, its single codes gathered into ranges, still fits.
 const MAX_CODES: u64 = 1 << 18;
 
-/// `stream` read as a `/ToUnicode` CMap by lopdf, the reader detection
-/// decodes text with; `None` when it can't be decoded or lopdf can't read it.
-///
-/// lopdf is given the very bytes whose ranges were counted, unfiltered, so
-/// nothing it reads went uncounted.
+/// `stream` read as a `/ToUnicode` CMap, as detection decodes text with it;
+/// `None` when it can't be decoded or read.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if it
-/// decodes past the content limit, or maps more than [`MAX_CODES`] codes,
-/// counted before lopdf expands them.
-pub(crate) fn to_unicode(doc: &Document, stream: &Stream) -> Result<Option<Encoding<'static>>> {
-    let content = match stream.decoded() {
+/// decodes past the content limit, or maps more than [`MAX_CODES`] codes.
+pub(crate) fn to_unicode(stream: &Stream<'_>) -> Result<Option<CMap>> {
+    let content = match stream.plain() {
         Ok(content) => content,
         Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
         Err(_) => return Ok(None),
     };
-    if mapped_codes(&content) > MAX_CODES {
+    to_unicode_bytes(&content)
+}
+
+/// The CMap `content` read as a `/ToUnicode` CMap, as [`to_unicode`].
+///
+/// # Errors
+///
+/// As [`to_unicode`].
+pub(crate) fn to_unicode_bytes(content: &[u8]) -> Result<Option<CMap>> {
+    let codes = mapped(content)
+        .iter()
+        .fold(0u64, |count, entry| count.saturating_add(entry.count()));
+    if codes > MAX_CODES {
         return Err(Error::resource_limit(format!(
             "a /ToUnicode CMap maps more than {MAX_CODES} codes"
         )));
     }
-    // lopdf parses a CMap only as a font's: a font with no `/Encoding` reads
-    // its `/ToUnicode`, and falls back to a one-byte encoding when it can't.
-    let plain = Stream::new(Dictionary::new(), content);
-    let font = dictionary! { "Type" => "Font", "ToUnicode" => Object::Stream(plain) };
-    match font.get_font_encoding(doc) {
-        Ok(Encoding::UnicodeMapEncoding(cmap)) => Ok(Some(Encoding::UnicodeMapEncoding(cmap))),
-        _ => Ok(None),
-    }
+    Ok(CMap::parse(content, load_embedded))
 }
 
-/// How many codes the CMap `content` maps, at least: one for each `bfchar`
-/// entry (a pair of hex strings), and the codes each `bfrange` entry spans
-/// (a `<lo> <hi>` pair of hex strings of one length opening it). Comments
-/// are skipped, and strings and dictionary delimiters are passed over whole,
-/// so a `%` or `>` inside them hides nothing.
-fn mapped_codes(content: &[u8]) -> u64 {
-    let mut tokens = Vec::new();
-    let mut in_ranges = false;
-    let mut in_chars = false;
-    let mut char_strings = 0u64;
-    let mut i = 0;
-    while i < content.len() {
-        match content[i] {
-            b'%' => {
-                while i < content.len() && !matches!(content[i], b'\n' | b'\r') {
-                    i += 1;
-                }
-            }
-            b'(' => i = past_string(content, i),
-            b'<' | b'>' if content.get(i + 1) == Some(&content[i]) => i += 2,
-            b'<' => {
-                let end = content[i..]
-                    .iter()
-                    .position(|&b| b == b'>')
-                    .map_or(content.len(), |e| i + e);
-                if in_ranges {
-                    tokens.push(Some(&content[i + 1..end]));
-                }
-                char_strings += u64::from(in_chars);
-                i = end + 1;
-            }
-            b'[' => {
-                i += content[i..]
-                    .iter()
-                    .position(|&b| b == b']')
-                    .unwrap_or(content.len() - i)
-                    + 1;
-                if in_ranges {
-                    tokens.push(None);
-                }
-            }
-            b if b.is_ascii_alphabetic() => {
-                let start = i;
-                while i < content.len() && content[i].is_ascii_alphanumeric() {
-                    i += 1;
-                }
-                match &content[start..i] {
-                    b"beginbfrange" => in_ranges = true,
-                    b"endbfrange" => in_ranges = false,
-                    b"beginbfchar" => in_chars = true,
-                    b"endbfchar" => in_chars = false,
-                    _ => {}
-                }
-            }
-            _ => i += 1,
-        }
-    }
-    let code = |hex: &[u8]| {
-        let digits: Vec<u8> = hex
-            .iter()
-            .copied()
-            .filter(|b| !b.is_ascii_whitespace())
-            .collect();
-        (digits.len() <= 8 && digits.len().is_multiple_of(2))
-            .then(|| u64::from_str_radix(std::str::from_utf8(&digits).ok()?, 16).ok())
-            .flatten()
-            .map(|value| (digits.len(), value))
-    };
-    let mut count = 0u64;
-    let mut i = 0;
-    while i + 1 < tokens.len() {
-        if let (Some(Some((lo_len, lo))), Some(Some((hi_len, hi)))) =
-            (tokens[i].map(code), tokens[i + 1].map(code))
-            && lo_len == hi_len
-            && hi >= lo
-        {
-            count = count.saturating_add(hi - lo + 1);
-            i += 3;
-        } else {
-            i += 1;
-        }
-    }
-    count.saturating_add(char_strings / 2)
-}
-
-/// The index past the literal string opening at `start` in `content`: its
-/// balancing `)`, past escaped bytes and nested parentheses.
-fn past_string(content: &[u8], start: usize) -> usize {
-    let mut depth = 0usize;
-    let mut i = start;
-    while i < content.len() {
-        match content[i] {
-            b'\\' => i += 1,
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return i + 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    content.len()
+/// The UTF-16 units `cmap` maps `code` to.
+pub(crate) fn mapped_units(cmap: &CMap, code: u32) -> Option<Vec<u16>> {
+    Some(match cmap.lookup_bf_string(code)? {
+        BfString::Char(c) => c.encode_utf16(&mut [0; 2]).to_vec(),
+        BfString::String(text) => text.encode_utf16().collect(),
+    })
 }
 
 /// The text of a glyph whose code maps to the UTF-16 `units`.
@@ -453,7 +438,7 @@ fn mapped_text(units: &[u16]) -> Result<String> {
 /// Fails closed: a code that does not decode under the font is an unmatchable
 /// glyph, it could not be located for deletion, so the whole redaction is
 /// refused rather than leaving that text silently in place.
-pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Glyph>> {
+pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>> {
     match font {
         // Codes split by the encoding: each the shortest run of bytes its
         // ranges map, read through `/ToUnicode`, else as UTF-16 under a
@@ -493,14 +478,10 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
                 let code = number(code_bytes);
                 // A code the encoding maps to no CID draws the missing glyph.
                 let cid = encoding.lookup_cid_code(code, len as u8).unwrap_or(0);
-                let mapped = match to_unicode {
-                    Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(code, len as u8),
-                    _ => None,
-                };
-                let cid_text = || match collection.as_ref()?.lookup_bf_string(cid)? {
-                    BfString::Char(c) => Some(c.encode_utf16(&mut [0; 2]).to_vec()),
-                    BfString::String(text) => Some(text.encode_utf16().collect()),
-                };
+                let mapped = to_unicode
+                    .as_ref()
+                    .and_then(|cmap| mapped_units(cmap, code));
+                let cid_text = || mapped_units(collection.as_ref()?, cid);
                 let units = match mapped {
                     Some(units) => units,
                     None if *unicode && len.is_multiple_of(2) => code_bytes
@@ -540,16 +521,15 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
                 .iter()
                 .enumerate()
                 .map(|(i, &b)| {
-                    let mapped = match to_unicode {
-                        Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(u32::from(b), 1),
-                        _ => None,
-                    };
+                    let mapped = to_unicode
+                        .as_ref()
+                        .and_then(|cmap| mapped_units(cmap, u32::from(b)));
                     let text = match mapped {
                         Some(units) => mapped_text(&units)?,
                         None => encoding
                             .as_ref()
-                            .and_then(|encoding| encoding.bytes_to_string(&[b]).ok())
-                            .map(|t| readable(&t))
+                            .and_then(|encoding| encoding[usize::from(b)].as_deref())
+                            .map(readable)
                             .ok_or_else(|| {
                                 Error::redaction(
                                     "text drawn with a byte that does not decode under its \
@@ -573,6 +553,27 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::{held, objects_of, read_id};
+    use crate::pdf::object::{Dictionary, Stream as Written, Value, dict};
+    use crate::pdf::writer::Document;
+
+    /// The text decoding of `font`, written into `doc` with the streams it
+    /// holds as objects of their own.
+    fn text_of(mut doc: Document, font: Dictionary) -> Result<Option<FontText>> {
+        let font = objects_of(&mut doc, Value::Dict(font));
+        let font = doc.add(font);
+        let pdf = held(doc, &[font]);
+        let dict = pdf.object(read_id(font)).unwrap().into_dict().unwrap();
+        FontText::of(&dict)
+    }
+
+    /// The CMap `stream` read as a `/ToUnicode` CMap.
+    fn unicode_of(stream: Written) -> Result<Option<CMap>> {
+        let mut doc = Document::new((1, 7));
+        let id = doc.add(stream);
+        let pdf = held(doc, &[id]);
+        to_unicode(&pdf.object(read_id(id)).unwrap().into_stream().unwrap())
+    }
 
     /// A one-byte-and-two-byte `/ToUnicode` CMap mapping `<41>` to `J`,
     /// `<8140>` to `a` (as a Shift-JIS font's would), and `<5C71>` to `x`.
@@ -585,18 +586,18 @@ mod tests {
 
     /// The glyphs `bytes` draw in a composite font of `encoding`, with the
     /// `/ToUnicode` above when `mapped`.
-    fn composite(encoding: Object, mapped: bool, bytes: &[u8]) -> Option<Result<Vec<String>>> {
-        let mut doc = Document::with_version("1.7");
-        let mut font = dictionary! {
+    fn composite(encoding: Value, mapped: bool, bytes: &[u8]) -> Option<Result<Vec<String>>> {
+        let mut doc = Document::new((1, 7));
+        let mut font = dict! {
             "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X", "Encoding" => encoding,
         };
         if mapped {
             font.set(
                 "ToUnicode",
-                doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec())),
+                doc.add(Written::new(dict! {}, TO_UNICODE.to_vec())),
             );
         }
-        let text = FontText::of(&doc, &font).unwrap()?;
+        let text = text_of(doc.clone(), font.clone()).unwrap()?;
         Some(
             decode_glyphs(&text, bytes)
                 .map(|glyphs| glyphs.into_iter().map(|glyph| glyph.text).collect()),
@@ -608,15 +609,15 @@ mod tests {
     /// font embeds.
     #[test]
     fn a_composite_font_reads_through_its_to_unicode() {
-        let embedded = Object::Stream(Stream::new(
-            dictionary! { "Type" => "CMap" },
+        let embedded = Value::from(Written::new(
+            dict! { "Type" => "CMap" },
             b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
               2 begincodespacerange\n<00> <80>\n<8140> <9FFC>\nendcodespacerange\n\
               2 begincidrange\n<41> <41> 34\n<8140> <8140> 633\nendcidrange\n\
               endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
                 .to_vec(),
         ));
-        for encoding in [Object::Name(b"90ms-RKSJ-H".to_vec()), embedded] {
+        for encoding in [Value::Name(b"90ms-RKSJ-H".to_vec()), embedded] {
             let glyphs = composite(encoding, true, b"\x41\x81\x40").unwrap().unwrap();
             assert_eq!(glyphs, ["J", "a"]);
         }
@@ -627,21 +628,21 @@ mod tests {
     /// 0), whose width it takes; a mapped code takes its CID's.
     #[test]
     fn a_code_in_the_codespace_without_a_cid_still_reads() {
-        let mut doc = Document::with_version("1.7");
-        let encoding = doc.add_object(Stream::new(
-            dictionary! { "Type" => "CMap" },
+        let mut doc = Document::new((1, 7));
+        let encoding = doc.add(Written::new(
+            dict! { "Type" => "CMap" },
             b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
               2 begincodespacerange\n<00> <80>\n<8140> <9FFC>\nendcodespacerange\n\
               1 begincidrange\n<41> <41> 34\nendcidrange\n\
               endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
                 .to_vec(),
         ));
-        let to_unicode = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
-        let font = dictionary! {
+        let to_unicode = doc.add(Written::new(dict! {}, TO_UNICODE.to_vec()));
+        let font = dict! {
             "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X",
             "Encoding" => encoding, "ToUnicode" => to_unicode,
         };
-        let text = FontText::of(&doc, &font).unwrap().unwrap();
+        let text = text_of(doc.clone(), font.clone()).unwrap().unwrap();
         let glyphs = decode_glyphs(&text, b"\x41\x81\x40").unwrap();
         let read: Vec<(&str, u32, u32)> = glyphs
             .iter()
@@ -655,8 +656,8 @@ mod tests {
     /// through it.
     #[test]
     fn an_encoding_on_a_stream_base_is_refused() {
-        let named = Object::Stream(Stream::new(
-            dictionary! { "Type" => "CMap", "UseCMap" => "90ms-RKSJ-H" },
+        let named = Value::from(Written::new(
+            dict! { "Type" => "CMap", "UseCMap" => "90ms-RKSJ-H" },
             b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
               endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
                 .to_vec(),
@@ -665,12 +666,12 @@ mod tests {
             composite(named, true, b"\x41\x81\x40").unwrap().unwrap(),
             ["J", "a"]
         );
-        let base = Stream::new(
-            dictionary! { "Type" => "CMap" },
+        let base = Written::new(
+            dict! { "Type" => "CMap" },
             b"begincmap\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\nendcmap".to_vec(),
         );
-        let child = Object::Stream(Stream::new(
-            dictionary! { "Type" => "CMap", "UseCMap" => Object::Stream(base) },
+        let child = Value::from(Written::new(
+            dict! { "Type" => "CMap", "UseCMap" => Value::from(base) },
             b"begincmap\nendcmap".to_vec(),
         ));
         assert!(composite(child, true, b"\x41").is_none());
@@ -681,7 +682,7 @@ mod tests {
     /// Adobe-Japan1's `B`.
     #[test]
     fn a_code_its_to_unicode_lacks_reads_through_the_collection() {
-        let name = Object::Name(b"90ms-RKSJ-H".to_vec());
+        let name = Value::Name(b"90ms-RKSJ-H".to_vec());
         assert_eq!(
             composite(name, true, b"\x41\x42").unwrap().unwrap(),
             ["J", "B"]
@@ -693,14 +694,19 @@ mod tests {
     /// collection) as one glyph.
     #[test]
     fn a_unicode_cmap_reads_as_utf16() {
-        let name = Object::Name(b"UniJIS-UTF16-H".to_vec());
+        let name = Value::Name(b"UniJIS-UTF16-H".to_vec());
         let glyphs = composite(name, false, b"\x00J\xD8\x42\xDF\x9F")
             .unwrap()
             .unwrap();
         assert_eq!(glyphs, ["J", "\u{20B9F}"]);
     }
 
-    /// Codes are counted before lopdf expands them: a CMap spanning too
+    /// How many codes the CMap `content` maps.
+    fn mapped_codes(content: &[u8]) -> u64 {
+        mapped(content).iter().map(|entry| entry.count()).sum()
+    }
+
+    /// Codes are counted as their entries span them: a CMap spanning too
     /// many codes is refused, one in a comment is no range, and single
     /// codes count as ranges do, so the count is the same however the
     /// codes are written.
@@ -727,12 +733,12 @@ mod tests {
         assert!(mapped_codes(wide) > MAX_CODES);
     }
 
-    /// A CMap whose filter is not one is not read at all, so lopdf never
-    /// parses bytes that went uncounted.
+    /// A CMap whose filter is not one is not read at all, so no bytes that
+    /// went uncounted are parsed.
     #[test]
     fn a_cmap_under_a_filter_that_is_none_is_unreadable() {
-        let stream = Stream::new(dictionary! { "Filter" => 5 }, TO_UNICODE.to_vec());
-        assert!(to_unicode(&Document::new(), &stream).unwrap().is_none());
+        let stream = Written::new(dict! { "Filter" => 5 }, TO_UNICODE.to_vec());
+        assert!(unicode_of(stream).unwrap().is_none());
     }
 
     /// A composite font with no `/ToUnicode`, no Unicode encoding and no
@@ -741,29 +747,29 @@ mod tests {
     /// no CMap can't even be split.
     #[test]
     fn a_composite_font_with_nothing_to_read_is_refused() {
-        let refused = composite(Object::Name(b"Identity-H".to_vec()), false, b"\x00\x41");
+        let refused = composite(Value::Name(b"Identity-H".to_vec()), false, b"\x00\x41");
         assert!(refused.unwrap().is_err());
-        assert!(composite(Object::Name(b"No-Such-CMap".to_vec()), true, b"\x41").is_none());
+        assert!(composite(Value::Name(b"No-Such-CMap".to_vec()), true, b"\x41").is_none());
     }
 
     /// The glyphs `bytes` draw in a composite font of `encoding` whose
     /// descendant CIDFont names the collection `registry`-`ordering`, with no
     /// `/ToUnicode`.
     fn collected(encoding: &str, ordering: &str, bytes: &[u8]) -> Result<Vec<String>> {
-        let mut doc = Document::with_version("1.7");
-        let descendant = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 7));
+        let descendant = doc.add(dict! {
             "Type" => "Font", "Subtype" => "CIDFontType0", "BaseFont" => "X",
-            "CIDSystemInfo" => dictionary! {
-                "Registry" => Object::string_literal("Adobe"),
-                "Ordering" => Object::string_literal(ordering),
+            "CIDSystemInfo" => dict! {
+                "Registry" => Value::string("Adobe"),
+                "Ordering" => Value::string(ordering),
                 "Supplement" => 6,
             },
         });
-        let font = dictionary! {
+        let font = dict! {
             "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X",
             "Encoding" => encoding, "DescendantFonts" => vec![descendant.into()],
         };
-        let text = FontText::of(&doc, &font).unwrap().unwrap();
+        let text = text_of(doc.clone(), font.clone()).unwrap().unwrap();
         decode_glyphs(&text, bytes).map(|glyphs| glyphs.into_iter().map(|g| g.text).collect())
     }
 
@@ -786,7 +792,7 @@ mod tests {
     /// has a one-byte code of that value.
     #[test]
     fn codes_split_by_the_encoding_not_the_map() {
-        let name = Object::Name(b"90ms-RKSJ-H".to_vec());
+        let name = Value::Name(b"90ms-RKSJ-H".to_vec());
         let glyphs = composite(name, true, b"\x81\x40\x41").unwrap().unwrap();
         assert_eq!(glyphs, ["a", "J"]);
     }
@@ -795,7 +801,7 @@ mod tests {
     /// as the UTF-16 it is.
     #[test]
     fn a_unicode_encoding_reads_a_code_its_to_unicode_lacks() {
-        let name = Object::Name(b"UniJIS-UCS2-H".to_vec());
+        let name = Value::Name(b"UniJIS-UCS2-H".to_vec());
         let glyphs = composite(name, true, b"\x5C\x71\x00\x62").unwrap().unwrap();
         assert_eq!(glyphs, ["x", "b"]);
     }
@@ -804,7 +810,7 @@ mod tests {
     /// `Identity-H` a one-byte mapping never shortens a two-byte code.
     #[test]
     fn identity_codes_are_two_bytes_whatever_the_map_holds() {
-        let name = Object::Name(b"Identity-H".to_vec());
+        let name = Value::Name(b"Identity-H".to_vec());
         let err = composite(name, true, b"\x41\x81").unwrap().unwrap_err();
         assert_eq!(err.kind(), elide_core::ErrorKind::Redaction);
     }
@@ -813,12 +819,12 @@ mod tests {
     /// through the standard encoding, still one byte a code.
     #[test]
     fn a_simple_font_without_an_encoding_falls_back_per_byte() {
-        let mut doc = Document::with_version("1.7");
-        let map = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
-        let font = dictionary! {
+        let mut doc = Document::new((1, 7));
+        let map = doc.add(Written::new(dict! {}, TO_UNICODE.to_vec()));
+        let font = dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "X", "ToUnicode" => map,
         };
-        let text = FontText::of(&doc, &font).unwrap().unwrap();
+        let text = text_of(doc.clone(), font.clone()).unwrap().unwrap();
         let glyphs: Vec<String> = decode_glyphs(&text, b"\x41\x42")
             .unwrap()
             .into_iter()
@@ -833,34 +839,38 @@ mod tests {
     /// naming a composite encoding is no font whose codes can be read.
     #[test]
     fn a_symbolic_font_refuses_a_byte_its_map_lacks() {
-        let mut doc = Document::with_version("1.7");
-        let map = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
-        let descriptor = doc.add_object(dictionary! { "Type" => "FontDescriptor", "Flags" => 4 });
-        let program = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
-        let embedded = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 7));
+        let map = doc.add(Written::new(dict! {}, TO_UNICODE.to_vec()));
+        let descriptor = doc.add(dict! { "Type" => "FontDescriptor", "Flags" => 4 });
+        let program = doc.add(Written::new(dict! {}, Vec::new()));
+        let embedded = doc.add(dict! {
             "Type" => "FontDescriptor", "Flags" => 32, "FontFile" => program,
         });
+        // The standard Symbol font's own encoding is the standard Symbol
+        // table, which is read.
+        let symbol = dict! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Symbol", "ToUnicode" => map };
+        let text = text_of(doc.clone(), symbol).unwrap().unwrap();
+        assert_eq!(decode_glyphs(&text, b"\x42").unwrap()[0].text, "\u{0392}");
         for font in [
-            dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Symbol", "ToUnicode" => map },
-            dictionary! {
+            dict! {
                 "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "ABCDEF+Glyphs",
                 "ToUnicode" => map, "FontDescriptor" => descriptor,
             },
-            dictionary! {
+            dict! {
                 "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "ABCDEF+Embedded",
                 "ToUnicode" => map, "FontDescriptor" => embedded,
             },
         ] {
-            let text = FontText::of(&doc, &font).unwrap().unwrap();
+            let text = text_of(doc.clone(), font.clone()).unwrap().unwrap();
             assert_eq!(decode_glyphs(&text, b"\x41").unwrap()[0].text, "J");
             let refused = decode_glyphs(&text, b"\x42");
             assert!(refused.is_err_and(|e| e.kind() == ErrorKind::Redaction));
         }
-        let composite = dictionary! {
+        let composite = dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "X",
             "Encoding" => "Identity-H", "ToUnicode" => map,
         };
-        assert!(FontText::of(&doc, &composite).unwrap().is_none());
+        assert!(text_of(doc.clone(), composite.clone()).unwrap().is_none());
     }
 
     #[test]

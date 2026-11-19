@@ -5,13 +5,15 @@ use std::mem;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Dictionary, Object, ObjectId, Stream};
+use hayro_syntax::object::{Array, Dict, MaybeRef, Object, Stream};
 
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
-use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST, record};
+use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, Src, VALUE_COST, record};
 use crate::content::image;
-use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
-use crate::pdf::writer::{UnicodeMap, compressed};
+use crate::pdf::decode::filters;
+use crate::pdf::object::{Dictionary, Stream as Written, Value};
+use crate::pdf::reader::{DictExt, ObjectId, Scope, StreamExt, id};
+use crate::pdf::writer::{UnicodeMap, compressed, object_value};
 
 /// Where a value is copied: the scope names in its content resolve in, how
 /// deep in the rebuild it nests, and whether content drawn there begins
@@ -71,53 +73,59 @@ impl<'a> Builder<'a> {
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// objects nest past [`MAX_NESTING`] or the rebuild copies more than
     /// [`MAX_COPIED_BYTES`].
-    pub(super) fn copy<'s>(
+    pub(super) fn copy(
         &mut self,
         kind: Kind,
-        value: &'s Object,
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
+        value: &Src<'a>,
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
         if at.depth > MAX_NESTING {
             return Err(Error::resource_limit(format!(
                 "objects nest deeper than {MAX_NESTING} levels"
             )));
         }
-        let held = match value {
-            Object::String(bytes, _) | Object::Name(bytes) => bytes.len(),
+        let object = match value {
+            MaybeRef::Ref(reference) => {
+                self.charge(VALUE_COST)?;
+                return self.copy_reference(kind, id(*reference), at);
+            }
+            MaybeRef::NotRef(object) => object,
+        };
+        let held = match object {
+            Object::String(string) => string.as_bytes().len(),
+            Object::Name(name) => name.len(),
             _ => 0,
         };
         self.charge(VALUE_COST + held)?;
-        match value {
-            Object::Reference(id) => self.copy_reference(kind, *id, at),
+        match object {
             // A font held in place is written as an object of its own, as
             // the normal form has every font and stream.
-            Object::Dictionary(_) | Object::Stream(_) => {
-                Ok(match self.copy_object(kind, None, value, at)? {
-                    Some(copy @ Object::Stream(_)) => Some(self.add(copy)),
+            Object::Dict(_) | Object::Stream(_) => {
+                Ok(match self.copy_object(kind, None, object, at)? {
+                    Some(copy @ Value::Stream(_)) => Some(self.add(copy)),
                     Some(copy) if kind == Kind::Font => Some(self.add(copy)),
                     copy => copy,
                 })
             }
-            Object::Array(items) if kind == Kind::ColorSpace => self.color_space(items, at),
             Object::Array(items) => {
+                let items: Vec<Src<'a>> = items.raw_iter().collect();
+                if kind == Kind::ColorSpace {
+                    return self.color_space(&items, at);
+                }
                 let mut out = Vec::with_capacity(items.len());
-                for item in items {
+                for item in &items {
                     match self.copy(kind, item, at.deeper())? {
                         Some(item) => out.push(item),
                         None => return Ok(None),
                     }
                 }
-                Ok(Some(Object::Array(out)))
+                Ok(Some(Value::Array(out)))
             }
-            Object::Null
+            Object::Null(_)
             | Object::Boolean(_)
-            | Object::Integer(_)
-            | Object::Real(_)
+            | Object::Number(_)
             | Object::Name(_)
-            | Object::String(..) => Ok(Some(value.clone())),
+            | Object::String(_) => Ok(Some(object_value(object))),
         }
     }
 
@@ -125,26 +133,18 @@ impl<'a> Builder<'a> {
     /// its own object, copied once per kind (and per scope, for an object
     /// whose copy depends on the scope it is drawn in); anything else in
     /// place.
-    fn copy_reference<'s>(
+    fn copy_reference(
         &mut self,
         kind: Kind,
         id: ObjectId,
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
-        // The object `id` holds, or the one a chain of references from it
-        // ends at.
-        let source = self.source;
-        let Some(Ok((last, object))) = source.objects.get(&id).map(|o| source.dereference(o))
-        else {
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
+        let Some(object) = self.source.object(id) else {
             self.residue += 1;
             return Ok(None);
         };
-        let target = last.unwrap_or(id);
-        if !matches!(object, Object::Dictionary(_) | Object::Stream(_)) {
-            return self.copy(kind, object, at.deeper());
+        if !matches!(object, Object::Dict(_) | Object::Stream(_)) {
+            return self.copy(kind, &MaybeRef::NotRef(object), at.deeper());
         }
         // An object whose copy depends on the scope it is drawn in (content
         // that resolves its names there, or an object holding such content)
@@ -152,10 +152,10 @@ impl<'a> Builder<'a> {
         // object is copied once.
         let drawn_in = at.scope.dictionaries();
         // A form's copy also depends on whether its caller's font is lost.
-        let key = (target, kind, kind == Kind::Form && at.no_font);
+        let key = (id, kind, kind == Kind::Form && at.no_font);
         let scopes = &self.scopes;
         let fits = |(index, _): &&ScopedCopy| {
-            index.is_none_or(|index| scopes[index].iter().eq(drawn_in.iter().copied()))
+            index.is_none_or(|index| scopes[index].as_slice() == drawn_in)
         };
         if let Some(&(index, copy)) = self
             .copies
@@ -163,16 +163,16 @@ impl<'a> Builder<'a> {
             .and_then(|copies| copies.iter().find(fits))
         {
             self.scoped |= index.is_some();
-            return Ok(Some(Object::Reference(copy)));
+            return Ok(Some(Value::Ref(copy)));
         }
         // The copy's id is taken first, so an object that refers back to
         // itself (a form drawing a pattern drawing the form) refers to it.
-        let borrows = self.borrows_scope(kind, object);
+        let borrows = self.borrows_scope(kind, &object);
         let index = borrows.then(|| self.scope_index(drawn_in));
-        let copy = self.out.new_object_id();
+        let copy = self.out.reserve();
         self.copies.entry(key).or_default().push((index, copy));
         let outer = mem::take(&mut self.scoped);
-        let copied = self.copy_object(kind, Some(target), object, at.deeper())?;
+        let copied = self.copy_object(kind, Some(id), &object, at.deeper())?;
         let scoped = borrows || self.scoped;
         self.scoped = outer || scoped;
         if scoped && index.is_none() {
@@ -186,9 +186,9 @@ impl<'a> Builder<'a> {
             }
         }
         match copied {
-            Some(object) => {
-                self.out.objects.insert(copy, object);
-                Ok(Some(Object::Reference(copy)))
+            Some(value) => {
+                self.out.set(copy, value);
+                Ok(Some(Value::Ref(copy)))
             }
             None => {
                 if let Some(copies) = self.copies.get_mut(&key) {
@@ -202,73 +202,73 @@ impl<'a> Builder<'a> {
     /// The index in [`Builder::scopes`] of the scope `resources`, kept there
     /// the first time it is seen. It is looked up only when a scoped copy is
     /// made, so the scan is paid once per copy, not once per reference.
-    fn scope_index(&mut self, resources: &[&Dictionary]) -> usize {
-        let same = |scope: &Vec<Dictionary>| scope.iter().eq(resources.iter().copied());
-        self.scopes.iter().position(same).unwrap_or_else(|| {
-            self.scopes
-                .push(resources.iter().map(|dict| (*dict).clone()).collect());
-            self.scopes.len() - 1
-        })
+    fn scope_index(&mut self, resources: &[Dict<'a>]) -> usize {
+        self.scopes
+            .iter()
+            .position(|scope| scope.as_slice() == resources)
+            .unwrap_or_else(|| {
+                self.scopes.push(resources.to_vec());
+                self.scopes.len() - 1
+            })
     }
 
     /// Whether `object`, copied as `kind`, is content that resolves its names
     /// in the scope it is drawn in: a form, tiling pattern, or Type3 font
     /// whose `/Resources`, if any, is not a dictionary it can use.
-    fn borrows_scope(&self, kind: Kind, object: &Object) -> bool {
-        let Some(dict) = object.dict() else {
-            return false;
+    fn borrows_scope(&self, kind: Kind, object: &Object<'a>) -> bool {
+        let (dict, stream) = match object {
+            Object::Dict(dict) => (dict.clone(), false),
+            Object::Stream(stream) => (stream.dict().clone(), true),
+            _ => return false,
         };
         let content = match kind {
-            Kind::Form | Kind::Pattern => matches!(object, Object::Stream(_)),
-            Kind::Font => dict.is_subtype(self.source, b"Type3"),
+            Kind::Form | Kind::Pattern => stream,
+            Kind::Font => dict.is_subtype(b"Type3"),
             _ => false,
         };
-        content && Scope::own(self.source, dict).is_none()
+        content && Scope::own(&dict).is_none()
     }
 
     /// The dictionary or stream `value` (the source object `id`, when it is
     /// one) copied as `kind`.
-    fn copy_object<'s>(
+    fn copy_object(
         &mut self,
         kind: Kind,
         id: Option<ObjectId>,
-        value: &'s Object,
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
+        value: &Object<'a>,
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
         match (kind, value) {
-            (Kind::Font, Object::Dictionary(dict)) => self.font(dict, at).map(Some),
+            (Kind::Font, Object::Dict(dict)) => self.font(dict, at).map(Some),
             (Kind::Form, Object::Stream(stream)) => self.form(stream, FORM, at),
             (Kind::Pattern, _) => self.pattern(value, at),
-            (Kind::FileSpec, Object::Dictionary(dict)) => self.file_spec(dict),
-            (Kind::ToUnicode, Object::Stream(stream)) if !self.external(&stream.dict) => {
+            (Kind::FileSpec, Object::Dict(dict)) => self.file_spec(dict),
+            (Kind::ToUnicode, Object::Stream(stream)) if !external(stream.dict()) => {
                 self.unicode_map(stream, at)
             }
             (Kind::Image | Kind::Mask, Object::Stream(stream))
-                if !image::is_surfaceable(self.source, stream) =>
+                if !image::is_surfaceable(stream) =>
             {
                 self.unreadable(id);
                 Ok(None)
             }
-            (Kind::Image | Kind::Mask, Object::Stream(stream)) if !self.external(&stream.dict) => {
+            (Kind::Image | Kind::Mask, Object::Stream(stream)) if !external(stream.dict()) => {
                 self.image(kind, id, stream, at)
             }
-            (Kind::Map(inner), Object::Dictionary(dict)) => {
+            (Kind::Map(inner), Object::Dict(dict)) => {
                 let mut out = Dictionary::new();
-                for (key, value) in dict.iter() {
-                    if let Some(value) = self.copy(*inner, value, at.deeper())? {
-                        out.set(key.clone(), value);
+                for (key, value) in dict.entries() {
+                    if let Some(value) = self.copy(*inner, &value, at.deeper())? {
+                        out.set(&*key, value);
                     }
                 }
-                Ok(Some(Object::Dictionary(out)))
+                Ok(Some(Value::Dict(out)))
             }
             // A graphics state's font is carried as the `Tf` it selects, where
             // the state is set.
-            (Kind::ExtGState, Object::Dictionary(dict)) => {
+            (Kind::ExtGState, Object::Dict(dict)) => {
                 let fields = keys::fields(kind).unwrap_or_default();
-                Ok(Some(Object::Dictionary(self.keys(
+                Ok(Some(Value::Dict(self.keys(
                     dict,
                     fields,
                     &[b"Font"],
@@ -289,8 +289,8 @@ impl<'a> Builder<'a> {
     /// what it draws resolved its names there, not in the scope it is drawn
     /// in, so whether its copy depends on that scope is as it was before,
     /// `scoped`.
-    fn own_scope(&mut self, dict: &Dictionary, scoped: bool) {
-        if Scope::own(self.source, dict).is_some() {
+    fn own_scope(&mut self, dict: &Dict<'a>, scoped: bool) {
+        if Scope::own(dict).is_some() {
             self.scoped = scoped;
         }
     }
@@ -300,18 +300,15 @@ impl<'a> Builder<'a> {
     /// samples it takes, so no bytes past them are carried; one stored as a
     /// JPEG or JPEG 2000 file copied as it is. Either is written as an image
     /// XObject, which the image pipeline surfaces, whatever its source said.
-    fn image<'s>(
+    fn image(
         &mut self,
         kind: Kind,
         id: Option<ObjectId>,
-        stream: &'s Stream,
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
+        stream: &Stream<'a>,
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
         let fields = keys::fields(kind).unwrap_or_default();
-        let samples = match image::raw_samples(self.source, stream) {
+        let samples = match image::raw_samples(stream) {
             Ok(Some(samples)) => {
                 self.charge(samples.len())?;
                 samples
@@ -323,77 +320,71 @@ impl<'a> Builder<'a> {
             }
         };
         let mut dict = self.stream_keys(
-            &stream.dict,
+            stream.dict(),
             fields,
             &[b"Filter", b"DecodeParms", b"DL"],
             at,
         )?;
         image_xobject(&mut dict);
-        Ok(Some(Object::Stream(compressed(dict, samples)?)))
+        Ok(Some(compressed(dict, &samples)?.into()))
     }
 
     /// An image `stream` stored as a JPEG or JPEG 2000 file, keeping
     /// `fields`, and its data and parameters as stored: the file a codec
     /// reads. Its one filter is written as a name.
-    fn stored<'s>(
+    fn stored(
         &mut self,
-        stream: &'s Stream,
+        stream: &Stream<'a>,
         fields: &[(&[u8], Kind)],
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
-        self.charge(stream.content.len())?;
-        let mut dict = self.stream_keys(&stream.dict, fields, &[b"Filter", b"DecodeParms"], at)?;
-        let filters = stream.filters();
-        let Ok([filter]) = filters.as_deref() else {
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
+        let data = stream.raw_data().into_owned();
+        self.charge(data.len())?;
+        let mut dict = self.stream_keys(stream.dict(), fields, &[b"Filter", b"DecodeParms"], at)?;
+        let Ok(filters) = filters(stream) else {
             return Ok(None);
         };
-        dict.set("Filter", Object::Name(filter.to_vec()));
+        let [filter] = filters.as_slice() else {
+            return Ok(None);
+        };
+        let filter = filter.name.clone();
+        dict.set("Filter", Value::Name(filter.clone()));
         // The one filter's parameters (a dictionary, or the one in a
         // one-item array): a JPEG's colour transform, 0 or 1, is the only
         // one either file filter takes (7.4.8), so it alone is written.
-        let source = self.source;
-        let parameters = match stream
-            .dict
-            .get(b"DecodeParms")
-            .ok()
-            .and_then(|p| source.resolve(p))
-        {
+        let parameters = match stream.dict().get::<Object<'a>>(b"DecodeParms") {
             Some(Object::Array(parameters)) => {
+                let parameters: Vec<Object<'a>> = parameters.iter::<Object<'a>>().collect();
                 self.residue += parameters.len().saturating_sub(1);
-                parameters.first().and_then(|p| source.resolve(p))
+                parameters.into_iter().next()
             }
             parameters => parameters,
         }
-        .filter(|p| !matches!(p, Object::Null));
+        .filter(|p| !matches!(p, Object::Null(_)));
         let transform = parameters
-            .and_then(|p| p.as_dict().ok())
-            .and_then(|p| source.resolve(p.get(b"ColorTransform").ok()?))
-            .and_then(|t| t.as_i64().ok())
-            .filter(|t| *filter == b"DCTDecode" && matches!(t, 0 | 1));
+            .clone()
+            .and_then(Object::into_dict)
+            .and_then(|p| p.get::<i64>(b"ColorTransform"))
+            .filter(|t| filter == b"DCTDecode" && matches!(t, 0 | 1));
         // Every other parameter, and a transform not written, is dropped.
-        match parameters.map(Object::as_dict) {
+        match parameters.map(Object::into_dict) {
             None => {}
-            Some(Ok(p)) => self.residue += p.len() - usize::from(transform.is_some()),
-            Some(Err(_)) => self.residue += 1,
+            Some(Some(p)) => self.residue += p.len() - usize::from(transform.is_some()),
+            Some(None) => self.residue += 1,
         }
         if let Some(transform) = transform {
             dict.set(
                 "DecodeParms",
-                Dictionary::from_iter([("ColorTransform", Object::Integer(transform))]),
+                Dictionary::from_iter([("ColorTransform", Value::Int(transform))]),
             );
         }
         image_xobject(&mut dict);
-        Ok(Some(Object::Stream(
-            Stream::new(dict, stream.content.clone()).with_compression(false),
-        )))
+        Ok(Some(Written::new(dict, data).into()))
     }
 
-    /// `object` added to the rebuild as an object of its own, referred to.
-    fn add(&mut self, object: Object) -> Object {
-        Object::Reference(self.out.add_object(object))
+    /// `value` added to the rebuild as an object of its own, referred to.
+    fn add(&mut self, value: Value) -> Value {
+        Value::Ref(self.out.add(value))
     }
 
     /// Take `bytes` from the copy budget.
@@ -421,18 +412,15 @@ impl<'a> Builder<'a> {
 
     /// The dictionary or stream `value` copied keeping `fields`, a stream's
     /// data as it is stored.
-    fn table<'s>(
+    fn table(
         &mut self,
-        value: &'s Object,
+        value: &Object<'a>,
         fields: &[(&[u8], Kind)],
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
         Ok(Some(match value {
-            Object::Dictionary(dict) => Object::Dictionary(self.keys(dict, fields, &[], at)?),
-            Object::Stream(stream) if self.external(&stream.dict) => {
+            Object::Dict(dict) => Value::Dict(self.keys(dict, fields, &[], at)?),
+            Object::Stream(stream) if external(stream.dict()) => {
                 self.record(HiddenContent::Unreadable);
                 return Ok(None);
             }
@@ -440,7 +428,7 @@ impl<'a> Builder<'a> {
             // reaches the output; its data decodes within what the copy
             // budget has left.
             Object::Stream(stream) => {
-                let data = match stream.decoded_within(self.copy_budget) {
+                let data = match stream.plain_within(self.copy_budget) {
                     Ok(data) => data,
                     Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
                     Err(_) => {
@@ -450,59 +438,38 @@ impl<'a> Builder<'a> {
                 };
                 self.charge(data.len())?;
                 let dict = self.stream_keys(
-                    &stream.dict,
+                    stream.dict(),
                     fields,
                     &[b"Filter", b"DecodeParms", b"DL"],
                     at,
                 )?;
-                Object::Stream(compressed(dict, data)?)
+                compressed(dict, &data)?.into()
             }
             _ => return Ok(None),
         }))
     }
 
-    /// Whether the stream `dict` describes holds data the rebuild cannot
-    /// carry: data in another file (`/F`), or under a `/Crypt` filter.
-    fn external(&self, dict: &Dictionary) -> bool {
-        let source = self.source;
-        let crypt = dict
-            .get(b"Filter")
-            .ok()
-            .and_then(|filter| source.resolve(filter))
-            .is_some_and(|filter| match filter {
-                Object::Name(name) => name == b"Crypt",
-                Object::Array(names) => names.iter().any(|name| {
-                    source.resolve(name).and_then(|n| n.as_name().ok()) == Some(b"Crypt")
-                }),
-                _ => false,
-            });
-        crypt || dict.get(b"F").is_ok()
-    }
-
     /// The entries of `dict` that `fields` keeps, each copied as its kind;
     /// every other entry but those in `handled` is recorded as dropped.
-    pub(super) fn keys<'s>(
+    pub(super) fn keys(
         &mut self,
-        dict: &'s Dictionary,
+        dict: &Dict<'a>,
         fields: &[(&[u8], Kind)],
         handled: &[&[u8]],
-        at: At<'_, 's>,
-    ) -> Result<Dictionary>
-    where
-        'a: 's,
-    {
+        at: At<'_, 'a>,
+    ) -> Result<Dictionary> {
         let mut out = Dictionary::new();
-        for (key, value) in dict.iter() {
-            if handled.contains(&key.as_slice()) {
+        for (key, value) in dict.entries() {
+            if handled.contains(&&*key) {
                 continue;
             }
-            match fields.iter().find(|(field, _)| *field == key.as_slice()) {
+            match fields.iter().find(|(field, _)| *field == &*key) {
                 Some(&(_, kind)) => {
-                    if let Some(value) = self.copy(kind, value, at.deeper())? {
-                        out.set(key.clone(), value);
+                    if let Some(value) = self.copy(kind, &value, at.deeper())? {
+                        out.set(&*key, value);
                     }
                 }
-                None => self.drop_key(key, record::entry),
+                None => self.drop_key(&key, record::entry),
             }
         }
         Ok(out)
@@ -510,16 +477,13 @@ impl<'a> Builder<'a> {
 
     /// As [`keys`](Self::keys), for a stream's dictionary: the stream encoding
     /// entries are kept too, and its length is rewritten on save.
-    fn stream_keys<'s>(
+    fn stream_keys(
         &mut self,
-        dict: &'s Dictionary,
+        dict: &Dict<'a>,
         fields: &[(&[u8], Kind)],
         handled: &[&[u8]],
-        at: At<'_, 's>,
-    ) -> Result<Dictionary>
-    where
-        'a: 's,
-    {
+        at: At<'_, 'a>,
+    ) -> Result<Dictionary> {
         let fields: Vec<(&[u8], Kind)> = fields.iter().chain(STREAM).copied().collect();
         let handled: Vec<&[u8]> = handled.iter().copied().chain([&b"Length"[..]]).collect();
         self.keys(dict, &fields, &handled, at)
@@ -527,12 +491,9 @@ impl<'a> Builder<'a> {
 
     /// A font, a Type3 font's glyph procedures rebuilt as content with names
     /// resolved in its own resources, else in `at`'s scope.
-    fn font<'s>(&mut self, dict: &'s Dictionary, at: At<'_, 's>) -> Result<Object>
-    where
-        'a: 's,
-    {
-        let source = self.source;
-        let subtype = dict.name(self.source, b"Subtype");
+    fn font(&mut self, dict: &Dict<'a>, at: At<'_, 'a>) -> Result<Value> {
+        let subtype = dict.name(b"Subtype");
+        let subtype = subtype.as_deref();
         let handled: &[&[u8]] = match subtype {
             Some(b"Type3") => &[b"CharProcs", b"Resources"],
             Some(b"Type0") => &[b"Encoding"],
@@ -540,93 +501,86 @@ impl<'a> Builder<'a> {
         };
         let mut out = self.keys(dict, FONT, handled, at)?;
         if subtype == Some(b"Type0") {
-            if let Ok(encoding) = dict.get(b"Encoding")
-                && let Some(encoding) = self.copy(Kind::CMap, encoding, at.deeper())?
+            if let Some(encoding) = dict.raw(b"Encoding")
+                && let Some(encoding) = self.copy(Kind::CMap, &encoding, at.deeper())?
             {
                 out.set("Encoding", encoding);
             }
-            return Ok(Object::Dictionary(out));
+            return Ok(Value::Dict(out));
         }
         if subtype != Some(b"Type3") {
-            return Ok(Object::Dictionary(out));
+            return Ok(Value::Dict(out));
         }
-        let inner = at.scope.inner(source, dict);
+        let inner = at.scope.inner(dict);
         let scoped = self.scoped;
         // The glyph procedures share one resource dictionary, so the names
         // they are rebuilt with are given across all of them.
         let mut resources = Dictionary::new();
         let mut procs = Dictionary::new();
-        let glyphs = dict
-            .get(b"CharProcs")
-            .ok()
-            .and_then(|p| source.resolve_dict(p));
-        for (name, glyph) in glyphs.into_iter().flat_map(Dictionary::iter) {
-            let Some(Object::Stream(glyph)) = source.resolve(glyph) else {
-                self.residue += 1;
-                continue;
-            };
-            if self.external(&glyph.dict) {
-                self.record(HiddenContent::Unreadable);
-                continue;
+        if let Some(glyphs) = dict.get::<Dict<'a>>(b"CharProcs") {
+            for name in glyphs.keys() {
+                let Some(glyph) = glyphs.get::<Stream<'a>>(&*name) else {
+                    self.residue += 1;
+                    continue;
+                };
+                if external(glyph.dict()) {
+                    self.record(HiddenContent::Unreadable);
+                    continue;
+                }
+                let content = self.content(
+                    &glyph.plain()?,
+                    at.within(&inner).font(true),
+                    &mut resources,
+                )?;
+                self.charge(content.len())?;
+                let glyph = self.out.add(compressed(Dictionary::new(), &content)?);
+                procs.set(&*name, glyph);
             }
-            let content = self.content(
-                &glyph.decoded()?,
-                at.within(&inner).font(true),
-                &mut resources,
-            )?;
-            self.charge(content.len())?;
-            procs.set(
-                name.clone(),
-                self.out.add_object(compressed(Dictionary::new(), content)?),
-            );
         }
         self.own_scope(dict, scoped);
         out.set("CharProcs", procs);
         out.set("Resources", resources);
-        Ok(Object::Dictionary(out))
+        Ok(Value::Dict(out))
     }
 
     /// A form XObject or tiling pattern `stream` keeping `fields`, its content
     /// rebuilt with names resolved in its own resources, else in `at`'s scope;
     /// `None`, recorded as unreadable, when its data is in another file or
     /// under a `/Crypt` filter.
-    fn form<'s>(
+    fn form(
         &mut self,
-        stream: &'s Stream,
+        stream: &Stream<'a>,
         fields: &[(&[u8], Kind)],
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
+        at: At<'_, 'a>,
+    ) -> Result<Option<Value>> {
         // Content kept in another file is not what the stream's own bytes
         // say, so it is not rebuilt from them.
-        if self.external(&stream.dict) {
+        if external(stream.dict()) {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
         }
-        let inner = at.scope.inner(self.source, &stream.dict);
+        let inner = at.scope.inner(stream.dict());
         let scoped = self.scoped;
         let mut resources = Dictionary::new();
-        let content = self.content(&stream.decoded()?, at.within(&inner), &mut resources)?;
+        let content = self.content(&stream.plain()?, at.within(&inner), &mut resources)?;
         // Content that borrows its scope is rebuilt once per scope, so each
         // rebuild is charged.
         self.charge(content.len())?;
-        self.own_scope(&stream.dict, scoped);
+        self.own_scope(stream.dict(), scoped);
         let mut dict = self.stream_keys(
-            &stream.dict,
+            stream.dict(),
             fields,
             &[b"Resources", b"Filter", b"DecodeParms", b"DL"],
             at,
         )?;
         dict.set("Resources", resources);
-        Ok(Some(Object::Stream(compressed(dict, content)?)))
+        Ok(Some(compressed(dict, &content)?.into()))
     }
 
-    /// A `/ToUnicode` CMap `stream` written anew from what lopdf, which
-    /// detection decodes text with, reads of it, its destinations written as
-    /// the text detection reads; dropped as unreadable when lopdf can't read
-    /// it, so a viewer reads no text detection did not.
+    /// A `/ToUnicode` CMap `stream` written anew from what detection reads
+    /// of it, its destinations written as the text detection reads; dropped
+    /// as unreadable when it can't be read, so a viewer reads no text
+    /// detection did not.
     ///
     /// # Errors
     ///
@@ -634,11 +588,8 @@ impl<'a> Builder<'a> {
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the CMaps written across the document take more than
     /// [`MAX_CONTENT_BYTES`](crate::pdf::reader::MAX_CONTENT_BYTES).
-    fn unicode_map<'s>(&mut self, stream: &'s Stream, at: At<'_, 's>) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
-        let Some(map) = UnicodeMap::read(self.source, stream)? else {
+    fn unicode_map(&mut self, stream: &Stream<'a>, at: At<'_, 'a>) -> Result<Option<Value>> {
+        let Some(map) = UnicodeMap::read(stream)? else {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
         };
@@ -648,19 +599,16 @@ impl<'a> Builder<'a> {
             .checked_sub(content.len())
             .ok_or_else(|| Error::resource_limit("the /ToUnicode CMaps pass their size limit"))?;
         let dict = self.stream_keys(
-            &stream.dict,
+            stream.dict(),
             TO_UNICODE,
             &[b"Filter", b"DecodeParms", b"DL"],
             at,
         )?;
-        Ok(Some(Object::Stream(compressed(dict, content)?)))
+        Ok(Some(compressed(dict, &content)?.into()))
     }
 
     /// A pattern: a tiling one rebuilt as content, a shading one copied.
-    fn pattern<'s>(&mut self, value: &'s Object, at: At<'_, 's>) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
+    fn pattern(&mut self, value: &Object<'a>, at: At<'_, 'a>) -> Result<Option<Value>> {
         // A pattern's kind is its shape: a stream is a tiling pattern, a
         // dictionary a shading pattern. `/PatternType` is written to match,
         // so a viewer and the text walk read the copy as the same kind.
@@ -669,7 +617,7 @@ impl<'a> Builder<'a> {
                 Some(copy) => (copy, 1),
                 None => return Ok(None),
             },
-            Object::Dictionary(_) => match self.table(value, SHADING_PATTERN, at)? {
+            Object::Dict(_) => match self.table(value, SHADING_PATTERN, at)? {
                 Some(copy) => (copy, 2),
                 None => return Ok(None),
             },
@@ -678,29 +626,25 @@ impl<'a> Builder<'a> {
                 return Ok(None);
             }
         };
-        if let Some(dict) = copy.dict_mut() {
-            dict.set("PatternType", Object::Integer(kind));
+        if let Some(dict) = copy.as_dict_mut() {
+            dict.set("PatternType", kind);
         }
         Ok(Some(copy))
     }
 
     /// A colour space array: the family name, then its parameters, each
     /// copied as what that family takes there.
-    fn color_space<'s>(&mut self, items: &'s [Object], at: At<'_, 's>) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
-        let source = self.source;
+    fn color_space(&mut self, items: &[Src<'a>], at: At<'_, 'a>) -> Result<Option<Value>> {
         let Some((family, parameters)) = items.split_first() else {
             self.residue += 1;
             return Ok(None);
         };
-        let Some(Object::Name(family)) = source.resolve(family) else {
+        let Some(family) = self.source.resolve(family).and_then(Object::into_name) else {
             self.residue += 1;
             return Ok(None);
         };
         // Each family's parameters, and how many of them it requires.
-        let (kinds, required): (&[Kind], usize) = match family.as_slice() {
+        let (kinds, required): (&[Kind], usize) = match &*family {
             b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK" => (&[], 0),
             b"ICCBased" => (&[Kind::IccProfile], 1),
             b"Indexed" => (&[Kind::ColorSpace, Kind::Value, Kind::Data], 3),
@@ -725,7 +669,7 @@ impl<'a> Builder<'a> {
             self.residue += 1;
             return Ok(None);
         }
-        let mut out = vec![Object::Name(family.clone())];
+        let mut out = vec![Value::Name(family.to_vec())];
         for (&kind, parameter) in kinds.iter().zip(parameters) {
             match self.copy(kind, parameter, at.deeper())? {
                 Some(parameter) => out.push(parameter),
@@ -733,12 +677,24 @@ impl<'a> Builder<'a> {
             }
         }
         self.residue += parameters.len().saturating_sub(kinds.len());
-        Ok(Some(Object::Array(out)))
+        Ok(Some(Value::Array(out)))
     }
+}
+
+/// Whether the stream `dict` describes holds data the rebuild cannot carry:
+/// data in another file (`/F`), or under a `/Crypt` filter.
+pub(super) fn external(dict: &Dict<'_>) -> bool {
+    let crypt = dict.name(b"Filter").is_some_and(|name| &*name == b"Crypt")
+        || dict.get::<Array<'_>>(b"Filter").is_some_and(|names| {
+            names
+                .iter::<Object<'_>>()
+                .any(|name| name.into_name().is_some_and(|name| &*name == b"Crypt"))
+        });
+    crypt || dict.contains_key(b"F")
 }
 
 /// Mark `dict` an image XObject.
 fn image_xobject(dict: &mut Dictionary) {
-    dict.set("Type", Object::Name(b"XObject".to_vec()));
-    dict.set("Subtype", Object::Name(b"Image".to_vec()));
+    dict.set("Type", "XObject");
+    dict.set("Subtype", "Image");
 }

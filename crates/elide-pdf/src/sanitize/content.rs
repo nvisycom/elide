@@ -21,13 +21,14 @@ use std::collections::BTreeMap;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Object, ObjectId};
+use hayro_syntax::object::{Array, Object};
 
 use super::copy::At;
 use super::keys::Kind;
-use super::{Builder, MAX_NESTING};
-use crate::pdf::reader::{DictionaryExt, DocumentExt};
+use super::{Builder, MAX_NESTING, Src};
+use crate::pdf::content::{Operation, encode, parse};
+use crate::pdf::object::{Dictionary, Id, Value};
+use crate::pdf::reader::DictExt;
 
 /// Every content operator the PDF specification defines, but the inline image
 /// and marked-content operators the rebuild handles itself.
@@ -109,7 +110,7 @@ impl Resource {
 
     /// The operand of `operation` that names it: a pattern's last, after any
     /// colour components; any other's first.
-    fn name(self, operation: &Operation) -> Option<&Object> {
+    fn name(self, operation: &Operation) -> Option<&Value> {
         match self {
             Self::Pattern => operation.operands.last(),
             _ => operation.operands.first(),
@@ -125,27 +126,23 @@ impl<'a> Builder<'a> {
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// the content cannot be decoded or encoded, or as [`copy`](Self::copy).
-    pub(super) fn content<'s>(
+    pub(super) fn content(
         &mut self,
         bytes: &[u8],
-        at: At<'_, 's>,
+        at: At<'_, 'a>,
         resources: &mut Dictionary,
-    ) -> Result<Vec<u8>>
-    where
-        'a: 's,
-    {
+    ) -> Result<Vec<u8>> {
         if at.depth > MAX_NESTING {
             return Err(Error::resource_limit(format!(
                 "content nests deeper than {MAX_NESTING} levels"
             )));
         }
-        let content =
-            Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
+        let content = parse(bytes);
         let mut copy = ContentCopy {
             builder: self,
             at,
             resources,
-            kept: Vec::with_capacity(content.operations.len()),
+            kept: Vec::with_capacity(content.len()),
             open: Vec::new(),
             hiding: 0,
             saved: 0,
@@ -156,7 +153,7 @@ impl<'a> Builder<'a> {
             drawn: Fresh::new(DRAWN_PREFIX),
             drawn_names: BTreeMap::new(),
         };
-        for operation in content.operations {
+        for operation in content {
             copy.operation(operation)?;
         }
         copy.finish()
@@ -177,9 +174,9 @@ enum StateFont {
 /// scope its names resolve in), the resources they are copied into, the operations
 /// kept, and what is open as it goes, so the content written is balanced and
 /// ends in the state it began in.
-struct ContentCopy<'c, 'a, 's> {
+struct ContentCopy<'c, 'a> {
     builder: &'c mut Builder<'a>,
-    at: At<'c, 's>,
+    at: At<'c, 'a>,
     resources: &'c mut Dictionary,
     kept: Vec<Operation>,
     /// One entry per open marked-content sequence.
@@ -203,10 +200,10 @@ struct ContentCopy<'c, 'a, 's> {
     drawn: Fresh,
     /// The name each XObject name and copy drawn is written under, so a
     /// name drawn again with the same copy is not named anew.
-    drawn_names: BTreeMap<(Vec<u8>, ObjectId), Vec<u8>>,
+    drawn_names: BTreeMap<(Vec<u8>, Id), Vec<u8>>,
 }
 
-impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
+impl<'a> ContentCopy<'_, 'a> {
     /// Rebuild `operation`: keep it, rewrite it, or cut it.
     ///
     /// # Errors
@@ -286,7 +283,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 self.resource(operation, Resource::Shading)?;
             }
             "cs" | "CS" => match operation.operands.first() {
-                Some(Object::Name(name)) if FAMILIES.contains(&name.as_slice()) => {
+                Some(Value::Name(name)) if FAMILIES.contains(&name.as_slice()) => {
                     self.kept.push(operation);
                 }
                 _ => {
@@ -294,7 +291,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 }
             },
             "scn" | "SCN" => match operation.operands.last() {
-                Some(Object::Name(_)) => {
+                Some(Value::Name(_)) => {
                     self.resource(operation, Resource::Pattern)?;
                 }
                 _ => self.kept.push(operation),
@@ -381,31 +378,40 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     fn marked(&mut self, operation: Operation) {
         let builder = &mut *self.builder;
         let is_sequence = operation.operator == "BDC";
-        let [Object::Name(tag), properties] = operation.operands.as_slice() else {
+        let [Value::Name(tag), properties] = operation.operands.as_slice() else {
             builder.residue += 1;
             if is_sequence {
                 self.open_written();
                 self.kept
-                    .push(Operation::new("BMC", vec![Object::Name(b"Span".to_vec())]));
+                    .push(Operation::new("BMC", vec![Value::name("Span")]));
             }
             return;
         };
-        let properties = match properties {
-            Object::Name(name) => self.at.scope.lookup(builder.source, b"Properties", name),
-            other => Some(other),
+        // A property list held in place in content refers to no object, so
+        // it names no group a layer hides.
+        let (hidden, alternate) = match properties {
+            Value::Name(name) => {
+                let named = self.at.scope.lookup(b"Properties", name);
+                let hidden = named
+                    .clone()
+                    .is_some_and(|entry| builder.layers.is_hidden(&entry.held()));
+                let alternate = named
+                    .and_then(|entry| entry.value.into_dict())
+                    .is_some_and(|p| ALTERNATE_TEXT_KEYS.iter().any(|k| p.contains_key(k)));
+                (hidden, alternate)
+            }
+            Value::Dict(p) => (false, ALTERNATE_TEXT_KEYS.iter().any(|k| p.has(k))),
+            _ => (false, false),
         };
-        if is_sequence && tag == b"OC" && properties.is_some_and(|p| builder.layers.is_hidden(p)) {
+        if is_sequence && tag == b"OC" && hidden {
             builder.record(HiddenContent::Layer);
             self.push(Marked::Hiding);
             return;
         }
-        if properties
-            .and_then(|p| builder.source.resolve_dict(p))
-            .is_some_and(|p| ALTERNATE_TEXT_KEYS.iter().any(|k| p.get(k).is_ok()))
-        {
+        if alternate {
             builder.record(HiddenContent::AlternativeText);
         }
-        let tag = Object::Name(tag.clone());
+        let tag = Value::Name(tag.clone());
         if is_sequence {
             self.open_written();
             self.kept.push(Operation::new("BMC", vec![tag]));
@@ -447,18 +453,18 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     /// As [`Builder::copy`].
     fn resource(&mut self, operation: Operation, resource: Resource) -> Result<bool> {
         let category = resource.category();
-        let Some(Object::Name(name)) = resource.name(&operation) else {
+        let Some(Value::Name(name)) = resource.name(&operation) else {
             self.builder.residue += 1;
             return Ok(false);
         };
         if !has(self.resources, category, name) {
-            let Some(value) = self.at.scope.lookup(self.builder.source, category, name) else {
+            let Some(entry) = self.at.scope.lookup(category, name) else {
                 self.builder.residue += 1;
                 return Ok(false);
             };
             let Some(copy) = self
                 .builder
-                .copy(resource.kind(), value, self.at.deeper())?
+                .copy(resource.kind(), &entry.held(), self.at.deeper())?
             else {
                 return Ok(false);
             };
@@ -476,26 +482,26 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     /// As [`Builder::copy`].
     fn draw(&mut self, operation: Operation) -> Result<()> {
         let builder = &mut *self.builder;
-        let source = builder.source;
-        let Some(Object::Name(name)) = operation.operands.first() else {
+        let Some(Value::Name(name)) = operation.operands.first() else {
             builder.residue += 1;
             return Ok(());
         };
-        let Some(value) = self.at.scope.lookup(source, b"XObject", name) else {
+        let Some(entry) = self.at.scope.lookup(b"XObject", name) else {
             builder.residue += 1;
             return Ok(());
         };
-        let Some(Object::Stream(xobject)) = source.resolve(value) else {
+        let Object::Stream(xobject) = entry.value.clone() else {
             builder.residue += 1;
             return Ok(());
         };
-        let id = value.as_reference().ok();
-        if builder.layers.hides(&xobject.dict) {
+        let id = entry.id;
+        if builder.layers.hides(xobject.dict()) {
             builder.record(HiddenContent::Layer);
             builder.cut.extend(id);
             return Ok(());
         }
-        let kind = match xobject.dict.name(source, b"Subtype") {
+        let subtype = xobject.dict().name(b"Subtype");
+        let kind = match subtype.as_deref() {
             Some(b"Form") => Kind::Form,
             Some(b"Image") => Kind::Image,
             Some(b"PS") => {
@@ -512,10 +518,10 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         // drawn where that font is lost is a copy of its own, under a name
         // of its own when the name already stands for the other copy.
         let at = self.at.deeper().font(self.font_lost);
-        let Some(copy) = builder.copy(kind, value, at)? else {
+        let Some(copy) = builder.copy(kind, &entry.held(), at)? else {
             return Ok(());
         };
-        let Ok(copied) = copy.as_reference() else {
+        let Some(copied) = copy.as_ref_id() else {
             builder.residue += 1;
             return Ok(());
         };
@@ -526,9 +532,8 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 let existing = self
                     .resources
                     .get(b"XObject")
-                    .and_then(Object::as_dict)
-                    .ok()
-                    .and_then(|entries| entries.get(name).ok());
+                    .and_then(Value::as_dict)
+                    .and_then(|entries| entries.get(name));
                 let given = match existing {
                     None => name.clone(),
                     Some(existing) if *existing == copy => name.clone(),
@@ -537,7 +542,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                         let scope = self.at.scope;
                         self.drawn.name(|name| {
                             has(resources, b"XObject", name)
-                                || scope.lookup(source, b"XObject", name).is_some()
+                                || scope.lookup(b"XObject", name).is_some()
                         })
                     }
                 };
@@ -547,7 +552,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         };
         insert(self.resources, b"XObject", &name, copy);
         self.kept
-            .push(Operation::new("Do", vec![Object::Name(name)]));
+            .push(Operation::new("Do", vec![Value::Name(name)]));
         Ok(())
     }
 
@@ -561,27 +566,30 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     ///
     /// As [`Builder::copy`].
     fn state_font(&mut self, gs: &Operation) -> Result<StateFont> {
-        let source = self.builder.source;
-        let Some(Object::Name(name)) = gs.operands.first() else {
+        let Some(Value::Name(name)) = gs.operands.first() else {
             return Ok(StateFont::Unset);
         };
-        let Some(setting) = self
+        let Some(state) = self
             .at
             .scope
-            .lookup(source, b"ExtGState", name)
-            .and_then(|state| source.resolve_dict(state))
-            .and_then(|state| state.get(b"Font").ok())
+            .lookup(b"ExtGState", name)
+            .and_then(|state| state.value.into_dict())
+            .filter(|state| state.contains_key(b"Font"))
         else {
             return Ok(StateFont::Unset);
         };
-        let Some([font, size]) = source.resolve_array(setting).map(Vec::as_slice) else {
+        let setting: Option<Vec<Src<'a>>> = state
+            .get::<Array<'a>>(b"Font")
+            .map(|setting| setting.raw_iter().collect());
+        let Some([font, size]) = setting.as_deref() else {
             self.builder.residue += 1;
             return Ok(StateFont::Lost);
         };
-        let Some(size @ (Object::Integer(_) | Object::Real(_))) = source.resolve(size) else {
+        let Some(Object::Number(size)) = self.builder.source.resolve(size) else {
             self.builder.residue += 1;
             return Ok(StateFont::Lost);
         };
+        let size = size.as_f64();
         let Some(font) = self.builder.copy(Kind::Font, font, self.at.deeper())? else {
             return Ok(StateFont::Lost);
         };
@@ -589,20 +597,18 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         // name nothing in scope uses.
         let resources = &*self.resources;
         let scope = self.at.scope;
-        let taken = |name: &[u8]| {
-            has(resources, b"Font", name) || scope.lookup(source, b"Font", name).is_some()
-        };
+        let taken =
+            |name: &[u8]| has(resources, b"Font", name) || scope.lookup(b"Font", name).is_some();
         let name = resources
             .get(b"Font")
-            .and_then(Object::as_dict)
-            .ok()
+            .and_then(Value::as_dict)
             .and_then(|fonts| fonts.iter().find(|(_, value)| **value == font))
-            .map(|(name, _)| name.clone())
+            .map(|(name, _)| name.to_vec())
             .unwrap_or_else(|| self.state_fonts.name(taken));
         insert(self.resources, b"Font", &name, font);
         Ok(StateFont::Selected(Operation::new(
             "Tf",
-            vec![Object::Name(name), size.clone()],
+            vec![Value::Name(name), Value::number(size)],
         )))
     }
 
@@ -633,30 +639,23 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         // everything this content draws in it.
         for name in DEFAULT_SPACES {
             if !has(self.resources, b"ColorSpace", name)
-                && let Some(space) = self
-                    .at
-                    .scope
-                    .lookup(self.builder.source, b"ColorSpace", name)
-                && let Some(space) = self
-                    .builder
-                    .copy(Kind::ColorSpace, space, self.at.deeper())?
+                && let Some(space) = self.at.scope.lookup(b"ColorSpace", name)
+                && let Some(space) =
+                    self.builder
+                        .copy(Kind::ColorSpace, &space.held(), self.at.deeper())?
             {
                 insert(self.resources, b"ColorSpace", name, space);
             }
         }
-        Content {
-            operations: self.kept,
-        }
-        .encode()
-        .map_err(|e| Error::malformed(format!("encode content: {e}")))
+        encode(&self.kept)
     }
 }
 
 /// Whether `operands` are what `operator` takes (8.2, table 50): operands of
 /// another shape are not drawing, and a string among them is text no
 /// detection reads.
-fn operands_fit(operator: &str, operands: &[Object]) -> bool {
-    let number = |o: &Object| matches!(o, Object::Integer(_) | Object::Real(_));
+fn operands_fit(operator: &str, operands: &[Value]) -> bool {
+    let number = |o: &Value| matches!(o, Value::Int(_) | Value::Real(_));
     let numbers = |count: usize| operands.len() == count && operands.iter().all(number);
     match operator {
         "q" | "Q" | "h" | "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "n" | "W"
@@ -670,24 +669,24 @@ fn operands_fit(operator: &str, operands: &[Object]) -> bool {
         "cm" | "c" | "Tm" | "d1" => numbers(6),
         "SC" | "sc" => !operands.is_empty() && operands.iter().all(number),
         "SCN" | "scn" => match operands.split_last() {
-            Some((Object::Name(_), rest)) => rest.iter().all(number),
+            Some((Value::Name(_), rest)) => rest.iter().all(number),
             Some(_) => operands.iter().all(number),
             None => false,
         },
         "ri" | "gs" | "sh" | "Do" | "CS" | "cs" | "BMC" | "MP" => {
-            matches!(operands, [Object::Name(_)])
+            matches!(operands, [Value::Name(_)])
         }
-        "Tf" => matches!(operands, [Object::Name(_), size] if number(size)),
+        "Tf" => matches!(operands, [Value::Name(_), size] if number(size)),
         "d" => matches!(
             operands,
-            [Object::Array(dashes), phase] if number(phase) && dashes.iter().all(number)
+            [Value::Array(dashes), phase] if number(phase) && dashes.iter().all(number)
         ),
-        "Tj" | "'" => matches!(operands, [Object::String(..)]),
-        "\"" => matches!(operands, [w, c, Object::String(..)] if number(w) && number(c)),
+        "Tj" | "'" => matches!(operands, [Value::String(_)]),
+        "\"" => matches!(operands, [w, c, Value::String(_)] if number(w) && number(c)),
         "TJ" => matches!(
             operands,
-            [Object::Array(items)]
-                if items.iter().all(|item| number(item) || matches!(item, Object::String(..)))
+            [Value::Array(items)]
+                if items.iter().all(|item| number(item) || matches!(item, Value::String(_)))
         ),
         _ => false,
     }
@@ -723,16 +722,16 @@ impl Fresh {
 pub(super) fn has(resources: &Dictionary, category: &[u8], name: &[u8]) -> bool {
     resources
         .get(category)
-        .and_then(Object::as_dict)
-        .is_ok_and(|entries| entries.get(name).is_ok())
+        .and_then(Value::as_dict)
+        .is_some_and(|entries| entries.has(name))
 }
 
 /// Set `name` to `value` under `category` of `resources`.
-pub(super) fn insert(resources: &mut Dictionary, category: &[u8], name: &[u8], value: Object) {
-    if resources.get(category).is_err() {
-        resources.set(category.to_vec(), Dictionary::new());
+pub(super) fn insert(resources: &mut Dictionary, category: &[u8], name: &[u8], value: Value) {
+    if !resources.has(category) {
+        resources.set(category, Dictionary::new());
     }
-    if let Ok(Object::Dictionary(entries)) = resources.get_mut(category) {
-        entries.set(name.to_vec(), value);
+    if let Some(Value::Dict(entries)) = resources.get_mut(category) {
+        entries.set(name, value);
     }
 }

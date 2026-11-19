@@ -11,12 +11,13 @@
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Object, dictionary};
+use hayro_syntax::object::{Dict, MaybeRef, Object};
 
-use super::Builder;
 use super::copy::At;
 use super::keys::Kind;
-use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, Scope, normalize_rect};
+use super::{Builder, Src};
+use crate::pdf::object::{Dictionary, Value, dict};
+use crate::pdf::reader::{DeviceRect, DictExt, Matrix, Scope, id, normalize_rect};
 
 /// The annotation flags that keep a widget from being shown (12.5.3): Hidden
 /// and NoView.
@@ -30,7 +31,7 @@ const NO_ROTATE: i64 = 16;
 /// on the page, and the graphics state it is composited in when that is not
 /// the page's initial one.
 pub(super) struct Flattened {
-    pub(super) form: Object,
+    pub(super) form: Value,
     pub(super) matrix: Matrix,
     pub(super) state: Option<Dictionary>,
 }
@@ -46,17 +47,12 @@ impl<'a> Builder<'a> {
     /// As [`copy`](Self::copy).
     pub(super) fn flatten(
         &mut self,
-        dict: &'a Dictionary,
+        dict: &Dict<'a>,
         page: &Scope<'a>,
         rotate: u32,
     ) -> Result<Option<Flattened>> {
         let source = self.source;
-        let flags = dict
-            .get(b"F")
-            .ok()
-            .and_then(|f| source.resolve(f))
-            .and_then(|f| f.as_i64().ok())
-            .unwrap_or(0);
+        let flags = dict.get::<i64>(b"F").unwrap_or(0);
         if self.layers.hides(dict) {
             self.record(HiddenContent::Layer);
             return Ok(None);
@@ -66,29 +62,30 @@ impl<'a> Builder<'a> {
             .appearance(dict)
             .filter(|_| shown)
             .and_then(|appearance| {
-                Some((appearance, source.resolve(appearance)?.as_stream().ok()?))
+                let stream = source.resolve(&appearance)?.into_stream()?;
+                Some((appearance, stream))
             });
-        let rect = dict.get(b"Rect").ok().and_then(|r| self.rect(r));
+        let rect = dict.numbers::<4>(b"Rect").map(normalize_rect);
         let (Some((appearance, stream)), Some(rect)) = (appearance, rect) else {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
         // The appearance is a form, and a form in a hidden layer is not drawn
         // whatever shows it.
-        if self.layers.hides(&stream.dict) {
+        if self.layers.hides(stream.dict()) {
             self.record(HiddenContent::Layer);
-            self.cut.extend(appearance.as_reference().ok());
+            if let MaybeRef::Ref(reference) = appearance {
+                self.cut.insert(id(reference));
+            }
             return Ok(None);
         }
-        let Some(bbox) = stream.dict.get(b"BBox").ok().and_then(|b| self.rect(b)) else {
+        let Some(bbox) = stream.dict().numbers::<4>(b"BBox").map(normalize_rect) else {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
         let matrix = stream
-            .dict
-            .get(b"Matrix")
-            .ok()
-            .and_then(|matrix| source.resolve_numbers(matrix))
+            .dict()
+            .numbers(b"Matrix")
             .map_or(Matrix::IDENTITY, Matrix::from);
         let Some(mut matrix) = placement(bbox, matrix, rect) else {
             self.record(HiddenContent::FormField);
@@ -104,39 +101,35 @@ impl<'a> Builder<'a> {
         let defaults = source
             .catalog()
             .ok()
-            .and_then(|catalog| catalog.get(b"AcroForm").ok())
-            .and_then(|form| source.resolve_dict(form))
-            .and_then(|form| form.get(b"DR").ok())
-            .and_then(|resources| source.resolve_dict(resources));
-        let defaults = Scope::new(page.dictionaries().iter().copied().chain(defaults));
-        let Some(form) = self.copy(Kind::Form, appearance, At::top(&defaults))? else {
+            .and_then(|catalog| catalog.get::<Dict<'a>>(b"AcroForm"))
+            .and_then(|form| form.get::<Dict<'a>>(b"DR"));
+        let defaults = Scope::new(page.dictionaries().iter().cloned().chain(defaults));
+        let Some(form) = self.copy(Kind::Form, &appearance, At::top(&defaults))? else {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
         let state = self.compositing(dict)?;
         let mut form = form;
-        if let Object::Reference(id) = form
-            && let Ok(Object::Stream(copy)) = self.out.get_object_mut(id)
+        if let Value::Ref(id) = form
+            && let Some(Value::Stream(copy)) = self.out.get_mut(id)
         {
-            copy.dict.set("Type", Object::Name(b"XObject".to_vec()));
-            copy.dict.set("Subtype", Object::Name(b"Form".to_vec()));
+            copy.dict.set("Type", "XObject");
+            copy.dict.set("Subtype", "Form");
             // The annotation is composited as a group; the copy may also be
             // drawn by page content, which must not be, so the group is set
             // on a copy of its own, one for every widget showing the form.
-            if state.is_some() && copy.dict.get(b"Group").is_err() {
+            if state.is_some() && !copy.dict.has(b"Group") {
                 let grouped = match self.grouped.get(&id) {
                     Some(&grouped) => grouped,
                     None => {
-                        let mut grouped = copy.clone();
-                        grouped
-                            .dict
-                            .set("Group", dictionary! { "S" => "Transparency" });
-                        let grouped = self.out.add_object(grouped);
+                        let mut grouped = copy.as_ref().clone();
+                        grouped.dict.set("Group", dict! { "S" => "Transparency" });
+                        let grouped = self.out.add(grouped);
                         self.grouped.insert(id, grouped);
                         grouped
                     }
                 };
-                form = Object::Reference(grouped);
+                form = Value::Ref(grouped);
             }
         }
         Ok(Some(Flattened {
@@ -155,57 +148,42 @@ impl<'a> Builder<'a> {
     /// # Errors
     ///
     /// As [`copy`](Self::copy).
-    fn compositing(&mut self, dict: &'a Dictionary) -> Result<Option<Dictionary>> {
-        let source = self.source;
-        let opacity = |key: &[u8]| {
-            dict.get(key)
-                .ok()
-                .and_then(|value| source.resolve_number(value))
-        };
-        let stroking = opacity(b"CA");
-        let nonstroking = opacity(b"ca").or(stroking);
-        let blend = match dict.get(b"BM") {
-            Ok(blend) => self.copy(Kind::Value, blend, At::top(&Scope::default()))?,
-            Err(_) => None,
+    fn compositing(&mut self, dict: &Dict<'a>) -> Result<Option<Dictionary>> {
+        let stroking = dict.number(b"CA");
+        let nonstroking = dict.number(b"ca").or(stroking);
+        let blend = match dict.raw(b"BM") {
+            Some(blend) => self.copy(Kind::Value, &blend, At::top(&Scope::default()))?,
+            None => None,
         };
         let normal = blend
             .as_ref()
-            .is_none_or(|blend| matches!(blend.as_name(), Ok(b"Normal" | b"Compatible")));
+            .is_none_or(|blend| matches!(blend.as_name(), Some(b"Normal" | b"Compatible")));
         let opaque = |alpha: Option<f64>| alpha.is_none_or(|alpha| alpha >= 1.0);
         if normal && opaque(stroking) && opaque(nonstroking) {
             return Ok(None);
         }
-        let mut state = dictionary! { "Type" => "ExtGState" };
+        let mut state = dict! { "Type" => "ExtGState" };
         if let Some(blend) = blend {
             state.set("BM", blend);
         }
         if let Some(alpha) = stroking {
-            state.set("CA", Object::Real(alpha.clamp(0.0, 1.0) as f32));
+            state.set("CA", alpha.clamp(0.0, 1.0));
         }
         if let Some(alpha) = nonstroking {
-            state.set("ca", Object::Real(alpha.clamp(0.0, 1.0) as f32));
+            state.set("ca", alpha.clamp(0.0, 1.0));
         }
         Ok(Some(state))
     }
 
     /// The appearance the widget `dict` shows: its normal appearance, or the
     /// one its appearance state (`/AS`) selects among several.
-    fn appearance(&self, dict: &'a Dictionary) -> Option<&'a Object> {
-        let source = self.source;
-        let normal = source.resolve_dict(dict.get(b"AP").ok()?)?.get(b"N").ok()?;
-        match source.resolve(normal)? {
+    fn appearance(&self, dict: &Dict<'a>) -> Option<Src<'a>> {
+        let normal = dict.get::<Dict<'a>>(b"AP")?.raw(b"N")?;
+        match self.source.resolve(&normal)? {
             Object::Stream(_) => Some(normal),
-            Object::Dictionary(states) => {
-                let state = source.resolve(dict.get(b"AS").ok()?)?.as_name().ok()?;
-                states.get(state).ok()
-            }
+            Object::Dict(states) => states.raw(&dict.name(b"AS")?),
             _ => None,
         }
-    }
-
-    /// `value` as a rectangle, `[x0, y0, x1, y1]` with low corners first.
-    fn rect(&self, value: &Object) -> Option<[f64; 4]> {
-        self.source.resolve_numbers(value).map(normalize_rect)
     }
 }
 

@@ -3,70 +3,70 @@
 
 use std::collections::HashSet;
 
+use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use elide_core::{Error, Result};
-use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Object, ObjectId};
+use hayro_syntax::object::{Array, Dict, Object};
 
 use super::content::Fresh;
 use super::copy::At;
 use super::keys::Kind;
 use super::{Builder, content, record};
-use crate::pdf::reader::{DictionaryExt, DocumentExt, PRINT_BOXES, PageBoxes, Scope, page_boxes};
+use crate::pdf::content::{Operation, encode};
+use crate::pdf::object::{Dictionary, Id, Value};
+use crate::pdf::reader::{
+    DictExt, ObjectId, PRINT_BOXES, PageBoxes, Scope, page_boxes, page_content,
+};
 use crate::pdf::writer::compressed;
 
-impl Builder<'_> {
-    /// Record the entries of the page `id` and of each page-tree node above it
-    /// not yet in `nodes` that the rebuild does not carry.
-    pub(super) fn record_page_tree(&mut self, id: ObjectId, nodes: &mut HashSet<ObjectId>) {
-        let source = self.source;
-        let mut current = Some(id);
-        while let Some(node) = current.take() {
+impl<'a> Builder<'a> {
+    /// Record the entries of the page `page` and of each page-tree node
+    /// above it not yet in `nodes` that the rebuild does not carry.
+    pub(super) fn record_page_tree(&mut self, page: &Dict<'a>, nodes: &mut HashSet<ObjectId>) {
+        let mut current = Some(page.clone());
+        while let Some(dict) = current.take() {
+            let Some(node) = dict.obj_id() else {
+                break;
+            };
             if !nodes.insert(node) {
                 break;
             }
-            let Ok(dict) = source.get_dictionary(node) else {
-                break;
-            };
-            for (key, _) in dict.iter() {
-                if let Some(held) = record::page(key) {
+            for key in dict.keys() {
+                if let Some(held) = record::page(&key) {
                     self.record(held);
                 }
             }
-            current = dict.get(b"Parent").and_then(Object::as_reference).ok();
+            current = dict.get::<Dict<'a>>(b"Parent");
         }
     }
 
-    /// Copy the page `id` under the page-tree node `parent`, returning its
-    /// copy's id.
-    pub(super) fn page(&mut self, id: ObjectId, parent: ObjectId) -> Result<ObjectId> {
-        let source = self.source;
+    /// Copy the page `dict` (the object `id`) under the page-tree node
+    /// `parent`, returning its copy's id.
+    pub(super) fn page(&mut self, id: ObjectId, dict: &Dict<'a>, parent: Id) -> Result<Id> {
         let copy = self.pages[&id];
         let mut page = Dictionary::from_iter([
-            ("Type", Object::Name(b"Page".to_vec())),
-            ("Parent", Object::Reference(parent)),
+            ("Type", Value::name("Page")),
+            ("Parent", Value::Ref(parent)),
         ]);
         // A page with no box of its own or inherited is drawn as US Letter,
         // and the media box is required, so it is written.
-        let boxes = page_boxes(source, id).unwrap_or(PageBoxes::LETTER);
+        let boxes = page_boxes(dict).unwrap_or(PageBoxes::LETTER);
         {
             page.set("MediaBox", rect(boxes.media));
             if boxes.crop != boxes.media {
                 page.set("CropBox", rect(boxes.crop));
             }
             if boxes.rotate != 0 {
-                page.set("Rotate", i64::from(boxes.rotate));
+                page.set("Rotate", boxes.rotate);
             }
             if boxes.unit != 1.0 {
-                page.set("UserUnit", Object::Real(boxes.unit as f32));
+                page.set("UserUnit", boxes.unit);
             }
             // A print box the page sets that is not a box within its media
             // box is not written, and is recorded as a property dropped.
-            let own = source.get_dictionary(id).ok();
             for (key, print) in PRINT_BOXES.into_iter().zip(boxes.print) {
                 match print {
                     Some(print) => page.set(key, rect(print)),
-                    None if own.is_some_and(|own| own.get(key).is_ok()) => {
+                    None if dict.contains_key(key) => {
                         self.record(HiddenContent::Properties);
                     }
                     None => {}
@@ -74,11 +74,8 @@ impl Builder<'_> {
             }
         }
 
-        let dict = source
-            .get_dictionary(id)
-            .map_err(|e| Error::malformed(format!("page {id:?}: {e}")))?;
-        let scope = Scope::page(source, id);
-        let bytes = source.page_content(id)?;
+        let scope = Scope::page(dict);
+        let bytes = page_content(dict)?;
         let mut resources = Dictionary::new();
         let mut content = self.content(&bytes, At::top(&scope), &mut resources)?;
 
@@ -87,25 +84,22 @@ impl Builder<'_> {
         // is balanced, so a `q … Q` around it restores that state).
         let mut links = Vec::new();
         let mut appearances = Vec::new();
-        let annotations = dict
-            .get(b"Annots")
-            .ok()
-            .and_then(|annotations| source.resolve_array(annotations));
-        for annotation in annotations.into_iter().flatten() {
-            let Some(annotation) = source.resolve_dict(annotation) else {
+        let annotations = dict.get::<Array<'a>>(b"Annots");
+        for annotation in annotations.iter().flat_map(|a| a.iter::<Object<'a>>()) {
+            let Some(annotation) = annotation.into_dict() else {
                 self.residue += 1;
                 continue;
             };
-            if annotation.is_subtype(self.source, b"Widget") {
-                appearances.extend(self.flatten(annotation, &scope, boxes.rotate)?);
+            if annotation.is_subtype(b"Widget") {
+                appearances.extend(self.flatten(&annotation, &scope, boxes.rotate)?);
                 continue;
             }
-            if let Some(link) = self.link(annotation)? {
+            if let Some(link) = self.link(&annotation)? {
                 links.push(link);
             }
         }
         if !links.is_empty() {
-            page.set("Annots", Object::Array(links));
+            page.set("Annots", Value::Array(links));
         }
         if !appearances.is_empty() {
             let mut drawn = Vec::with_capacity(appearances.len() * 5);
@@ -121,31 +115,25 @@ impl Builder<'_> {
                         &mut resources,
                         b"ExtGState",
                         &state_name,
-                        Object::Dictionary(state),
+                        Value::Dict(state),
                     );
-                    drawn.push(Operation::new("gs", vec![Object::Name(state_name)]));
+                    drawn.push(Operation::new("gs", vec![Value::Name(state_name)]));
                 }
                 drawn.push(Operation::new(
                     "cm",
-                    flattened
-                        .matrix
-                        .values()
-                        .map(|v| Object::Real(v as f32))
-                        .to_vec(),
+                    flattened.matrix.values().map(Value::Real).to_vec(),
                 ));
-                drawn.push(Operation::new("Do", vec![Object::Name(name)]));
+                drawn.push(Operation::new("Do", vec![Value::Name(name)]));
                 drawn.push(Operation::new("Q", Vec::new()));
             }
-            let drawn = Content { operations: drawn }
-                .encode()
-                .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
+            let drawn = encode(&drawn)?;
             content = [b"q\n".as_slice(), &content, b"\nQ\n", &drawn].concat();
         }
 
         self.charge(content.len())?;
         page.set(
             "Contents",
-            self.out.add_object(compressed(Dictionary::new(), content)?),
+            self.out.add(compressed(Dictionary::new(), &content)?),
         );
         page.set("Resources", resources);
 
@@ -154,25 +142,23 @@ impl Builder<'_> {
             (b"OutputIntents", Kind::OutputIntent),
         ];
         for (key, kind) in own {
-            if let Ok(value) = dict.get(key)
-                && let Some(value) = self.copy(kind, value, At::top(&scope))?
+            if let Some(value) = dict.raw(key)
+                && let Some(value) = self.copy(kind, &value, At::top(&scope))?
             {
                 page.set(key, value);
             }
         }
-        if let Some(af) = dict
-            .get(b"AF")
-            .ok()
-            .and_then(|af| self.associated(af).transpose())
+        if let Some(af) = dict.raw(b"AF")
+            && let Some(af) = self.associated(&af)?
         {
-            page.set("AF", af?);
+            page.set("AF", af);
         }
-        self.out.objects.insert(copy, Object::Dictionary(page));
+        self.out.set(copy, page);
         Ok(copy)
     }
 }
 
 /// `[x0, y0, x1, y1]` as a PDF rectangle.
-fn rect(corners: [f64; 4]) -> Object {
-    Object::Array(corners.map(|v| Object::Real(v as f32)).to_vec())
+fn rect(corners: [f64; 4]) -> Value {
+    Value::Array(corners.map(Value::Real).to_vec())
 }

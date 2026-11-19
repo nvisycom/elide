@@ -2,60 +2,63 @@
 //! image, so nothing of the original survives underneath.
 
 use elide_core::{Error, Result};
-use lopdf::{Object, Stream, dictionary};
 
 use super::PageReplacement;
 use crate::pdf::Edit;
+use crate::pdf::object::{Value, dict};
 use crate::pdf::reader::{PageBoxes, page_boxes};
+use crate::pdf::writer::{Changes, compressed, dict_value};
 
 /// Replace the whole content of each page `replacements` names with its
 /// image; see [`PageRedaction`](super::PageRedaction).
 pub(super) fn reflatten(edit: &mut Edit, replacements: &[PageReplacement]) -> Result<()> {
-    let doc = edit.doc_mut();
-    let pages = doc.get_pages();
+    let pdf = edit.pdf();
+    let pages = pdf.pages();
 
-    // The replaced pages' old content and resource objects become unreachable
-    // once each page is repointed, and the save prunes them, so the original
-    // page does not survive in the bytes. An object shared with a surviving
-    // page stays reachable and is kept.
+    // The replaced pages' old content and resource objects are no longer
+    // named once each page is repointed, so they are not written and the
+    // original page does not survive in the bytes. An object shared with a
+    // surviving page is still named, and kept.
+    let mut changes = Changes::new();
     for replacement in replacements {
         let number = replacement.number;
-        let Some(&page_id) = pages.get(&number) else {
+        let Some(page) = usize::try_from(number)
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .and_then(|i| pages.get(i))
+        else {
             return Err(Error::redaction(format!("page {number} does not exist")));
         };
+        let page_id = page
+            .obj_id()
+            .ok_or_else(|| Error::redaction(format!("page {number} is unreadable")))?;
         // The image is the page as displayed (cropped, rotated, at its user
         // unit), so it is drawn over a page of that size with no crop,
         // rotation, or unit of its own. A page with no box renders as US
         // Letter.
-        let (width, height) = page_boxes(doc, page_id)
+        let (width, height) = page_boxes(page)
             .unwrap_or(PageBoxes::LETTER)
             .displayed_size();
 
-        let image_id = doc.add_object(replacement.image.clone());
+        let image = changes.add(replacement.image.clone());
         let content = format!("q {width} 0 0 {height} 0 0 cm /Im0 Do Q");
-        let content_id = doc.add_object(Stream::new(dictionary! {}, content.into_bytes()));
+        let content = changes.add(compressed(dict! {}, content.as_bytes())?);
 
-        let page = doc
-            .get_dictionary_mut(page_id)
-            .map_err(|e| Error::redaction(format!("page {number} is unreadable: {e}")))?;
-        page.set("Contents", Object::Reference(content_id));
+        let mut dict = dict_value(page);
+        dict.set("Contents", content.value());
         // Held in place, as the normal form has it.
-        page.set(
+        dict.set(
             "Resources",
-            dictionary! { "XObject" => dictionary! { "Im0" => Object::Reference(image_id) } },
+            dict! { "XObject" => dict! { "Im0" => image.value() } },
         );
         // Each is set on the page itself, so an inherited value from an
         // ancestor `Pages` node cannot clip, rotate, or rescale the image.
-        let size = vec![
-            0.into(),
-            0.into(),
-            Object::Real(width as f32),
-            Object::Real(height as f32),
-        ];
-        page.set("MediaBox", size.clone());
-        page.set("CropBox", size);
-        page.set("Rotate", 0);
-        page.set("UserUnit", 1);
+        let size: Vec<Value> = vec![0.into(), 0.into(), width.into(), height.into()];
+        dict.set("MediaBox", size.clone());
+        dict.set("CropBox", size);
+        dict.set("Rotate", 0);
+        dict.set("UserUnit", 1);
+        changes.replace(page_id, dict);
     }
-    Ok(())
+    edit.apply(changes)
 }

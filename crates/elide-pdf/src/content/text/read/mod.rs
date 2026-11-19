@@ -20,8 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
 use elide_core::{Error, Result};
-use lopdf::content::Content;
-use lopdf::{Document, ObjectId};
+use hayro_syntax::object::Dict;
 
 use self::nested::{Cell, Selected};
 use self::paint::Painted;
@@ -29,7 +28,8 @@ use self::run::TextRun;
 use self::stream::{Frame, Inherited};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
-use crate::pdf::reader::{DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
+use crate::pdf::content::parse;
+use crate::pdf::reader::{GlyphRect, ObjectId, PageFrame, Scope, page_content, page_frame};
 
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
@@ -44,8 +44,7 @@ pub(super) const MAX_XOBJECT_DEPTH: u8 = 12;
 pub(super) const MAX_XOBJECT_WALKS: u32 = 4_096;
 
 /// Build one [`TextBlock`] per page by walking its content in operator order,
-/// the same order lopdf's text extraction uses, so a character offset maps to
-/// the glyph that drew it. Text drawn through a `Do`-invoked Form XObject is
+/// so a character offset maps to the glyph that drew it. Text drawn through a `Do`-invoked Form XObject is
 /// walked in place, so it is located and redactable like page-level text.
 ///
 /// # Errors
@@ -55,13 +54,12 @@ pub(super) const MAX_XOBJECT_WALKS: u32 = 4_096;
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page draws text
 /// with a font whose encoding cannot be decoded.
 pub(super) fn text_blocks(source: &Pdf) -> Result<Vec<TextBlock>> {
-    let doc = source.doc();
-    let pages = doc.get_pages();
-    let mut out = Vec::with_capacity(pages.len());
-    for (&page, &page_id) in &pages {
-        out.push(text_block_for_page(doc, page, page_id)?);
-    }
-    Ok(out)
+    source
+        .pages()
+        .iter()
+        .zip(1..)
+        .map(|(page, number)| text_block_for_page(number, page))
+        .collect()
 }
 
 /// Build the [`TextBlock`] for one page by walking its content (and the Form
@@ -76,10 +74,11 @@ pub(super) fn text_blocks(source: &Pdf) -> Result<Vec<TextBlock>> {
 /// content, resources, or an XObject stream cannot be read;
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the page draws text
 /// with a font whose encoding cannot be decoded.
-fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<TextBlock> {
-    let content_data = doc.page_content(page_id)?;
-    let content = Content::decode(&content_data)
-        .map_err(|e| Error::malformed(format!("page {page} content: {e}")))?;
+fn text_block_for_page(page: u32, page_dict: &Dict<'_>) -> Result<TextBlock> {
+    let page_id = page_dict
+        .obj_id()
+        .ok_or_else(|| Error::malformed(format!("page {page} is not an object of its own")))?;
+    let content = parse(&page_content(page_dict)?);
 
     let mut text = String::new();
     let mut runs: Vec<OffsetRun> = Vec::new();
@@ -87,7 +86,6 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut rects: Vec<GlyphRect> = Vec::new();
     let mut fonts: Vec<FontEntry> = Vec::new();
     let mut walk = Walk {
-        doc,
         accum: TextAccum {
             text: &mut text,
             runs: &mut runs,
@@ -106,7 +104,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         walks_remaining: MAX_XOBJECT_WALKS,
     };
 
-    let scope = Scope::page(doc, page_id);
+    let scope = Scope::page(page_dict);
     walk.walk_stream(
         &content,
         Frame {
@@ -130,7 +128,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     // The page's visible rectangle and rotation, for normalizing glyph device
     // boxes to page fractions. A page missing its boxes falls back to a unit
     // frame, leaving geometry unnormalized rather than failing.
-    let frame = page_frame(doc, page_id).unwrap_or(PageFrame::UNIT);
+    let frame = page_frame(page_dict).unwrap_or(PageFrame::UNIT);
 
     Ok(TextBlock {
         page,
@@ -161,7 +159,6 @@ struct TextAccum<'a> {
 /// recursion stack (cycle guard), the 1-based page number for diagnostics, and the
 /// remaining total-walk budget.
 struct Walk<'a, 'd> {
-    doc: &'d Document,
     accum: TextAccum<'a>,
     /// Where the last shown glyph left the pen, in device space, shared across
     /// every stream of the page (`None` before the first glyph).
@@ -194,11 +191,18 @@ struct Walk<'a, 'd> {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use lopdf::content::Operation;
-    use lopdf::{Dictionary, Object, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{open, with_pages};
+    use crate::pdf::content::{Operation, encode};
+    use crate::pdf::object::{Dictionary, Id, Stream, Value, dict};
+    use crate::pdf::writer::Document;
+
+    /// The text block of the first page of `doc`, written and read back.
+    fn first_block(doc: &Document) -> Result<TextBlock> {
+        let pdf = open(doc);
+        text_block_for_page(1, &pdf.pages()[0])
+    }
 
     /// Build a one-page document whose single content stream is `ops`, drawing
     /// with a simple Helvetica font (no `/Widths`, so glyph advances are unknown —
@@ -211,8 +215,8 @@ mod tests {
     /// advances — and thus box widths — are known) and a descriptor with
     /// ascent/descent (so box heights are real rather than the default em box).
     fn extract_block_with_widths(ops: Vec<Operation>, widths: bool) -> super::TextBlock {
-        let mut doc = Document::with_version("1.5");
-        let mut font = dictionary! {
+        let mut doc = Document::new((1, 5));
+        let mut font = dict! {
             "Type" => "Font",
             "Subtype" => "Type1",
             "BaseFont" => "Helvetica",
@@ -220,7 +224,7 @@ mod tests {
         if widths {
             // Every byte 0..=255 is 500/1000 em wide — enough to give boxes a real
             // width without modelling real Helvetica metrics.
-            let descriptor = doc.add_object(dictionary! {
+            let descriptor = doc.add(dict! {
                 "Type" => "FontDescriptor",
                 "FontName" => "Helvetica",
                 "Ascent" => 718,
@@ -228,25 +232,25 @@ mod tests {
             });
             font.set("FirstChar", 0);
             font.set("LastChar", 255);
-            font.set("Widths", vec![Object::Integer(500); 256]);
+            font.set("Widths", vec![Value::Int(500); 256]);
             font.set("FontDescriptor", descriptor);
         }
-        let font_id = doc.add_object(font);
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font_id },
+        let font_id = doc.add(font);
+        let resources = doc.add(dict! {
+            "Font" => dict! { "F1" => font_id },
         });
-        let content = Content { operations: ops };
-        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
-        let page_id = with_pages(
+        let content = ops;
+        let content_id = doc.add(Stream::new(dict! {}, encode(&content).unwrap()));
+        with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content_id,
                 "Resources" => resources,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
             }],
-        )[0];
+        );
 
-        text_block_for_page(&doc, 1, page_id).unwrap()
+        first_block(&doc).unwrap()
     }
 
     /// The extracted page text for `ops`.
@@ -255,7 +259,7 @@ mod tests {
     }
 
     fn show(s: &str) -> Operation {
-        Operation::new("Tj", vec![Object::string_literal(s)])
+        Operation::new("Tj", vec![Value::string(s)])
     }
 
     /// A glyph drawn at a known position yields a page-normalized rect: its left
@@ -433,14 +437,14 @@ mod tests {
             Operation::new("Td", vec![72.into(), 720.into()]),
             Operation::new(
                 "TJ",
-                vec![Object::Array(vec![
-                    Object::string_literal("To"),
+                vec![Value::Array(vec![
+                    Value::string("To"),
                     // small intra-word kern (−40/1000 em): not a space
                     (-40).into(),
-                    Object::string_literal("ok"),
+                    Value::string("ok"),
                     // large word gap (−400/1000 em ≈ 4.8pt > 0.2·12pt): a space
                     (-400).into(),
-                    Object::string_literal("here"),
+                    Value::string("here"),
                 ])],
             ),
             Operation::new("ET", vec![]),
@@ -454,52 +458,47 @@ mod tests {
     /// it, not at the content's local origin.
     #[test]
     fn form_xobject_text_inherits_the_transform() {
-        let mut doc = Document::with_version("1.5");
-        let font_id = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 5));
+        let font_id = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
+        let font_res = dict! { "Font" => dict! { "F1" => font_id } };
 
         // The form's content: draw "Hi" at the form's own origin.
-        let form_ops = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 10.into()]),
-                Operation::new("Td", vec![0.into(), 0.into()]),
-                Operation::new("Tj", vec![Object::string_literal("Hi")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
+        let form_ops = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 10.into()]),
+            Operation::new("Td", vec![0.into(), 0.into()]),
+            Operation::new("Tj", vec![Value::string("Hi")]),
+            Operation::new("ET", vec![]),
+        ];
         // The form carries a /Matrix translating it to (20, 180) on the page.
-        let form_id = doc.add_object(Stream::new(
-            dictionary! {
+        let form_id = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject",
                 "Subtype" => "Form",
                 "Matrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 20.into(), 180.into()],
                 "Resources" => font_res.clone(),
             },
-            form_ops.encode().unwrap(),
+            encode(&form_ops).unwrap(),
         ));
 
         // The page just invokes the form.
-        let page_content = Content {
-            operations: vec![Operation::new("Do", vec!["Fm".into()])],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "XObject" => dictionary! { "Fm" => form_id },
+        let page_content = vec![Operation::new("Do", vec!["Fm".into()])];
+        let content_id = doc.add(Stream::new(dict! {}, encode(&page_content).unwrap()));
+        let resources = doc.add(dict! {
+            "XObject" => dict! { "Fm" => form_id },
         });
-        let page_id = with_pages(
+        with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content_id,
                 "Resources" => resources,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
             }],
-        )[0];
+        );
 
-        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let block = first_block(&doc).unwrap();
         // The form's text is extracted (inheritance did not drop it).
         assert_eq!(block.text, "Hi");
         // And it is positioned by the inherited transform: the glyph box sits
@@ -540,12 +539,12 @@ mod tests {
             ),
             Operation::new(
                 "TJ",
-                vec![Object::Array(vec![
-                    Object::string_literal("To"),
+                vec![Value::Array(vec![
+                    Value::string("To"),
                     (-40).into(), // small intra-word kern: not a space
-                    Object::string_literal("ok"),
+                    Value::string("ok"),
                     (-400).into(), // wide word gap: a space
-                    Object::string_literal("here"),
+                    Value::string("here"),
                 ])],
             ),
             Operation::new("ET", vec![]),
@@ -558,60 +557,55 @@ mod tests {
     /// zero-advance fallback of an uninherited font).
     #[test]
     fn form_xobject_inherits_font_widths() {
-        let mut doc = Document::with_version("1.5");
+        let mut doc = Document::new((1, 5));
         // A font with explicit widths (500/1000 for every byte) and a descriptor.
-        let descriptor = doc.add_object(dictionary! {
+        let descriptor = doc.add(dict! {
             "Type" => "FontDescriptor", "FontName" => "Helvetica",
             "Ascent" => 718, "Descent" => -207,
         });
-        let font_id = doc.add_object(dictionary! {
+        let font_id = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
             "FirstChar" => 0, "LastChar" => 255,
-            "Widths" => vec![Object::Integer(500); 256],
+            "Widths" => vec![Value::Int(500); 256],
             "FontDescriptor" => descriptor,
         });
-        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
+        let font_res = dict! { "Font" => dict! { "F1" => font_id } };
 
         // The form draws text with no `Tf` of its own — it relies on the font the
         // caller selected before the `Do`.
-        let form_ops = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Td", vec![10.into(), 100.into()]),
-                Operation::new("Tj", vec![Object::string_literal("Hi")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let form_id = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
-            form_ops.encode().unwrap(),
+        let form_ops = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Td", vec![10.into(), 100.into()]),
+            Operation::new("Tj", vec![Value::string("Hi")]),
+            Operation::new("ET", vec![]),
+        ];
+        let form_id = doc.add(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
+            encode(&form_ops).unwrap(),
         ));
 
         // The page selects F1 at size 20, then invokes the form.
-        let page_content = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 20.into()]),
-                Operation::new("ET", vec![]),
-                Operation::new("Do", vec!["Fm".into()]),
-            ],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font_id },
-            "XObject" => dictionary! { "Fm" => form_id },
+        let page_content = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 20.into()]),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm".into()]),
+        ];
+        let content_id = doc.add(Stream::new(dict! {}, encode(&page_content).unwrap()));
+        let resources = doc.add(dict! {
+            "Font" => dict! { "F1" => font_id },
+            "XObject" => dict! { "Fm" => form_id },
         });
-        let page_id = with_pages(
+        with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content_id,
                 "Resources" => resources,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
             }],
-        )[0];
+        );
 
-        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let block = first_block(&doc).unwrap();
         assert_eq!(block.text, "Hi");
         let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
@@ -631,90 +625,85 @@ mod tests {
     /// it — all three words stay space-separated, none run together.
     #[test]
     fn pen_is_shared_across_the_form_boundary() {
-        let mut doc = Document::with_version("1.5");
-        let font_id = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 5));
+        let font_id = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
+        let font_res = dict! { "Font" => dict! { "F1" => font_id } };
 
         // The form draws "Beta" at x=140 (a wide gap after the page's "Alpha").
-        let form_ops = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new(
-                    "Tm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        140.into(),
-                        150.into(),
-                    ],
-                ),
-                Operation::new("Tj", vec![Object::string_literal("Beta")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let form_id = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
-            form_ops.encode().unwrap(),
+        let form_ops = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    140.into(),
+                    150.into(),
+                ],
+            ),
+            Operation::new("Tj", vec![Value::string("Beta")]),
+            Operation::new("ET", vec![]),
+        ];
+        let form_id = doc.add(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
+            encode(&form_ops).unwrap(),
         ));
 
         // The page: "Alpha" at x=10, Do the form, then "Gamma" at x=300 (a wide
         // gap after the form's "Beta" ended around x≈160).
-        let page_content = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new(
-                    "Tm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        10.into(),
-                        150.into(),
-                    ],
-                ),
-                Operation::new("Tj", vec![Object::string_literal("Alpha")]),
-                Operation::new("ET", vec![]),
-                Operation::new("Do", vec!["Fm".into()]),
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new(
-                    "Tm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        300.into(),
-                        150.into(),
-                    ],
-                ),
-                Operation::new("Tj", vec![Object::string_literal("Gamma")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font_id },
-            "XObject" => dictionary! { "Fm" => form_id },
+        let page_content = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    10.into(),
+                    150.into(),
+                ],
+            ),
+            Operation::new("Tj", vec![Value::string("Alpha")]),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm".into()]),
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    300.into(),
+                    150.into(),
+                ],
+            ),
+            Operation::new("Tj", vec![Value::string("Gamma")]),
+            Operation::new("ET", vec![]),
+        ];
+        let content_id = doc.add(Stream::new(dict! {}, encode(&page_content).unwrap()));
+        let resources = doc.add(dict! {
+            "Font" => dict! { "F1" => font_id },
+            "XObject" => dict! { "Fm" => form_id },
         });
-        let page_id = with_pages(
+        with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content_id,
                 "Resources" => resources,
                 "MediaBox" => vec![0.into(), 0.into(), 400.into(), 200.into()],
             }],
-        )[0];
+        );
 
-        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let block = first_block(&doc).unwrap();
         // A gap entering the form (Alpha→Beta) and leaving it (Beta→Gamma) are
         // both seen: the three words are space-separated.
         assert_eq!(block.text, "Alpha Beta Gamma");
@@ -725,56 +714,53 @@ mod tests {
     /// use the first font's widths (the font is part of the graphics state).
     #[test]
     fn q_restore_brings_back_the_selected_font() {
-        let mut doc = Document::with_version("1.5");
-        let descriptor = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 5));
+        let descriptor = doc.add(dict! {
             "Type" => "FontDescriptor", "FontName" => "F",
             "Ascent" => 700, "Descent" => -200,
         });
         // F1 is wide (900/1000 per glyph), F2 is narrow (100/1000).
-        let wide = doc.add_object(dictionary! {
+        let wide = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Wide",
             "FirstChar" => 0, "LastChar" => 255,
-            "Widths" => vec![Object::Integer(900); 256],
+            "Widths" => vec![Value::Int(900); 256],
             "FontDescriptor" => descriptor,
         });
-        let narrow = doc.add_object(dictionary! {
+        let narrow = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Narrow",
             "FirstChar" => 0, "LastChar" => 255,
-            "Widths" => vec![Object::Integer(100); 256],
+            "Widths" => vec![Value::Int(100); 256],
             "FontDescriptor" => descriptor,
         });
 
         // Select F1 (wide), q, select F2 (narrow), Q, then draw "AB".
-        let page_content = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new(
-                    "Tm",
-                    vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 150.into()],
-                ),
-                Operation::new("Tf", vec!["F1".into(), 10.into()]),
-                Operation::new("q", vec![]),
-                Operation::new("Tf", vec!["F2".into(), 10.into()]),
-                Operation::new("Q", vec![]),
-                Operation::new("Tj", vec![Object::string_literal("AB")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => wide, "F2" => narrow },
+        let page_content = vec![
+            Operation::new("BT", vec![]),
+            Operation::new(
+                "Tm",
+                vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 150.into()],
+            ),
+            Operation::new("Tf", vec!["F1".into(), 10.into()]),
+            Operation::new("q", vec![]),
+            Operation::new("Tf", vec!["F2".into(), 10.into()]),
+            Operation::new("Q", vec![]),
+            Operation::new("Tj", vec![Value::string("AB")]),
+            Operation::new("ET", vec![]),
+        ];
+        let content_id = doc.add(Stream::new(dict! {}, encode(&page_content).unwrap()));
+        let resources = doc.add(dict! {
+            "Font" => dict! { "F1" => wide, "F2" => narrow },
         });
-        let page_id = with_pages(
+        with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content_id,
                 "Resources" => resources,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
             }],
-        )[0];
+        );
 
-        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let block = first_block(&doc).unwrap();
         let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
         assert_eq!(rects.len(), 1, "one line: {rects:?}");
@@ -792,27 +778,24 @@ mod tests {
     /// document and its page id.
     fn page_drawing(
         ops: Vec<Operation>,
-        xobjects: impl FnOnce(&mut Document) -> Vec<ObjectId>,
-    ) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
+        xobjects: impl FnOnce(&mut Document) -> Vec<Id>,
+    ) -> (Document, Id) {
+        let mut doc = Document::new((1, 5));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
         let mut entries = Dictionary::new();
         for (i, id) in xobjects(&mut doc).into_iter().enumerate() {
             entries.set(format!("X{i}"), id);
         }
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font },
+        let resources = doc.add(dict! {
+            "Font" => dict! { "F1" => font },
             "XObject" => entries,
         });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content { operations: ops }.encode().unwrap(),
-        ));
+        let content = doc.add(Stream::new(dict! {}, encode(&ops).unwrap()));
         let page_id = with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
                 "Resources" => resources,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
@@ -826,7 +809,7 @@ mod tests {
         vec![
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal("Hello")]),
+            Operation::new("Tj", vec![Value::string("Hello")]),
             Operation::new("ET", vec![]),
         ]
     }
@@ -834,8 +817,8 @@ mod tests {
     /// A form XObject drawing `ops`, its names resolved in `resources`.
     fn form(ops: Vec<Operation>, resources: Dictionary) -> Stream {
         Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => resources },
-            Content { operations: ops }.encode().unwrap(),
+            dict! { "Type" => "XObject", "Subtype" => "Form", "Resources" => resources },
+            encode(&ops).unwrap(),
         )
     }
 
@@ -843,42 +826,42 @@ mod tests {
     fn text_shown_before_a_font_is_an_error() {
         let ops = vec![
             Operation::new("BT", vec![]),
-            Operation::new("Tj", vec![Object::string_literal("Jane")]),
+            Operation::new("Tj", vec![Value::string("Jane")]),
             Operation::new("ET", vec![]),
         ];
-        let (doc, page_id) = page_drawing(ops, |_| Vec::new());
-        let err = text_block_for_page(&doc, 1, page_id).unwrap_err();
+        let (doc, _) = page_drawing(ops, |_| Vec::new());
+        let err = first_block(&doc).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
     /// Text in a form nested past the depth limit is never skipped.
     #[test]
     fn a_form_nested_too_deep_is_an_error() {
-        let (doc, page_id) = page_drawing(vec![Operation::new("Do", vec!["X0".into()])], |doc| {
-            let font = doc.add_object(dictionary! {
+        let (doc, _) = page_drawing(vec![Operation::new("Do", vec!["X0".into()])], |doc| {
+            let font = doc.add(dict! {
                 "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
             });
-            let mut inner = doc.add_object(form(
-                hello(),
-                dictionary! { "Font" => dictionary! { "F1" => font } },
-            ));
+            let mut inner = doc.add(form(hello(), dict! { "Font" => dict! { "F1" => font } }));
             for _ in 0..=MAX_XOBJECT_DEPTH {
-                inner = doc.add_object(form(
+                inner = doc.add(form(
                     vec![Operation::new("Do", vec!["In".into()])],
-                    dictionary! { "XObject" => dictionary! { "In" => inner } },
+                    dict! { "XObject" => dict! { "In" => inner } },
                 ));
             }
             vec![inner]
         });
-        let err = text_block_for_page(&doc, 1, page_id).unwrap_err();
+        let err = first_block(&doc).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::ResourceLimit);
     }
 
+    /// Content that refers to nothing draws nothing, as a viewer reads it.
     #[test]
-    fn a_missing_content_stream_is_an_error() {
+    fn a_missing_content_stream_draws_nothing() {
         let (mut doc, page_id) = page_drawing(hello(), |_| Vec::new());
-        let content = doc.get_page_contents(page_id)[0];
-        doc.objects.remove(&content);
-        assert!(text_block_for_page(&doc, 1, page_id).is_err());
+        doc.get_mut(page_id)
+            .and_then(Value::as_dict_mut)
+            .unwrap()
+            .set("Contents", Id(9999));
+        assert!(first_block(&doc).unwrap().text.is_empty());
     }
 }

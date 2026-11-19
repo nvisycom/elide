@@ -174,45 +174,41 @@ fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
 #[cfg(test)]
 mod tests {
     use elide_core::modality::text::TextReplacement;
-    use lopdf::content::{Content, Operation};
-    use lopdf::{Document, Object, Stream as PdfObjectStream, dictionary};
 
     use super::*;
     use crate::codec::state::Pages;
     use crate::content::text::Text;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{save, with_pages};
     use crate::pdf::Pdf;
+    use crate::pdf::content::{Operation, encode};
+    use crate::pdf::object::{Stream as PdfObjectStream, Value, dict};
     #[cfg(feature = "render")]
     use crate::pdf::reader::{DeviceRect, GlyphRect, PageFrame};
     #[cfg(feature = "render")]
     use crate::pdf::render::PageObservation;
+    use crate::pdf::writer::Document;
 
     /// The body stream of a one-page document showing `Jane Roe`.
     fn body() -> PdfStream {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
+        let mut doc = Document::new((1, 5));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
         let operations = vec![
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal("Jane Roe")]),
+            Operation::new("Tj", vec![Value::string("Jane Roe")]),
             Operation::new("ET", vec![]),
         ];
-        let content = doc.add_object(PdfObjectStream::new(
-            dictionary! {},
-            Content { operations }.encode().unwrap(),
-        ));
+        let content = doc.add(PdfObjectStream::new(dict! {}, encode(&operations).unwrap()));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "Resources" => dict! { "Font" => dict! { "F1" => font } },
             }],
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
+        let blocks = Pdf::open(&save(&doc)).unwrap().read(Text).unwrap();
         PdfStream {
             state: PdfState::new(Pages::Glyph(blocks)),
         }

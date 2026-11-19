@@ -14,9 +14,9 @@ mod redact;
 
 use bytes::Bytes;
 use elide_core::Result;
-use lopdf::ObjectId;
 
 pub(crate) use self::read::Tree;
+use crate::pdf::reader::ObjectId;
 use crate::pdf::{Edit, Pdf, Read, Redact};
 
 /// The identity of an attached file within a PDF: the indirect-object id of its
@@ -35,12 +35,14 @@ impl AttachmentId {
         Self { number, generation }
     }
 
-    pub(crate) fn from_object((number, generation): ObjectId) -> Self {
-        Self::new(number, generation)
+    /// The attachment whose stream is the object `id`.
+    pub(crate) fn of(id: ObjectId) -> Self {
+        Self::new(id.obj_number, u16::try_from(id.gen_number).unwrap_or(0))
     }
 
+    /// The object of the attachment's stream.
     pub(crate) fn object(self) -> ObjectId {
-        (self.number, self.generation)
+        ObjectId::new(self.number, i32::from(self.generation))
     }
 }
 
@@ -79,7 +81,7 @@ impl Read for Attachments {
     type Output = Vec<Attachment>;
 
     fn read(self, pdf: &Pdf) -> Result<Self::Output> {
-        read::attachments(pdf.doc())
+        read::attachments(pdf)
     }
 }
 
@@ -106,17 +108,24 @@ impl Redact for AttachmentRedaction<'_> {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Dictionary, Document, Object, Stream, dictionary, text_string};
-
     use super::*;
-    use crate::fixtures::{with_attachments, with_pages};
+    use crate::fixtures::{catalog, save, with_attachments, with_pages};
+    use crate::pdf::object::{Dictionary, Stream, Value, dict};
+    use crate::pdf::writer::Document;
+
+    /// `text` as a text string: UTF-16BE after its byte order mark.
+    fn text_string(text: &str) -> Value {
+        let mut bytes = vec![0xFE, 0xFF];
+        bytes.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        Value::String(bytes)
+    }
 
     /// `pdf` with `replaced` written back and `removed` dropped.
     fn redacted(pdf: &Pdf, replaced: &[AttachmentReplacement], removed: &[AttachmentId]) -> Pdf {
         let mut edit = pdf.edit();
         edit.redact(AttachmentRedaction { replaced, removed })
             .unwrap();
-        edit.finish().unwrap()
+        edit.finish()
     }
 
     fn names(pdf: &Pdf) -> Vec<(String, Vec<u8>)> {
@@ -167,28 +176,26 @@ mod tests {
     /// does not name it.
     #[test]
     fn reads_a_legacy_file_under_a_referenced_name() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let stream = doc.add_object(Stream::new(
-            dictionary! { "Type" => "EmbeddedFile" },
+        let stream = doc.add(Stream::new(
+            dict! { "Type" => "EmbeddedFile" },
             b"Jane Roe".to_vec(),
         ));
-        let name = doc.add_object(Object::string_literal("LEGACY.PDF"));
-        let spec = doc.add_object(dictionary! {
-            "Type" => "Filespec", "F" => Object::string_literal("portable.txt"), "DOS" => name,
-            "EF" => dictionary! { "DOS" => stream },
+        let name = doc.add(Value::string("LEGACY.PDF"));
+        let spec = doc.add(dict! {
+            "Type" => "Filespec", "F" => Value::string("portable.txt"), "DOS" => name,
+            "EF" => dict! { "DOS" => stream },
         });
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "Names",
-            dictionary! {
-                "EmbeddedFiles" => dictionary! {
-                    "Names" => vec![Object::string_literal("key"), spec.into()],
+            dict! {
+                "EmbeddedFiles" => dict! {
+                    "Names" => vec![Value::string("key"), spec.into()],
                 },
             },
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let pdf = Pdf::open(&bytes).unwrap();
+        let pdf = Pdf::open(&save(&doc)).unwrap();
         assert_eq!(
             names(&pdf),
             [("LEGACY.PDF".to_owned(), b"Jane Roe".to_vec())]
@@ -198,28 +205,26 @@ mod tests {
     /// A file held under `/EF /F` is named by its Unicode `/UF` first.
     #[test]
     fn a_portable_file_takes_its_unicode_name() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let stream = doc.add_object(Stream::new(
-            dictionary! { "Type" => "EmbeddedFile" },
+        let stream = doc.add(Stream::new(
+            dict! { "Type" => "EmbeddedFile" },
             b"<a/>".to_vec(),
         ));
-        let spec = doc.add_object(dictionary! {
-            "Type" => "Filespec", "F" => Object::string_literal("invoice"),
+        let spec = doc.add(dict! {
+            "Type" => "Filespec", "F" => Value::string("invoice"),
             "UF" => text_string("請求書.xml"),
-            "EF" => dictionary! { "F" => stream },
+            "EF" => dict! { "F" => stream },
         });
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "Names",
-            dictionary! {
-                "EmbeddedFiles" => dictionary! {
-                    "Names" => vec![Object::string_literal("key"), spec.into()],
+            dict! {
+                "EmbeddedFiles" => dict! {
+                    "Names" => vec![Value::string("key"), spec.into()],
                 },
             },
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let pdf = Pdf::open(&bytes).unwrap();
+        let pdf = Pdf::open(&save(&doc)).unwrap();
         assert_eq!(names(&pdf)[0].0, "請求書.xml");
     }
 
@@ -227,26 +232,24 @@ mod tests {
     /// array and whose catalog associates `on_catalog` through a referenced
     /// one; neither file is in the attachment tree.
     fn with_associated(on_page: (&str, &[u8]), on_catalog: (&str, &[u8])) -> Vec<u8> {
-        let mut doc = Document::with_version("2.0");
+        let mut doc = Document::new((2, 0));
         let mut spec = |(name, bytes): (&str, &[u8])| {
-            let stream = doc.add_object(Stream::new(
-                dictionary! { "Type" => "EmbeddedFile" },
+            let stream = doc.add(Stream::new(
+                dict! { "Type" => "EmbeddedFile" },
                 bytes.to_vec(),
             ));
-            doc.add_object(dictionary! {
+            doc.add(dict! {
                 "Type" => "Filespec",
-                "F" => Object::string_literal(name),
-                "EF" => dictionary! { "F" => stream },
+                "F" => Value::string(name),
+                "EF" => dict! { "F" => stream },
             })
         };
         let page_spec = spec(on_page);
         let catalog_spec = spec(on_catalog);
-        let catalog_af = doc.add_object(Object::Array(vec![catalog_spec.into()]));
-        with_pages(&mut doc, [dictionary! { "AF" => vec![page_spec.into()] }]);
-        doc.catalog_mut().unwrap().set("AF", catalog_af);
-        let mut out = Vec::new();
-        doc.save_to(&mut out).unwrap();
-        out
+        let catalog_af = doc.add(Value::Array(vec![catalog_spec.into()]));
+        with_pages(&mut doc, [dict! { "AF" => vec![page_spec.into()] }]);
+        catalog(&mut doc).set("AF", catalog_af);
+        save(&doc).to_vec()
     }
 
     #[test]
@@ -274,8 +277,7 @@ mod tests {
             [("invoice.xml".to_owned(), b"<buyer>[NAME]</buyer>".to_vec())]
         );
         // The catalog's association, left empty, is gone with its file.
-        let doc = Document::load_mem(&redacted.bytes()).unwrap();
-        assert!(doc.catalog().unwrap().get(b"AF").is_err());
+        assert!(!redacted.catalog().unwrap().contains_key(b"AF"));
     }
 
     #[test]

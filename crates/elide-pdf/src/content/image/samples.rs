@@ -18,9 +18,9 @@ use std::io::Cursor;
 
 use ::image::{DynamicImage, GrayImage, ImageFormat, RgbImage};
 use elide_core::{Error, Result};
-use lopdf::{Dictionary, Document, Object, Stream};
+use hayro_syntax::object::{Array, Dict, Object, Stream};
 
-use crate::pdf::reader::DocumentExt;
+use crate::pdf::reader::{StreamExt, numbers};
 
 /// The largest image accepted, in bytes, both as packed samples and as the
 /// pixels they decode to: a sample stream may claim any size, and a 1-bit
@@ -104,31 +104,27 @@ impl Layout {
 
 /// Whether the image XObject `dict` is a stencil mask: its samples say where
 /// to paint, not what colour.
-pub(crate) fn is_stencil(doc: &Document, dict: &Dictionary) -> bool {
-    dict.get(b"ImageMask")
-        .ok()
-        .and_then(|mask| doc.resolve(mask))
-        .and_then(|mask| mask.as_bool().ok())
-        .unwrap_or(false)
+pub(crate) fn is_stencil(dict: &Dict<'_>) -> bool {
+    dict.get::<bool>(b"ImageMask").unwrap_or(false)
 }
 
-/// Whether the raw-sample image XObject `dict` in `doc` describes samples this
+/// Whether the raw-sample image XObject `dict` describes samples this
 /// module decodes.
-pub(crate) fn is_supported(doc: &Document, dict: &Dictionary) -> bool {
-    layout(doc, dict).is_some()
+pub(crate) fn is_supported(dict: &Dict<'_>) -> bool {
+    layout(dict).is_some()
 }
 
 /// The layout `dict` describes, or `None` when its samples are of a kind this
 /// module does not decode, or they or their pixels take more than
 /// [`MAX_SAMPLE_BYTES`].
-fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
-    let integer = |key: &[u8]| doc.resolve(dict.get(key).ok()?)?.as_i64().ok();
+fn layout(dict: &Dict<'_>) -> Option<Layout> {
+    let integer = |key: &[u8]| dict.get::<i64>(key);
     let width = u32::try_from(integer(b"Width")?).ok()?;
     let height = u32::try_from(integer(b"Height")?).ok()?;
     if width == 0 || height == 0 {
         return None;
     }
-    let layout = if is_stencil(doc, dict) {
+    let layout = if is_stencil(dict) {
         // A stencil mask's samples are 1 bit, a 0 painting under the default
         // decode array (8.9.6.2): as gray, the painted samples are black.
         let bits = integer(b"BitsPerComponent").unwrap_or(1);
@@ -140,7 +136,7 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
             height,
             bits: 1,
             space: Space::Gray {
-                inverted: decode_array(doc, dict)?,
+                inverted: decode_array(dict)?,
             },
         }
     } else {
@@ -148,12 +144,13 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
         if ![1, 2, 4, 8].contains(&bits) {
             return None;
         }
-        let colours = doc.resolve(dict.get(b"ColorSpace").ok()?)?;
-        let indexed = colours.as_array().is_ok_and(|array| {
+        let colours = dict.get::<Object<'_>>(b"ColorSpace")?;
+        let indexed = colours.clone().into_array().is_some_and(|array| {
             array
-                .first()
-                .and_then(|family| doc.resolve(family)?.as_name().ok())
-                .is_some_and(|family| matches!(family, b"Indexed" | b"I"))
+                .iter::<Object<'_>>()
+                .next()
+                .and_then(Object::into_name)
+                .is_some_and(|family| matches!(&*family, b"Indexed" | b"I"))
         });
         // An index's decode array is `[0 2^bits-1]` unless it says otherwise
         // (8.9.5.2), not a colour's `[0 1]`; one that maps indexes elsewhere
@@ -161,15 +158,15 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
         let inverted = if indexed {
             Some(false)
         } else {
-            decode_array(doc, dict)
+            decode_array(dict)
         };
-        let space = space(doc, colours, inverted)?;
-        if indexed && let Ok(decode) = dict.get(b"Decode") {
+        let space = space(colours, inverted)?;
+        if indexed && dict.contains_key(b"Decode") {
             let identity = [0.0, ((1u32 << bits) - 1) as f64];
-            let values: Option<Vec<f64>> = doc
-                .resolve_array(decode)
-                .and_then(|values| values.iter().map(|v| doc.resolve_number(v)).collect());
-            if values.as_deref() != Some(&identity[..]) {
+            let values = dict
+                .get::<Array<'_>>(b"Decode")
+                .and_then(|values| numbers::<2>(&values));
+            if values != Some(identity) {
                 return None;
             }
         }
@@ -185,15 +182,15 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
     (samples <= MAX_SAMPLE_BYTES && pixels <= MAX_SAMPLE_BYTES).then_some(layout)
 }
 
-/// The pixels of the raw-sample image XObject `stream` in `doc`. Samples
+/// The pixels of the raw-sample image XObject `stream`. Samples
 /// shorter than the image are padded with zeros, as a viewer draws them.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the image is not of a supported kind (see
 /// [`is_supported`]), or its samples cannot be decompressed.
-pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
-    let (layout, samples) = read(doc, stream)?;
+pub(crate) fn decode(stream: &Stream<'_>) -> Result<Pixels> {
+    let (layout, samples) = read(stream)?;
     let row_bytes = layout.row_bytes();
 
     let count = layout.width as usize * layout.space.components();
@@ -210,7 +207,7 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
     })
 }
 
-/// The samples of the raw-sample image XObject `stream` in `doc`, exactly as
+/// The samples of the raw-sample image XObject `stream`, exactly as
 /// many as the image takes: samples short of it padded with zeros, as a
 /// viewer draws them, and bytes past it dropped, so nothing rides along
 /// after the image. An indexed image's index past its last colour is
@@ -221,16 +218,11 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
 /// # Errors
 ///
 /// As [`decode`].
-pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
-    let (layout, mut samples) = read(doc, stream)?;
+pub(crate) fn samples(stream: &Stream<'_>) -> Result<Vec<u8>> {
+    let (layout, mut samples) = read(stream)?;
     // A colour key masks by the raw sample, before any clamp (8.9.6.4), so
     // a keyed image's samples are kept as they are.
-    let keyed = stream
-        .dict
-        .get(b"Mask")
-        .ok()
-        .and_then(|mask| doc.resolve(mask))
-        .is_some_and(|mask| matches!(mask, Object::Array(_)));
+    let keyed = stream.dict().get::<Array<'_>>(b"Mask").is_some();
     if !keyed && let Some(last) = layout.space.last_index() {
         let count = layout.width as usize * layout.space.components();
         for row in samples.chunks_exact_mut(layout.row_bytes()) {
@@ -244,12 +236,12 @@ pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
     Ok(samples)
 }
 
-/// Where the stencil mask `stream` in `doc` paints, as a box `[x0 y0 x1 y1]`
+/// Where the stencil mask `stream` paints, as a box `[x0 y0 x1 y1]`
 /// in its unit square (y up, its first row at the top): around the samples
 /// its decode array paints, `None` when it paints none, and the whole square
 /// when its samples cannot be read.
-pub(crate) fn stencil_extent(doc: &Document, stream: &Stream) -> Option<[f64; 4]> {
-    let Ok((layout, samples)) = read(doc, stream) else {
+pub(crate) fn stencil_extent(stream: &Stream<'_>) -> Option<[f64; 4]> {
+    let Ok((layout, samples)) = read(stream) else {
         return Some([0.0, 0.0, 1.0, 1.0]);
     };
     let Space::Gray { inverted } = layout.space else {
@@ -283,13 +275,11 @@ pub(crate) fn stencil_extent(doc: &Document, stream: &Stream) -> Option<[f64; 4]
 }
 
 /// The layout of `stream` and its samples, exactly as many as it takes.
-fn read(doc: &Document, stream: &Stream) -> Result<(Layout, Vec<u8>)> {
+fn read(stream: &Stream<'_>) -> Result<(Layout, Vec<u8>)> {
     let layout =
-        layout(doc, &stream.dict).ok_or_else(|| Error::malformed("unsupported image samples"))?;
+        layout(stream.dict()).ok_or_else(|| Error::malformed("unsupported image samples"))?;
     let size = layout.row_bytes() * layout.height as usize;
-    let mut samples = stream
-        .decompressed_content_with_limit(MAX_SAMPLE_BYTES)
-        .map_err(|e| Error::malformed(format!("image samples: {e}")))?;
+    let mut samples = stream.plain_within(MAX_SAMPLE_BYTES)?;
     samples.resize(size, 0);
     // The bits past a row's last sample, in its last byte, draw nothing, so
     // nothing is carried in them.
@@ -311,13 +301,13 @@ fn read(doc: &Document, stream: &Stream) -> Result<(Layout, Vec<u8>)> {
 /// # Errors
 ///
 /// As [`decode`].
-pub(crate) fn png(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
+pub(crate) fn png(stream: &Stream<'_>) -> Result<Vec<u8>> {
     let Pixels {
         width,
         height,
         rgb,
         data,
-    } = decode(doc, stream)?;
+    } = decode(stream)?;
     let image = if rgb {
         RgbImage::from_raw(width, height, data).map(DynamicImage::ImageRgb8)
     } else {
@@ -334,15 +324,11 @@ pub(crate) fn png(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
 /// Whether the image's `/Decode` array inverts a gray sample, or `None` when
 /// it maps samples some other non-default way, or is not an array of
 /// numbers.
-fn decode_array(doc: &Document, dict: &Dictionary) -> Option<bool> {
-    let Ok(decode) = dict.get(b"Decode") else {
+fn decode_array(dict: &Dict<'_>) -> Option<bool> {
+    if !dict.contains_key(b"Decode") {
         return Some(false);
-    };
-    let values: Vec<f64> = doc
-        .resolve_array(decode)?
-        .iter()
-        .map(|value| doc.resolve_number(value))
-        .collect::<Option<_>>()?;
+    }
+    let values = numbers(&dict.get::<Array<'_>>(b"Decode")?)?;
     let default = values.chunks(2).all(|pair| pair == [0.0, 1.0]);
     let inverted = values == [1.0, 0.0];
     if default {
@@ -356,7 +342,7 @@ fn decode_array(doc: &Document, dict: &Dictionary) -> Option<bool> {
 
 /// The colour space `object` names, with `inverted` from the decode array
 /// (`None` when the array is unsupported).
-fn space(doc: &Document, object: &Object, inverted: Option<bool>) -> Option<Space> {
+fn space(object: Object<'_>, inverted: Option<bool>) -> Option<Space> {
     let inverted = inverted?;
     let by_components = |n: i64| match n {
         1 => Some(Space::Gray { inverted }),
@@ -365,39 +351,38 @@ fn space(doc: &Document, object: &Object, inverted: Option<bool>) -> Option<Spac
         _ => None,
     };
     match object {
-        Object::Name(name) => match name.as_slice() {
+        Object::Name(name) => match &*name {
             b"DeviceGray" | b"CalGray" | b"G" => by_components(1),
             b"DeviceRGB" | b"CalRGB" | b"RGB" => by_components(3),
             b"DeviceCMYK" | b"CMYK" => by_components(4),
             _ => None,
         },
         Object::Array(array) => {
-            let family = array.first()?.as_name().ok()?;
-            match family {
+            let items: Vec<Object<'_>> = array.iter::<Object<'_>>().collect();
+            let family = items.first()?.clone().into_name()?;
+            match &*family {
                 b"CalGray" => by_components(1),
                 b"CalRGB" => by_components(3),
                 b"ICCBased" => {
-                    let profile = doc.resolve(array.get(1)?)?.as_stream().ok()?;
-                    by_components(profile.dict.get(b"N").ok()?.as_i64().ok()?)
+                    let profile = items.get(1)?.clone().into_stream()?;
+                    by_components(profile.dict().get::<i64>(b"N")?)
                 }
                 b"Indexed" | b"I" if !inverted => {
-                    let base = space(doc, doc.resolve(array.get(1)?)?, Some(false))?;
+                    let base = space(items.get(1)?.clone(), Some(false))?;
                     let rgb = match base {
                         Space::Gray { .. } => false,
                         Space::Rgb => true,
                         _ => return None,
                     };
-                    let hival = usize::try_from(doc.resolve(array.get(2)?)?.as_i64().ok()?)
+                    let hival = usize::try_from(items.get(2)?.clone().into_number()?.as_i64())
                         .ok()
                         .filter(|&hival| hival <= 255)?;
                     let needed = (hival + 1) * if rgb { 3 } else { 1 };
                     // A palette has at most 256 entries, so a stream decoding
                     // past the colours they take is not read whole.
-                    let palette = match doc.resolve(array.get(3)?)? {
-                        Object::String(bytes, _) => bytes.clone(),
-                        Object::Stream(stream) => stream
-                            .decompressed_content_with_limit(MAX_PALETTE_BYTES)
-                            .ok()?,
+                    let palette = match items.get(3)? {
+                        Object::String(bytes) => bytes.as_bytes().to_vec(),
+                        Object::Stream(stream) => stream.plain_within(MAX_PALETTE_BYTES).ok()?,
                         _ => return None,
                     };
                     // Only the colours up to `hival` are the palette's.
@@ -477,164 +462,185 @@ fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{StringFormat, dictionary};
-
     use super::*;
+    use crate::fixtures::{held, objects_of, read_id};
+    use crate::pdf::object::{Dictionary, Stream as Written, Value, dict};
+    use crate::pdf::writer::Document;
 
-    fn image(dict: Dictionary, samples: Vec<u8>) -> Stream {
-        Stream::new(dict, samples)
+    fn image(dict: Dictionary, samples: Vec<u8>) -> Written {
+        Written::new(dict, samples)
+    }
+
+    /// What `read` reads of the image `stream`, written and read back.
+    fn on<T>(stream: &Written, read: impl FnOnce(&Stream<'_>) -> T) -> T {
+        let mut doc = Document::new((1, 7));
+        let stream = objects_of(&mut doc, Value::from(stream.clone()));
+        let id = stream.as_ref_id().unwrap();
+        let pdf = held(doc, &[id]);
+        read(&pdf.object(read_id(id)).unwrap().into_stream().unwrap())
+    }
+
+    fn decode(stream: &Written) -> Result<Pixels> {
+        on(stream, super::decode)
+    }
+
+    fn samples(stream: &Written) -> Result<Vec<u8>> {
+        on(stream, super::samples)
+    }
+
+    fn stencil_extent(stream: &Written) -> Option<[f64; 4]> {
+        on(stream, super::stencil_extent)
+    }
+
+    fn is_supported(dict: &Dictionary) -> bool {
+        on(&Written::new(dict.clone(), Vec::new()), |s| {
+            super::is_supported(s.dict())
+        })
     }
 
     #[test]
     fn decodes_gray_rgb_and_indexed_samples() {
-        let doc = Document::new();
         let gray = image(
-            dictionary! { "Width" => 2, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
+            dict! { "Width" => 2, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
             vec![0, 255],
         );
-        assert_eq!(decode(&doc, &gray).unwrap().data, [0, 255]);
+        assert_eq!(decode(&gray).unwrap().data, [0, 255]);
 
         let rgb = image(
-            dictionary! { "Width" => 1, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB" },
+            dict! { "Width" => 1, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB" },
             vec![10, 20, 30],
         );
-        let pixels = decode(&doc, &rgb).unwrap();
+        let pixels = decode(&rgb).unwrap();
         assert!(pixels.rgb);
         assert_eq!(pixels.data, [10, 20, 30]);
 
         // Two 1-bit pixels per row, rows padded to a byte: 0b10 in the top bits.
         let bitonal = image(
-            dictionary! { "Width" => 2, "Height" => 1, "BitsPerComponent" => 1, "ColorSpace" => "DeviceGray" },
+            dict! { "Width" => 2, "Height" => 1, "BitsPerComponent" => 1, "ColorSpace" => "DeviceGray" },
             vec![0b1000_0000],
         );
-        assert_eq!(decode(&doc, &bitonal).unwrap().data, [255, 0]);
+        assert_eq!(decode(&bitonal).unwrap().data, [255, 0]);
 
         let indexed = image(
-            dictionary! {
+            dict! {
                 "Width" => 2, "Height" => 1, "BitsPerComponent" => 8,
                 "ColorSpace" => vec![
-                    Object::Name(b"Indexed".to_vec()),
-                    Object::Name(b"DeviceRGB".to_vec()),
+                    Value::Name(b"Indexed".to_vec()),
+                    Value::Name(b"DeviceRGB".to_vec()),
                     1.into(),
-                    Object::String(vec![255, 0, 0, 0, 0, 255], StringFormat::Hexadecimal),
+                    Value::String(vec![255, 0, 0, 0, 0, 255]),
                 ],
             },
             vec![1, 0],
         );
-        assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 255, 0, 0]);
+        assert_eq!(decode(&indexed).unwrap().data, [0, 0, 255, 255, 0, 0]);
     }
 
     /// An index past the palette's last colour is that colour, as a viewer
     /// clamps it: in the samples kept, and in the pixels decoded.
     #[test]
     fn an_index_past_the_palette_is_clamped() {
-        let doc = Document::new();
         let indexed = image(
-            dictionary! {
+            dict! {
                 "Width" => 2, "Height" => 1, "BitsPerComponent" => 8,
                 "ColorSpace" => vec![
-                    Object::Name(b"Indexed".to_vec()),
-                    Object::Name(b"DeviceRGB".to_vec()),
+                    Value::Name(b"Indexed".to_vec()),
+                    Value::Name(b"DeviceRGB".to_vec()),
                     1.into(),
-                    Object::String(vec![255, 0, 0, 0, 0, 255], StringFormat::Hexadecimal),
+                    Value::String(vec![255, 0, 0, 0, 0, 255]),
                 ],
             },
             vec![1, 2],
         );
-        assert_eq!(decode(&doc, &indexed).unwrap().data, [0, 0, 255, 0, 0, 255]);
-        assert_eq!(samples(&doc, &indexed).unwrap(), [1, 1]);
+        assert_eq!(decode(&indexed).unwrap().data, [0, 0, 255, 0, 0, 255]);
+        assert_eq!(samples(&indexed).unwrap(), [1, 1]);
         let packed = image(
-            dictionary! {
+            dict! {
                 "Width" => 4, "Height" => 1, "BitsPerComponent" => 2,
                 "ColorSpace" => vec![
-                    Object::Name(b"Indexed".to_vec()),
-                    Object::Name(b"DeviceGray".to_vec()),
+                    Value::Name(b"Indexed".to_vec()),
+                    Value::Name(b"DeviceGray".to_vec()),
                     1.into(),
-                    Object::String(vec![0, 255], StringFormat::Hexadecimal),
+                    Value::String(vec![0, 255]),
                 ],
             },
             vec![0b00_01_10_11],
         );
-        assert_eq!(samples(&doc, &packed).unwrap(), [0b00_01_01_01]);
+        assert_eq!(samples(&packed).unwrap(), [0b00_01_01_01]);
 
         // A colour key reads the raw sample, so a keyed image keeps it.
         let mut keyed = indexed.clone();
         keyed.dict.set("Mask", vec![1.into(), 1.into()]);
-        assert_eq!(samples(&doc, &keyed).unwrap(), [1, 2]);
+        assert_eq!(samples(&keyed).unwrap(), [1, 2]);
         // An index decode array other than the identity is not read.
         let mut decoded = indexed.clone();
         decoded.dict.set("Decode", vec![0.into(), 1.into()]);
-        assert!(samples(&doc, &decoded).is_err());
+        assert!(samples(&decoded).is_err());
         decoded.dict.set("Decode", vec![0.into(), 255.into()]);
-        assert!(samples(&doc, &decoded).is_ok());
+        assert!(samples(&decoded).is_ok());
     }
 
     /// A stencil paints where its samples paint: around them, nothing when
     /// none does, and the inverse samples under `[1 0]`.
     #[test]
     fn a_stencil_paints_where_its_samples_do() {
-        let doc = Document::new();
-        let stencil = |samples: Vec<u8>, decode: Option<Vec<Object>>| {
-            let mut dict = dictionary! { "Width" => 2, "Height" => 2, "ImageMask" => true };
+        let stencil = |samples: Vec<u8>, decode: Option<Vec<Value>>| {
+            let mut dict = dict! { "Width" => 2, "Height" => 2, "ImageMask" => true };
             if let Some(decode) = decode {
                 dict.set("Decode", decode);
             }
             image(dict, samples)
         };
         // Row 0 (the top) paints its right sample; row 1 paints nothing.
-        let extent = stencil_extent(&doc, &stencil(vec![0b1000_0000, 0b1100_0000], None));
+        let extent = stencil_extent(&stencil(vec![0b1000_0000, 0b1100_0000], None));
         assert_eq!(extent, Some([0.5, 0.5, 1.0, 1.0]));
-        assert_eq!(stencil_extent(&doc, &stencil(vec![0xC0, 0xC0], None)), None);
+        assert_eq!(stencil_extent(&stencil(vec![0xC0, 0xC0], None)), None);
         let inverted = stencil(vec![0xC0, 0xC0], Some(vec![1.into(), 0.into()]));
-        assert_eq!(stencil_extent(&doc, &inverted), Some([0.0, 0.0, 1.0, 1.0]));
+        assert_eq!(stencil_extent(&inverted), Some([0.0, 0.0, 1.0, 1.0]));
     }
 
     /// An image whose packed samples fit the bound but whose pixels do not is
     /// refused: 1-bit samples expand to a byte each.
     #[test]
     fn pixels_past_the_bound_are_refused() {
-        let doc = Document::new();
-        let mask = dictionary! { "Width" => 65_536, "Height" => 32_768, "ImageMask" => true };
-        assert!(!is_supported(&doc, &mask));
-        let gray = dictionary! {
+        let mask = dict! { "Width" => 65_536, "Height" => 32_768, "ImageMask" => true };
+        assert!(!is_supported(&mask));
+        let gray = dict! {
             "Width" => 65_536, "Height" => 32_768, "BitsPerComponent" => 1,
             "ColorSpace" => "DeviceGray",
         };
-        assert!(!is_supported(&doc, &gray));
+        assert!(!is_supported(&gray));
     }
 
     /// A stencil mask reads as gray, its painted samples (0 under the
     /// default decode array) black; an inverted decode array swaps them.
     #[test]
     fn a_stencil_mask_reads_as_gray() {
-        let doc = Document::new();
-        let mask = dictionary! { "Width" => 2, "Height" => 1, "ImageMask" => true };
-        assert!(is_supported(&doc, &mask));
+        let mask = dict! { "Width" => 2, "Height" => 1, "ImageMask" => true };
+        assert!(is_supported(&mask));
         assert_eq!(
-            decode(&doc, &image(mask, vec![0b0100_0000])).unwrap().data,
+            decode(&image(mask, vec![0b0100_0000])).unwrap().data,
             [0, 255]
         );
-        let inverted = dictionary! {
+        let inverted = dict! {
             "Width" => 2, "Height" => 1, "ImageMask" => true,
             "Decode" => vec![1.into(), 0.into()],
         };
         assert_eq!(
-            decode(&doc, &image(inverted, vec![0b0100_0000]))
-                .unwrap()
-                .data,
+            decode(&image(inverted, vec![0b0100_0000])).unwrap().data,
             [255, 0]
         );
-        let wide = dictionary! { "Width" => 2, "Height" => 1, "ImageMask" => true, "BitsPerComponent" => 8 };
-        assert!(!is_supported(&doc, &wide));
+        let wide =
+            dict! { "Width" => 2, "Height" => 1, "ImageMask" => true, "BitsPerComponent" => 8 };
+        assert!(!is_supported(&wide));
     }
 
     #[test]
     fn short_samples_are_padded() {
-        let doc = Document::new();
         let short = image(
-            dictionary! { "Width" => 2, "Height" => 2, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
+            dict! { "Width" => 2, "Height" => 2, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
             vec![9; 3],
         );
-        assert_eq!(decode(&doc, &short).unwrap().data, [9, 9, 9, 0]);
+        assert_eq!(decode(&short).unwrap().data, [9, 9, 9, 0]);
     }
 }

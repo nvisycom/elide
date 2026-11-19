@@ -2,7 +2,6 @@
 //! normal form and rebuilding it again drops nothing.
 
 use elide_core::{Error, Result};
-use lopdf::Document;
 
 use super::{Builder, normal};
 use crate::pdf::{Pdf, Read};
@@ -22,14 +21,14 @@ impl Read for Check {
     type Output = ();
 
     fn read(self, pdf: &Pdf) -> Result<Self::Output> {
-        check(pdf.doc())
+        check(pdf)
     }
 }
 
-/// The [`Check`] of `doc`.
-pub(super) fn check(doc: &Document) -> Result<()> {
-    normal::verify(doc)?;
-    let mut rebuild = Builder::new(doc);
+/// The [`Check`] of `pdf`.
+pub(super) fn check(pdf: &Pdf) -> Result<()> {
+    normal::verify(pdf)?;
+    let mut rebuild = Builder::new(pdf);
     rebuild.run()?;
     if rebuild.stripped.is_empty() && rebuild.residue == 0 {
         return Ok(());

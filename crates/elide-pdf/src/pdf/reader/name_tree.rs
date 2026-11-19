@@ -1,11 +1,12 @@
-//! Reading name trees (ISO 32000-2, 7.9.6): the trees under the catalog's
-//! `/Names`, node by node.
+//! Reading name trees (7.9.6): the trees under the catalog's `/Names`,
+//! node by node.
 
 use std::collections::BTreeSet;
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use hayro_syntax::object::{Array, Dict, MaybeRef, Object};
 
-use crate::pdf::reader::DocumentExt;
+use crate::pdf::Pdf;
+use crate::pdf::reader::{DictExt, ObjectId, id};
 
 /// How deep a name tree is walked: a real tree is a few levels deep, a cyclic
 /// or adversarial one is not walked forever.
@@ -22,11 +23,20 @@ pub(crate) enum Node {
     InlineRoot(Option<ObjectId>),
 }
 
+/// One key and value of a name tree: the key, the value, and the object the
+/// value is when it is one of its own.
+#[derive(Debug, Clone)]
+pub(crate) struct Pair<'a> {
+    pub(crate) key: Object<'a>,
+    pub(crate) value: Object<'a>,
+    pub(crate) id: Option<ObjectId>,
+}
+
 /// One name tree of a document, read once: its nodes, so pairs can be
 /// dropped in place, and its key/value pairs in tree order.
 pub(crate) struct NameTree<'a> {
     pub(crate) nodes: Vec<Node>,
-    pub(crate) pairs: Vec<(&'a Object, &'a Object)>,
+    pub(crate) pairs: Vec<Pair<'a>>,
     /// Whether every node was read: none failed to resolve, recurred, lay
     /// past [`MAX_TREE_DEPTH`], or held an unpaired name. A caller that must
     /// see every pair refuses an incomplete tree; one that may miss a pair
@@ -35,12 +45,11 @@ pub(crate) struct NameTree<'a> {
 }
 
 impl<'a> NameTree<'a> {
-    /// The tree `tree` (`/EmbeddedFiles`, `/Dests`, ...) of `doc`'s
+    /// The tree `tree` (`/EmbeddedFiles`, `/Dests`, ...) of `pdf`'s
     /// `/Names`, empty when the document has none.
-    pub(crate) fn read(doc: &'a Document, tree: &[u8]) -> Self {
+    pub(crate) fn read(pdf: &'a Pdf, tree: &[u8]) -> Self {
         let mut reader = Reader {
-            doc,
-            tree,
+            pdf,
             visited: BTreeSet::new(),
             out: Self {
                 nodes: Vec::new(),
@@ -48,163 +57,142 @@ impl<'a> NameTree<'a> {
                 complete: true,
             },
         };
-        let Some(names) = doc.catalog().ok().and_then(|c| c.get(b"Names").ok()) else {
+        let Ok(catalog) = pdf.catalog() else {
             return reader.out;
         };
-        let (names, names_id) = match names {
-            Object::Reference(id) => (doc.get_dictionary(*id).ok(), Some(*id)),
-            Object::Dictionary(dict) => (Some(dict), None),
-            _ => (None, None),
-        };
-        let Some(root) = names.and_then(|names| names.get(tree).ok()) else {
+        let Some(names) = catalog.get::<Dict<'a>>(b"Names") else {
             return reader.out;
         };
-        match root {
+        let names_id = catalog.reference(b"Names");
+        match names.raw(tree) {
+            None => {}
             // A root that is null, or refers to null or nothing, is no tree.
-            Object::Null => {}
-            Object::Reference(_) if matches!(doc.resolve(root), None | Some(Object::Null)) => {}
-            Object::Reference(id) => reader.walk(Node::Object(*id), 0),
-            Object::Dictionary(_) => reader.walk(Node::InlineRoot(names_id), 0),
-            _ => reader.out.complete = false,
+            Some(MaybeRef::NotRef(Object::Null(_))) => {}
+            Some(MaybeRef::Ref(_)) => match names.get::<Object<'a>>(tree) {
+                None | Some(Object::Null(_)) => {}
+                Some(Object::Dict(root)) => {
+                    let node = names
+                        .reference(tree)
+                        .map_or(Node::InlineRoot(names_id), Node::Object);
+                    reader.walk(node, root, 0);
+                }
+                Some(_) => reader.out.complete = false,
+            },
+            Some(MaybeRef::NotRef(Object::Dict(root))) => {
+                reader.walk(Node::InlineRoot(names_id), root, 0);
+            }
+            Some(MaybeRef::NotRef(_)) => reader.out.complete = false,
         }
         reader.out
     }
 }
 
-/// One name tree being read: the document and tree, the objects already
-/// read, so none is read twice, and the tree as read so far.
-struct Reader<'a, 't> {
-    doc: &'a Document,
-    tree: &'t [u8],
+/// One name tree being read: the document, the objects already read, so
+/// none is read twice, and the tree as read so far.
+struct Reader<'a> {
+    pdf: &'a Pdf,
     visited: BTreeSet<ObjectId>,
     out: NameTree<'a>,
 }
 
-impl<'a> Reader<'a, '_> {
-    /// Record `node`, `depth` levels down, and its pairs, then walk its kids.
-    fn walk(&mut self, node: Node, depth: usize) {
+impl<'a> Reader<'a> {
+    /// Record `node`, whose dictionary is `dict`, `depth` levels down, and
+    /// its pairs, then walk its kids.
+    fn walk(&mut self, node: Node, dict: Dict<'a>, depth: usize) {
         if depth > MAX_TREE_DEPTH {
             self.out.complete = false;
             return;
         }
         if let Node::Object(id) = node
-            && !self.visit(&Object::Reference(id))
+            && !self.visited.insert(id)
         {
             self.out.complete = false;
             return;
         }
-        let Some(dict) = node_dict(self.doc, self.tree, node) else {
-            self.out.complete = false;
-            return;
-        };
         self.out.nodes.push(node);
         // A null entry, or one referring to null, is no entry; so is a
         // `/Names` referring to nothing, which holds no pairs. `/Kids`
         // referring to nothing loses a subtree, so it is read and fails.
-        let null = |value: &Object| matches!(self.doc.resolve(value), Some(Object::Null));
-        if let Ok(names) = dict.get(b"Names")
-            && !null(names)
-            && self.doc.resolve(names).is_some()
+        if !matches!(
+            dict.get::<Object<'a>>(b"Names"),
+            None | Some(Object::Null(_))
+        ) && let Some(names) = self.array(&dict, b"Names")
         {
-            let Some(names) = self.array(names) else {
-                return;
-            };
-            let (pairs, unpaired) = names.as_chunks::<2>();
+            let items: Vec<MaybeRef<Object<'a>>> = names.raw_iter().collect();
+            let (pairs, unpaired) = items.as_chunks::<2>();
             self.out.complete &= unpaired.is_empty();
-            self.out
-                .pairs
-                .extend(pairs.iter().map(|[key, value]| (key, value)));
+            for [key, value] in pairs {
+                let (Some((key, _)), Some((value, id))) = (self.item(key), self.item(value)) else {
+                    self.out.complete = false;
+                    continue;
+                };
+                self.out.pairs.push(Pair { key, value, id });
+            }
         }
-        if let Ok(kids) = dict.get(b"Kids")
-            && !null(kids)
-        {
-            let Some(kids) = self.array(kids) else {
-                return;
+        let kids = dict.raw(b"Kids");
+        let null = matches!(dict.get::<Object<'a>>(b"Kids"), Some(Object::Null(_)));
+        if kids.is_none() || null {
+            return;
+        }
+        let Some(kids) = self.array(&dict, b"Kids") else {
+            return;
+        };
+        for kid in kids.raw_iter() {
+            let MaybeRef::Ref(reference) = kid else {
+                self.out.complete = false;
+                continue;
             };
-            for kid in kids {
-                match kid.as_reference() {
-                    Ok(id) => self.walk(Node::Object(id), depth + 1),
-                    Err(_) => self.out.complete = false,
-                }
+            let kid_id = id(reference);
+            match self.pdf.object(kid_id).and_then(Object::into_dict) {
+                Some(kid) => self.walk(Node::Object(kid_id), kid, depth + 1),
+                None => self.out.complete = false,
             }
         }
     }
 
-    /// The array `value` resolves to, read once: an array object another
-    /// node already named, which no real tree shares, is not read again, so
-    /// a tree that shares one among many nodes costs its size once.
-    fn array(&mut self, value: &'a Object) -> Option<&'a Vec<Object>> {
-        let array = match value {
-            Object::Reference(_) if !self.visit(value) => None,
-            value => self.doc.resolve_array(value),
+    /// The value `item` holds, and the object it is when it is one of its
+    /// own; `None` when it refers to nothing.
+    fn item(&self, item: &MaybeRef<Object<'a>>) -> Option<(Object<'a>, Option<ObjectId>)> {
+        Some((self.pdf.resolve(item)?, item.as_obj_ref().map(id)))
+    }
+
+    /// The array `dict` holds under `key`, read once: an array object
+    /// another node already named, which no real tree shares, is not read
+    /// again, so a tree that shares one among many nodes costs its size
+    /// once.
+    fn array(&mut self, dict: &Dict<'a>, key: &[u8]) -> Option<Array<'a>> {
+        let array = match dict.reference(key) {
+            Some(id) if !self.visited.insert(id) => None,
+            _ => dict.get::<Array<'a>>(key),
         };
         self.out.complete &= array.is_some();
         array
-    }
-
-    /// Mark the object the reference `value` ends at, through any chain of
-    /// references, read: whether it was not already, and `false` when it
-    /// does not resolve.
-    fn visit(&mut self, value: &Object) -> bool {
-        match self.doc.dereference(value) {
-            Ok((Some(id), _)) => self.visited.insert(id),
-            _ => false,
-        }
-    }
-}
-
-/// The dictionary of the node `node` of the tree `tree` in `doc`.
-pub(in crate::pdf) fn node_dict<'a>(
-    doc: &'a Document,
-    tree: &[u8],
-    node: Node,
-) -> Option<&'a Dictionary> {
-    match node {
-        Node::Object(id) => doc.get_dictionary(id).ok(),
-        Node::InlineRoot(names) => names_dict(doc, names)?
-            .get(tree)
-            .and_then(Object::as_dict)
-            .ok(),
-    }
-}
-
-/// The catalog's `/Names` dictionary: the indirect object `names`, or the
-/// catalog's inline entry.
-fn names_dict(doc: &Document, names: Option<ObjectId>) -> Option<&Dictionary> {
-    match names {
-        Some(id) => doc.get_dictionary(id).ok(),
-        None => doc
-            .catalog()
-            .ok()?
-            .get(b"Names")
-            .and_then(Object::as_dict)
-            .ok(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use lopdf::dictionary;
-
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{catalog, open, with_pages};
+    use crate::pdf::object::{Dictionary, Id, Value, dict};
+    use crate::pdf::writer::Document;
 
     /// A document whose `/Dests` tree has a kid that does not resolve, then
     /// a leaf held in a referenced `/Names` array.
     fn document() -> Document {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let names = doc.add_object(Object::Array(vec![
-            Object::string_literal("a"),
+        let names = doc.add(Value::Array(vec![
+            Value::string("a"),
             1.into(),
-            Object::string_literal("b"),
+            Value::string("b"),
             2.into(),
         ]));
-        let leaf = doc.add_object(dictionary! { "Names" => names });
-        doc.catalog_mut().unwrap().set(
+        let leaf = doc.add(dict! { "Names" => names });
+        catalog(&mut doc).set(
             "Names",
-            dictionary! {
-                "Dests" => dictionary! { "Kids" => vec![Object::Reference((9999, 0)), leaf.into()] },
+            dict! {
+                "Dests" => dict! { "Kids" => vec![Value::Ref(Id(9999)), leaf.into()] },
             },
         );
         doc
@@ -212,34 +200,33 @@ mod tests {
 
     #[test]
     fn a_node_that_does_not_resolve_leaves_the_tree_incomplete() {
-        let doc = document();
-        let tree = NameTree::read(&doc, b"Dests");
+        let pdf = open(&document());
+        let tree = NameTree::read(&pdf, b"Dests");
         assert!(!tree.complete);
-        let keys: Vec<&Object> = tree.pairs.iter().map(|(key, _)| *key).collect();
-        assert_eq!(
-            keys,
-            [&Object::string_literal("a"), &Object::string_literal("b")]
-        );
+        let keys: Vec<Vec<u8>> = tree
+            .pairs
+            .iter()
+            .map(|pair| pair.key.clone().into_string().unwrap().to_vec())
+            .collect();
+        assert_eq!(keys, [b"a".to_vec(), b"b".to_vec()]);
     }
 
     /// An array shared among many nodes is read once, its pairs taken once.
     #[test]
     fn a_shared_array_is_read_once() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let names = doc.add_object(Object::Array(vec![Object::string_literal("a"), 1.into()]));
-        let leaves: Vec<Object> = (0..3)
-            .map(|_| doc.add_object(dictionary! { "Names" => names }).into())
+        let names = doc.add(Value::Array(vec![Value::string("a"), 1.into()]));
+        let leaves: Vec<Value> = (0..3)
+            .map(|_| doc.add(dict! { "Names" => names }).into())
             .collect();
-        let kids = doc.add_object(Object::Array(leaves));
-        let parents: Vec<Object> = (0..3)
-            .map(|_| doc.add_object(dictionary! { "Kids" => kids }).into())
+        let kids = doc.add(Value::Array(leaves));
+        let parents: Vec<Value> = (0..3)
+            .map(|_| doc.add(dict! { "Kids" => kids }).into())
             .collect();
-        doc.catalog_mut().unwrap().set(
-            "Names",
-            dictionary! { "Dests" => dictionary! { "Kids" => parents } },
-        );
-        let tree = NameTree::read(&doc, b"Dests");
+        catalog(&mut doc).set("Names", dict! { "Dests" => dict! { "Kids" => parents } });
+        let pdf = open(&doc);
+        let tree = NameTree::read(&pdf, b"Dests");
         assert!(!tree.complete);
         assert_eq!(tree.pairs.len(), 1);
     }
@@ -248,17 +235,18 @@ mod tests {
     /// once.
     #[test]
     fn a_node_named_through_another_reference_is_read_once() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let leaf = doc.add_object(dictionary! {
-            "Names" => vec![Object::string_literal("a"), 1.into()],
+        let leaf = doc.add(dict! {
+            "Names" => vec![Value::string("a"), 1.into()],
         });
-        let alias = doc.add_object(Object::Reference(leaf));
-        doc.catalog_mut().unwrap().set(
+        let alias = doc.add(Value::Ref(leaf));
+        catalog(&mut doc).set(
             "Names",
-            dictionary! { "Dests" => dictionary! { "Kids" => vec![leaf.into(), alias.into()] } },
+            dict! { "Dests" => dict! { "Kids" => vec![leaf.into(), alias.into()] } },
         );
-        let tree = NameTree::read(&doc, b"Dests");
+        let pdf = open(&doc);
+        let tree = NameTree::read(&pdf, b"Dests");
         assert_eq!(tree.pairs.len(), 1);
     }
 
@@ -266,19 +254,20 @@ mod tests {
     /// node's kids are still read.
     #[test]
     fn a_null_names_entry_is_skipped() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let leaf = doc.add_object(dictionary! {
-            "Names" => vec![Object::string_literal("a"), 1.into()],
+        let leaf = doc.add(dict! {
+            "Names" => vec![Value::string("a"), 1.into()],
         });
-        let null = doc.add_object(Object::Null);
-        doc.catalog_mut().unwrap().set(
+        let null = doc.add(Value::Null);
+        catalog(&mut doc).set(
             "Names",
-            dictionary! {
-                "Dests" => dictionary! { "Names" => null, "Kids" => vec![leaf.into()] },
+            dict! {
+                "Dests" => dict! { "Names" => null, "Kids" => vec![leaf.into()] },
             },
         );
-        let tree = NameTree::read(&doc, b"Dests");
+        let pdf = open(&doc);
+        let tree = NameTree::read(&pdf, b"Dests");
         assert!(tree.complete);
         assert_eq!(tree.pairs.len(), 1);
     }
@@ -287,24 +276,25 @@ mod tests {
     /// still read; a null root is no tree, read whole.
     #[test]
     fn a_dangling_names_entry_and_a_null_root_are_absent() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let leaf = doc.add_object(dictionary! {
-            "Names" => vec![Object::string_literal("a"), 1.into()],
+        let leaf = doc.add(dict! {
+            "Names" => vec![Value::string("a"), 1.into()],
         });
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "Names",
-            dictionary! {
-                "Dests" => dictionary! {
-                    "Names" => Object::Reference((9999, 0)), "Kids" => vec![leaf.into()],
+            dict! {
+                "Dests" => dict! {
+                    "Names" => Value::Ref(Id(9999)), "Kids" => vec![leaf.into()],
                 },
-                "EmbeddedFiles" => Object::Null,
+                "EmbeddedFiles" => Value::Null,
             },
         );
-        let tree = NameTree::read(&doc, b"Dests");
+        let pdf = open(&doc);
+        let tree = NameTree::read(&pdf, b"Dests");
         assert!(tree.complete);
         assert_eq!(tree.pairs.len(), 1);
-        let files = NameTree::read(&doc, b"EmbeddedFiles");
+        let files = NameTree::read(&pdf, b"EmbeddedFiles");
         assert!(files.complete && files.pairs.is_empty());
     }
 }

@@ -128,8 +128,7 @@ and this project adheres to
   its annotation's blend mode and opacity) so its answer is detected like any
   text, and what the rebuild does not copy is recorded by category; encode
   checks its output and refuses one a rebuild would change. A document
-  encrypted with a user password, or whose attached files are encrypted under
-  a crypt filter of their own, is refused; attached files get neutral names;
+  encrypted with a user password is refused; attached files get neutral names;
   every image, stencil masks included, is surfaced to the image pipeline
   wherever it is drawn from, and one that cannot be (fax, JBIG2, inline
   images, external data) is removed rather than shipped unscanned; text in a

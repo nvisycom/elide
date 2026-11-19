@@ -53,8 +53,7 @@ impl Read for Observation {
     type Output = Vec<PageObservation>;
 
     fn read(self, pdf: &Pdf) -> Result<Self::Output> {
-        let doc = pdf.doc();
-        let pages = doc.get_pages();
+        let pages = pdf.pages();
         let observed = pdfium::observe(pdf)?;
         if observed.len() != pages.len() {
             return Err(Error::malformed(format!(
@@ -64,13 +63,14 @@ impl Read for Observation {
             )));
         }
         Ok(pages
-            .into_iter()
+            .iter()
+            .zip(1..)
             .zip(observed)
-            .map(|((page, id), (text, glyphs))| PageObservation {
+            .map(|((dict, page), (text, glyphs))| PageObservation {
                 page,
                 text,
                 glyphs,
-                frame: page_frame(doc, id).unwrap_or(PageFrame::LETTER),
+                frame: page_frame(dict).unwrap_or(PageFrame::LETTER),
             })
             .collect())
     }

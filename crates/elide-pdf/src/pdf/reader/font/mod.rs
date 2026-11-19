@@ -5,5 +5,6 @@ mod codespace;
 mod glyphs;
 mod widths;
 
-pub(crate) use self::glyphs::{FontText, decode_glyphs, readable, to_unicode};
+pub(crate) use self::codespace::mapped;
+pub(crate) use self::glyphs::{FontText, decode_glyphs, mapped_units, readable, to_unicode_bytes};
 pub(crate) use self::widths::{GlyphMetrics, WidthSource};

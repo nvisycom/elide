@@ -9,23 +9,26 @@
 
 use std::collections::HashSet;
 
-use ::image::load_from_memory;
+use ::image::{ColorType, DynamicImage, ImageFormat, guess_format, load_from_memory};
 use elide_core::{Error, Result};
-use lopdf::content::{Content, Operation};
-use lopdf::xobject::image_from;
-use lopdf::{Document, Object, ObjectId, Stream, dictionary};
+use hayro_syntax::object::{Object, Stream as Source};
 
 use super::ImageReplacement;
 use super::samples::is_stencil;
-use crate::pdf::Edit;
-use crate::pdf::reader::{DictionaryExt, Scope};
-use crate::pdf::writer::compressed;
+use crate::pdf::content::{Operation, encode, parse};
+use crate::pdf::object::{Stream, Value, dict};
+use crate::pdf::reader::{DictExt, ObjectId, Scope};
+use crate::pdf::writer::{Changes, compressed, drop_xobjects, rewrite_contents, stream_value};
+use crate::pdf::{Edit, Pdf};
 
-/// Replace the embedded images named in `replacements` in `doc` with redacted
-/// images.
+/// Replace in `changes` the embedded images of `pdf` named in
+/// `replacements` with redacted images.
 ///
 /// Each [`ImageReplacement`] carries an encoded image (PNG/JPEG); its XObject is
-/// rebuilt so the stream and dictionary stay consistent.
+/// rebuilt so the stream and dictionary stay consistent. The original
+/// image's sub-objects that encode pixel content (soft masks, stencil masks,
+/// alternate representations) are no longer named by the rebuilt XObject,
+/// so they are not written, unless a retained object still names them.
 ///
 /// **Fail-closed:** a replacement naming an object that is not an image XObject,
 /// or an image that cannot be decoded, refuses the whole rewrite rather than
@@ -35,44 +38,91 @@ use crate::pdf::writer::compressed;
 ///
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a replacement could
 /// not be applied.
-pub(super) fn replace(edit: &mut Edit, replacements: &[ImageReplacement]) -> Result<()> {
-    let doc = edit.doc_mut();
-    // The original images' sub-objects that encode pixel content (soft masks,
-    // stencil masks, alternate representations) become unreachable when the
-    // rebuilt XObject drops their dict keys, and the save prunes them, so no
-    // mask carrying the sensitive shape survives in the bytes. A mask shared
-    // with a retained object stays reachable and is kept.
+pub(super) fn replace(
+    pdf: &Pdf,
+    replacements: &[ImageReplacement],
+    changes: &mut Changes,
+) -> Result<()> {
     for replacement in replacements {
         let id = replacement.id.object();
-
         // The target must be an image XObject, not a content or font stream,
         // or a structural object, that happens to share the id.
-        if !is_image(doc, id) {
+        let Some(image) = image(pdf, id) else {
             return Err(Error::redaction(format!(
                 "object ({}, {}) is not a replaceable image XObject",
                 replacement.id.number, replacement.id.generation
             )));
-        }
-
-        // Rebuild a valid image XObject from the encoded bytes (lopdf sets
-        // the dictionary, dimensions, colour space, filter, to match); a
-        // stencil mask stays a stencil, so it still paints in the fill colour.
-        let stencil =
-            matches!(doc.get_object(id), Ok(Object::Stream(s)) if is_stencil(doc, &s.dict));
-        let stream = if stencil {
+        };
+        // A stencil mask stays a stencil, so it still paints in the fill
+        // colour.
+        let built = if is_stencil(image.dict()) {
             stencil_from(&replacement.image)
         } else {
-            image_from(replacement.image.clone()).map_err(|e| Error::redaction(e.to_string()))
-        }
-        .map_err(|e| {
+            image_from(&replacement.image, changes)
+        };
+        let stream = built.map_err(|e| {
             Error::redaction(format!(
                 "could not build image ({}, {}): {e}",
                 replacement.id.number, replacement.id.generation
             ))
         })?;
-        doc.objects.insert(id, Object::Stream(stream));
+        changes.replace(id, stream);
     }
     Ok(())
+}
+
+/// An image XObject of the encoded image `bytes`: a JPEG as it is, any
+/// other image as its samples, its alpha (when it has one) a soft mask
+/// added to `changes`.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the bytes are
+/// not an image, and as [`compressed`].
+fn image_from(bytes: &[u8], changes: &mut Changes) -> Result<Stream> {
+    let image =
+        load_from_memory(bytes).map_err(|e| Error::redaction(format!("not an image: {e}")))?;
+    let (width, height) = (image.width(), image.height());
+    let gray = matches!(
+        image.color(),
+        ColorType::L8 | ColorType::L16 | ColorType::La8 | ColorType::La16
+    );
+    let space = if gray { "DeviceGray" } else { "DeviceRGB" };
+    let mut dict = dict! {
+        "Type" => "XObject",
+        "Subtype" => "Image",
+        "Width" => width,
+        "Height" => height,
+        "ColorSpace" => space,
+        "BitsPerComponent" => 8,
+    };
+    // A JPEG of gray or RGB samples is stored as it is.
+    let jpeg = guess_format(bytes).is_ok_and(|format| format == ImageFormat::Jpeg)
+        && matches!(image.color(), ColorType::L8 | ColorType::Rgb8);
+    if jpeg {
+        dict.set("Filter", "DCTDecode");
+        return Ok(Stream::new(dict, bytes.to_vec()));
+    }
+    if image.color().has_alpha() {
+        let alpha: Vec<u8> = image.to_rgba8().pixels().map(|pixel| pixel.0[3]).collect();
+        let mask = compressed(
+            dict! {
+                "Type" => "XObject",
+                "Subtype" => "Image",
+                "Width" => width,
+                "Height" => height,
+                "ColorSpace" => "DeviceGray",
+                "BitsPerComponent" => 8,
+            },
+            &alpha,
+        )?;
+        dict.set("SMask", changes.add(mask).value());
+    }
+    let samples = match image {
+        image if gray => DynamicImage::ImageLuma8(image.to_luma8()).into_bytes(),
+        image => DynamicImage::ImageRgb8(image.to_rgb8()).into_bytes(),
+    };
+    compressed(dict, &samples)
 }
 
 /// A stencil mask of the encoded image `bytes`: a dark pixel paints, a light
@@ -97,27 +147,29 @@ fn stencil_from(bytes: &[u8]) -> Result<Stream> {
         }
     }
     compressed(
-        dictionary! {
+        dict! {
             "Type" => "XObject",
             "Subtype" => "Image",
-            "Width" => i64::from(width),
-            "Height" => i64::from(height),
+            "Width" => width,
+            "Height" => height,
             "ImageMask" => true,
             "BitsPerComponent" => 1,
         },
-        samples,
+        &samples,
     )
 }
 
-/// Whether `id` is an image XObject of `doc`.
-fn is_image(doc: &Document, id: ObjectId) -> bool {
-    matches!(doc.get_object(id), Ok(Object::Stream(stream)) if stream.dict.is_subtype(doc, b"Image"))
+/// The image XObject `id` of `pdf`, if it is one.
+fn image(pdf: &Pdf, id: ObjectId) -> Option<Source<'_>> {
+    pdf.object(id)
+        .and_then(Object::into_stream)
+        .filter(|stream| stream.dict().is_subtype(b"Image"))
 }
 
-/// Remove the image XObjects `images` from every page and form XObject
-/// `edit` draws, returning how many drawings were cut. Each is dropped from
-/// every resource dictionary, and from every image it masks, so saving the
-/// edit prunes it from the file.
+/// Remove in `changes` the image XObjects `images` from every page and form
+/// XObject of `pdf`, returning how many drawings were cut. Each is dropped
+/// from every resource dictionary, and from every image it masks, so the
+/// document written no longer holds it.
 ///
 /// A page positions everything it draws, so cutting an image leaves its area
 /// empty without moving anything else.
@@ -126,45 +178,52 @@ fn is_image(doc: &Document, id: ObjectId) -> bool {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
 /// content stream cannot be decoded or encoded.
-pub(super) fn remove(edit: &mut Edit, images: &HashSet<ObjectId>) -> Result<usize> {
-    let cuts = edit.rewrite_contents(|doc, bytes, scope| {
-        let content =
-            Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
-        let before = content.operations.len();
+pub(super) fn remove(
+    pdf: &Pdf,
+    images: &HashSet<ObjectId>,
+    changes: &mut Changes,
+) -> Result<usize> {
+    let cuts = rewrite_contents(pdf, changes, |bytes, scope| {
+        let content = parse(bytes);
+        let before = content.len();
         let kept: Vec<Operation> = content
-            .operations
             .into_iter()
-            .filter(|operation| operation.operator != "Do" || !draws(doc, operation, scope, images))
+            .filter(|operation| operation.operator != "Do" || !draws(operation, scope, images))
             .collect();
         let cut = before - kept.len();
         if cut == 0 {
             return Ok(None);
         }
-        let encoded = Content { operations: kept }
-            .encode()
-            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
-        Ok(Some((encoded, cut)))
+        Ok(Some((encode(&kept)?, cut)))
     })?;
-    edit.drop_xobjects(images);
-    drop_masks(edit, images);
+    drop_xobjects(pdf, images, changes);
+    drop_masks(pdf, images, changes);
     Ok(cuts.into_iter().sum())
 }
 
-/// Drop every `/SMask` and `/Mask` entry naming one of `images`.
-fn drop_masks(edit: &mut Edit, images: &HashSet<ObjectId>) {
-    let doc = edit.doc_mut();
-    for object in doc.objects.values_mut() {
+/// Drop in `changes` every `/SMask` and `/Mask` entry of `pdf` naming one of
+/// `images`.
+fn drop_masks(pdf: &Pdf, images: &HashSet<ObjectId>, changes: &mut Changes) {
+    for object in pdf.file().objects() {
         let Object::Stream(stream) = object else {
             continue;
         };
-        for key in [b"SMask".as_slice(), b"Mask"] {
-            if stream
-                .dict
-                .get(key)
-                .and_then(Object::as_reference)
-                .is_ok_and(|id| images.contains(&id))
-            {
-                stream.dict.remove(key);
+        let masked: Vec<&[u8]> = [b"SMask".as_slice(), b"Mask"]
+            .into_iter()
+            .filter(|key| {
+                stream
+                    .dict()
+                    .reference(key)
+                    .is_some_and(|id| images.contains(&id))
+            })
+            .collect();
+        if masked.is_empty() {
+            continue;
+        }
+        let written = changes.entry(stream.obj_id(), || Value::from(stream_value(&stream)));
+        if let Some(dict) = written.as_dict_mut() {
+            for key in masked {
+                dict.remove(key);
             }
         }
     }
@@ -172,19 +231,33 @@ fn drop_masks(edit: &mut Edit, images: &HashSet<ObjectId>) {
 
 /// Whether the `Do` `operation` draws one of `images`, by its name in
 /// `scope`.
-fn draws(
-    doc: &Document,
-    operation: &Operation,
-    scope: &Scope<'_>,
-    images: &HashSet<ObjectId>,
-) -> bool {
-    let [Object::Name(name)] = operation.operands.as_slice() else {
+fn draws(operation: &Operation, scope: &Scope<'_>, images: &HashSet<ObjectId>) -> bool {
+    let [Value::Name(name)] = operation.operands.as_slice() else {
         return false;
     };
     scope
-        .lookup(doc, b"XObject", name)
-        .and_then(|xobject| xobject.as_reference().ok())
+        .lookup(b"XObject", name)
+        .and_then(|xobject| xobject.id)
         .is_some_and(|id| images.contains(&id))
+}
+
+/// Replace the images `replaced` names and remove those `removed` names, in
+/// one change of `edit`.
+///
+/// # Errors
+///
+/// As [`replace`] and [`remove`], and as [`Edit::apply`].
+pub(super) fn redact(
+    edit: &mut Edit,
+    replaced: &[ImageReplacement],
+    removed: &HashSet<ObjectId>,
+) -> Result<()> {
+    let mut changes = Changes::new();
+    replace(edit.pdf(), replaced, &mut changes)?;
+    if !removed.is_empty() {
+        remove(edit.pdf(), removed, &mut changes)?;
+    }
+    edit.apply(changes)
 }
 
 #[cfg(test)]
@@ -196,52 +269,56 @@ mod tests {
     use super::*;
     use crate::content::image::ImageId;
     use crate::content::image::samples::decode;
+    use crate::fixtures::{held, read_id};
+    use crate::pdf::writer::Document;
 
     #[test]
     fn only_an_image_xobject_is_replaced() {
-        let mut doc = Document::with_version("1.5");
-        let catalog = doc.add_object(dictionary! { "Type" => "Catalog" });
-        let page = doc.add_object(dictionary! { "Type" => "Page" });
-        let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1" });
-        let image = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Image" },
+        let mut doc = Document::new((1, 5));
+        let page = doc.add(dict! { "Type" => "Page" });
+        let font = doc.add(dict! { "Type" => "Font", "Subtype" => "Type1" });
+        let picture = doc.add(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Image" },
             b"pixels".to_vec(),
         ));
-        for id in [catalog, page, font] {
-            assert!(!is_image(&doc, id));
+        let pdf = held(doc, &[page, font, picture]);
+        for id in [page, font] {
+            assert!(image(&pdf, read_id(id)).is_none());
         }
-        assert!(is_image(&doc, image));
+        assert!(image(&pdf, read_id(picture)).is_some());
     }
 
     /// A redacted stencil mask goes back as a stencil: what was painted
     /// paints, and the redaction box (black) paints too.
     #[test]
     fn a_stencil_stays_a_stencil() {
-        let mut doc = Document::with_version("1.5");
-        let id = doc.add_object(Stream::new(
-            dictionary! {
+        let mut doc = Document::new((1, 5));
+        let id = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image",
                 "Width" => 2, "Height" => 1, "ImageMask" => true,
             },
             vec![0b0100_0000],
         ));
+        let pdf = held(doc, &[id]);
         let redacted = GrayImage::from_fn(2, 1, |_, _| Luma([0]));
         let mut png = Vec::new();
         DynamicImage::ImageLuma8(redacted)
             .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
             .unwrap();
-        let mut edit = Edit::of(doc);
-        replace(
+        let mut edit = Edit::of(&pdf);
+        redact(
             &mut edit,
             &[ImageReplacement {
-                id: ImageId::new(id.0, id.1),
+                id: ImageId::new(id.0, 0),
                 image: png,
             }],
+            &HashSet::new(),
         )
         .unwrap();
-        let doc = edit.doc();
-        let stream = doc.get_object(id).and_then(Object::as_stream).unwrap();
-        assert!(is_stencil(doc, &stream.dict));
-        assert_eq!(decode(doc, stream).unwrap().data, [0, 0]);
+        let pdf = edit.finish();
+        let stream = pdf.object(read_id(id)).unwrap().into_stream().unwrap();
+        assert!(is_stencil(stream.dict()));
+        assert_eq!(decode(&stream).unwrap().data, [0, 0]);
     }
 }

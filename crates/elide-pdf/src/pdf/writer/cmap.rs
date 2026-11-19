@@ -2,10 +2,11 @@
 //!
 //! A `/ToUnicode` CMap maps character codes to Unicode, so text can be
 //! recovered from it (copy, search, extraction) independently of the drawn
-//! glyphs. A CMap is never edited as text: it is read as lopdf reads it, the
-//! reader text detection decodes with, changed as a map of codes, and written
-//! whole. So the CMap a viewer reads maps what detection read and nothing
-//! else: no comment, and no entry lopdf passes over, survives.
+//! glyphs. A CMap is never edited as text: each code an entry names is read
+//! as hayro-cmap, the reader text detection decodes with, maps it, changed
+//! as a map of codes, and written whole. So the CMap a viewer reads maps
+//! what detection read and nothing else: no comment, and no entry the
+//! reader passes over, survives.
 //!
 //! The rebuild writes each destination as [`readable`] text, so the text a
 //! viewer copies is the text detection read; text redaction removes each
@@ -14,10 +15,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use elide_core::{Error, Result};
-use lopdf::{Dictionary, Document, Encoding, Object, ObjectId, Stream};
+use elide_core::{Error, ErrorKind, Result};
+use hayro_syntax::object::{Object, Stream as Source};
 
-use crate::pdf::reader::font::{readable, to_unicode};
+use super::{Changes, compressed};
+use crate::pdf::Pdf;
+use crate::pdf::object::Dictionary;
+use crate::pdf::reader::font::{mapped, mapped_units, readable, to_unicode_bytes};
+use crate::pdf::reader::{ObjectId, StreamExt};
 
 /// The most UTF-16 units a CMap's destinations hold together, so the map
 /// held while a CMap is written, and the CMap written, stay bounded.
@@ -40,41 +45,54 @@ const FOOTER: &str = "endcmap\n\
     end\n\
     end\n";
 
-/// A `/ToUnicode` CMap as lopdf reads it: each code, by its length in bytes,
-/// and the UTF-16 units it maps to.
+/// A `/ToUnicode` CMap as detection reads it: each code an entry names, by
+/// its length in bytes, and the UTF-16 units the reader maps it to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UnicodeMap {
     codes: BTreeMap<(u8, u32), Vec<u16>>,
 }
 
 impl UnicodeMap {
-    /// The CMap `stream` in `doc` as lopdf reads it, or `None` when lopdf
-    /// can't read it.
+    /// The CMap `stream` as detection reads it, or `None` when it can't be
+    /// decoded or read.
     ///
     /// # Errors
     ///
-    /// As [`to_unicode`], and
+    /// As [`read_bytes`](Self::read_bytes).
+    pub(crate) fn read(stream: &Source<'_>) -> Result<Option<Self>> {
+        match stream.plain() {
+            Ok(content) => Self::read_bytes(&content),
+            Err(e) if e.kind() == ErrorKind::ResourceLimit => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// The CMap `content` as detection reads it, or `None` when it can't be
+    /// read.
+    ///
+    /// # Errors
+    ///
+    /// As [`to_unicode_bytes`], and
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// its destinations hold more than [`MAX_UNITS`] UTF-16 units together.
-    pub(crate) fn read(doc: &Document, stream: &Stream) -> Result<Option<Self>> {
-        let Some(Encoding::UnicodeMapEncoding(cmap)) = to_unicode(doc, stream)? else {
+    pub(crate) fn read_bytes(content: &[u8]) -> Result<Option<Self>> {
+        let Some(cmap) = to_unicode_bytes(content)? else {
             return Ok(None);
         };
         let mut codes = BTreeMap::new();
         let mut units_left = MAX_UNITS;
-        for (len, ranges) in (1u8..).zip(&cmap.bf_ranges) {
-            for (range, _) in ranges.iter() {
-                for code in range.clone() {
-                    let Some(units) = cmap.get(code, len).filter(|units| !units.is_empty()) else {
-                        continue;
-                    };
-                    units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
-                        Error::resource_limit(format!(
-                            "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
-                        ))
-                    })?;
-                    codes.insert((len, code), units);
-                }
+        for entry in mapped(content) {
+            for code in entry.low..=entry.high {
+                let Some(units) = mapped_units(&cmap, code).filter(|units| !units.is_empty())
+                else {
+                    continue;
+                };
+                units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
+                    Error::resource_limit(format!(
+                        "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
+                    ))
+                })?;
+                codes.insert((entry.len, code), units);
             }
         }
         Ok(Some(Self { codes }))
@@ -221,10 +239,10 @@ impl UnicodeMap {
     }
 }
 
-/// Remove `deleted` codes from each named `/ToUnicode` CMap stream, each by
-/// its value at any length the CMap stores it under (see
-/// [`UnicodeMap::remove`]), sparing any code `surviving` text still draws
-/// with it.
+/// Replace in `changes` each `/ToUnicode` CMap stream of `pdf` named in
+/// `deleted` by one without its deleted codes, each by its value at any
+/// length the CMap stores it under (see [`UnicodeMap::remove`]), sparing
+/// any code `surviving` text still draws with it.
 ///
 /// # Errors
 ///
@@ -233,9 +251,10 @@ impl UnicodeMap {
 /// maps one, so the redaction fails closed rather than leaving a
 /// recoverable code->Unicode entry; or as [`UnicodeMap::read`].
 pub(crate) fn scrub(
-    doc: &mut Document,
+    pdf: &Pdf,
     deleted: &BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
     surviving: &BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
+    changes: &mut Changes,
 ) -> Result<()> {
     for (&cmap_id, deleted_here) in deleted {
         // Fonts and their CMaps are shared, and a code (the letter `a`)
@@ -251,10 +270,10 @@ pub(crate) fn scrub(
         if values.is_empty() {
             continue;
         }
-        let Ok(Object::Stream(stream)) = doc.get_object(cmap_id) else {
+        let Some(stream) = pdf.object(cmap_id).and_then(Object::into_stream) else {
             continue;
         };
-        let Some(mut map) = UnicodeMap::read(doc, stream)? else {
+        let Some(mut map) = UnicodeMap::read(&stream)? else {
             return Err(Error::redaction(
                 "a /ToUnicode CMap mapping deleted glyphs cannot be read, so their \
                  codes cannot be removed from it",
@@ -267,18 +286,34 @@ pub(crate) fn scrub(
         // The CMap written is read back as a viewer would: a deleted code
         // still mapped there fails the redaction.
         let written = map.write();
-        let check = Stream::new(Dictionary::new(), written.clone());
-        let remains = UnicodeMap::read(doc, &check)?.is_none_or(|read| read.maps(&values, kept));
+        let remains = UnicodeMap::read_bytes(&written)?.is_none_or(|read| read.maps(&values, kept))
+            || still_maps(&written, &values, kept)?;
         if remains {
             return Err(Error::redaction(
                 "a deleted glyph's code is still mapped in its rewritten /ToUnicode CMap",
             ));
         }
-        if let Ok(Object::Stream(stream)) = doc.get_object_mut(cmap_id) {
-            stream.set_plain_content(written);
-        }
+        changes.replace(cmap_id, compressed(Dictionary::new(), &written)?);
     }
     Ok(())
+}
+
+/// Whether the reader maps any of `values` (a code text no longer draws,
+/// not `kept` at its length) in the CMap `written`, whatever entry it reads
+/// it from: by value alone, as it looks codes up.
+fn still_maps(written: &[u8], values: &BTreeSet<u32>, kept: &BTreeSet<Vec<u8>>) -> Result<bool> {
+    let Some(cmap) = to_unicode_bytes(written)? else {
+        return Ok(true);
+    };
+    let spared: BTreeSet<u32> = kept
+        .iter()
+        .filter_map(|code| key(code))
+        .map(|(_, v)| v)
+        .collect();
+    Ok(values
+        .iter()
+        .filter(|value| !spared.contains(value))
+        .any(|&value| mapped_units(&cmap, value).is_some()))
 }
 
 /// Whether the `len`-byte `code` is one of `values` and not `kept`.
@@ -333,19 +368,19 @@ fn units_hex(units: &[u16]) -> String {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use lopdf::dictionary;
 
     use super::*;
+    use crate::fixtures::{held, read_id};
+    use crate::pdf::Edit;
+    use crate::pdf::object::{Stream, dict};
+    use crate::pdf::writer::Document;
 
-    /// `cmap` read as lopdf reads it.
+    /// `cmap` read as detection reads it.
     fn read(cmap: &[u8]) -> UnicodeMap {
-        let stream = Stream::new(dictionary! {}, cmap.to_vec());
-        UnicodeMap::read(&Document::new(), &stream)
-            .unwrap()
-            .unwrap()
+        UnicodeMap::read_bytes(cmap).unwrap().unwrap()
     }
 
-    /// A CMap of `sections`, in the shape lopdf reads.
+    /// A CMap of `sections`, in the shape a producer writes.
     fn cmap(sections: &str) -> Vec<u8> {
         format!("{HEADER}{sections}\n{FOOTER}").into_bytes()
     }
@@ -407,7 +442,8 @@ mod tests {
 
     /// A one-byte code is removed under whatever length the CMap stores it,
     /// so a viewer reading codes by value alone finds it nowhere; a code
-    /// text that stays still draws is spared.
+    /// text that stays still draws is spared, mapped as the reader maps its
+    /// value.
     #[test]
     fn a_code_is_removed_at_every_length_it_is_stored() {
         let mut map = read(&cmap(
@@ -419,28 +455,31 @@ mod tests {
         let map = read(&map.write());
         assert_eq!(text(&map, 2, 0x41), None);
         assert_eq!(text(&map, 1, 0x42), None);
-        assert_eq!(text(&map, 2, 0x42).as_deref(), Some("b"));
+        assert!(text(&map, 2, 0x42).is_some());
     }
 
     /// A deleted code that text elsewhere still draws stays, while an entry
     /// of its value at another length, which nothing draws, goes.
     #[test]
     fn a_surviving_code_spares_only_itself() {
-        let mut doc = Document::new();
-        let cmap = doc.add_object(Stream::new(
-            dictionary! {},
+        let mut doc = Document::new((1, 7));
+        let cmap = doc.add(Stream::new(
+            dict! {},
             cmap(
                 "2 begincodespacerange\n<00> <FF>\n<0000> <FFFF>\nendcodespacerange\n\
                 2 beginbfchar\n<41> <0041>\n<0041> <004A>\nendbfchar",
             ),
         ));
-        let deleted = BTreeMap::from([(cmap, BTreeSet::from([vec![0x41]]))]);
-        scrub(&mut doc, &deleted, &deleted).unwrap();
-        let Ok(Object::Stream(stream)) = doc.get_object(cmap) else {
-            panic!("cmap");
-        };
-        let map = read(&stream.content);
-        assert_eq!(text(&map, 1, 0x41).as_deref(), Some("A"));
+        let pdf = held(doc, &[cmap]);
+        let deleted = BTreeMap::from([(read_id(cmap), BTreeSet::from([vec![0x41]]))]);
+        let mut changes = Changes::new();
+        scrub(&pdf, &deleted, &deleted, &mut changes).unwrap();
+        let mut edit = Edit::of(&pdf);
+        edit.apply(changes).unwrap();
+        let out = edit.finish();
+        let stream = out.object(read_id(cmap)).unwrap().into_stream().unwrap();
+        let map = read(&stream.plain().unwrap());
+        assert!(text(&map, 1, 0x41).is_some());
         assert_eq!(text(&map, 2, 0x41), None);
     }
 
@@ -493,7 +532,7 @@ mod tests {
         );
     }
 
-    /// A map whose every code was removed is still a CMap lopdf reads.
+    /// A map whose every code was removed is still a CMap the reader reads.
     #[test]
     fn a_map_of_no_code_is_still_read() {
         let mut map = read(&source());
@@ -534,14 +573,11 @@ mod tests {
     /// A CMap naming more codes than are held is refused before any is.
     #[test]
     fn a_map_of_too_many_codes_is_refused() {
-        let stream = Stream::new(
-            dictionary! {},
-            cmap(
-                "1 begincodespacerange\n<000000> <FFFFFF>\nendcodespacerange\n\
-                1 beginbfrange\n<000000> <04FFFF> <0041>\nendbfrange",
-            ),
+        let cmap = cmap(
+            "1 begincodespacerange\n<000000> <FFFFFF>\nendcodespacerange\n\
+            1 beginbfrange\n<000000> <04FFFF> <0041>\nendbfrange",
         );
-        let err = UnicodeMap::read(&Document::new(), &stream).unwrap_err();
+        let err = UnicodeMap::read_bytes(&cmap).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::ResourceLimit);
     }
 }

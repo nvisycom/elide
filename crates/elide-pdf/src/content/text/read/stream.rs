@@ -6,31 +6,29 @@ use std::collections::BTreeMap;
 use std::slice;
 
 use elide_core::{Error, Result};
-use lopdf::Object;
-use lopdf::content::Content;
 
 use super::geometry::{Cursor, TextState};
 use super::paint::{Paint, Painting};
 use super::{TextRun, Walk};
 use crate::content::text::{FontEntry, StreamTarget};
+use crate::pdf::content::Operation;
+use crate::pdf::object::Value;
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
-use crate::pdf::reader::{
-    DeviceRect, DictionaryExt, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope,
-};
+use crate::pdf::reader::{DeviceRect, DictExt, GlyphRect, Matrix, Scope};
 
 /// The numeric operand at `index` as `f64`, or `0.0` when absent or non-numeric
 /// (a malformed operator reads as its zero, never a hard error — positioning is
 /// best-effort for spacing).
-pub(super) fn operand_f64(operands: &[Object], index: usize) -> f64 {
+pub(super) fn operand_f64(operands: &[Value], index: usize) -> f64 {
     operands
         .get(index)
-        .map(|o| o.as_number().unwrap_or(0.0))
+        .and_then(Value::as_number)
         .unwrap_or(0.0)
 }
 
 /// Read six numeric operands from `base` as a [`Matrix`] `[a b c d e f]`, or
 /// `None` when fewer than six are present.
-pub(super) fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
+pub(super) fn read_matrix(operands: &[Value], base: usize) -> Option<Matrix> {
     (operands.len() >= base + 6)
         .then(|| Matrix::from(std::array::from_fn(|i| operand_f64(operands, base + i))))
 }
@@ -43,7 +41,7 @@ pub(super) fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
 #[derive(Clone, Copy)]
 pub(super) struct Font<'f> {
     pub(super) slot: u16,
-    pub(super) text: Option<&'f FontText<'f>>,
+    pub(super) text: Option<&'f FontText>,
     pub(super) widths: &'f WidthSource,
     pub(super) metrics: GlyphMetrics,
     /// Whether its glyphs are outlines a clipping rendering mode clips to;
@@ -53,20 +51,20 @@ pub(super) struct Font<'f> {
 
 /// The fonts a stream's scope names, each with its slot in the page's font
 /// table.
-struct Fonts<'d> {
-    by_name: BTreeMap<Vec<u8>, ScopeFont<'d>>,
+struct Fonts {
+    by_name: BTreeMap<Vec<u8>, ScopeFont>,
 }
 
 /// One font a scope names, read.
-struct ScopeFont<'d> {
+struct ScopeFont {
     slot: u16,
-    text: Option<FontText<'d>>,
+    text: Option<FontText>,
     widths: WidthSource,
     metrics: GlyphMetrics,
     outlines: bool,
 }
 
-impl Fonts<'_> {
+impl Fonts {
     /// The font `name` selects, or, when the scope names no such font, one
     /// whose codes can't be read, keeping the slot of `previous`.
     fn select(&self, name: &[u8], previous: Option<Font<'_>>) -> Font<'_> {
@@ -135,17 +133,13 @@ impl<'d> Walk<'_, 'd> {
     /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the table
     /// would outgrow its `u16` slots, so a deleted glyph's code could be
     /// routed to the wrong `/ToUnicode`; or as [`FontText::of`].
-    fn fonts(&mut self, scope: &Scope<'d>) -> Result<Fonts<'d>> {
-        let doc = self.doc;
+    fn fonts(&mut self, scope: &Scope<'d>) -> Result<Fonts> {
         let mut by_name = BTreeMap::new();
-        for (name, font) in scope.entries(doc, b"Font") {
-            let Some(font) = doc.resolve_dict(font) else {
+        for (name, entry) in scope.entries(b"Font") {
+            let Some(font) = entry.value.into_dict() else {
                 continue;
             };
-            let to_unicode = font
-                .get(b"ToUnicode")
-                .ok()
-                .and_then(|o| o.as_reference().ok());
+            let to_unicode = font.reference(b"ToUnicode");
             // Every stream walk appends its scope's fonts, so the table can
             // grow past the `u16` a glyph records its font by; fail closed
             // rather than let a slot truncate and misroute the scrub.
@@ -162,10 +156,10 @@ impl<'d> Walk<'_, 'd> {
                 name.to_vec(),
                 ScopeFont {
                     slot,
-                    text: FontText::of(doc, font)?,
-                    widths: WidthSource::from_font(doc, font),
-                    metrics: GlyphMetrics::from_font(doc, font),
-                    outlines: !font.is_subtype(doc, b"Type3"),
+                    text: FontText::of(&font)?,
+                    widths: WidthSource::from_font(&font),
+                    metrics: GlyphMetrics::from_font(&font),
+                    outlines: !font.is_subtype(b"Type3"),
                 },
             );
         }
@@ -187,7 +181,7 @@ impl<'d> Walk<'_, 'd> {
     /// [`walk_xobject`](Self::walk_xobject).
     pub(super) fn walk_stream(
         &mut self,
-        content: &Content,
+        content: &[Operation],
         frame: Frame<'_, '_, 'd>,
     ) -> Result<()> {
         let Frame {
@@ -218,7 +212,7 @@ impl<'d> Walk<'_, 'd> {
             .map_or_else(Painting::default, |inh| inh.painting.inherited());
         let pattern_space = state.ctm;
 
-        for (op_idx, op) in content.operations.iter().enumerate() {
+        for (op_idx, op) in content.iter().enumerate() {
             if let Some(painted) = painting.path(op, state.ctm) {
                 self.paint(painted);
                 continue;
@@ -264,7 +258,7 @@ impl<'d> Walk<'_, 'd> {
                 "TL" => state.leading = operand_f64(&op.operands, 0),
                 "Ts" => state.rise = operand_f64(&op.operands, 0),
                 "Tf" => {
-                    if let Some(Object::Name(name)) = op.operands.first() {
+                    if let Some(Value::Name(name)) = op.operands.first() {
                         font = Some(fonts.select(name, font));
                     }
                     state.font_size = operand_f64(&op.operands, 1);
@@ -312,7 +306,7 @@ impl<'d> Walk<'_, 'd> {
                             self.page
                         )));
                     };
-                    let (operands, base): (&[Object], usize) = if op.operator == "\"" {
+                    let (operands, base): (&[Value], usize) = if op.operator == "\"" {
                         match op.operands.get(2) {
                             Some(s) => (slice::from_ref(s), 2),
                             None => (&[], 0),
@@ -369,7 +363,7 @@ impl<'d> Walk<'_, 'd> {
                 // graphics state, the selected font and the text state, onto
                 // whose CTM `walk_xobject` composes the form's `/Matrix`.
                 "Do" => {
-                    if let Some(Object::Name(name)) = op.operands.first() {
+                    if let Some(Value::Name(name)) = op.operands.first() {
                         let inherited = Inherited {
                             font,
                             state,
@@ -385,7 +379,7 @@ impl<'d> Walk<'_, 'd> {
                 // inside it; any other colour paints with no pattern.
                 "scn" | "SCN" => {
                     let pattern = match op.operands.last() {
-                        Some(Object::Name(name)) => self.select_pattern(name, scope, depth),
+                        Some(Value::Name(name)) => self.select_pattern(name, scope, depth),
                         _ => None,
                     };
                     let paint = pattern.map(|pattern| Paint {
@@ -399,12 +393,12 @@ impl<'d> Walk<'_, 'd> {
                     }
                 }
                 "gs" => {
-                    if let Some(Object::Name(name)) = op.operands.first()
+                    if let Some(Value::Name(name)) = op.operands.first()
                         && let Some(graphics) = scope
-                            .lookup(self.doc, b"ExtGState", name)
-                            .and_then(|graphics| self.doc.resolve_dict(graphics))
+                            .lookup(b"ExtGState", name)
+                            .and_then(|graphics| graphics.value.into_dict())
                     {
-                        painting.state(self.doc, graphics);
+                        painting.state(&graphics);
                     }
                 }
                 "sc" | "g" | "rg" | "k" | "cs" => painting.fill = None,

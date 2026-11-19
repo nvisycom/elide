@@ -52,15 +52,21 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use elide_codec::StrippedContent;
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use hayro_syntax::metadata::Metadata;
+use hayro_syntax::object::{Dict, MaybeRef, Object};
 
 pub(crate) use self::check::Check;
 use self::copy::At;
 use self::keys::Kind;
 use self::layers::Layers;
 use self::links::destinations;
-use crate::pdf::reader::{DocumentExt, MAX_CONTENT_BYTES, ObjectExt, Scope};
-use crate::pdf::{Edit, Pdf, Read};
+use crate::pdf::object::{Dictionary, Id, Value};
+use crate::pdf::reader::{DictExt, MAX_CONTENT_BYTES, ObjectId, Scope, id};
+use crate::pdf::writer::{self, Document, finish};
+use crate::pdf::{Pdf, Read};
+
+/// A value of the source as it is held: a reference, or the value in place.
+type Src<'a> = MaybeRef<Object<'a>>;
 
 /// How deep forms, patterns, and glyph procedures may nest in one another.
 const MAX_NESTING: usize = 32;
@@ -93,11 +99,12 @@ impl Read for Rebuild {
     type Output = Rebuilt;
 
     fn read(self, pdf: &Pdf) -> Result<Self::Output> {
-        let (document, stripped) = rebuild(pdf.doc())?;
-        Ok(Rebuilt {
-            pdf: Edit::of(document).finish()?,
-            stripped,
-        })
+        let mut builder = Builder::new(pdf);
+        builder.run()?;
+        let Builder { out, stripped, .. } = builder;
+        let pdf = finish(&out)?;
+        normal::verify(&pdf)?;
+        Ok(Rebuilt { pdf, stripped })
     }
 }
 
@@ -109,23 +116,13 @@ pub(crate) struct Rebuilt {
     pub(crate) stripped: StrippedContent,
 }
 
-/// Rebuild `source`: a new document holding only what draws its pages, and
-/// what it did not copy.
-fn rebuild(source: &Document) -> Result<(Document, StrippedContent)> {
-    let mut builder = Builder::new(source);
-    builder.run()?;
-    let Builder { out, stripped, .. } = builder;
-    normal::verify(&out)?;
-    Ok((out, stripped))
-}
-
 /// One copy of a source object: the index in [`Builder::scopes`] of the
 /// scope it was copied for, when it depends on that scope, and its id.
-type ScopedCopy = (Option<usize>, ObjectId);
+type ScopedCopy = (Option<usize>, Id);
 
 /// The state of one rebuild.
 struct Builder<'a> {
-    source: &'a Document,
+    source: &'a Pdf,
     out: Document,
     /// The copies of each source object, by the kind it was copied as (and,
     /// for a form, whether its caller's font is lost): one per scope for an
@@ -134,26 +131,26 @@ struct Builder<'a> {
     copies: HashMap<(ObjectId, Kind, bool), Vec<ScopedCopy>>,
     /// Each scope a copy depends on, its resource dictionaries kept once:
     /// equal resources resolve every name alike, so they share copies.
-    scopes: Vec<Vec<Dictionary>>,
+    scopes: Vec<Vec<Dict<'a>>>,
     /// Whether the copy being made depends on the scope it is copied in: it,
     /// or an object it holds, is content that borrows that scope.
     scoped: bool,
     /// The id each source page's copy takes.
-    pages: BTreeMap<ObjectId, ObjectId>,
+    pages: BTreeMap<ObjectId, Id>,
     /// The source XObjects cut and recorded, so they are not also recorded as
     /// undisplayed.
     cut: HashSet<ObjectId>,
     /// The neutral names of the attached files copied.
     file_names: HashSet<String>,
     /// The copy of each embedded file made for a name of each extension.
-    file_copies: HashMap<ObjectId, HashMap<Option<String>, Object>>,
+    file_copies: HashMap<ObjectId, HashMap<Option<String>, Value>>,
     /// The number the next attached file renamed is tried with: one tried
     /// is never tried again, so naming every file takes one pass.
     next_file: usize,
     layers: Layers<'a>,
     /// The `/Names` tree of destinations, read once: each name's first
     /// destination.
-    destinations: HashMap<&'a [u8], &'a Object>,
+    destinations: HashMap<Vec<u8>, Object<'a>>,
     stripped: StrippedContent,
     /// How many entries, values, and operators nothing models were dropped
     /// unrecorded.
@@ -165,14 +162,14 @@ struct Builder<'a> {
     copy_budget: usize,
     /// Each form a widget shows grouped, by its copy: the copy of it that
     /// carries the transparency group.
-    grouped: HashMap<ObjectId, ObjectId>,
+    grouped: HashMap<Id, Id>,
 }
 
 impl<'a> Builder<'a> {
-    fn new(source: &'a Document) -> Self {
+    fn new(source: &'a Pdf) -> Self {
         Self {
             source,
-            out: Document::with_version(version(source)),
+            out: Document::new(version(source)),
             copies: HashMap::new(),
             scopes: Vec::new(),
             scoped: false,
@@ -207,35 +204,32 @@ impl<'a> Builder<'a> {
 
     fn run(&mut self) -> Result<()> {
         let source = self.source;
+        let catalog = source.catalog()?;
         let reachable = reachable(source);
-        let unreachable = source
-            .objects
-            .iter()
-            .filter(|(id, object)| !reachable.contains(id) && !object.is_xref_stream())
-            .count();
+        let unreachable = unreachable(source, &reachable);
         self.stripped
             .record(HiddenContent::PriorRevision, None, unreachable);
-        for (key, _) in source.trailer.iter() {
-            if let Some(held) = record::trailer(key) {
-                self.record(held);
-            }
+        // The document information dictionary, the one trailer entry read.
+        if *source.file().metadata() != Metadata::default()
+            && let Some(held) = record::trailer(b"Info")
+        {
+            self.record(held);
         }
 
-        let catalog = source
-            .catalog()
-            .map_err(|e| Error::malformed(format!("PDF has no catalog: {e}")))?;
-        for (key, value) in catalog.iter() {
-            if key == b"Names" {
-                for (tree, _) in source
-                    .resolve_dict(value)
-                    .into_iter()
-                    .flat_map(Dictionary::iter)
-                {
-                    if let Some(held) = record::name_tree(tree) {
+        for (key, value) in catalog.entries() {
+            if &*key == b"Names" {
+                let trees = match value {
+                    MaybeRef::Ref(reference) => {
+                        source.object(id(reference)).and_then(Object::into_dict)
+                    }
+                    MaybeRef::NotRef(names) => names.into_dict(),
+                };
+                for tree in trees.iter().flat_map(Dict::keys) {
+                    if let Some(held) = record::name_tree(&tree) {
                         self.record(held);
                     }
                 }
-            } else if let Some(held) = record::catalog(key) {
+            } else if let Some(held) = record::catalog(&key) {
                 self.record(held);
             }
         }
@@ -243,53 +237,56 @@ impl<'a> Builder<'a> {
         // The attachment tree is copied first, so a file it and an `/AF`
         // both name takes the tree's name.
         let tree = self.attachment_tree()?;
-        let pages_id = self.out.new_object_id();
-        let source_pages = source.get_pages();
-        for &id in source_pages.values() {
-            let copy = self.out.new_object_id();
+        let pages_id = self.out.reserve();
+        let source_pages = source.pages();
+        let mut page_ids = Vec::with_capacity(source_pages.len());
+        for page in &source_pages {
+            let id = page
+                .obj_id()
+                .ok_or_else(|| Error::malformed("a page is not an object of its own"))?;
+            let copy = self.out.reserve();
             self.pages.insert(id, copy);
+            page_ids.push(id);
         }
         let mut nodes = HashSet::new();
         let mut kids = Vec::with_capacity(source_pages.len());
-        for &id in source_pages.values() {
-            self.record_page_tree(id, &mut nodes);
-            kids.push(Object::Reference(self.page(id, pages_id)?));
+        for (page, id) in source_pages.iter().zip(page_ids) {
+            self.record_page_tree(page, &mut nodes);
+            kids.push(Value::Ref(self.page(id, page, pages_id)?));
         }
-        let count = kids.len() as i64;
-        self.out.objects.insert(
+        let count = kids.len();
+        self.out.set(
             pages_id,
-            Object::Dictionary(Dictionary::from_iter([
-                ("Type", Object::Name(b"Pages".to_vec())),
-                ("Kids", Object::Array(kids)),
-                ("Count", Object::Integer(count)),
-            ])),
+            Dictionary::from_iter([
+                ("Type", Value::name("Pages")),
+                ("Kids", Value::Array(kids)),
+                ("Count", count.into()),
+            ]),
         );
 
         let mut new_catalog = Dictionary::from_iter([
-            ("Type", Object::Name(b"Catalog".to_vec())),
-            ("Pages", Object::Reference(pages_id)),
+            ("Type", Value::name("Catalog")),
+            ("Pages", Value::Ref(pages_id)),
         ]);
-        if let Some(af) = catalog
-            .get(b"AF")
-            .ok()
-            .and_then(|af| self.associated(af).transpose())
+        if let Some(af) = catalog.raw(b"AF")
+            && let Some(af) = self.associated(&af)?
         {
-            new_catalog.set("AF", af?);
+            new_catalog.set("AF", af);
         }
-        if let Ok(intents) = catalog.get(b"OutputIntents")
+        if let Some(intents) = catalog.raw(b"OutputIntents")
             && let Some(intents) =
-                self.copy(Kind::OutputIntent, intents, At::top(&Scope::default()))?
+                self.copy(Kind::OutputIntent, &intents, At::top(&Scope::default()))?
         {
             new_catalog.set("OutputIntents", intents);
         }
         if let Some(tree) = tree {
             new_catalog.set(
                 "Names",
-                Dictionary::from_iter([("EmbeddedFiles", Object::Dictionary(tree))]),
+                Dictionary::from_iter([("EmbeddedFiles", Value::Dict(tree))]),
             );
         }
-        let catalog_id = self.out.add_object(new_catalog);
-        self.out.trailer.set("Root", catalog_id);
+        let catalog_id = self.out.add(new_catalog);
+        self.out.set_root(catalog_id);
 
         // A resource a resource dictionary lists (a font, form, image,
         // graphics state, shading, pattern or colour space) but no content
@@ -301,8 +298,8 @@ impl<'a> Builder<'a> {
             .map(|((id, ..), _)| *id)
             .collect();
         let mut listed = HashSet::new();
-        for object in source.objects.values() {
-            listed_resources(source, object, 0, &mut listed);
+        for object in source.file().objects() {
+            listed_resources(source, &object, 0, &mut listed);
         }
         let undisplayed = listed
             .iter()
@@ -316,26 +313,70 @@ impl<'a> Builder<'a> {
 
 /// The version the document conforms to: its header's, or its catalog's
 /// `/Version` when that is later.
-fn version(source: &Document) -> String {
+fn version(source: &Pdf) -> (u8, u8) {
+    let header = writer::version(source);
     let catalog = source
         .catalog()
         .ok()
-        .and_then(|catalog| catalog.get(b"Version").ok())
-        .and_then(|version| source.resolve(version))
-        .and_then(|version| version.as_name().ok())
-        .and_then(|version| str::from_utf8(version).ok())
-        .and_then(|version| Some((version, parse_version(version)?)));
-    match (catalog, parse_version(&source.version)) {
-        (Some((catalog, later)), Some(header)) if later > header => catalog.to_owned(),
-        (Some((catalog, _)), None) => catalog.to_owned(),
-        _ => source.version.clone(),
+        .and_then(|catalog| catalog.name(b"Version"))
+        .and_then(|version| parse_version(&version));
+    match catalog {
+        Some(later) if later > header => later,
+        _ => header,
     }
 }
 
 /// `version` as `(major, minor)`, when it reads as `major.minor`.
-fn parse_version(version: &str) -> Option<(u32, u32)> {
-    let (major, minor) = version.split_once('.')?;
+fn parse_version(version: &[u8]) -> Option<(u8, u8)> {
+    let (major, minor) = str::from_utf8(version).ok()?.split_once('.')?;
     Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+/// How many objects of `pdf` are not `reachable`: those it lists, less
+/// those reached and those the trailer holds.
+fn unreachable(pdf: &Pdf, reachable: &HashSet<ObjectId>) -> usize {
+    let mut listed = 0usize;
+    let mut held = 0usize;
+    for object in pdf.file().objects() {
+        listed += 1;
+        let (id, dict) = match &object {
+            Object::Dict(dict) => (dict.obj_id(), dict.clone()),
+            Object::Stream(stream) => (Some(stream.obj_id()), stream.dict().clone()),
+            _ => continue,
+        };
+        if id.is_some_and(|id| !reachable.contains(&id)) && trailer_held(&dict) {
+            held += 1;
+        }
+    }
+    let reached = reachable
+        .iter()
+        .filter(|&&id| pdf.object(id).is_some())
+        .count();
+    listed.saturating_sub(reached + held)
+}
+
+/// Whether `dict`, reached by no reference from the catalog, is one the
+/// trailer holds: the document information dictionary, or the encryption
+/// dictionary. hayro-syntax keeps the trailer to itself, so each is known
+/// by its shape: every key of the one an information key (14.3.3), the
+/// other a standard security handler's (7.6.4).
+fn trailer_held(dict: &Dict<'_>) -> bool {
+    const INFO: [&[u8]; 9] = [
+        b"Title",
+        b"Author",
+        b"Subject",
+        b"Keywords",
+        b"Creator",
+        b"Producer",
+        b"CreationDate",
+        b"ModDate",
+        b"Trapped",
+    ];
+    let info = !dict.is_empty() && dict.keys().all(|key| INFO.contains(&&*key));
+    let encrypt =
+        dict.contains_key(b"Filter") && dict.contains_key(b"O") && dict.contains_key(b"U");
+    let structure = dict.is_type(b"XRef") || dict.is_type(b"ObjStm");
+    info || encrypt || structure
 }
 
 /// The resource categories whose entries the rebuild copies only when
@@ -352,50 +393,54 @@ const USED_CATEGORIES: [&[u8]; 6] = [
 /// Collect into `out` every object a resource dictionary within `object`
 /// lists under a category of [`USED_CATEGORIES`]: each a dictionary or
 /// stream, which a copy of it is made of.
-fn listed_resources(doc: &Document, object: &Object, depth: usize, out: &mut HashSet<ObjectId>) {
+fn listed_resources(pdf: &Pdf, object: &Object<'_>, depth: usize, out: &mut HashSet<ObjectId>) {
     if depth > MAX_NESTING {
         return;
     }
-    let Some(dict) = object.dict() else {
-        return;
+    let dict = match object {
+        Object::Dict(dict) => dict.clone(),
+        Object::Stream(stream) => stream.dict().clone(),
+        _ => return,
     };
     for category in USED_CATEGORIES {
-        if let Some(entries) = dict.get(category).ok().and_then(|e| doc.resolve_dict(e)) {
-            out.extend(
-                entries
-                    .iter()
-                    .filter_map(|(_, entry)| entry.as_reference().ok())
-                    .filter(|&id| {
-                        matches!(
-                            doc.get_object(id),
-                            Ok(Object::Dictionary(_) | Object::Stream(_))
-                        )
-                    }),
-            );
+        if let Some(entries) = dict.get::<Dict<'_>>(category) {
+            out.extend(entries.keys().filter_map(|name| {
+                let id = entries.reference(&name)?;
+                matches!(pdf.object(id), Some(Object::Dict(_) | Object::Stream(_))).then_some(id)
+            }));
         }
     }
-    for (_, value) in dict.iter() {
-        listed_resources(doc, value, depth + 1, out);
+    for (_, value) in dict.entries() {
+        if let MaybeRef::NotRef(value) = value {
+            listed_resources(pdf, &value, depth + 1, out);
+        }
     }
 }
 
-/// Every object of `doc` the trailer reaches through references.
-fn reachable(doc: &Document) -> HashSet<ObjectId> {
-    let mut seen = HashSet::new();
-    let mut stack: Vec<&Object> = doc.trailer.iter().map(|(_, value)| value).collect();
+/// Every object of `pdf` the catalog reaches through references.
+fn reachable(pdf: &Pdf) -> HashSet<ObjectId> {
+    let root = pdf.file().xref().root_id();
+    let mut seen = HashSet::from([root]);
+    let mut stack: Vec<Object<'_>> = pdf.object(root).into_iter().collect();
     while let Some(object) = stack.pop() {
-        match object {
-            Object::Reference(id) => {
-                if seen.insert(*id)
-                    && let Ok(target) = doc.get_object(*id)
-                {
-                    stack.push(target);
+        let items: Vec<Src<'_>> = match &object {
+            Object::Array(items) => items.raw_iter().collect(),
+            Object::Dict(dict) => dict.entries().map(|(_, value)| value).collect(),
+            Object::Stream(stream) => stream.dict().entries().map(|(_, value)| value).collect(),
+            _ => continue,
+        };
+        for item in items {
+            match item {
+                MaybeRef::Ref(reference) => {
+                    let target = id(reference);
+                    if seen.insert(target)
+                        && let Some(object) = pdf.object(target)
+                    {
+                        stack.push(object);
+                    }
                 }
+                MaybeRef::NotRef(value) => stack.push(value),
             }
-            Object::Array(items) => stack.extend(items),
-            Object::Dictionary(dict) => stack.extend(dict.iter().map(|(_, value)| value)),
-            Object::Stream(stream) => stack.extend(stream.dict.iter().map(|(_, value)| value)),
-            _ => {}
         }
     }
     seen
@@ -404,15 +449,19 @@ fn reachable(doc: &Document) -> HashSet<ObjectId> {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use lopdf::content::{Content, Operation};
-    use lopdf::{IncrementalDocument, Stream, StringFormat, dictionary};
+    use hayro_syntax::object::{Object as Read, Stream as ReadStream};
 
     use super::check::check;
     use super::*;
     use crate::content::attachment::Tree;
     use crate::content::text::{Detection, Text, TextBlock, TextRedaction};
-    use crate::fixtures::{with_attachments, with_pages};
-    use crate::pdf::reader::DictionaryExt;
+    use crate::fixtures::{
+        attachments_document, catalog, object, objects_of, open, read_id, save, with_pages,
+    };
+    use crate::pdf::content::{Operation, encode, parse};
+    use crate::pdf::object::{Stream, dict};
+    use crate::pdf::reader::{StreamExt, page_content, reference_to};
+    use crate::pdf::writer::{dict_value, object_value};
 
     /// A one-page document: Helvetica as `/F1`, the page drawing `operations`,
     /// with `resources` added to its resource dictionary and `page` entries
@@ -421,25 +470,38 @@ mod tests {
         operations: Vec<Operation>,
         resources: Dictionary,
         page: Dictionary,
-    ) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.7");
-        let font = doc.add_object(dictionary! {
+    ) -> (Document, Id) {
+        let mut doc = Document::new((1, 7));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-            "Secret" => Object::string_literal("Jane Roe"),
+            "Secret" => Value::string("Jane Roe"),
         });
-        let mut all = dictionary! { "Font" => dictionary! { "F1" => font } };
-        all.extend(&resources);
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content { operations }.encode().unwrap(),
-        ));
-        let mut dict = dictionary! {
+        let mut all = dict! { "Font" => dict! { "F1" => font } };
+        extend(&mut all, &resources);
+        let content = doc.add(Stream::new(dict! {}, encode(&operations).unwrap()));
+        let mut dict = dict! {
             "Contents" => content, "Resources" => all,
             "MediaBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
         };
-        dict.extend(&page);
-        let page = with_pages(&mut doc, [dict])[0];
+        extend(&mut dict, &page);
+        let page = objects_of(&mut doc, Value::Dict(dict));
+        let Value::Dict(page) = page else {
+            unreachable!("a dictionary stays one");
+        };
+        let page = with_pages(&mut doc, [page])[0];
         (doc, page)
+    }
+
+    /// `into` with every entry of `from` set on it.
+    fn extend(into: &mut Dictionary, from: &Dictionary) {
+        for (key, value) in from.iter() {
+            into.set(key, value.clone());
+        }
+    }
+
+    /// The dictionary `id` of `doc`, to change.
+    fn dict_mut(doc: &mut Document, id: Id) -> &mut Dictionary {
+        doc.get_mut(id).and_then(Value::as_dict_mut).unwrap()
     }
 
     /// Text `text` shown with `/F1`.
@@ -447,23 +509,20 @@ mod tests {
         vec![
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal(text)]),
+            Operation::new("Tj", vec![Value::string(text)]),
             Operation::new("ET", vec![]),
         ]
     }
 
     /// `doc` rebuilt, saved, and read back, with what the rebuild recorded.
-    fn rebuilt(doc: &Document) -> (Document, StrippedContent) {
-        let (bytes, stripped) = saved(doc);
-        let out = Document::load_mem(&bytes).unwrap();
-        normal::verify(&out).unwrap();
-        (out, stripped)
+    fn rebuilt(doc: &Document) -> (Pdf, StrippedContent) {
+        let Rebuilt { pdf, stripped } = open(doc).read(Rebuild).unwrap();
+        (pdf, stripped)
     }
 
     /// `doc` rebuilt and saved, with what the rebuild recorded.
     fn saved(doc: &Document) -> (Vec<u8>, StrippedContent) {
-        let (document, stripped) = rebuild(doc).unwrap();
-        let pdf = Edit::of(document).finish().unwrap();
+        let (pdf, stripped) = rebuilt(doc);
         (pdf.bytes().to_vec(), stripped)
     }
 
@@ -477,7 +536,7 @@ mod tests {
             detections,
         })
         .unwrap();
-        edit.finish().unwrap()
+        edit.finish()
     }
 
     fn count(stripped: &StrippedContent, content: HiddenContent) -> usize {
@@ -488,24 +547,89 @@ mod tests {
             .sum()
     }
 
-    /// Every string the rebuilt document holds, its streams decoded.
-    fn text_of(doc: &Document) -> String {
+    /// Every string and name `pdf` holds, and every stream's data decoded,
+    /// as text.
+    fn text_of(pdf: &Pdf) -> String {
+        fn push(value: &Value, out: &mut String) {
+            match value {
+                Value::String(bytes) | Value::Name(bytes) => {
+                    out.push_str(&String::from_utf8_lossy(bytes));
+                    out.push(' ');
+                }
+                Value::Array(items) => items.iter().for_each(|item| push(item, out)),
+                Value::Dict(dict) => dict.iter().for_each(|(key, item)| {
+                    out.push_str(&String::from_utf8_lossy(key));
+                    out.push(' ');
+                    push(item, out);
+                }),
+                Value::Stream(stream) => {
+                    push(&Value::Dict(stream.dict.clone()), out);
+                    out.push_str(&String::from_utf8_lossy(&stream.data));
+                }
+                _ => {}
+            }
+        }
         let mut out = String::new();
-        for object in doc.objects.values() {
-            if let Object::Stream(stream) = object {
-                let bytes = stream
-                    .decompressed_content()
-                    .unwrap_or(stream.content.clone());
+        for read in pdf.file().objects() {
+            if let Read::Stream(stream) = &read
+                && let Ok(bytes) = stream.plain()
+            {
                 out.push_str(&String::from_utf8_lossy(&bytes));
             }
-            out.push_str(&format!("{object:?}"));
+            push(&object_value(&read), &mut out);
         }
         out
     }
 
-    fn page_dict(doc: &Document) -> &Dictionary {
-        let id = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary(id).unwrap()
+    /// The first page of `pdf`, owned.
+    fn page_dict(pdf: &Pdf) -> Dictionary {
+        dict_value(&pdf.pages()[0])
+    }
+
+    /// The operations of the first page of `pdf`.
+    fn page_operations(pdf: &Pdf) -> Vec<Operation> {
+        parse(&page_content(&pdf.pages()[0]).unwrap())
+    }
+
+    /// A reference to the object `id` of a document written.
+    fn src(id: Id) -> Src<'static> {
+        reference_to(read_id(id))
+    }
+
+    /// `pdf` with the changes `change` makes written.
+    fn changed(pdf: &Pdf, change: impl FnOnce(&Pdf, &mut crate::pdf::writer::Changes)) -> Pdf {
+        let mut changes = crate::pdf::writer::Changes::new();
+        change(pdf, &mut changes);
+        let mut edit = pdf.edit();
+        edit.apply(changes).unwrap();
+        edit.finish()
+    }
+
+    /// The first page of `doc`.
+    fn first_page(doc: &Document) -> Id {
+        let root = doc.root().unwrap();
+        let pages = doc
+            .get(root)
+            .and_then(Value::as_dict)
+            .unwrap()
+            .get(b"Pages")
+            .unwrap();
+        let pages = doc
+            .get(pages.as_ref_id().unwrap())
+            .and_then(Value::as_dict)
+            .unwrap();
+        let Some(Value::Array(kids)) = pages.get(b"Kids") else {
+            panic!("kids");
+        };
+        kids[0].as_ref_id().unwrap()
+    }
+
+    /// The value `value` holds, following a reference into `pdf`.
+    fn resolved(pdf: &Pdf, value: &Value) -> Value {
+        match value {
+            Value::Ref(id) => object(pdf, read_id(*id)),
+            value => value.clone(),
+        }
     }
 
     /// What the source held outside its pages is left behind, each item
@@ -515,41 +639,36 @@ mod tests {
         let (mut doc, _) = document(
             show("Hello"),
             Dictionary::new(),
-            dictionary! {
-                "Thumb" => Object::string_literal("thumbnail"),
-                "PieceInfo" => dictionary! { "Illustrator" => "private" },
-                "Annots" => vec![Object::Dictionary(dictionary! {
+            dict! {
+                "Thumb" => Value::string("thumbnail"),
+                "PieceInfo" => dict! { "Illustrator" => "private" },
+                "Annots" => vec![Value::Dict(dict! {
                     "Subtype" => "Text",
-                    "Contents" => Object::string_literal("ask Jane about the fee"),
+                    "Contents" => Value::string("ask Jane about the fee"),
                 })],
             },
         );
-        let xmp = doc.add_object(Stream::new(
-            dictionary! { "Type" => "Metadata", "Subtype" => "XML" },
+        let xmp = doc.add(Stream::new(
+            dict! { "Type" => "Metadata", "Subtype" => "XML" },
             b"<x:xmpmeta>Jane Roe</x:xmpmeta>".to_vec(),
         ));
-        let script = doc.add_object(dictionary! { "S" => "JavaScript", "JS" => "app.alert(1)" });
-        let catalog = doc.catalog_mut().unwrap();
+        let script = doc.add(dict! { "S" => "JavaScript", "JS" => "app.alert(1)" });
+        let catalog = catalog(&mut doc);
         catalog.set("Metadata", xmp);
         catalog.set("OpenAction", script);
-        catalog.set(
-            "Outlines",
-            dictionary! { "Title" => Object::string_literal("Jane") },
-        );
-        let info = doc.add_object(dictionary! {
-            "Author" => Object::String(b"Jane Roe".to_vec(), StringFormat::Literal),
+        catalog.set("Outlines", dict! { "Title" => Value::string("Jane") });
+        let info = doc.add(dict! {
+            "Author" => Value::String(b"Jane Roe".to_vec()),
         });
-        doc.trailer.set("Info", info);
-        doc.trailer
-            .set("ID", vec![Object::string_literal("fingerprint")]);
-        doc.add_object(Object::string_literal("deleted paragraph"));
+        doc.set_info(info);
+        doc.add(Value::string("deleted paragraph"));
+        doc.keep_all();
 
         let (out, stripped) = rebuilt(&doc);
         for content in [
             HiddenContent::Properties,
             HiddenContent::Action,
             HiddenContent::Outline,
-            HiddenContent::DocumentId,
             HiddenContent::Thumbnail,
             HiddenContent::ApplicationData,
             HiddenContent::Annotation,
@@ -558,18 +677,11 @@ mod tests {
             assert!(count(&stripped, content) > 0, "{content:?} unrecorded");
         }
         let text = text_of(&out);
-        for leaked in [
-            "Jane",
-            "app.alert",
-            "thumbnail",
-            "Illustrator",
-            "fingerprint",
-            "deleted",
-        ] {
+        for leaked in ["Jane", "app.alert", "thumbnail", "Illustrator", "deleted"] {
             assert!(!text.contains(leaked), "{leaked} survived");
         }
         assert!(text.contains("Hello"));
-        assert!(page_dict(&out).get(b"Annots").is_err());
+        assert!(!page_dict(&out).has(b"Annots"));
     }
 
     /// A rebuild of a rebuild drops nothing: the output check holds.
@@ -578,7 +690,10 @@ mod tests {
         let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
         let (out, _) = rebuilt(&doc);
         check(&out).unwrap();
-        assert!(check(&doc).is_err(), "the source font's extra key passed");
+        assert!(
+            check(&open(&doc)).is_err(),
+            "the source font's extra key passed"
+        );
     }
 
     /// An operator whose operands are not what it takes is cut, so a string
@@ -586,7 +701,7 @@ mod tests {
     #[test]
     fn an_operator_with_operands_of_another_shape_is_cut() {
         let mut ops = vec![
-            Operation::new("w", vec![Object::string_literal("123-45-6789")]),
+            Operation::new("w", vec![Value::string("123-45-6789")]),
             Operation::new("w", vec![2.into()]),
         ];
         ops.extend(show("Hello"));
@@ -610,74 +725,73 @@ mod tests {
             Dictionary::new(),
             Dictionary::new(),
         );
-        let mask = doc.add_object(Stream::new(
-            dictionary! { "Width" => 8, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
+        let mask = doc.add(Stream::new(
+            dict! { "Width" => 8, "Height" => 1, "BitsPerComponent" => 8, "ColorSpace" => "DeviceGray" },
             vec![0; 8],
         ));
-        let parameters = doc.add_object(vec![Object::Dictionary(dictionary! {
-            "ColorTransform" => 0, "Note" => Object::string_literal("Jane Roe"),
+        let parameters = doc.add(vec![Value::Dict(dict! {
+            "ColorTransform" => 0, "Note" => Value::string("Jane Roe"),
         })]);
-        let jpeg = doc.add_object(
-            Stream::new(
-                dictionary! {
-                    "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 8,
-                    "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB",
-                    "Filter" => vec![Object::Name(b"DCTDecode".to_vec())],
-                    "DecodeParms" => parameters,
-                    "SMask" => mask,
-                },
-                b"jpeg".to_vec(),
-            )
-            .with_compression(false),
-        );
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        let jpeg = doc.add(Stream::new(
+            dict! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 8,
+                "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB",
+                "Filter" => vec![Value::Name(b"DCTDecode".to_vec())],
+                "DecodeParms" => parameters,
+                "SMask" => mask,
+            },
+            b"jpeg".to_vec(),
+        ));
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("XObject", dictionary! { "Im" => jpeg });
+            .set("XObject", dict! { "Im" => jpeg });
         let (out, _) = rebuilt(&doc);
-        let Object::Stream(image) = resource(&out, b"XObject", b"Im") else {
+        let Value::Stream(image) = resource(&out, b"XObject", b"Im") else {
             panic!("image");
         };
         assert_eq!(
             image.dict.get(b"Filter").unwrap(),
-            &Object::Name(b"DCTDecode".to_vec())
+            &Value::Name(b"DCTDecode".to_vec())
         );
         let parameters = image
             .dict
             .get(b"DecodeParms")
-            .and_then(Object::as_dict)
+            .and_then(Value::as_dict)
             .unwrap();
-        assert_eq!(parameters.len(), 1);
-        assert_eq!(
-            parameters.get(b"ColorTransform").unwrap(),
-            &Object::Integer(0)
-        );
-        let mask = out.get_object(image.dict.get(b"SMask").unwrap().as_reference().unwrap());
-        let Ok(Object::Stream(mask)) = mask else {
+        assert_eq!(parameters.iter().count(), 1);
+        assert_eq!(parameters.get(b"ColorTransform").unwrap(), &Value::Int(0));
+        let mask = resolved(&out, image.dict.get(b"SMask").unwrap());
+        let Value::Stream(mask) = mask else {
             panic!("mask");
         };
-        assert!(mask.dict.is_subtype(&out, b"Image"));
+        assert_eq!(mask.dict.get(b"Subtype"), Some(&Value::name("Image")));
         // The note dropped is recorded: a rebuild that carries one again is
         // not passed as clean.
         check(&out).unwrap();
-        let mut noted = out.clone();
-        let image = noted
-            .objects
-            .values_mut()
-            .find_map(|object| match object {
-                Object::Stream(stream) if stream.dict.has(b"DecodeParms") => Some(stream),
-                _ => None,
-            })
+        let jpeg = out
+            .file()
+            .objects()
+            .into_iter()
+            .filter_map(Read::into_stream)
+            .find(|stream| stream.dict().contains_key(b"DecodeParms"))
+            .map(|stream| stream.obj_id())
             .unwrap();
-        image
+        let mut changes = crate::pdf::writer::Changes::new();
+        let Value::Stream(mut noted) = object(&out, jpeg) else {
+            panic!("image");
+        };
+        noted
             .dict
             .get_mut(b"DecodeParms")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("Note", Object::string_literal("Jane Roe"));
-        assert!(check(&noted).is_err(), "the JPEG's note passed");
+            .set("Note", Value::string("Jane Roe"));
+        changes.replace(jpeg, *noted);
+        let mut edit = out.edit();
+        edit.apply(changes).unwrap();
+        assert!(check(&edit.finish()).is_err(), "the JPEG's note passed");
     }
 
     /// An image stored as raw samples is written as exactly the samples it
@@ -689,43 +803,52 @@ mod tests {
             Dictionary::new(),
             Dictionary::new(),
         );
-        let mask = doc.add_object(Stream::new(
-            dictionary! {
+        let mask = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 1,
                 "ImageMask" => true,
             },
             [&[0x0F][..], b"tail-secret"].concat(),
         ));
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("XObject", dictionary! { "Im" => mask });
+            .set("XObject", dict! { "Im" => mask });
         let (out, _) = rebuilt(&doc);
-        let Object::Stream(image) = resource(&out, b"XObject", b"Im") else {
+        let Value::Stream(image) = resource(&out, b"XObject", b"Im") else {
             panic!("image");
         };
-        assert_eq!(image.decompressed_content().unwrap(), [0x0F]);
+        assert_eq!(plain(&image), [0x0F]);
         assert!(!text_of(&out).contains("tail-secret"));
         check(&out).unwrap();
     }
 
     /// The rebuilt image under `Im` on the first page of `doc`, drawing it.
-    fn drawn_image(mut doc: Document, page: ObjectId, image: ObjectId) -> Vec<u8> {
-        doc.get_dictionary_mut(page)
-            .unwrap()
+    fn drawn_image(mut doc: Document, page: Id, image: Id) -> Vec<u8> {
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("XObject", dictionary! { "Im" => image });
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
-        let Object::Stream(image) = resource(pdf.doc(), b"XObject", b"Im") else {
+            .set("XObject", dict! { "Im" => image });
+        let (pdf, _) = rebuilt(&doc);
+        let Value::Stream(image) = resource(&pdf, b"XObject", b"Im") else {
             panic!("image");
         };
-        image.decompressed_content().unwrap()
+        plain(&image)
+    }
+
+    /// The data of the stream `stream` written, decoded.
+    fn plain(stream: &Stream) -> Vec<u8> {
+        let mut doc = Document::new((1, 7));
+        let id = doc.add(stream.clone());
+        let pdf = crate::fixtures::held(doc, &[id]);
+        pdf.object(read_id(id))
+            .unwrap()
+            .into_stream()
+            .unwrap()
+            .plain()
+            .unwrap()
     }
 
     /// The bits past a row's last sample are cleared, so nothing rides in
@@ -737,8 +860,8 @@ mod tests {
             Dictionary::new(),
             Dictionary::new(),
         );
-        let mask = doc.add_object(Stream::new(
-            dictionary! {
+        let mask = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 3, "Height" => 2,
                 "ImageMask" => true,
             },
@@ -756,10 +879,10 @@ mod tests {
             Dictionary::new(),
             Dictionary::new(),
         );
-        let mask = doc.add_object(true);
-        let decode = doc.add_object(vec![1.into(), 0.into()]);
-        let image = doc.add_object(Stream::new(
-            dictionary! {
+        let mask = doc.add(true);
+        let decode = doc.add(vec![1.into(), 0.into()]);
+        let image = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 1,
                 "ImageMask" => mask, "Decode" => decode,
             },
@@ -779,23 +902,21 @@ mod tests {
         );
         // Rows of two gray samples, each behind a PNG `None` predictor byte;
         // enough of them that the stream compresses.
-        let mut image = Stream::new(
-            dictionary! {
+        let mut image = crate::pdf::writer::compressed(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Height" => 64,
                 "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
             },
-            [0, 10, 20].repeat(64),
-        );
-        image.compress().unwrap();
-        assert!(image.dict.get(b"Filter").is_ok());
-        let filter = doc.add_object(Object::Name(b"FlateDecode".to_vec()));
-        let parms =
-            doc.add_object(dictionary! { "Predictor" => 15, "Colors" => 1, "Columns" => 2 });
-        let width = doc.add_object(2);
+            &[0, 10, 20].repeat(64),
+        )
+        .unwrap();
+        let filter = doc.add(Value::Name(b"FlateDecode".to_vec()));
+        let parms = doc.add(dict! { "Predictor" => 15, "Colors" => 1, "Columns" => 2 });
+        let width = doc.add(2);
         image.dict.set("Filter", filter);
         image.dict.set("DecodeParms", parms);
         image.dict.set("Width", width);
-        let image = doc.add_object(image);
+        let image = doc.add(image);
         assert_eq!(drawn_image(doc, page, image), [10, 20].repeat(64));
     }
 
@@ -804,14 +925,15 @@ mod tests {
     /// is not.
     #[test]
     fn arrays_fanning_out_are_refused() {
-        let mut doc = Document::with_version("1.7");
-        let mut widths = doc.add_object(vec![Object::Integer(500); 8]);
+        let mut doc = Document::new((1, 7));
+        let mut widths = doc.add(vec![Value::Int(500); 8]);
         for _ in 0..3 {
-            widths = doc.add_object(vec![Object::Reference(widths); 8]);
+            widths = doc.add(vec![Value::Ref(widths); 8]);
         }
-        let widths = Object::Reference(widths);
+        let pdf = crate::fixtures::held(doc, &[widths]);
+        let widths = src(widths);
         let copy = |budget: usize| {
-            let mut builder = Builder::new(&doc);
+            let mut builder = Builder::new(&pdf);
             builder.copy_budget = budget;
             builder.copy(Kind::Value, &widths, At::top(&Scope::default()))
         };
@@ -827,23 +949,23 @@ mod tests {
     /// scope: a budget for one rebuild does not cover a second.
     #[test]
     fn each_rebuild_of_borrowing_content_is_charged() {
-        let mut doc = Document::with_version("1.7");
-        let form = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+        let mut doc = Document::new((1, 7));
+        let form = doc.add(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Form" },
             b"0 0 1 1 re f ".repeat(100),
         ));
-        let form = Object::Reference(form);
-        let (one, two) = (
-            dictionary! { "ExtGState" => dictionary! {} },
-            dictionary! { "Pattern" => dictionary! {} },
-        );
-        let (one, two) = (Scope::new([&one]), Scope::new([&two]));
+        let one = doc.add(dict! { "ExtGState" => dict! {} });
+        let two = doc.add(dict! { "Pattern" => dict! {} });
+        let pdf = crate::fixtures::held(doc, &[form, one, two]);
+        let scope = |id: Id| Scope::new(pdf.object(read_id(id)).unwrap().into_dict());
+        let (one, two) = (scope(one), scope(two));
+        let form = src(form);
         let used = {
-            let mut builder = Builder::new(&doc);
+            let mut builder = Builder::new(&pdf);
             builder.copy(Kind::Form, &form, At::top(&one)).unwrap();
             MAX_COPIED_BYTES - builder.copy_budget
         };
-        let mut builder = Builder::new(&doc);
+        let mut builder = Builder::new(&pdf);
         builder.copy_budget = used + used / 2;
         builder.copy(Kind::Form, &form, At::top(&one)).unwrap();
         let error = builder.copy(Kind::Form, &form, At::top(&two)).unwrap_err();
@@ -854,39 +976,44 @@ mod tests {
     /// stream cost it once per page.
     #[test]
     fn each_pages_content_is_charged() {
-        let mut doc = Document::with_version("1.7");
-        let content = doc.add_object(Stream::new(dictionary! {}, b"0 0 1 1 re f ".repeat(1_000)));
-        let pages = with_pages(
+        let mut doc = Document::new((1, 7));
+        let content = doc.add(Stream::new(dict! {}, b"0 0 1 1 re f ".repeat(1_000)));
+        with_pages(
             &mut doc,
-            [0, 1].map(|_| dictionary! { "Contents" => content, "Resources" => dictionary! {} }),
+            [0, 1].map(|_| dict! { "Contents" => content, "Resources" => dict! {} }),
         );
-        let parent = (9999, 0);
+        let pdf = open(&doc);
+        let pages = pdf.pages();
+        let ids: Vec<ObjectId> = pages.iter().map(|page| page.obj_id().unwrap()).collect();
+        let parent = Id(9999);
         let builder = || {
-            let mut builder = Builder::new(&doc);
-            for (n, &page) in pages.iter().enumerate() {
-                builder.pages.insert(page, (10_000 + n as u32, 0));
+            let mut builder = Builder::new(&pdf);
+            for (n, &page) in ids.iter().enumerate() {
+                builder.pages.insert(page, Id(10_000 + n as u32));
             }
             builder
         };
         let used = {
             let mut builder = builder();
-            builder.page(pages[0], parent).unwrap();
+            builder.page(ids[0], &pages[0], parent).unwrap();
             MAX_COPIED_BYTES - builder.copy_budget
         };
         let mut builder = builder();
         builder.copy_budget = used + used / 2;
-        builder.page(pages[0], parent).unwrap();
-        let error = builder.page(pages[1], parent).unwrap_err();
+        builder.page(ids[0], &pages[0], parent).unwrap();
+        let error = builder.page(ids[1], &pages[1], parent).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
 
     /// A string referenced many times costs its bytes each time it is copied.
     #[test]
     fn a_string_referred_to_again_and_again_is_charged_each_time() {
-        let mut doc = Document::with_version("1.7");
-        let text = doc.add_object(Object::string_literal(vec![b'x'; 1_000]));
-        let array = Object::Array(vec![Object::Reference(text); 100]);
-        let mut builder = Builder::new(&doc);
+        let mut doc = Document::new((1, 7));
+        let text = doc.add(Value::string(vec![b'x'; 1_000]));
+        let array = doc.add(Value::Array(vec![Value::Ref(text); 100]));
+        let pdf = crate::fixtures::held(doc, &[array]);
+        let array = src(array);
+        let mut builder = Builder::new(&pdf);
         builder.copy_budget = 50_000;
         let error = builder
             .copy(Kind::Value, &array, At::top(&Scope::default()))
@@ -908,22 +1035,14 @@ mod tests {
     /// A form the page lists but never draws is not copied, and is recorded.
     #[test]
     fn an_undrawn_form_is_left_behind() {
-        let unused = (1000, 0);
-        let (mut doc, _) = document(
+        let unused = Value::from(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Form" },
+            encode(&show("Jane Roe")).unwrap(),
+        ));
+        let (doc, _) = document(
             show("Hello"),
-            dictionary! { "XObject" => dictionary! { "Unused" => unused } },
+            dict! { "XObject" => dict! { "Unused" => unused } },
             Dictionary::new(),
-        );
-        doc.objects.insert(
-            unused,
-            Object::Stream(Stream::new(
-                dictionary! { "Type" => "XObject", "Subtype" => "Form" },
-                Content {
-                    operations: show("Jane Roe"),
-                }
-                .encode()
-                .unwrap(),
-            )),
         );
         let (out, stripped) = rebuilt(&doc);
         assert!(!text_of(&out).contains("Jane Roe"));
@@ -934,7 +1053,6 @@ mod tests {
     /// kept, and marked content's alternate text dropped.
     #[test]
     fn hidden_layers_and_alternate_text_are_cut() {
-        let (visible, hidden) = ((1000, 0), (1001, 0));
         let mut operations = vec![Operation::new("BDC", vec!["OC".into(), "A".into()])];
         operations.extend(show("shown"));
         operations.push(Operation::new("EMC", vec![]));
@@ -945,36 +1063,29 @@ mod tests {
             "BDC",
             vec![
                 "Span".into(),
-                Object::Dictionary(
-                    dictionary! { "ActualText" => Object::string_literal("Jane Roe") },
-                ),
+                Value::Dict(dict! { "ActualText" => Value::string("Jane Roe") }),
             ],
         ));
         operations.extend(show("J. R."));
         operations.push(Operation::new("EMC", vec![]));
-        let (mut built, _) = document(
-            operations,
-            dictionary! { "Properties" => dictionary! { "A" => visible, "B" => hidden } },
-            Dictionary::new(),
-        );
-        for id in [visible, hidden] {
-            built
-                .objects
-                .insert(id, Object::Dictionary(dictionary! { "Type" => "OCG" }));
-        }
-        built.catalog_mut().unwrap().set(
+        let (mut built, page) = document(operations, Dictionary::new(), Dictionary::new());
+        let visible = built.add(dict! { "Type" => "OCG" });
+        let hidden = built.add(dict! { "Type" => "OCG" });
+        dict_mut(&mut built, page)
+            .get_mut(b"Resources")
+            .and_then(Value::as_dict_mut)
+            .unwrap()
+            .set("Properties", dict! { "A" => visible, "B" => hidden });
+        catalog(&mut built).set(
             "OCProperties",
-            dictionary! {
+            dict! {
                 "OCGs" => vec![visible.into(), hidden.into()],
-                "D" => dictionary! { "OFF" => vec![hidden.into()] },
+                "D" => dict! { "OFF" => vec![hidden.into()] },
             },
         );
 
         let (out, stripped) = rebuilt(&built);
-        let content = String::from_utf8_lossy(
-            &out.get_page_content(out.get_pages().into_values().next().unwrap()),
-        )
-        .into_owned();
+        let content = String::from_utf8_lossy(&page_content(&out.pages()[0]).unwrap()).into_owned();
         assert!(content.contains("shown") && content.contains("J. R."));
         assert!(!content.contains("secret") && !text_of(&out).contains("Jane Roe"));
         assert!(!content.contains("BDC"));
@@ -986,10 +1097,7 @@ mod tests {
     #[test]
     fn an_unknown_operator_is_cut() {
         let mut operations = show("Hello");
-        operations.push(Operation::new(
-            "Xx",
-            vec![Object::string_literal("Jane Roe")],
-        ));
+        operations.push(Operation::new("Xx", vec![Value::string("Jane Roe")]));
         let (doc, _) = document(operations, Dictionary::new(), Dictionary::new());
         let (out, _) = rebuilt(&doc);
         assert!(!text_of(&out).contains("Jane Roe"));
@@ -999,20 +1107,18 @@ mod tests {
     #[test]
     fn inherited_page_attributes_are_set_on_the_page() {
         let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        doc.get_dictionary_mut(page).unwrap().remove(b"MediaBox");
-        let parent = doc
-            .get_dictionary(page)
-            .unwrap()
+        dict_mut(&mut doc, page).remove(b"MediaBox");
+        let parent = dict_mut(&mut doc, page)
             .get(b"Parent")
-            .and_then(Object::as_reference)
+            .and_then(Value::as_ref_id)
             .unwrap();
-        let tree = doc.get_dictionary_mut(parent).unwrap();
+        let tree = dict_mut(&mut doc, parent);
         tree.set("MediaBox", vec![0.into(), 0.into(), 300.into(), 400.into()]);
         tree.set("Rotate", 90);
         let (out, _) = rebuilt(&doc);
         let page = page_dict(&out);
-        assert!(page.get(b"MediaBox").is_ok());
-        assert_eq!(page.get(b"Rotate").and_then(Object::as_i64).unwrap(), 90);
+        assert!(page.has(b"MediaBox"));
+        assert_eq!(page.get(b"Rotate").and_then(Value::as_int).unwrap(), 90);
     }
 
     /// A link to a named destination goes to the copied page; a link that
@@ -1021,37 +1127,35 @@ mod tests {
     fn an_internal_link_is_resolved_to_its_page() {
         let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
         let annotations = vec![
-            Object::Dictionary(dictionary! {
+            Value::Dict(dict! {
                 "Subtype" => "Link",
                 "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-                "Dest" => Object::Name(b"chapter".to_vec()),
-                "Contents" => Object::string_literal("ask Jane Roe"),
+                "Dest" => Value::Name(b"chapter".to_vec()),
+                "Contents" => Value::string("ask Jane Roe"),
             }),
-            Object::Dictionary(dictionary! {
+            Value::Dict(dict! {
                 "Subtype" => "Link",
-                "A" => dictionary! { "S" => "URI", "URI" => Object::string_literal("mailto:jane@example.com") },
+                "A" => dict! { "S" => "URI", "URI" => Value::string("mailto:jane@example.com") },
             }),
         ];
-        doc.get_dictionary_mut(page)
-            .unwrap()
-            .set("Annots", annotations);
-        doc.catalog_mut().unwrap().set(
+        dict_mut(&mut doc, page).set("Annots", annotations);
+        catalog(&mut doc).set(
             "Dests",
-            dictionary! { "chapter" => vec![page.into(), "Fit".into()] },
+            dict! { "chapter" => vec![page.into(), "Fit".into()] },
         );
 
         let (out, stripped) = rebuilt(&doc);
-        let new_page = out.get_pages().into_values().next().unwrap();
-        let links = page_dict(&out)
-            .get(b"Annots")
-            .and_then(Object::as_array)
-            .unwrap();
+        let new_page = out.pages()[0].obj_id().unwrap();
+        let Some(Value::Array(links)) = page_dict(&out).get(b"Annots").cloned() else {
+            panic!("annotations");
+        };
         assert_eq!(links.len(), 1);
-        let link = out
-            .get_dictionary(links[0].as_reference().unwrap())
-            .unwrap();
-        let dest = link.get(b"Dest").and_then(Object::as_array).unwrap();
-        assert_eq!(dest[0], Object::Reference(new_page));
+        let link = resolved(&out, &links[0]);
+        let Some(Value::Array(dest)) = link.as_dict().and_then(|link| link.get(b"Dest")).cloned()
+        else {
+            panic!("destination");
+        };
+        assert_eq!(dest[0], Value::Ref(Id(new_page.obj_number)));
         assert!(!text_of(&out).contains("Jane") && !text_of(&out).contains("jane@"));
         assert_eq!(count(&stripped, HiddenContent::Link), 1);
         assert_eq!(count(&stripped, HiddenContent::Annotation), 1);
@@ -1062,29 +1166,27 @@ mod tests {
     /// as it is, whichever name sorts first.
     #[test]
     fn a_file_named_under_two_extensions_is_copied_for_each() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         with_pages(&mut doc, [Dictionary::new()]);
-        let stream = doc.add_object(Stream::new(
-            dictionary! { "Type" => "EmbeddedFile" },
+        let stream = doc.add(Stream::new(
+            dict! { "Type" => "EmbeddedFile" },
             b"Jane Roe".to_vec(),
         ));
-        // One name reaches the stream through a reference to its reference.
-        let alias = doc.add_object(Object::Reference(stream));
-        let spec = |doc: &mut Document, name: &str, file: ObjectId| {
-            doc.add_object(dictionary! {
-                "Type" => "Filespec", "F" => Object::string_literal(name),
-                "EF" => dictionary! { "F" => file },
+        let spec = |doc: &mut Document, name: &str, file: Id| {
+            doc.add(dict! {
+                "Type" => "Filespec", "F" => Value::string(name),
+                "EF" => dict! { "F" => file },
             })
         };
         let pdf = spec(&mut doc, "report.pdf", stream);
-        let txt = spec(&mut doc, "notes.txt", alias);
-        doc.catalog_mut().unwrap().set(
+        let txt = spec(&mut doc, "notes.txt", stream);
+        catalog(&mut doc).set(
             "Names",
-            dictionary! {
-                "EmbeddedFiles" => dictionary! {
+            dict! {
+                "EmbeddedFiles" => dict! {
                     "Names" => vec![
-                        Object::string_literal("a"), pdf.into(),
-                        Object::string_literal("b"), txt.into(),
+                        Value::string("a"), pdf.into(),
+                        Value::string("b"), txt.into(),
                     ],
                 },
             },
@@ -1097,13 +1199,8 @@ mod tests {
             .iter()
             .find(|entry| entry.name.ends_with(".txt"))
             .unwrap();
-        let bytes = out.get_object(text.stream).unwrap().as_stream().unwrap();
-        assert_eq!(
-            bytes
-                .decompressed_content()
-                .unwrap_or(bytes.content.clone()),
-            b"Jane Roe"
-        );
+        let bytes = out.object(text.stream).unwrap().into_stream().unwrap();
+        assert_eq!(bytes.plain().unwrap(), b"Jane Roe");
         check(&out).unwrap();
     }
 
@@ -1111,11 +1208,10 @@ mod tests {
     /// share a name.
     #[test]
     fn a_neutral_name_already_taken_is_renamed() {
-        let source = Document::load_mem(&with_attachments(&[
+        let source = attachments_document(&[
             ("attachment-1.private.pdf", b"first"),
             ("attachment-1.pdf", b"second"),
-        ]))
-        .unwrap();
+        ]);
         let (out, _) = rebuilt(&source);
         let mut names: Vec<String> = Tree::read(&out)
             .unwrap()
@@ -1133,33 +1229,33 @@ mod tests {
     #[test]
     fn links_resolve_in_their_own_namespace_and_hidden_ones_are_dropped() {
         let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        let layer = doc.add_object(dictionary! { "Type" => "OCG", "Name" => "Off" });
-        let link = |dest: Object| {
-            dictionary! {
+        let layer = doc.add(dict! { "Type" => "OCG", "Name" => "Off" });
+        let link = |dest: Value| {
+            dict! {
                 "Subtype" => "Link",
                 "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
                 "Dest" => dest,
             }
         };
-        let mut hidden = link(Object::Name(b"chapter".to_vec()));
+        let mut hidden = link(Value::Name(b"chapter".to_vec()));
         hidden.set("OC", layer);
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
             vec![
-                Object::Dictionary(link(Object::string_literal("chapter"))),
-                Object::Dictionary(hidden),
+                Value::Dict(link(Value::string("chapter"))),
+                Value::Dict(hidden),
             ],
         );
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "Dests",
-            dictionary! { "chapter" => vec![page.into(), "Fit".into()] },
+            dict! { "chapter" => vec![page.into(), "Fit".into()] },
         );
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, stripped) = rebuilt(&doc);
-        assert!(page_dict(&out).get(b"Annots").is_err());
+        assert!(!page_dict(&out).has(b"Annots"));
         assert!(count(&stripped, HiddenContent::Layer) >= 1);
     }
 
@@ -1168,44 +1264,43 @@ mod tests {
     #[test]
     fn a_named_destination_is_found_past_a_dangling_kid() {
         let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Link",
                 "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-                "Dest" => Object::string_literal("chapter"),
+                "Dest" => Value::string("chapter"),
             })],
         );
-        let leaf = doc.add_object(dictionary! {
-            "Names" => vec![Object::string_literal("chapter"), vec![page.into(), "Fit".into()].into()],
+        let leaf = doc.add(dict! {
+            "Names" => vec![Value::string("chapter"), vec![page.into(), "Fit".into()].into()],
         });
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "Names",
-            dictionary! { "Dests" => dictionary! { "Kids" => vec![Object::Reference((9999, 0)), leaf.into()] } },
+            dict! { "Dests" => dict! { "Kids" => vec![Value::Ref(Id(9999)), leaf.into()] } },
         );
 
         let (out, _) = rebuilt(&doc);
-        let new_page = out.get_pages().into_values().next().unwrap();
-        let links = page_dict(&out)
-            .get(b"Annots")
-            .and_then(Object::as_array)
-            .unwrap();
-        let link = out
-            .get_dictionary(links[0].as_reference().unwrap())
-            .unwrap();
-        let dest = link.get(b"Dest").and_then(Object::as_array).unwrap();
-        assert_eq!(dest[0], Object::Reference(new_page));
+        let new_page = out.pages()[0].obj_id().unwrap();
+        let Some(Value::Array(links)) = page_dict(&out).get(b"Annots").cloned() else {
+            panic!("annotations");
+        };
+        let link = resolved(&out, &links[0]);
+        let Some(Value::Array(dest)) = link.as_dict().and_then(|link| link.get(b"Dest")).cloned()
+        else {
+            panic!("destination");
+        };
+        assert_eq!(dest[0], Value::Ref(Id(new_page.obj_number)));
     }
 
     /// Attached files keep their content under neutral names, and a rebuild
     /// of the result renames nothing.
     #[test]
     fn attached_files_get_neutral_names() {
-        let source = Document::load_mem(&with_attachments(&[
+        let source = attachments_document(&[
             ("Jane_Roe_passport.pdf", b"pdf bytes"),
             ("notes.txt", b"Jane Roe"),
-        ]))
-        .unwrap();
+        ]);
         let (out, stripped) = rebuilt(&source);
         assert_eq!(count(&stripped, HiddenContent::Properties), 2);
         let mut names: Vec<String> = Tree::read(&out)
@@ -1224,11 +1319,10 @@ mod tests {
     /// renamed like any other.
     #[test]
     fn a_name_past_its_neutral_number_is_renamed() {
-        let source = Document::load_mem(&with_attachments(&[
+        let source = attachments_document(&[
             ("attachment-1.Jane Roe passport scan", b"scan"),
             ("attachment-2.pdf", b"pdf bytes"),
-        ]))
-        .unwrap();
+        ]);
         let (out, stripped) = rebuilt(&source);
         assert_eq!(count(&stripped, HiddenContent::Properties), 1);
         let names: Vec<String> = Tree::read(&out)
@@ -1245,42 +1339,37 @@ mod tests {
     /// attaches its file.
     #[test]
     fn an_indirect_embedded_file_dictionary_is_followed() {
-        let mut source =
-            Document::load_mem(&with_attachments(&[("notes.txt", b"Jane Roe")])).unwrap();
-        let spec = source
-            .objects
-            .iter()
-            .find(|(_, object)| object.as_dict().is_ok_and(|d| d.get(b"EF").is_ok()))
-            .map(|(id, _)| *id)
-            .unwrap();
-        let files = source
-            .get_dictionary(spec)
-            .unwrap()
-            .get(b"EF")
-            .unwrap()
-            .clone();
-        let files = source.add_object(files);
-        source
-            .get_dictionary_mut(spec)
-            .unwrap()
-            .set("EF", Object::Reference(files));
+        let mut source = Document::new((1, 7));
+        let file = source.add(Stream::new(
+            dict! { "Type" => "EmbeddedFile" },
+            b"Jane Roe".to_vec(),
+        ));
+        let files = source.add(dict! { "F" => file });
+        let spec = source.add(dict! {
+            "Type" => "Filespec", "F" => Value::string("notes.txt"), "EF" => files,
+        });
+        with_pages(&mut source, [Dictionary::new()]);
+        catalog(&mut source).set(
+            "Names",
+            dict! { "EmbeddedFiles" => dict! { "Names" => vec![Value::string("a"), spec.into()] } },
+        );
 
         let (out, _) = rebuilt(&source);
         assert_eq!(Tree::read(&out).unwrap().entries.len(), 1);
     }
 
     /// The first page's resources in `doc`.
-    fn resources_of(doc: &Document) -> &Dictionary {
-        let resources = page_dict(doc).get(b"Resources").unwrap();
-        doc.resolve_dict(resources).unwrap()
+    fn resources_of(pdf: &Pdf) -> Dictionary {
+        let resources = page_dict(pdf).get(b"Resources").unwrap().clone();
+        resolved(pdf, &resources).as_dict().unwrap().clone()
     }
 
-    /// The resource `name` under `category` on the first page of `doc`,
+    /// The resource `name` under `category` on the first page of `pdf`,
     /// resolved.
-    fn resource<'d>(doc: &'d Document, category: &[u8], name: &[u8]) -> &'d Object {
-        let entries = resources_of(doc).get(category).unwrap();
-        doc.resolve(doc.resolve_dict(entries).unwrap().get(name).unwrap())
-            .unwrap()
+    fn resource(pdf: &Pdf, category: &[u8], name: &[u8]) -> Value {
+        let entries = resources_of(pdf).get(category).unwrap().clone();
+        let entries = resolved(pdf, &entries);
+        resolved(pdf, entries.as_dict().unwrap().get(name).unwrap())
     }
 
     /// A Type0 font's embedded encoding CMap keeps what a CMap is.
@@ -1290,36 +1379,32 @@ mod tests {
         ops.push(Operation::new("Tf", vec!["F0".into(), 12.into()]));
         ops.push(Operation::new("ET", vec![]));
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let cmap = doc.add_object(Stream::new(
-            dictionary! {
+        let cmap = doc.add(Stream::new(
+            dict! {
                 "Type" => "CMap", "CMapName" => "Custom", "UseCMap" => "Identity-H",
-                "CIDSystemInfo" => dictionary! {
-                    "Registry" => Object::string_literal("Adobe"),
-                    "Ordering" => Object::string_literal("Identity"),
+                "CIDSystemInfo" => dict! {
+                    "Registry" => Value::string("Adobe"),
+                    "Ordering" => Value::string("Identity"),
                     "Supplement" => 0,
                 },
-                "Secret" => Object::string_literal("Jane Roe"),
+                "Secret" => Value::string("Jane Roe"),
             },
             b"begincmap endcmap".to_vec(),
         ));
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X", "Encoding" => cmap,
         });
-        let page = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary_mut(page)
-            .unwrap()
-            .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
-            .unwrap()
-            .set("Font", dictionary! { "F0" => font });
+        set_fonts(&mut doc, dict! { "F0" => font });
         let (out, _) = rebuilt(&doc);
-        let Object::Dictionary(font) = resource(&out, b"Font", b"F0") else {
+        let Value::Dict(font) = resource(&out, b"Font", b"F0") else {
             panic!("font");
         };
-        let encoding = out.resolve(font.get(b"Encoding").unwrap()).unwrap();
-        let encoding = &encoding.as_stream().unwrap().dict;
-        assert!(encoding.get(b"CMapName").is_ok() && encoding.get(b"UseCMap").is_ok());
-        assert!(encoding.get(b"Secret").is_err());
+        let Value::Stream(encoding) = resolved(&out, font.get(b"Encoding").unwrap()) else {
+            panic!("encoding");
+        };
+        let encoding = &encoding.dict;
+        assert!(encoding.has(b"CMapName") && encoding.has(b"UseCMap"));
+        assert!(!encoding.has(b"Secret"));
     }
 
     /// A `/ToUnicode` CMap that maps a glyph to a radical maps it to the
@@ -1330,20 +1415,21 @@ mod tests {
         ops.push(Operation::new("Tf", vec!["F0".into(), 12.into()]));
         ops.push(Operation::new("ET", vec![]));
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let mut cmap = Stream::new(Dictionary::new(), to_unicode(&["<01> <2F2D>"]));
-        cmap.compress().unwrap();
-        let cmap = doc.add_object(cmap);
-        let font = doc.add_object(dictionary! {
+        let cmap = crate::pdf::writer::compressed(Dictionary::new(), &to_unicode(&["<01> <2F2D>"]))
+            .unwrap();
+        let cmap = doc.add(cmap);
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "X", "ToUnicode" => cmap,
         });
-        set_fonts(&mut doc, dictionary! { "F0" => font });
+        set_fonts(&mut doc, dict! { "F0" => font });
         let (out, _) = rebuilt(&doc);
-        let Object::Dictionary(font) = resource(&out, b"Font", b"F0") else {
+        let Value::Dict(font) = resource(&out, b"Font", b"F0") else {
             panic!("font");
         };
-        let cmap = out.resolve(font.get(b"ToUnicode").unwrap()).unwrap();
-        let data = cmap.as_stream().unwrap().decompressed_content().unwrap();
-        let data = String::from_utf8(data).unwrap();
+        let Value::Stream(cmap) = resolved(&out, font.get(b"ToUnicode").unwrap()) else {
+            panic!("cmap");
+        };
+        let data = String::from_utf8(plain(&cmap)).unwrap();
         assert!(
             data.contains("<01> <5C71>") && !data.contains("2F2D"),
             "{data}"
@@ -1367,11 +1453,10 @@ mod tests {
 
     /// The first page's fonts in `doc` replaced by `fonts`.
     fn set_fonts(doc: &mut Document, fonts: Dictionary) {
-        let page = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        let page = first_page(doc);
+        dict_mut(doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
             .set("Font", fonts);
     }
@@ -1384,21 +1469,21 @@ mod tests {
         let ops = vec![
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal(vec![1, 2, 3, 4])]),
+            Operation::new("Tj", vec![Value::string(vec![1, 2, 3, 4])]),
             Operation::new("ET", vec![]),
         ];
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let cmap = doc.add_object(Stream::new(
+        let cmap = doc.add(Stream::new(
             Dictionary::new(),
             to_unicode(&["<01> <004A>", "<02> <0061>", "<03> <006E>", "<04> <0065>"]),
         ));
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "X", "ToUnicode" => cmap,
-            "Encoding" => dictionary! {
+            "Encoding" => dict! {
                 "Differences" => vec![1.into(), "g1".into(), "g2".into(), "g3".into(), "g4".into()],
             },
         });
-        set_fonts(&mut doc, dictionary! { "F1" => font });
+        set_fonts(&mut doc, dict! { "F1" => font });
 
         let (rebuilt, _) = saved(&doc);
         let pdf = Pdf::open(&rebuilt).unwrap();
@@ -1409,24 +1494,24 @@ mod tests {
         assert!(!redacted.read(Text).unwrap()[0].text.contains("Jane"));
     }
 
-    /// A `/ToUnicode` lopdf cannot read is dropped, so a viewer reads no text
-    /// detection did not.
+    /// A `/ToUnicode` that cannot be read (here, its data does not decode)
+    /// is dropped, so a viewer reads no text detection did not.
     #[test]
     fn an_unreadable_to_unicode_is_dropped() {
         let (mut doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        let cmap = doc.add_object(Stream::new(
-            Dictionary::new(),
+        let cmap = doc.add(Stream::new(
+            dict! { "Filter" => "FlateDecode" },
             b"1 beginbfchar <48> <004A> endbfchar".to_vec(),
         ));
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "ToUnicode" => cmap,
         });
-        set_fonts(&mut doc, dictionary! { "F1" => font });
+        set_fonts(&mut doc, dict! { "F1" => font });
         let (out, stripped) = rebuilt(&doc);
-        let Object::Dictionary(font) = resource(&out, b"Font", b"F1") else {
+        let Value::Dict(font) = resource(&out, b"Font", b"F1") else {
             panic!("font");
         };
-        assert!(font.get(b"ToUnicode").is_err());
+        assert!(!font.has(b"ToUnicode"));
         assert_eq!(count(&stripped, HiddenContent::Unreadable), 1);
     }
 
@@ -1438,22 +1523,21 @@ mod tests {
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["Missing".into(), 12.into()]),
             Operation::new("gs", vec!["GS1".into()]),
-            Operation::new("Tj", vec![Object::string_literal("Hello")]),
+            Operation::new("Tj", vec![Value::string("Hello")]),
             Operation::new("ET", vec![]),
         ];
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
         });
-        let page = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        let page = first_page(&doc);
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
             .set(
                 "ExtGState",
-                dictionary! { "GS1" => dictionary! { "Font" => vec![font.into(), 10.into()] } },
+                dict! { "GS1" => dict! { "Font" => vec![font.into(), 10.into()] } },
             );
         let (rebuilt, _) = saved(&doc);
         let blocks = Pdf::open(&rebuilt).unwrap().read(Text).unwrap();
@@ -1467,7 +1551,7 @@ mod tests {
     #[test]
     fn a_forms_text_follows_its_callers_font() {
         let mut ops = vec![
-            Operation::new("Tj", vec![Object::string_literal("Before")]),
+            Operation::new("Tj", vec![Value::string("Before")]),
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
             Operation::new("ET", vec![]),
@@ -1479,19 +1563,18 @@ mod tests {
         ];
         ops.extend(show("Page"));
         let (mut doc, page) = document(ops, Dictionary::new(), Dictionary::new());
-        let form = doc.add_object(Stream::new(
-            dictionary! {
+        let form = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             },
             b"BT (Inherited) Tj ET".to_vec(),
         ));
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("XObject", dictionary! { "Fm" => form });
+            .set("XObject", dict! { "Fm" => form });
         let (bytes, stripped) = saved(&doc);
         assert!(count(&stripped, HiddenContent::Unreadable) >= 2);
         let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
@@ -1506,10 +1589,10 @@ mod tests {
         let (doc, _) = document(
             show("Hello"),
             Dictionary::new(),
-            dictionary! { "TrimBox" => vec![500.into(), 500.into(), 600.into(), 600.into()] },
+            dict! { "TrimBox" => vec![500.into(), 500.into(), 600.into(), 600.into()] },
         );
         let (out, stripped) = rebuilt(&doc);
-        assert!(page_dict(&out).get(b"TrimBox").is_err());
+        assert!(!page_dict(&out).has(b"TrimBox"));
         assert_eq!(count(&stripped, HiddenContent::Properties), 1);
     }
 
@@ -1520,14 +1603,15 @@ mod tests {
         let (doc, _) = document(
             show("Hello"),
             Dictionary::new(),
-            dictionary! { "Dur" => 5, "Trans" => dictionary! { "S" => "Dissolve" } },
+            dict! { "Dur" => 5, "Trans" => dict! { "S" => "Dissolve" } },
         );
-        let (mut out, stripped) = rebuilt(&doc);
+        let (out, stripped) = rebuilt(&doc);
         assert_eq!(count(&stripped, HiddenContent::Properties), 2);
-        let page = out.get_pages().into_values().next().unwrap();
-        out.get_dictionary_mut(page)
-            .unwrap()
-            .set("Trans", dictionary! { "S" => "Dissolve" });
+        let out = changed(&out, |pdf, changes| {
+            let mut page = page_dict(pdf);
+            page.set("Trans", dict! { "S" => "Dissolve" });
+            changes.replace(pdf.pages()[0].obj_id().unwrap(), page);
+        });
         let error = check(&out).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Sanitization);
     }
@@ -1537,20 +1621,21 @@ mod tests {
     #[test]
     fn an_unused_font_fails_the_check() {
         let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        let (mut out, _) = rebuilt(&doc);
+        let (out, _) = rebuilt(&doc);
         check(&out).unwrap();
-        let unused = out.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+        let out = changed(&out, |pdf, changes| {
+            let unused = changes.add(dict! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+            });
+            let mut page = page_dict(pdf);
+            page.get_mut(b"Resources")
+                .and_then(Value::as_dict_mut)
+                .and_then(|resources| resources.get_mut(b"Font"))
+                .and_then(Value::as_dict_mut)
+                .unwrap()
+                .set("Unused", unused.value());
+            changes.replace(pdf.pages()[0].obj_id().unwrap(), page);
         });
-        let page = out.get_pages().into_values().next().unwrap();
-        out.get_dictionary_mut(page)
-            .unwrap()
-            .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
-            .and_then(|resources| resources.get_mut(b"Font"))
-            .and_then(Object::as_dict_mut)
-            .unwrap()
-            .set("Unused", unused);
         let error = check(&out).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Sanitization);
     }
@@ -1563,30 +1648,26 @@ mod tests {
             Operation::new("g", vec![0.5.into()]),
             Operation::new("Do", vec!["PS0".into()]),
         ];
-        let (mut doc, _) = document(
+        let (doc, _) = document(
             ops,
-            dictionary! {
-                "ColorSpace" => dictionary! {
+            dict! {
+                "ColorSpace" => dict! {
                     "DefaultGray" => vec![
-                        Object::Name(b"CalGray".to_vec()),
-                        Object::Dictionary(dictionary! { "WhitePoint" => vec![1.into(), 1.into(), 1.into()] }),
+                        Value::Name(b"CalGray".to_vec()),
+                        Value::Dict(dict! { "WhitePoint" => vec![1.into(), 1.into(), 1.into()] }),
                     ],
                 },
-                "XObject" => dictionary! { "PS0" => Object::Reference((1000, 0)) },
+                "XObject" => dict! { "PS0" => Stream::new(
+                    dict! { "Type" => "XObject", "Subtype" => "PS" },
+                    b"(Jane Roe) show".to_vec(),
+                ) },
             },
             Dictionary::new(),
-        );
-        doc.objects.insert(
-            (1000, 0),
-            Object::Stream(Stream::new(
-                dictionary! { "Type" => "XObject", "Subtype" => "PS" },
-                b"(Jane Roe) show".to_vec(),
-            )),
         );
         let (out, stripped) = rebuilt(&doc);
         assert!(matches!(
             resource(&out, b"ColorSpace", b"DefaultGray"),
-            Object::Array(_)
+            Value::Array(_)
         ));
         assert_eq!(count(&stripped, HiddenContent::Script), 1);
         assert!(!text_of(&out).contains("Jane Roe"));
@@ -1596,22 +1677,22 @@ mod tests {
     /// font descriptor its per-class descriptors.
     #[test]
     fn nested_dictionaries_keep_their_keys() {
-        let tint = Object::Dictionary(dictionary! {
+        let tint = Value::Dict(dict! {
             "FunctionType" => 2, "Domain" => vec![0.into(), 1.into()],
             "C0" => vec![0.into()], "C1" => vec![1.into()], "N" => 1,
         });
         let device_n = vec![
-            Object::Name(b"DeviceN".to_vec()),
-            vec![Object::Name(b"Spot".to_vec())].into(),
-            Object::Name(b"DeviceGray".to_vec()),
+            Value::Name(b"DeviceN".to_vec()),
+            vec![Value::Name(b"Spot".to_vec())].into(),
+            Value::Name(b"DeviceGray".to_vec()),
             tint.clone(),
-            Object::Dictionary(dictionary! {
+            Value::Dict(dict! {
                 "Subtype" => "NChannel",
-                "Colorants" => dictionary! {
+                "Colorants" => dict! {
                     "Spot" => vec![
-                        Object::Name(b"Separation".to_vec()),
-                        Object::Name(b"Spot".to_vec()),
-                        Object::Name(b"DeviceGray".to_vec()),
+                        Value::Name(b"Separation".to_vec()),
+                        Value::Name(b"Spot".to_vec()),
+                        Value::Name(b"DeviceGray".to_vec()),
                         tint,
                     ],
                 },
@@ -1621,63 +1702,57 @@ mod tests {
             Operation::new("cs", vec!["CS0".into()]),
             Operation::new("Do", vec!["Im0".into()]),
         ];
-        let (mut doc, _) = document(
-            ops,
-            dictionary! {
-                "ColorSpace" => dictionary! { "CS0" => device_n },
-                "XObject" => dictionary! { "Im0" => Object::Reference((1000, 0)) },
-            },
-            Dictionary::new(),
-        );
         let gray = |extra: Dictionary| {
-            let mut dict = dictionary! {
+            let mut dict = dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
                 "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
             };
-            dict.extend(&extra);
-            Object::Stream(Stream::new(dict, vec![0]))
+            extend(&mut dict, &extra);
+            Value::from(Stream::new(dict, vec![0]))
         };
-        doc.objects
-            .insert((1001, 0), gray(dictionary! { "Matte" => vec![0.into()] }));
-        doc.objects.insert(
-            (1000, 0),
-            gray(dictionary! { "SMask" => Object::Reference((1001, 0)) }),
+        let mask = gray(dict! { "Matte" => vec![0.into()] });
+        let (doc, _) = document(
+            ops,
+            dict! {
+                "ColorSpace" => dict! { "CS0" => device_n },
+                "XObject" => dict! { "Im0" => gray(dict! { "SMask" => mask }) },
+            },
+            Dictionary::new(),
         );
         let (out, _) = rebuilt(&doc);
-        let Object::Array(space) = resource(&out, b"ColorSpace", b"CS0") else {
+        let Value::Array(space) = resource(&out, b"ColorSpace", b"CS0") else {
             panic!("colour space");
         };
-        let attributes = out.resolve_dict(&space[4]).unwrap();
-        assert!(attributes.get(b"Colorants").is_ok());
-        let Object::Stream(image) = resource(&out, b"XObject", b"Im0") else {
+        let attributes = resolved(&out, &space[4]);
+        assert!(attributes.as_dict().unwrap().has(b"Colorants"));
+        let Value::Stream(image) = resource(&out, b"XObject", b"Im0") else {
             panic!("image");
         };
-        let mask = out.resolve(image.dict.get(b"SMask").unwrap()).unwrap();
-        assert!(mask.as_stream().unwrap().dict.get(b"Matte").is_ok());
+        let Value::Stream(mask) = resolved(&out, image.dict.get(b"SMask").unwrap()) else {
+            panic!("mask");
+        };
+        assert!(mask.dict.has(b"Matte"));
     }
 
     /// A stream whose data is in another file is not carried.
     #[test]
     fn an_external_stream_is_cut() {
         let ops = vec![Operation::new("Do", vec!["Im0".into()])];
-        let (mut doc, _) = document(
+        let image = Stream::new(
+            dict! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
+                "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
+                "F" => Value::string("/home/jane/scan.raw"),
+            },
+            Vec::new(),
+        );
+        let (doc, _) = document(
             ops,
-            dictionary! { "XObject" => dictionary! { "Im0" => Object::Reference((1000, 0)) } },
+            dict! { "XObject" => dict! { "Im0" => image } },
             Dictionary::new(),
         );
-        doc.objects.insert(
-            (1000, 0),
-            Object::Stream(Stream::new(
-                dictionary! {
-                    "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
-                    "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
-                    "F" => Object::string_literal("/home/jane/scan.raw"),
-                },
-                Vec::new(),
-            )),
-        );
         let (out, stripped) = rebuilt(&doc);
-        assert!(resources_of(&out).get(b"XObject").is_err());
+        assert!(!resources_of(&out).has(b"XObject"));
         assert_eq!(count(&stripped, HiddenContent::Unreadable), 1);
         assert!(!text_of(&out).contains("jane"));
     }
@@ -1690,90 +1765,102 @@ mod tests {
         let (mut doc, page) = document(
             show("Hello"),
             Dictionary::new(),
-            dictionary! {
+            dict! {
                 "TrimBox" => vec![10.into(), 10.into(), 300.into(), 190.into()],
-                "Annots" => vec![Object::Dictionary(dictionary! {
+                "Annots" => vec![Value::Dict(dict! {
                     "Subtype" => "Link",
                     "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-                    "Dest" => vec![Object::Reference((1, 0)), "Fit".into()],
-                    "BS" => dictionary! { "W" => 2, "S" => "D" },
+                    "Dest" => vec![Value::Ref(Id(1)), "Fit".into()],
+                    "BS" => dict! { "W" => 2, "S" => "D" },
                 })],
             },
         );
-        let annots = page_dict_mut(&mut doc, page);
-        let links = annots
-            .get_mut(b"Annots")
-            .and_then(Object::as_array_mut)
-            .unwrap();
-        let Object::Dictionary(link) = &mut links[0] else {
+        let Some(Value::Array(links)) = dict_mut(&mut doc, page).get_mut(b"Annots") else {
+            panic!("annotations");
+        };
+        let Value::Dict(link) = &mut links[0] else {
             panic!("link");
         };
         link.set("Dest", vec![page.into(), "Fit".into()]);
-        let parent = doc
-            .get_dictionary(page)
-            .unwrap()
+        let parent = dict_mut(&mut doc, page)
             .get(b"Parent")
-            .and_then(Object::as_reference)
+            .and_then(Value::as_ref_id)
             .unwrap();
-        doc.get_dictionary_mut(parent)
-            .unwrap()
-            .set("Group", dictionary! { "S" => "Transparency" });
-        doc.version = "1.4".to_owned();
-        let profile = doc.add_object(Stream::new(dictionary! { "N" => 3 }, b"icc".to_vec()));
-        let catalog = doc.catalog_mut().unwrap();
+        dict_mut(&mut doc, parent).set("Group", dict! { "S" => "Transparency" });
+        doc.set_version((1, 4));
+        let profile = doc.add(Stream::new(dict! { "N" => 3 }, b"icc".to_vec()));
+        let catalog = catalog(&mut doc);
         catalog.set("Version", "1.7");
         catalog.set(
             "OutputIntents",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Type" => "OutputIntent", "S" => "GTS_PDFX",
-                "OutputConditionIdentifier" => Object::string_literal("FOGRA39"),
+                "OutputConditionIdentifier" => Value::string("FOGRA39"),
                 "DestOutputProfile" => profile,
             })],
         );
 
         let (out, _) = rebuilt(&doc);
-        assert_eq!(out.version, "1.7");
+        assert_eq!(writer::version(&out), (1, 7));
         let page = page_dict(&out);
-        let trim = page.get(b"TrimBox").and_then(Object::as_array).unwrap();
-        assert_eq!(trim[2].as_float().unwrap(), 200.0);
-        assert!(page.get(b"Group").is_err());
-        assert!(out.catalog().unwrap().get(b"OutputIntents").is_ok());
-        let links = page.get(b"Annots").and_then(Object::as_array).unwrap();
-        let link = out
-            .get_dictionary(links[0].as_reference().unwrap())
-            .unwrap();
-        assert!(link.get(b"BS").is_ok());
+        let Some(Value::Array(trim)) = page.get(b"TrimBox") else {
+            panic!("trim box");
+        };
+        assert_eq!(trim[2].as_number().unwrap(), 200.0);
+        assert!(!page.has(b"Group"));
+        assert!(out.catalog().unwrap().contains_key(b"OutputIntents"));
+        let Some(Value::Array(links)) = page.get(b"Annots") else {
+            panic!("annotations");
+        };
+        let link = resolved(&out, &links[0]);
+        assert!(link.as_dict().unwrap().has(b"BS"));
     }
 
-    fn page_dict_mut(doc: &mut Document, page: ObjectId) -> &mut Dictionary {
-        doc.get_dictionary_mut(page).unwrap()
+    /// The file specification of the only file `doc` attaches.
+    fn only_spec(doc: &Document) -> Id {
+        doc.objects()
+            .find(|(_, value)| value.as_dict().is_some_and(|d| d.has(b"EF")))
+            .map(|(id, _)| id)
+            .unwrap()
+    }
+
+    /// How many dictionaries of `pdf` `matches`.
+    fn dicts_counted(pdf: &Pdf, matches: impl Fn(&Dict<'_>) -> bool) -> usize {
+        pdf.file()
+            .objects()
+            .into_iter()
+            .filter_map(Read::into_dict)
+            .filter(|dict| matches(dict))
+            .count()
+    }
+
+    /// The value at the end of `keys` from `value`, each reference along
+    /// the way followed into `pdf`.
+    fn path(pdf: &Pdf, value: Value, keys: &[&[u8]]) -> Value {
+        keys.iter().fold(resolved(pdf, &value), |value, key| {
+            resolved(pdf, value.as_dict().unwrap().get(key).unwrap())
+        })
+    }
+
+    /// How many streams of `pdf` `matches`.
+    fn streams_counted(pdf: &Pdf, matches: impl Fn(&ReadStream<'_>) -> bool) -> usize {
+        pdf.file()
+            .objects()
+            .into_iter()
+            .filter_map(Read::into_stream)
+            .filter(|stream| matches(stream))
+            .count()
     }
 
     /// An associated file keeps its relationship to what it is attached to.
     #[test]
     fn a_file_keeps_its_relationship() {
-        let mut source =
-            Document::load_mem(&with_attachments(&[("invoice.xml", b"<a/>")])).unwrap();
-        let spec = source
-            .objects
-            .iter()
-            .find(|(_, object)| object.as_dict().is_ok_and(|d| d.get(b"EF").is_ok()))
-            .map(|(&id, _)| id)
-            .unwrap();
-        source
-            .get_dictionary_mut(spec)
-            .unwrap()
-            .set("AFRelationship", "Data");
+        let mut source = attachments_document(&[("invoice.xml", b"<a/>")]);
+        let spec = only_spec(&source);
+        dict_mut(&mut source, spec).set("AFRelationship", "Data");
         let (out, _) = rebuilt(&source);
         let entry = Tree::read(&out).unwrap().entries.remove(0);
-        assert_eq!(
-            out.resolve_dict(entry.value)
-                .unwrap()
-                .get(b"AFRelationship")
-                .and_then(Object::as_name)
-                .unwrap(),
-            b"Data"
-        );
+        assert_eq!(&*entry.spec.name(b"AFRelationship").unwrap(), b"Data");
     }
 
     /// Two file specifications of one file each keep their own relationship
@@ -1781,69 +1868,44 @@ mod tests {
     /// each extension they give it.
     #[test]
     fn specifications_of_one_file_stay_apart() {
-        let mut source =
-            Document::load_mem(&with_attachments(&[("invoice.xml", b"<a/>")])).unwrap();
-        let (spec, stream) = source
-            .objects
-            .iter()
-            .find_map(|(&id, object)| {
-                let files = object.as_dict().ok()?.get(b"EF").ok()?.as_dict().ok()?;
-                Some((id, files.get(b"F").ok()?.as_reference().ok()?))
-            })
+        let mut source = attachments_document(&[("invoice.xml", b"<a/>")]);
+        let spec = only_spec(&source);
+        let stream = source
+            .get(spec)
+            .and_then(Value::as_dict)
+            .and_then(|spec| spec.get(b"EF"))
+            .and_then(Value::as_dict)
+            .and_then(|files| files.get(b"F"))
+            .and_then(Value::as_ref_id)
             .unwrap();
-        source
-            .get_dictionary_mut(spec)
-            .unwrap()
-            .set("AFRelationship", "Data");
-        let other = source.add_object(dictionary! {
-            "Type" => "Filespec", "F" => Object::string_literal("source.pdf"),
+        dict_mut(&mut source, spec).set("AFRelationship", "Data");
+        let other = source.add(dict! {
+            "Type" => "Filespec", "F" => Value::string("source.pdf"),
             "AFRelationship" => "Source",
-            "EF" => dictionary! { "F" => stream },
+            "EF" => dict! { "F" => stream },
         });
         // A string in `/AF` names a file elsewhere: dropped, as a path.
-        source.catalog_mut().unwrap().set(
+        catalog(&mut source).set(
             "AF",
-            vec![
-                other.into(),
-                Object::string_literal("C:/Users/jane/report.pdf"),
-            ],
+            vec![other.into(), Value::string("C:/Users/jane/report.pdf")],
         );
 
         let (out, stripped) = rebuilt(&source);
         assert_eq!(count(&stripped, HiddenContent::FilePath), 1);
         let catalog = out.catalog().unwrap();
-        assert_eq!(
-            out.resolve_array(catalog.get(b"AF").unwrap())
-                .unwrap()
-                .len(),
-            1
-        );
-        let associated = out
-            .resolve_dict(&out.resolve_array(catalog.get(b"AF").unwrap()).unwrap()[0])
-            .unwrap();
+        let associated: Vec<_> = catalog
+            .get::<hayro_syntax::object::Array<'_>>(b"AF")
+            .unwrap()
+            .iter::<Dict<'_>>()
+            .collect();
+        assert_eq!(associated.len(), 1);
+        let associated = &associated[0];
         let named = Tree::read(&out).unwrap().entries.remove(0);
-        let relationship = |spec: &Dictionary| {
-            spec.get(b"AFRelationship")
-                .and_then(Object::as_name)
-                .unwrap()
-                .to_vec()
-        };
-        assert_eq!(
-            relationship(out.resolve_dict(named.value).unwrap()),
-            b"Data"
-        );
-        assert_eq!(relationship(associated), b"Source");
+        assert_eq!(&*named.spec.name(b"AFRelationship").unwrap(), b"Data");
+        assert_eq!(&*associated.name(b"AFRelationship").unwrap(), b"Source");
         assert!(named.name.ends_with(".xml"), "{}", named.name);
-        assert!(associated.file_name(&out).unwrap().ends_with(".pdf"));
-        let files = out
-            .objects
-            .values()
-            .filter(|object| {
-                object
-                    .as_stream()
-                    .is_ok_and(|s| s.dict.has_type(b"EmbeddedFile"))
-            })
-            .count();
+        assert!(associated.file_name().unwrap().ends_with(".pdf"));
+        let files = streams_counted(&out, |s| s.dict().is_type(b"EmbeddedFile"));
         assert_eq!(files, 2);
     }
 
@@ -1853,45 +1915,33 @@ mod tests {
     /// many times stays one copy per form.
     #[test]
     fn a_form_without_resources_is_copied_once_per_scope() {
-        let mut doc = Document::with_version("1.7");
-        let leaf = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
-            Content {
-                operations: show("Hello"),
-            }
-            .encode()
-            .unwrap(),
+        let mut doc = Document::new((1, 7));
+        let leaf = doc.add(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Form" },
+            encode(&show("Hello")).unwrap(),
         ));
-        let middle = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+        let middle = doc.add(Stream::new(
+            dict! { "Type" => "XObject", "Subtype" => "Form" },
             b"/A Do /B Do /A Do".to_vec(),
         ));
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
-        let content = doc.add_object(Stream::new(dictionary! {}, b"/M Do /N Do /M Do".to_vec()));
+        let content = doc.add(Stream::new(dict! {}, b"/M Do /N Do /M Do".to_vec()));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                "Resources" => dictionary! {
-                    "Font" => dictionary! { "F1" => font },
-                    "XObject" => dictionary! { "M" => middle, "N" => middle, "A" => leaf, "B" => leaf },
+                "Resources" => dict! {
+                    "Font" => dict! { "F1" => font },
+                    "XObject" => dict! { "M" => middle, "N" => middle, "A" => leaf, "B" => leaf },
                 },
             }],
         );
 
         let (out, stripped) = rebuilt(&doc);
-        let forms = out
-            .objects
-            .values()
-            .filter(|object| {
-                object
-                    .as_stream()
-                    .is_ok_and(|stream| stream.dict.is_subtype(&out, b"Form"))
-            })
-            .count();
+        let forms = streams_counted(&out, |s| s.dict().is_subtype(b"Form"));
         assert_eq!(forms, 2);
         assert_eq!(count(&stripped, HiddenContent::Undisplayed), 0);
     }
@@ -1907,42 +1957,35 @@ mod tests {
     /// it is copied per scope too.
     #[test]
     fn a_form_with_unusable_resources_is_copied_per_scope() {
-        assert_eq!(form_fonts(Some(Object::Null)), ["Helvetica", "Courier"]);
+        assert_eq!(form_fonts(Some(Value::Null)), ["Helvetica", "Courier"]);
         assert_eq!(
-            form_fonts(Some(Object::Reference((9999, 0)))),
+            form_fonts(Some(Value::Ref(Id(9999)))),
             ["Helvetica", "Courier"]
         );
     }
 
     /// The font each of two pages' copy of one shared form selects, each page
     /// naming a different font `/F1` and the form's `/Resources` `resources`.
-    fn form_fonts(resources: Option<Object>) -> Vec<String> {
-        let mut doc = Document::with_version("1.7");
-        let mut dict = dictionary! { "Type" => "XObject", "Subtype" => "Form" };
+    fn form_fonts(resources: Option<Value>) -> Vec<String> {
+        let mut doc = Document::new((1, 7));
+        let mut dict = dict! { "Type" => "XObject", "Subtype" => "Form" };
         if let Some(resources) = resources {
             dict.set("Resources", resources);
         }
-        let form = doc.add_object(Stream::new(
-            dict,
-            Content {
-                operations: show("Hello"),
-            }
-            .encode()
-            .unwrap(),
-        ));
-        let content = doc.add_object(Stream::new(dictionary! {}, b"/Fm Do".to_vec()));
+        let form = doc.add(Stream::new(dict, encode(&show("Hello")).unwrap()));
+        let content = doc.add(Stream::new(dict! {}, b"/Fm Do".to_vec()));
         let pages: Vec<Dictionary> = ["Helvetica", "Courier"]
             .into_iter()
             .map(|base| {
-                let font = doc.add_object(dictionary! {
+                let font = doc.add(dict! {
                     "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
                 });
-                dictionary! {
+                dict! {
                     "Contents" => content,
                     "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                    "Resources" => dictionary! {
-                        "Font" => dictionary! { "F1" => font },
-                        "XObject" => dictionary! { "Fm" => form },
+                    "Resources" => dict! {
+                        "Font" => dict! { "F1" => font },
+                        "XObject" => dict! { "Fm" => form },
                     },
                 }
             })
@@ -1950,42 +1993,23 @@ mod tests {
         with_pages(&mut doc, pages);
 
         let (out, _) = rebuilt(&doc);
-        out.get_pages()
-            .into_values()
+        out.pages()
+            .iter()
             .map(|page| {
-                let resources = out
-                    .resolve_dict(out.get_dictionary(page).unwrap().get(b"Resources").unwrap())
-                    .unwrap();
-                let form = out
-                    .resolve(
-                        resources
-                            .get(b"XObject")
-                            .and_then(Object::as_dict)
-                            .unwrap()
-                            .get(b"Fm")
-                            .unwrap(),
-                    )
-                    .unwrap();
-                let form_resources = form.as_stream().unwrap().dict.get(b"Resources").unwrap();
-                let font = out
-                    .resolve(
-                        out.resolve_dict(form_resources)
-                            .unwrap()
-                            .get(b"Font")
-                            .and_then(Object::as_dict)
-                            .unwrap()
-                            .get(b"F1")
-                            .unwrap(),
-                    )
-                    .unwrap();
-                String::from_utf8_lossy(
-                    font.as_dict()
-                        .unwrap()
-                        .get(b"BaseFont")
-                        .and_then(Object::as_name)
-                        .unwrap(),
-                )
-                .into_owned()
+                let base = path(
+                    &out,
+                    Value::Dict(dict_value(page)),
+                    &[
+                        b"Resources",
+                        b"XObject",
+                        b"Fm",
+                        b"Resources",
+                        b"Font",
+                        b"F1",
+                        b"BaseFont",
+                    ],
+                );
+                String::from_utf8_lossy(base.as_name().unwrap()).into_owned()
             })
             .collect()
     }
@@ -1993,55 +2017,43 @@ mod tests {
     /// The Type3 fonts in a rebuild of two pages sharing one Type3 font
     /// whose glyph draws `/Fm`, each page naming a different form `/Fm`. The
     /// font's own resources, if any, are made by `resources` from its id.
-    fn type3_copies(
-        resources: impl FnOnce(&mut Document, ObjectId) -> Option<Dictionary>,
-    ) -> usize {
-        let mut doc = Document::with_version("1.7");
-        let glyph = doc.add_object(Stream::new(dictionary! {}, b"0 0 d0 /Fm Do".to_vec()));
-        let font = doc.new_object_id();
-        let mut dict = dictionary! {
+    fn type3_copies(resources: impl FnOnce(&mut Document, Id) -> Option<Dictionary>) -> usize {
+        let mut doc = Document::new((1, 7));
+        let glyph = doc.add(Stream::new(dict! {}, b"0 0 d0 /Fm Do".to_vec()));
+        let font = doc.reserve();
+        let mut dict = dict! {
             "Type" => "Font", "Subtype" => "Type3",
             "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
             "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
-            "CharProcs" => dictionary! { "a" => glyph },
-            "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::Name(b"a".to_vec())] },
+            "CharProcs" => dict! { "a" => glyph },
+            "Encoding" => dict! { "Differences" => vec![97.into(), Value::Name(b"a".to_vec())] },
             "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
         };
         if let Some(resources) = resources(&mut doc, font) {
             dict.set("Resources", resources);
         }
-        doc.objects.insert(font, Object::Dictionary(dict));
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"BT /T3 1 Tf (a) Tj ET".to_vec(),
-        ));
+        doc.set(font, dict);
+        let content = doc.add(Stream::new(dict! {}, b"BT /T3 1 Tf (a) Tj ET".to_vec()));
         let pages: Vec<Dictionary> = [&b"0 0 1 1 re f"[..], b"0 0 2 2 re f"]
             .into_iter()
             .map(|drawing| {
-                let form = doc.add_object(Stream::new(
-                    dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+                let form = doc.add(Stream::new(
+                    dict! { "Type" => "XObject", "Subtype" => "Form" },
                     drawing.to_vec(),
                 ));
-                dictionary! {
+                dict! {
                     "Contents" => content,
                     "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                    "Resources" => dictionary! {
-                        "Font" => dictionary! { "T3" => font },
-                        "XObject" => dictionary! { "Fm" => form },
+                    "Resources" => dict! {
+                        "Font" => dict! { "T3" => font },
+                        "XObject" => dict! { "Fm" => form },
                     },
                 }
             })
             .collect();
         with_pages(&mut doc, pages);
         let (out, _) = rebuilt(&doc);
-        out.objects
-            .values()
-            .filter(|object| {
-                object
-                    .as_dict()
-                    .is_ok_and(|dict| dict.is_subtype(&out, b"Type3"))
-            })
-            .count()
+        dicts_counted(&out, |dict| dict.is_subtype(b"Type3"))
     }
 
     /// A Type3 font with no resources of its own resolves its glyphs' names
@@ -2063,13 +2075,13 @@ mod tests {
     #[test]
     fn a_type3_font_drawn_by_its_own_glyph_is_copied_once() {
         let copies = type3_copies(|doc, font| {
-            let form = doc.add_object(Stream::new(
-                dictionary! { "Type" => "XObject", "Subtype" => "Form" },
+            let form = doc.add(Stream::new(
+                dict! { "Type" => "XObject", "Subtype" => "Form" },
                 b"BT /T3 1 Tf (a) Tj ET".to_vec(),
             ));
-            Some(dictionary! {
-                "Font" => dictionary! { "T3" => font },
-                "XObject" => dictionary! { "Fm" => form },
+            Some(dict! {
+                "Font" => dict! { "T3" => font },
+                "XObject" => dict! { "Fm" => form },
             })
         });
         assert_eq!(copies, 1);
@@ -2080,78 +2092,66 @@ mod tests {
     /// resources, and each selects its own font.
     #[test]
     fn type3_glyphs_selecting_different_state_fonts_keep_them_apart() {
-        let mut doc = Document::with_version("1.7");
+        let mut doc = Document::new((1, 7));
         let state = |doc: &mut Document, base: &str| {
-            let font = doc.add_object(dictionary! {
+            let font = doc.add(dict! {
                 "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
             });
-            dictionary! { "Font" => vec![font.into(), 1.into()] }
+            dict! { "Font" => vec![font.into(), 1.into()] }
         };
         let (helvetica, courier) = (state(&mut doc, "Helvetica"), state(&mut doc, "Courier"));
         let glyph = |doc: &mut Document, gs: &str| {
-            doc.add_object(Stream::new(
-                dictionary! {},
+            doc.add(Stream::new(
+                dict! {},
                 format!("0 0 d0 /{gs} gs BT (x) Tj ET").into_bytes(),
             ))
         };
         let (a, b) = (glyph(&mut doc, "GA"), glyph(&mut doc, "GB"));
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type3",
             "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
             "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
-            "CharProcs" => dictionary! { "a" => a, "b" => b },
-            "Encoding" => dictionary! {
-                "Differences" => vec![97.into(), Object::Name(b"a".to_vec()), Object::Name(b"b".to_vec())],
+            "CharProcs" => dict! { "a" => a, "b" => b },
+            "Encoding" => dict! {
+                "Differences" => vec![97.into(), Value::Name(b"a".to_vec()), Value::Name(b"b".to_vec())],
             },
             "FirstChar" => 97, "LastChar" => 98, "Widths" => vec![1.into(), 1.into()],
-            "Resources" => dictionary! {
-                "ExtGState" => dictionary! { "GA" => helvetica, "GB" => courier },
+            "Resources" => dict! {
+                "ExtGState" => dict! { "GA" => helvetica, "GB" => courier },
             },
         });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"BT /T3 1 Tf (ab) Tj ET".to_vec(),
-        ));
+        let content = doc.add(Stream::new(dict! {}, b"BT /T3 1 Tf (ab) Tj ET".to_vec()));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                "Resources" => dictionary! { "Font" => dictionary! { "T3" => font } },
+                "Resources" => dict! { "Font" => dict! { "T3" => font } },
             }],
         );
 
         let (out, _) = rebuilt(&doc);
         check(&out).unwrap();
         let font = out
-            .objects
-            .values()
-            .filter_map(|object| object.as_dict().ok())
-            .find(|dict| dict.is_subtype(&out, b"Type3"))
+            .file()
+            .objects()
+            .into_iter()
+            .filter_map(Read::into_dict)
+            .find(|dict| dict.is_subtype(b"Type3"))
+            .map(|font| Value::Dict(dict_value(&font)))
             .unwrap();
-        let fonts = out
-            .resolve_dict(font.get(b"Resources").unwrap())
-            .and_then(|resources| resources.get(b"Font").ok())
-            .and_then(|fonts| out.resolve_dict(fonts))
-            .unwrap();
-        let procs = out.resolve_dict(font.get(b"CharProcs").unwrap()).unwrap();
+        let fonts = path(&out, font.clone(), &[b"Resources", b"Font"]);
         let selected: Vec<String> = [&b"a"[..], b"b"]
             .into_iter()
             .map(|glyph| {
-                let proc = out.resolve(procs.get(glyph).unwrap()).unwrap();
-                let content = proc.as_stream().unwrap().decompressed_content().unwrap();
-                let content = Content::decode(&content).unwrap();
-                let tf = content
-                    .operations
-                    .iter()
-                    .find(|op| op.operator == "Tf")
-                    .unwrap();
+                let Value::Stream(proc) = path(&out, font.clone(), &[b"CharProcs", glyph]) else {
+                    panic!("glyph");
+                };
+                let content = parse(&plain(&proc));
+                let tf = content.iter().find(|op| op.operator == "Tf").unwrap();
                 let name = tf.operands[0].as_name().unwrap();
-                let selected = out.resolve_dict(fonts.get(name).unwrap()).unwrap();
-                String::from_utf8_lossy(
-                    selected.get(b"BaseFont").and_then(Object::as_name).unwrap(),
-                )
-                .into_owned()
+                let base = path(&out, fonts.clone(), &[name, b"BaseFont"]);
+                String::from_utf8_lossy(base.as_name().unwrap()).into_owned()
             })
             .collect();
         assert_eq!(selected, ["Helvetica", "Courier"]);
@@ -2162,35 +2162,31 @@ mod tests {
     /// names resolved in that page's resources.
     #[test]
     fn a_state_holding_a_borrowing_form_is_copied_per_scope() {
-        let mut doc = Document::with_version("1.7");
-        let form = doc.add_object(Stream::new(
-            dictionary! {
+        let mut doc = Document::new((1, 7));
+        let form = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             },
-            Content {
-                operations: show("Hello"),
-            }
-            .encode()
-            .unwrap(),
+            encode(&show("Hello")).unwrap(),
         ));
-        let state = doc.add_object(dictionary! {
+        let state = doc.add(dict! {
             "Type" => "ExtGState",
-            "SMask" => dictionary! { "Type" => "Mask", "S" => "Luminosity", "G" => form },
+            "SMask" => dict! { "Type" => "Mask", "S" => "Luminosity", "G" => form },
         });
-        let content = doc.add_object(Stream::new(dictionary! {}, b"/S gs".to_vec()));
+        let content = doc.add(Stream::new(dict! {}, b"/S gs".to_vec()));
         let pages: Vec<Dictionary> = ["Helvetica", "Courier"]
             .into_iter()
             .map(|base| {
-                let font = doc.add_object(dictionary! {
+                let font = doc.add(dict! {
                     "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
                 });
-                dictionary! {
+                dict! {
                     "Contents" => content,
                     "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                    "Resources" => dictionary! {
-                        "Font" => dictionary! { "F1" => font },
-                        "ExtGState" => dictionary! { "S" => state },
+                    "Resources" => dict! {
+                        "Font" => dict! { "F1" => font },
+                        "ExtGState" => dict! { "S" => state },
                     },
                 }
             })
@@ -2199,30 +2195,25 @@ mod tests {
 
         let (out, _) = rebuilt(&doc);
         let fonts: Vec<String> = out
-            .get_pages()
-            .into_values()
+            .pages()
+            .iter()
             .map(|page| {
-                let resources = out
-                    .resolve_dict(out.get_dictionary(page).unwrap().get(b"Resources").unwrap())
-                    .unwrap();
-                let state = resources
-                    .get(b"ExtGState")
-                    .and_then(Object::as_dict)
-                    .unwrap()
-                    .get(b"S")
-                    .unwrap();
-                let mask = out
-                    .resolve_dict(out.resolve_dict(state).unwrap().get(b"SMask").unwrap())
-                    .unwrap();
-                let form = out.resolve(mask.get(b"G").unwrap()).unwrap();
-                let font = out
-                    .resolve_dict(form.as_stream().unwrap().dict.get(b"Resources").unwrap())
-                    .and_then(|resources| resources.get(b"Font").ok())
-                    .and_then(|fonts| out.resolve_dict(fonts))
-                    .and_then(|fonts| out.resolve_dict(fonts.get(b"F1").unwrap()))
-                    .unwrap();
-                String::from_utf8_lossy(font.get(b"BaseFont").and_then(Object::as_name).unwrap())
-                    .into_owned()
+                let base = path(
+                    &out,
+                    Value::Dict(dict_value(page)),
+                    &[
+                        b"Resources",
+                        b"ExtGState",
+                        b"S",
+                        b"SMask",
+                        b"G",
+                        b"Resources",
+                        b"Font",
+                        b"F1",
+                        b"BaseFont",
+                    ],
+                );
+                String::from_utf8_lossy(base.as_name().unwrap()).into_owned()
             })
             .collect();
         assert_eq!(fonts, ["Helvetica", "Courier"]);
@@ -2234,21 +2225,17 @@ mod tests {
     #[test]
     fn form_fields_are_flattened_into_the_page() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let font = doc.add_object(dictionary! {
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
         });
         let appearance = |doc: &mut Document, text: &str| {
-            doc.add_object(Stream::new(
-                dictionary! {
+            doc.add(Stream::new(
+                dict! {
                     "Type" => "XObject", "Subtype" => "Form",
                     "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                    "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                    "Resources" => dict! { "Font" => dict! { "F1" => font } },
                 },
-                Content {
-                    operations: show(text),
-                }
-                .encode()
-                .unwrap(),
+                encode(&show(text)).unwrap(),
             ))
         };
         let answer = appearance(&mut doc, "Jane Roe");
@@ -2257,25 +2244,25 @@ mod tests {
         let off = appearance(&mut doc, "Off");
         let rect = || vec![50.into(), 100.into(), 150.into(), 120.into()];
         let widgets = vec![
-            Object::Dictionary(dictionary! {
-                "Subtype" => "Widget", "FT" => "Tx", "V" => Object::string_literal("Jane Roe"),
-                "Rect" => rect(), "AP" => dictionary! { "N" => answer },
+            Value::Dict(dict! {
+                "Subtype" => "Widget", "FT" => "Tx", "V" => Value::string("Jane Roe"),
+                "Rect" => rect(), "AP" => dict! { "N" => answer },
             }),
-            Object::Dictionary(dictionary! {
+            Value::Dict(dict! {
                 "Subtype" => "Widget", "F" => 2, "Rect" => rect(),
-                "AP" => dictionary! { "N" => hidden },
+                "AP" => dict! { "N" => hidden },
             }),
-            Object::Dictionary(dictionary! {
+            Value::Dict(dict! {
                 "Subtype" => "Widget", "FT" => "Btn", "AS" => "Yes", "Rect" => rect(),
-                "AP" => dictionary! { "N" => dictionary! { "Yes" => yes, "Off" => off } },
+                "AP" => dict! { "N" => dict! { "Yes" => yes, "Off" => off } },
             }),
         ];
-        doc.get_dictionary_mut(page).unwrap().set("Annots", widgets);
+        dict_mut(&mut doc, page).set("Annots", widgets);
 
         let (rebuilt, stripped) = saved(&doc);
         assert_eq!(count(&stripped, HiddenContent::FormField), 1);
-        let out = Document::load_mem(&rebuilt).unwrap();
-        assert!(page_dict(&out).get(b"Annots").is_err());
+        let out = Pdf::open(&rebuilt).unwrap();
+        assert!(!page_dict(&out).has(b"Annots"));
         check(&out).unwrap();
 
         let pdf = Pdf::open(&rebuilt).unwrap();
@@ -2286,8 +2273,7 @@ mod tests {
 
         let start = text[..text.find("Jane Roe").unwrap()].chars().count();
         let redacted = deleted(&pdf, &blocks, &[Detection::new(1, start, start + 8)]);
-        let redacted = redacted.doc();
-        assert!(!text_of(redacted).contains("Jane Roe"));
+        assert!(!text_of(&redacted).contains("Jane Roe"));
     }
 
     /// An appearance without resources of its own resolves names in the
@@ -2305,64 +2291,44 @@ mod tests {
     fn widget_font(null_on_page: bool) -> Vec<u8> {
         let (mut doc, page) = document(Vec::new(), Dictionary::new(), Dictionary::new());
         if null_on_page {
-            doc.get_dictionary_mut(page)
-                .unwrap()
+            dict_mut(&mut doc, page)
                 .get_mut(b"Resources")
-                .and_then(Object::as_dict_mut)
+                .and_then(Value::as_dict_mut)
                 .unwrap()
-                .set("Font", dictionary! { "F1" => Object::Null });
+                .set("Font", dict! { "F1" => Value::Null });
         }
-        let courier = doc.add_object(dictionary! {
+        let courier = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
         });
-        let appearance = doc.add_object(Stream::new(
-            dictionary! {
+        let appearance = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
-            Content {
-                operations: show("Jane"),
-            }
-            .encode()
-            .unwrap(),
+            encode(&show("Jane")).unwrap(),
         ));
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget", "FT" => "Tx",
                 "Rect" => vec![50.into(), 100.into(), 150.into(), 120.into()],
-                "AP" => dictionary! { "N" => appearance },
+                "AP" => dict! { "N" => appearance },
             })],
         );
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "AcroForm",
-            dictionary! { "DR" => dictionary! { "Font" => dictionary! { "F1" => courier } } },
+            dict! { "DR" => dict! { "Font" => dict! { "F1" => courier } } },
         );
         let (out, _) = rebuilt(&doc);
-        let xobjects = resources_of(&out)
-            .get(b"XObject")
-            .and_then(Object::as_dict)
-            .unwrap();
+        let resources = resources_of(&out);
+        let xobjects = resources.get(b"XObject").and_then(Value::as_dict).unwrap();
         let (_, form) = xobjects.iter().next().unwrap();
-        let form = out
-            .get_object(form.as_reference().unwrap())
-            .unwrap()
-            .as_stream()
-            .unwrap();
-        let fonts = form
-            .dict
-            .get(b"Resources")
-            .and_then(Object::as_dict)
-            .and_then(|resources| resources.get(b"Font"))
-            .and_then(Object::as_dict)
-            .unwrap();
-        let font = out
-            .get_dictionary(fonts.get(b"F1").unwrap().as_reference().unwrap())
-            .unwrap();
-        font.get(b"BaseFont")
-            .and_then(Object::as_name)
-            .unwrap()
-            .to_vec()
+        let base = path(
+            &out,
+            form.clone(),
+            &[b"Resources", b"Font", b"F1", b"BaseFont"],
+        );
+        base.as_name().unwrap().to_vec()
     }
 
     /// A translucent widget is composited as its annotation would be: as a
@@ -2370,32 +2336,32 @@ mod tests {
     #[test]
     fn a_widget_keeps_its_blend_mode_and_opacity() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
+        let answer = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             b"0 0 10 10 re f".to_vec(),
         ));
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget", "BM" => "Multiply", "CA" => 0.5,
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })],
         );
         let (out, _) = rebuilt(&doc);
-        let Object::Dictionary(state) = resource(&out, b"ExtGState", b"AnnotGS1") else {
+        let Value::Dict(state) = resource(&out, b"ExtGState", b"AnnotGS1") else {
             panic!("graphics state");
         };
         assert_eq!(state.get(b"BM").unwrap().as_name().unwrap(), b"Multiply");
-        assert_eq!(state.get(b"CA").unwrap().as_float().unwrap(), 0.5);
-        assert_eq!(state.get(b"ca").unwrap().as_float().unwrap(), 0.5);
-        let Object::Stream(form) = resource(&out, b"XObject", b"Annot1") else {
+        assert_eq!(state.get(b"CA").unwrap().as_number().unwrap(), 0.5);
+        assert_eq!(state.get(b"ca").unwrap().as_number().unwrap(), 0.5);
+        let Value::Stream(form) = resource(&out, b"XObject", b"Annot1") else {
             panic!("form");
         };
-        assert!(form.dict.get(b"Group").is_ok());
+        assert!(form.dict.has(b"Group"));
         check(&out).unwrap();
     }
 
@@ -2408,35 +2374,35 @@ mod tests {
             Dictionary::new(),
             Dictionary::new(),
         );
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
-                "Type" => "XObject", "Subtype" => "Form", "Resources" => dictionary! {},
+        let answer = doc.add(Stream::new(
+            dict! {
+                "Type" => "XObject", "Subtype" => "Form", "Resources" => dict! {},
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             b"0 0 10 10 re f".to_vec(),
         ));
-        let dict = doc.get_dictionary_mut(page).unwrap();
+        let dict = dict_mut(&mut doc, page);
         dict.get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("XObject", dictionary! { "Fm" => answer });
+            .set("XObject", dict! { "Fm" => answer });
         dict.set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget", "CA" => 0.5,
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })],
         );
         let (out, _) = rebuilt(&doc);
-        let Object::Stream(drawn) = resource(&out, b"XObject", b"Fm") else {
+        let Value::Stream(drawn) = resource(&out, b"XObject", b"Fm") else {
             panic!("form");
         };
-        assert!(drawn.dict.get(b"Group").is_err());
-        let Object::Stream(shown) = resource(&out, b"XObject", b"Annot1") else {
+        assert!(!drawn.dict.has(b"Group"));
+        let Value::Stream(shown) = resource(&out, b"XObject", b"Annot1") else {
             panic!("form");
         };
-        assert!(shown.dict.get(b"Group").is_ok());
+        assert!(shown.dict.has(b"Group"));
         check(&out).unwrap();
     }
 
@@ -2445,35 +2411,31 @@ mod tests {
     #[test]
     fn an_appearance_falls_back_to_the_page_resources() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
+        let answer = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
-            Content {
-                operations: show("Jane Roe"),
-            }
-            .encode()
-            .unwrap(),
+            encode(&show("Jane Roe")).unwrap(),
         ));
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget",
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })],
         );
         let (out, _) = rebuilt(&doc);
-        let Object::Stream(form) = resource(&out, b"XObject", b"Annot1") else {
+        let Value::Stream(form) = resource(&out, b"XObject", b"Annot1") else {
             panic!("form");
         };
-        let fonts = out
-            .resolve_dict(form.dict.get(b"Resources").unwrap())
-            .and_then(|resources| resources.get(b"Font").ok())
-            .and_then(|fonts| out.resolve_dict(fonts))
-            .unwrap();
-        assert!(fonts.get(b"F1").is_ok());
+        let fonts = path(
+            &out,
+            Value::Dict(form.dict.clone()),
+            &[b"Resources", b"Font"],
+        );
+        assert!(fonts.as_dict().unwrap().has(b"F1"));
         check(&out).unwrap();
     }
 
@@ -2483,24 +2445,24 @@ mod tests {
     #[test]
     fn text_in_a_font_found_nowhere_is_cut_and_reported() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
+        let answer = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             b"BT /F9 12 Tf 0 0 Td (Jane Roe) Tj (Doe) ' ET".to_vec(),
         ));
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget",
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })],
         );
         let (bytes, stripped) = saved(&doc);
         assert!(count(&stripped, HiddenContent::Unreadable) >= 1);
-        let out = Document::load_mem(&bytes).unwrap();
+        let out = Pdf::open(&bytes).unwrap();
         assert!(!text_of(&out).contains("Jane Roe"));
         let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
         assert_eq!(blocks[0].text.trim(), "Name:");
@@ -2510,32 +2472,31 @@ mod tests {
     #[test]
     fn widgets_share_a_grouped_form() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
+        let answer = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             b"0 0 10 10 re f".to_vec(),
         ));
         let widget = || {
-            Object::Dictionary(dictionary! {
+            Value::Dict(dict! {
                 "Subtype" => "Widget", "CA" => 0.5,
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })
         };
-        doc.get_dictionary_mut(page)
-            .unwrap()
-            .set("Annots", vec![widget(), widget()]);
+        dict_mut(&mut doc, page).set("Annots", vec![widget(), widget()]);
         let (out, _) = rebuilt(&doc);
-        let shown = |name: &[u8]| match resources_of(&out)
+        let resources = resources_of(&out);
+        let shown = |name: &[u8]| match resources
             .get(b"XObject")
-            .and_then(Object::as_dict)
+            .and_then(Value::as_dict)
             .unwrap()
             .get(name)
             .unwrap()
         {
-            Object::Reference(id) => *id,
+            Value::Ref(id) => *id,
             _ => panic!("form"),
         };
         assert_eq!(shown(b"Annot1"), shown(b"Annot2"));
@@ -2545,28 +2506,28 @@ mod tests {
     #[test]
     fn a_widget_in_a_hidden_layer_stays_hidden() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
+        let layer = doc.add(dict! { "Type" => "OCG" });
+        let answer = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             b"0 0 10 10 re f".to_vec(),
         ));
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget", "OC" => layer,
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })],
         );
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, stripped) = rebuilt(&doc);
-        assert!(resources_of(&out).get(b"XObject").is_err());
+        assert!(!resources_of(&out).has(b"XObject"));
         assert_eq!(count(&stripped, HiddenContent::FormField), 0);
         assert!(count(&stripped, HiddenContent::Layer) >= 1);
     }
@@ -2576,28 +2537,28 @@ mod tests {
     #[test]
     fn an_appearance_in_a_hidden_layer_stays_hidden() {
         let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
-        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
-        let answer = doc.add_object(Stream::new(
-            dictionary! {
+        let layer = doc.add(dict! { "Type" => "OCG" });
+        let answer = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form", "OC" => layer,
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             b"0 0 10 10 re f".to_vec(),
         ));
-        doc.get_dictionary_mut(page).unwrap().set(
+        dict_mut(&mut doc, page).set(
             "Annots",
-            vec![Object::Dictionary(dictionary! {
+            vec![Value::Dict(dict! {
                 "Subtype" => "Widget",
                 "Rect" => vec![0.into(), 0.into(), 100.into(), 20.into()],
-                "AP" => dictionary! { "N" => answer },
+                "AP" => dict! { "N" => answer },
             })],
         );
-        doc.catalog_mut().unwrap().set(
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, stripped) = rebuilt(&doc);
-        assert!(resources_of(&out).get(b"XObject").is_err());
+        assert!(!resources_of(&out).has(b"XObject"));
         assert!(count(&stripped, HiddenContent::Layer) >= 1);
         assert_eq!(count(&stripped, HiddenContent::FormField), 0);
         check(&out).unwrap();
@@ -2612,30 +2573,29 @@ mod tests {
             Dictionary::new(),
             Dictionary::new(),
         );
-        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
-        let form = doc.add_object(Stream::new(
-            dictionary! {
+        let layer = doc.add(dict! { "Type" => "OCG" });
+        let form = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-                "OC" => dictionary! {
+                "OC" => dict! {
                     "Type" => "OCMD",
-                    "OCGs" => vec![layer.into(), Object::Null, Object::Reference((9999, 0))],
+                    "OCGs" => vec![layer.into(), Value::Null, Value::Ref(Id(9999))],
                 },
             },
             b"0 0 10 10 re f".to_vec(),
         ));
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("XObject", dictionary! { "Fm" => form });
-        doc.catalog_mut().unwrap().set(
+            .set("XObject", dict! { "Fm" => form });
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, _) = rebuilt(&doc);
-        assert!(resources_of(&out).get(b"XObject").is_err());
+        assert!(!resources_of(&out).has(b"XObject"));
     }
 
     /// A page with no box anywhere is written with US Letter's, which a
@@ -2643,13 +2603,12 @@ mod tests {
     #[test]
     fn a_page_without_a_box_gets_letter() {
         let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
-        doc.get_dictionary_mut(page).unwrap().remove(b"MediaBox");
+        dict_mut(&mut doc, page).remove(b"MediaBox");
         let (out, _) = rebuilt(&doc);
-        let media = page_dict(&out)
-            .get(b"MediaBox")
-            .and_then(Object::as_array)
-            .unwrap();
-        let values: Vec<f32> = media.iter().map(|v| v.as_float().unwrap()).collect();
+        let Some(Value::Array(media)) = page_dict(&out).get(b"MediaBox").cloned() else {
+            panic!("media box");
+        };
+        let values: Vec<f64> = media.iter().map(|v| v.as_number().unwrap()).collect();
         assert_eq!(values, [0.0, 0.0, 612.0, 792.0]);
     }
 
@@ -2662,14 +2621,11 @@ mod tests {
             Operation::new("BT", vec![]),
             Operation::new("BMC", vec!["Span".into()]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal("Hello")]),
+            Operation::new("Tj", vec![Value::string("Hello")]),
         ];
         let (doc, _) = document(ops, Dictionary::new(), Dictionary::new());
         let (out, _) = rebuilt(&doc);
-        let page = out.get_pages().into_values().next().unwrap();
-        let operators: Vec<String> = Content::decode(&out.get_page_content(page))
-            .unwrap()
-            .operations
+        let operators: Vec<String> = page_operations(&out)
             .into_iter()
             .map(|op| op.operator)
             .collect();
@@ -2688,23 +2644,19 @@ mod tests {
             Operation::new("re", vec![0.into(), 0.into(), 1.into(), 1.into()]),
         ];
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
-        let page = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        let layer = doc.add(dict! { "Type" => "OCG" });
+        let page = first_page(&doc);
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("Properties", dictionary! { "L" => layer });
-        doc.catalog_mut().unwrap().set(
+            .set("Properties", dict! { "L" => layer });
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, _) = rebuilt(&doc);
-        let page = out.get_pages().into_values().next().unwrap();
-        let operators: Vec<String> = Content::decode(&out.get_page_content(page))
-            .unwrap()
-            .operations
+        let operators: Vec<String> = page_operations(&out)
             .into_iter()
             .map(|op| op.operator)
             .collect();
@@ -2718,24 +2670,20 @@ mod tests {
     /// hidden by default, rebuilt; its content's operators and text.
     fn hidden_layer_rebuild(ops: Vec<Operation>) -> (Vec<String>, String) {
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
-        let page = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        let layer = doc.add(dict! { "Type" => "OCG" });
+        let page = first_page(&doc);
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("Properties", dictionary! { "L" => layer });
-        doc.catalog_mut().unwrap().set(
+            .set("Properties", dict! { "L" => layer });
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, _) = rebuilt(&doc);
         check(&out).unwrap();
-        let page = out.get_pages().into_values().next().unwrap();
-        let operators = Content::decode(&out.get_page_content(page))
-            .unwrap()
-            .operations
+        let operators = page_operations(&out)
             .into_iter()
             .map(|op| op.operator)
             .collect();
@@ -2751,11 +2699,7 @@ mod tests {
             Operation::new("BDC", vec!["OC".into(), "L".into()]),
             Operation::new(
                 "\"",
-                vec![
-                    Object::string_literal("Jane Roe"),
-                    0.into(),
-                    Object::string_literal("x"),
-                ],
+                vec![Value::string("Jane Roe"), 0.into(), Value::string("x")],
             ),
             Operation::new("EMC", vec![]),
             Operation::new("ET", vec![]),
@@ -2807,23 +2751,19 @@ mod tests {
         ));
         ops.push(Operation::new("f", vec![]));
         let (mut doc, _) = document(ops, Dictionary::new(), Dictionary::new());
-        let layer = doc.add_object(dictionary! { "Type" => "OCG" });
-        let page = doc.get_pages().into_values().next().unwrap();
-        doc.get_dictionary_mut(page)
-            .unwrap()
+        let layer = doc.add(dict! { "Type" => "OCG" });
+        let page = first_page(&doc);
+        dict_mut(&mut doc, page)
             .get_mut(b"Resources")
-            .and_then(Object::as_dict_mut)
+            .and_then(Value::as_dict_mut)
             .unwrap()
-            .set("Properties", dictionary! { "L" => layer });
-        doc.catalog_mut().unwrap().set(
+            .set("Properties", dict! { "L" => layer });
+        catalog(&mut doc).set(
             "OCProperties",
-            dictionary! { "OCGs" => vec![layer.into()], "D" => dictionary! { "OFF" => vec![layer.into()] } },
+            dict! { "OCGs" => vec![layer.into()], "D" => dict! { "OFF" => vec![layer.into()] } },
         );
         let (out, _) = rebuilt(&doc);
-        let page = out.get_pages().into_values().next().unwrap();
-        let operators: Vec<String> = Content::decode(&out.get_page_content(page))
-            .unwrap()
-            .operations
+        let operators: Vec<String> = page_operations(&out)
             .into_iter()
             .map(|op| op.operator)
             .collect();
@@ -2836,26 +2776,23 @@ mod tests {
     }
 
     /// A one-page document whose page shows `text`, and its content id.
-    fn showing(text: &str) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
+    fn showing(text: &str) -> (Document, Id) {
+        let mut doc = Document::new((1, 5));
+        let font = doc.add(dict! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
         });
         let operations = vec![
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal(text)]),
+            Operation::new("Tj", vec![Value::string(text)]),
             Operation::new("ET", vec![]),
         ];
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content { operations }.encode().unwrap(),
-        ));
+        let content = doc.add(Stream::new(dict! {}, encode(&operations).unwrap()));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                "Resources" => dict! { "Font" => dict! { "F1" => font } },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
@@ -2870,21 +2807,41 @@ mod tests {
     /// the object graph; the rebuilt document never carries it.
     #[test]
     fn a_superseded_revision_never_ships() {
-        let (mut doc, content) = showing("Jane Roe");
-        let mut first = Vec::new();
-        doc.save_to(&mut first).unwrap();
-
-        let mut update =
-            IncrementalDocument::create_from(first.clone(), Document::load_mem(&first).unwrap());
-        update.opt_clone_object_to_new_document(content).unwrap();
-        let stream = update
-            .new_document
-            .get_object_mut(content)
-            .and_then(Object::as_stream_mut)
+        let (doc, content) = showing("Jane Roe");
+        let first = save(&doc).to_vec();
+        // The update writes the content object anew after the first
+        // revision, with a cross-reference section and trailer of its own
+        // that point back at the first (7.5.6).
+        let previous = String::from_utf8_lossy(&first)
+            .rsplit("startxref")
+            .next()
+            .and_then(|tail| tail.split_whitespace().next()?.parse::<usize>().ok())
             .unwrap();
-        stream.set_plain_content(b"BT /F1 12 Tf (public) Tj ET".to_vec());
-        let mut updated = Vec::new();
-        update.save_to(&mut updated).unwrap();
+        let root = doc.root().unwrap();
+        let size = doc.objects().map(|(id, _)| id.0).max().unwrap() + 1;
+        let data = b"BT /F1 12 Tf (public) Tj ET";
+        let mut updated = first.clone();
+        let offset = updated.len();
+        updated.extend(
+            format!(
+                "{} 0 obj\n<< /Length {} >>\nstream\n",
+                content.0,
+                data.len()
+            )
+            .as_bytes(),
+        );
+        updated.extend(data);
+        updated.extend(b"\nendstream\nendobj\n");
+        let xref = updated.len();
+        updated.extend(
+            format!(
+                "xref\n0 1\n0000000000 65535 f \n{} 1\n{offset:010} 00000 n \n\
+                 trailer\n<< /Size {size} /Root {} 0 R /Prev {previous} >>\n\
+                 startxref\n{xref}\n%%EOF\n",
+                content.0, root.0
+            )
+            .as_bytes(),
+        );
         assert!(
             contains(&updated, b"Jane Roe"),
             "the fixture keeps the old revision"
@@ -2892,6 +2849,6 @@ mod tests {
 
         let rebuilt = Pdf::open(&updated).unwrap().read(Rebuild).unwrap().pdf;
         assert!(!contains(&rebuilt.bytes(), b"Jane Roe"));
-        assert!(contains(&rebuilt.bytes(), b"public"));
+        assert!(text_of(&rebuilt).contains("public"));
     }
 }

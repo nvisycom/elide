@@ -183,16 +183,19 @@ mod tests {
     use elide_core::redaction::Redactions;
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
+    use hayro_syntax::object::Object;
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage, load_from_memory};
-    use lopdf::{Document as PdfDocument, Stream, dictionary};
 
     use super::PdfDocumentLoader;
     use crate::codec::blob_id::BlobId;
     use crate::codec::page::PageStream;
     use crate::codec::state::{Pages, PdfState};
     use crate::content::image::Images;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{save, with_pages};
     use crate::pdf::Pdf;
+    use crate::pdf::object::{Stream, dict};
+    use crate::pdf::reader::StreamExt;
+    use crate::pdf::writer::Document as PdfDocument;
     use crate::sanitize::Rebuild;
 
     /// A solid-colour PNG of `w`x`h`.
@@ -208,18 +211,16 @@ mod tests {
     /// A one-page textless 100x100pt PDF whose content stream carries a marker,
     /// to tell whether the original page content survives a reflatten.
     fn scanned_doc() -> Bytes {
-        let mut doc = PdfDocument::with_version("1.5");
-        let content = doc.add_object(Stream::new(dictionary! {}, MARKER.to_vec()));
+        let mut doc = PdfDocument::new((1, 5));
+        let content = doc.add(Stream::new(dict! {}, MARKER.to_vec()));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
-        let mut out = Vec::new();
-        doc.save_to(&mut out).unwrap();
-        Bytes::from(out)
+        save(&doc)
     }
 
     /// The glyph-deletion document of `document`, page 1 scanned with the
@@ -236,14 +237,15 @@ mod tests {
 
     /// Whether any stream of the PDF `bytes` still holds [`MARKER`]'s drawing.
     fn holds_marker(bytes: &[u8]) -> bool {
-        let doc = PdfDocument::load_mem(bytes).unwrap();
-        doc.objects
-            .values()
-            .filter_map(|o| o.as_stream().ok())
+        let pdf = Pdf::open(bytes).unwrap();
+        pdf.file()
+            .objects()
+            .into_iter()
+            .filter_map(Object::into_stream)
             .any(|stream| {
                 let content = stream
-                    .decompressed_content()
-                    .unwrap_or(stream.content.clone());
+                    .plain()
+                    .unwrap_or_else(|_| stream.raw_data().into_owned());
                 String::from_utf8_lossy(&content).contains("0.271828")
             })
     }
@@ -287,18 +289,11 @@ mod tests {
             !holds_marker(&out),
             "original scanned page content survived reflatten"
         );
-        let reopened = PdfDocument::load_mem(&out).unwrap();
-        let page = *reopened.get_pages().get(&1).unwrap();
-        let media_box: Vec<f32> = reopened
-            .get_dictionary(page)
+        let reopened = Pdf::open(&out).unwrap();
+        let media_box: Vec<f32> = reopened.pages()[0]
+            .get::<[f32; 4]>(b"MediaBox")
             .unwrap()
-            .get(b"MediaBox")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|n| n.as_float().unwrap())
-            .collect();
+            .to_vec();
         assert_eq!(media_box, [0.0, 0.0, 100.0, 100.0]);
     }
 
@@ -372,29 +367,27 @@ mod tests {
     /// A scanned page drawing one 2x2 gray image over the whole page, and its
     /// image surfaced as the pipeline reads it.
     fn scanned_with_image() -> (Bytes, Blob) {
-        let mut doc = PdfDocument::with_version("1.5");
-        let image = doc.add_object(Stream::new(
-            dictionary! {
+        let mut doc = PdfDocument::new((1, 5));
+        let image = doc.add(Stream::new(
+            dict! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 2, "Height" => 2,
                 "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
             },
             vec![200; 4],
         ));
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
+        let content = doc.add(Stream::new(
+            dict! {},
             b"q 100 0 0 100 0 0 cm /Im1 Do Q".to_vec(),
         ));
         with_pages(
             &mut doc,
-            [dictionary! {
+            [dict! {
                 "Contents" => content,
-                "Resources" => dictionary! { "XObject" => dictionary! { "Im1" => image } },
+                "Resources" => dict! { "XObject" => dict! { "Im1" => image } },
                 "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
             }],
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
-        let bytes = Bytes::from(bytes);
+        let bytes = save(&doc);
         // Surfaced from the rebuild the loader reads, whose ids it uses.
         let surfaced = Pdf::open(&bytes)
             .unwrap()

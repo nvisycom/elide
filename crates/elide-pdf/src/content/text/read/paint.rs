@@ -4,11 +4,11 @@
 //! so the region each pattern paints, where its cell's text shows, is known
 //! (8.7.3.1).
 
-use lopdf::content::Operation;
-use lopdf::{Dictionary, Document, ObjectId};
+use hayro_syntax::object::Dict;
 
 use super::stream::operand_f64;
-use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix};
+use crate::pdf::content::Operation;
+use crate::pdf::reader::{DeviceRect, DictExt, Matrix, ObjectId};
 
 /// The tiling pattern a fill or stroke paints with, and the space of the
 /// stream that selected it, which its `/Matrix` lays its tiles out in.
@@ -154,7 +154,7 @@ impl Painting {
                 return Some(Vec::new());
             }
             "Tr" => {
-                self.render = u8::try_from(operation.operands.first()?.as_i64().ok()?).ok()?;
+                self.render = u8::try_from(operation.operands.first()?.as_int()?).ok()?;
                 return Some(Vec::new());
             }
             "n" => (false, false),
@@ -258,8 +258,8 @@ impl Painting {
 
     /// Take the line style the graphics state `state` sets (`/LW`, `/ML`,
     /// `/LJ`, `/LC`), and its opacities (`/ca`, `/CA`).
-    pub(super) fn state(&mut self, doc: &Document, state: &Dictionary) {
-        let number = |key: &[u8]| doc.resolve_number(state.get(key).ok()?);
+    pub(super) fn state(&mut self, state: &Dict<'_>) {
+        let number = |key: &[u8]| state.number(key);
         if let Some(width) = number(b"LW") {
             self.line.width = width.abs();
         }
