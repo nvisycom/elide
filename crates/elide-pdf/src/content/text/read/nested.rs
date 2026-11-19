@@ -28,6 +28,10 @@ pub(super) const MAX_TILED_GLYPHS: usize = 1 << 20;
 /// twice are merged, so regions painted over and over cost their work.
 const MAX_TILE_CANDIDATES: f64 = (1u64 << 22) as f64;
 
+/// The most comparisons of a placed glyph box with the regions covering its
+/// tile a page's tiling patterns make, together.
+const MAX_COVERAGE_CHECKS: usize = 1 << 24;
+
 /// A tiling pattern selected to paint with, to be walked once the page's own
 /// text is: the pattern, and the nesting depth left where it was first
 /// selected.
@@ -335,7 +339,8 @@ impl<'d> Walk<'_, 'd> {
     ///
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the page's patterns would place more than [`MAX_TILED_GLYPHS`] glyph
-    /// boxes, or as [`placements`](Self::placements).
+    /// boxes, or compare them with more than [`MAX_COVERAGE_CHECKS`] regions,
+    /// or as [`placements`](Self::placements).
     pub(super) fn place_tiles(&mut self) -> Result<()> {
         // Only a pattern with text is placed, and those that paint it; one
         // drawing graphics alone needs no tiles.
@@ -350,15 +355,18 @@ impl<'d> Walk<'_, 'd> {
             self.placements(id, &mut placed, 0)?;
         }
         let mut boxes = 0usize;
+        let mut checks = 0usize;
         for id in ids {
             let Some(cell) = self.cells.get(&id) else {
                 continue;
             };
             let tiles = placed.done.get(&id).map(Vec::as_slice).unwrap_or_default();
             boxes = boxes.saturating_add(tiles.len().saturating_mul(cell.glyphs.len()));
-            if boxes > MAX_TILED_GLYPHS {
+            let regions: usize = tiles.iter().map(|tile| tile.coverage.len()).sum();
+            checks = checks.saturating_add(regions.saturating_mul(cell.glyphs.len()));
+            if boxes > MAX_TILED_GLYPHS || checks > MAX_COVERAGE_CHECKS {
                 return Err(Error::resource_limit(format!(
-                    "page {} tiles its patterns' text into more than {MAX_TILED_GLYPHS} glyph boxes",
+                    "page {} tiles its patterns' text into more glyph boxes than are placed",
                     self.page
                 )));
             }
@@ -427,7 +435,9 @@ impl<'d> Walk<'_, 'd> {
                     .get(&outer)
                     .map(Vec::as_slice)
                     .unwrap_or_default();
-                placed.candidates += outer_tiles.len() as f64;
+                // Each region an outer tile shows is a region of its own.
+                let regions: usize = outer_tiles.iter().map(|tile| tile.coverage.len()).sum();
+                placed.candidates += regions as f64;
                 if placed.candidates > MAX_TILE_CANDIDATES {
                     return Err(over("on more tiles than are counted"));
                 }
