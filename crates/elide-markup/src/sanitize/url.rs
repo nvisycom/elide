@@ -21,24 +21,31 @@ pub(super) fn loads_remote(value: &str, key: &str) -> bool {
         let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
         decoded
             .split(|c: char| c == ',' || c.is_ascii_whitespace())
-            .any(|word| {
-                REMOTE_SCHEMES
-                    .iter()
-                    .any(|scheme| scheme_of(word).starts_with(scheme))
-            })
+            .any(reaches_server)
     } else {
         is_remote(value)
     }
 }
 
-/// Whether the URL `value` reaches a server.
+/// Whether the URL attribute `value` reaches a server.
 pub(super) fn is_remote(value: &str) -> bool {
-    let url = normalized_url(value);
+    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
+    reaches_server(&decoded)
+}
+
+/// Whether the URL `decoded`, its character references already decoded,
+/// reaches a server.
+fn reaches_server(decoded: &str) -> bool {
+    let url = scheme_of(decoded);
     REMOTE_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
 }
 
 /// Whether the CSS `css` loads anything from a server, through a `url(...)` or
 /// an `@import`.
+///
+/// `css` is the text CSS reads: the caller decodes the character references
+/// of a style attribute or a foreign style sheet, and leaves those of an HTML
+/// `<style>`, which a browser reads as written.
 pub(super) fn css_loads_remote(css: &str) -> bool {
     let css = css.to_ascii_lowercase();
     let urls = css.split("url(").skip(1).map(|rest| {
@@ -51,7 +58,7 @@ pub(super) fn css_loads_remote(css: &str) -> bool {
         .split("@import")
         .skip(1)
         .map(|rest| rest.trim_start().trim_start_matches(['"', '\'']));
-    urls.chain(imports).any(is_remote)
+    urls.chain(imports).any(reaches_server)
 }
 
 /// A URL attribute's `value` as a browser reads its scheme: character

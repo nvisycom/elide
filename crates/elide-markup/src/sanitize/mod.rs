@@ -525,6 +525,15 @@ impl<'a> Rebuild<'a> {
         let left = html::breaks_out(self.space(), &name, &tag.attributes) && self.leave_foreign();
         let space = self.space();
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
+        // A `/` before the `>` is the self-closing flag unless an unquoted
+        // value read it as its own.
+        let slash = span.end.saturating_sub(2);
+        let self_closing = !is_start
+            && !tag.attributes.last().is_some_and(|attr| {
+                self.raw
+                    .substr_range(attr.source)
+                    .is_some_and(|range| range.end > slash)
+            });
         // Whether the element holds what follows: a browser ignores the
         // self-closing flag on a non-void HTML element, but not on the root of
         // SVG or MathML, kept or not.
@@ -533,7 +542,7 @@ impl<'a> Rebuild<'a> {
             Element::Keep | Element::Drop(_) if space == Space::Html && !foreign_root => {
                 !VOID_ELEMENTS.contains(&name.as_str())
             }
-            _ => is_start,
+            _ => !self_closing,
         };
         if let Element::Drop(content) = element {
             self.record(content);
@@ -548,15 +557,6 @@ impl<'a> Rebuild<'a> {
             return Ok(());
         };
 
-        // A `/` before the `>` is the self-closing flag unless an unquoted
-        // value read it as its own.
-        let slash = span.end.saturating_sub(2);
-        let self_closing = !is_start
-            && !tag.attributes.last().is_some_and(|attr| {
-                self.raw
-                    .substr_range(attr.source)
-                    .is_some_and(|range| range.end > slash)
-            });
         // The root of SVG or MathML carries that vocabulary's attributes.
         let attributes_space = match element {
             Element::Enter(entered) => entered,

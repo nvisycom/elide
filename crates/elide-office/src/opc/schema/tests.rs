@@ -196,6 +196,12 @@ fn a_graphic_keeps_the_payload_its_uri_names() {
     );
     assert_eq!(removed, [(HiddenContent::ApplicationData, 2)]);
 
+    // A reference in the `uri` names the same payload.
+    let uri = "http://schemas.openxmlformats.org/drawingml/2006/pictur&#101;";
+    let (text, removed) = rebuilt(&frame(uri, &format!("{picture}{table}")), sld);
+    assert_eq!(text, frame(uri, picture));
+    assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
+
     let raw = frame("http://purl.oclc.org/ooxml/drawingml/table", table);
     assert!(rebuild(&raw, sld).unwrap().is_none());
 

@@ -50,10 +50,10 @@ use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use quick_xml::NsReader;
 use quick_xml::escape::partial_escape;
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::{NsReader, XmlVersion};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
 use crate::opc::archive::MAX_PART_BYTES;
@@ -621,7 +621,11 @@ fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
     let Some(uri) = uri else {
         return Ok(None);
     };
-    let uri: &str = &uri.value;
+    // A reference in the value stands for the character it names.
+    let uri = uri
+        .normalized_value(XmlVersion::Implicit1_0)
+        .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+    let uri: &str = &uri;
     Ok(PAYLOADS
         .iter()
         .find(|(area, name, _, _)| {

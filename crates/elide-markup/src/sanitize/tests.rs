@@ -516,14 +516,24 @@ fn a_remote_import_spelled_with_references_in_svg_goes() {
     ] {
         assert_eq!(sanitize(html(policy), raw), "<svg></svg>", "{raw}");
     }
-    let raw = "<style>p { content: 'https&#58;//t' }</style>";
-    assert_eq!(sanitize(html(policy), raw), raw);
+    for raw in [
+        "<style>p { content: 'https&#58;//t' }</style>",
+        r#"<style>p { background: url("https&#58;//local.png") }</style>"#,
+    ] {
+        assert_eq!(sanitize(html(policy), raw), raw, "{raw}");
+    }
 }
 
 /// The root of SVG or MathML honours its self-closing flag, even removed.
 #[test]
 fn a_removed_self_closing_svg_root_holds_nothing() {
     let raw = "<svg hidden/><math hidden/><p>Visible</p>";
+    assert_eq!(
+        sanitize(html(HiddenContentPolicy::default()), raw),
+        "<p>Visible</p>"
+    );
+    // The `/` belongs to the unquoted value, so the root holds what follows.
+    let raw = r#"<svg display="none" id=x/>Secret</svg><p>Visible</p>"#;
     assert_eq!(
         sanitize(html(HiddenContentPolicy::default()), raw),
         "<p>Visible</p>"
