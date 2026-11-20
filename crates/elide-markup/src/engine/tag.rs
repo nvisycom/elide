@@ -151,6 +151,9 @@ pub(crate) struct HtmlTag<'a> {
     pub(crate) name: &'a str,
     /// The attributes, in source order.
     pub(crate) attributes: Vec<HtmlAttribute<'a>>,
+    /// Whether the tag carries the self-closing flag: a `/` before its `>`
+    /// that no unquoted value read as its own.
+    pub(crate) self_closing: bool,
 }
 
 /// One attribute of an HTML tag, borrowed from the tag as written.
@@ -194,10 +197,17 @@ impl HtmlTagExt for BytesStart<'_> {
         // quick-xml leaves the `/` of an empty tag's `/>` out of its bytes,
         // but a browser reads it: as the end of an unquoted value, or as the
         // self-closing flag.
-        if raw[text.end..].starts_with("/>") {
+        let slash = raw[text.end..].starts_with("/>");
+        if slash {
             text.end += 1;
         }
-        read_tag(&raw[text])
+        let mut tag = read_tag(&raw[text.clone()])?;
+        tag.self_closing = slash
+            && !tag.attributes.last().is_some_and(|attr| {
+                raw.substr_range(attr.source)
+                    .is_some_and(|range| range.end == text.end)
+            });
+        Ok(tag)
     }
 }
 
@@ -213,6 +223,7 @@ impl HtmlTagExt for BytesEnd<'_> {
         Ok(HtmlTag {
             name: &text[..read_name(text)],
             attributes: Vec::new(),
+            self_closing: false,
         })
     }
 }
@@ -256,7 +267,7 @@ fn skip(bytes: &[u8], at: usize, pred: impl Fn(u8) -> bool) -> usize {
 }
 
 /// The tag `text` (between `<` and `>`, as quick-xml found it) read by the
-/// tokenizer's tag states.
+/// tokenizer's tag states; the caller sets its self-closing flag.
 fn read_tag(text: &str) -> Result<HtmlTag<'_>> {
     let bytes = text.as_bytes();
     let mut at = read_name(text);
@@ -306,7 +317,11 @@ fn read_tag(text: &str) -> Result<HtmlTag<'_>> {
         attributes.push(attribute(text, name_start..name_end, Some(value), end));
         at = end;
     }
-    Ok(HtmlTag { name, attributes })
+    Ok(HtmlTag {
+        name,
+        attributes,
+        self_closing: false,
+    })
 }
 
 /// The attribute of `text` named at `name`, with its `value` range, ending at
@@ -454,14 +469,15 @@ mod tests {
         }
     }
 
-    /// The first start tag html5ever's tokenizer reads: its name and its
+    /// The first start tag html5ever's tokenizer reads: its name, its
     /// attributes as `(name, value)`, names lowercased and the first of a
-    /// repeated name kept.
+    /// repeated name kept, and its self-closing flag.
     #[derive(Default)]
     struct FirstStartTag(RefCell<Option<ReferenceTag>>);
 
-    /// A tag as the reference reads it: its name and `(name, value)` pairs.
-    type ReferenceTag = (String, Vec<(String, String)>);
+    /// A tag as the reference reads it: its name, `(name, value)` pairs, and
+    /// self-closing flag.
+    type ReferenceTag = (String, Vec<(String, String)>, bool);
 
     impl TokenSink for FirstStartTag {
         type Handle = ();
@@ -476,7 +492,7 @@ mod tests {
                     .iter()
                     .map(|attr| (attr.name.local.to_string(), attr.value.to_string()))
                     .collect();
-                *self.0.borrow_mut() = Some((tag.name.to_string(), attributes));
+                *self.0.borrow_mut() = Some((tag.name.to_string(), attributes, tag.self_closing));
             }
             TokenSinkResult::Continue
         }
@@ -522,6 +538,12 @@ mod tests {
             r#"<p//class="x"//>t</p>"#,
             "<p//class=x//>t</p>",
             "<img alt=Jane/>",
+            "<br/>",
+            "<img alt=x />",
+            "<img alt=x/ />",
+            "<img alt=/>",
+            "<img alt/>",
+            "<img =/>",
         ];
         for raw in corpus {
             let ours = ours(raw).unwrap_or_else(|| panic!("{raw} is refused"));
@@ -553,7 +575,7 @@ mod tests {
             raw.push_str(">t");
             // Only a tag quick-xml reads whole and this reader does not refuse
             // is compared.
-            let Some((name, attributes)) = ours(&raw) else {
+            let Some((name, attributes, self_closing)) = ours(&raw) else {
                 continue;
             };
             // A browser reads a carriage return as a line feed, in a value
@@ -562,7 +584,7 @@ mod tests {
                 .into_iter()
                 .map(|(key, value)| (key, value.replace("\r\n", "\n").replace('\r', "\n")))
                 .collect::<Vec<_>>();
-            assert_eq!((name, attributes), reference(&raw), "{raw:?}");
+            assert_eq!((name, attributes, self_closing), reference(&raw), "{raw:?}");
             compared += 1;
         }
         assert!(compared > 5_000, "only {compared} generated tags compared");
@@ -570,8 +592,8 @@ mod tests {
 
     /// The first start tag of `raw` as this reader reads it, in the
     /// reference's terms (names lowercased, the first of a repeated name kept,
-    /// a missing value empty); `None` when quick-xml cannot read the tag or
-    /// this reader refuses it.
+    /// a missing value empty, the self-closing flag); `None` when quick-xml
+    /// cannot read the tag or this reader refuses it.
     fn ours(raw: &str) -> Option<ReferenceTag> {
         let tag = first_start(raw)?.html5_tag(raw).ok()?;
         let mut attributes: Vec<(String, String)> = Vec::new();
@@ -581,6 +603,6 @@ mod tests {
                 attributes.push((name, attr.value.unwrap_or_default().to_owned()));
             }
         }
-        Some((tag.name.to_ascii_lowercase(), attributes))
+        Some((tag.name.to_ascii_lowercase(), attributes, tag.self_closing))
     }
 }
