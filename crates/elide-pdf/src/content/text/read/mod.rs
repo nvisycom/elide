@@ -201,8 +201,8 @@ mod tests {
     use crate::fixtures::with_pages;
 
     /// Build a one-page document whose single content stream is `ops`, drawing
-    /// with a simple Helvetica font (no `/Widths`, so glyph advances are unknown —
-    /// the gap-presence path), on a 100×200 point page. Returns the walked block.
+    /// with a simple Helvetica font (no `/Widths`, so glyph advances are the
+    /// standard face's), on a 100×200 point page. Returns the walked block.
     fn extract_block(ops: Vec<Operation>) -> super::TextBlock {
         extract_block_with_widths(ops, false)
     }
@@ -211,26 +211,38 @@ mod tests {
     /// advances — and thus box widths — are known) and a descriptor with
     /// ascent/descent (so box heights are real rather than the default em box).
     fn extract_block_with_widths(ops: Vec<Operation>, widths: bool) -> super::TextBlock {
-        let mut doc = Document::with_version("1.5");
-        let mut font = dictionary! {
-            "Type" => "Font",
-            "Subtype" => "Type1",
-            "BaseFont" => "Helvetica",
-        };
+        let mut font = simple_font("Helvetica");
         if widths {
             // Every byte 0..=255 is 500/1000 em wide — enough to give boxes a real
             // width without modelling real Helvetica metrics.
-            let descriptor = doc.add_object(dictionary! {
-                "Type" => "FontDescriptor",
-                "FontName" => "Helvetica",
-                "Ascent" => 718,
-                "Descent" => -207,
-            });
             font.set("FirstChar", 0);
             font.set("LastChar", 255);
             font.set("Widths", vec![Object::Integer(500); 256]);
-            font.set("FontDescriptor", descriptor);
+            font.set(
+                "FontDescriptor",
+                dictionary! {
+                    "Type" => "FontDescriptor",
+                    "FontName" => "Helvetica",
+                    "Ascent" => 718,
+                    "Descent" => -207,
+                },
+            );
         }
+        extract_block_in(ops, font)
+    }
+
+    /// A simple Type1 font named `base_font`, with no `/Widths`.
+    fn simple_font(base_font: &str) -> Dictionary {
+        dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => base_font,
+        }
+    }
+
+    /// As [`extract_block`], drawing with `font`.
+    fn extract_block_in(ops: Vec<Operation>, font: Dictionary) -> super::TextBlock {
+        let mut doc = Document::with_version("1.5");
         let font_id = doc.add_object(font);
         let resources = doc.add_object(dictionary! {
             "Font" => dictionary! { "F1" => font_id },
@@ -333,6 +345,54 @@ mod tests {
             Operation::new("ET", vec![]),
         ]);
         assert_eq!(text, "Email alice@example.com");
+    }
+
+    /// The operations of `text` in `font` at 12 points, each glyph placed by
+    /// its own `Td`, `advances` (in thousandths of an em) apart, as printer
+    /// drivers and OCR text layers draw.
+    fn one_glyph_at_a_time(text: &str, advances: &[i64]) -> Vec<Operation> {
+        let mut ops = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![10.into(), 100.into()]),
+        ];
+        for (glyph, advance) in text.chars().zip(advances) {
+            ops.push(show(&glyph.to_string()));
+            let step = *advance as f64 * 12.0 / 1000.0;
+            ops.push(Operation::new("Td", vec![step.into(), 0.into()]));
+        }
+        ops.push(Operation::new("ET", vec![]));
+        ops
+    }
+
+    /// Text in a standard font with no `/Widths`, drawn one glyph at a time,
+    /// reads as one word: each glyph advances by its width in the face, so
+    /// the next starts where it ends.
+    #[test]
+    fn standard_font_glyphs_drawn_one_at_a_time_read_as_one_word() {
+        // `a@b.io` in Helvetica and Courier, their AFM widths.
+        let helvetica = one_glyph_at_a_time("a@b.io", &[556, 1015, 556, 278, 222, 556]);
+        assert_eq!(extract_block(helvetica).text, "a@b.io");
+        let courier = one_glyph_at_a_time("a@b.io", &[600; 6]);
+        let text = extract_block_in(courier, simple_font("ABCDEF+CourierNew")).text;
+        assert_eq!(text, "a@b.io");
+    }
+
+    /// A font with no widths a reader can know advances each glyph by
+    /// nothing, so text drawn one glyph at a time reads with a space at each
+    /// move, while text in one run still reads whole.
+    #[test]
+    fn a_font_with_unknown_widths_reads_by_gaps() {
+        let ops = one_glyph_at_a_time("a@b.io", &[556, 1015, 556, 278, 222, 556]);
+        let text = extract_block_in(ops, simple_font("Unknown")).text;
+        assert_eq!(text, "a @ b . i o");
+        let run = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            show("a@b.io"),
+            Operation::new("ET", vec![]),
+        ];
+        assert_eq!(extract_block_in(run, simple_font("Unknown")).text, "a@b.io");
     }
 
     /// Glyphs drawn contiguously (one `Tj`) are not split by spurious spaces.
