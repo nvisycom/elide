@@ -610,6 +610,11 @@ fn mglyph_and_malignmark_stay_mathml() {
     // Other children of `mi` are still HTML: a `title` there is text.
     let raw = "<math hidden><mi><b><title></math></title></b></mi></math><p>Visible</p>";
     assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>");
+    // Under an HTML element in `mi`, an `mglyph` is HTML: its self-closing
+    // flag is ignored and it holds what follows.
+    let raw = "<math><mi><span><mglyph hidden/>Secret</mglyph></span></mi></math>";
+    let out = sanitize(html(policy), raw);
+    assert!(!out.contains("Secret"), "{out}");
     // A kept `mi` holding a self-closed `mglyph` does not hold what follows.
     let out = sanitize(
         html(policy),

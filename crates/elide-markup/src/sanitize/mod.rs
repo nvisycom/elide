@@ -560,10 +560,11 @@ impl<'a> Rebuild<'a> {
         let name = tag.name.to_ascii_lowercase();
         let left = html::breaks_out(self.space(), &name, &tag.attributes) && self.leave_foreign();
         // A MathML token element reads HTML, but for an `mglyph` or
-        // `malignmark`, which stays MathML.
+        // `malignmark` started right in it, which stays MathML.
         let space = match self.spaces.last() {
             Some(foreign)
                 if foreign.space == Space::Html
+                    && foreign.open.is_empty()
                     && html::integration_point(Space::Math, &foreign.root)
                     && html::stays_math(&name) =>
             {
@@ -649,25 +650,19 @@ impl<'a> Rebuild<'a> {
             return Ok(());
         }
         match element {
-            Element::Enter(space) => self.spaces.push(Foreign {
-                space,
-                root: name.clone(),
-                depth: 1,
-            }),
+            Element::Enter(space) => self.spaces.push(Foreign::new(space, name.clone())),
             _ => {
-                if let Some(foreign) = self.spaces.last_mut()
-                    && foreign.root == name
-                {
-                    foreign.depth += 1;
+                if let Some(foreign) = self.spaces.last_mut() {
+                    if foreign.root == name {
+                        foreign.depth += 1;
+                    } else if foreign.space == Space::Html {
+                        foreign.open.push(name.clone());
+                    }
                 }
                 // Inside an SVG `desc` or a MathML `mi`, a browser reads HTML
                 // until the element ends.
                 if html::integration_point(space, &name) {
-                    self.spaces.push(Foreign {
-                        space: Space::Html,
-                        root: name.clone(),
-                        depth: 1,
-                    });
+                    self.spaces.push(Foreign::new(Space::Html, name.clone()));
                 }
             }
         }
@@ -692,6 +687,11 @@ impl<'a> Rebuild<'a> {
         // left out unrecorded; a stray HTML one in SVG or MathML still acts.
         let named = html::names(space, &name) || html::names(Space::Html, &name);
         let leaves = self.spaces.last_mut().is_some_and(|foreign| {
+            // An HTML element open inside the element read as HTML ends first.
+            if let Some(at) = foreign.open.iter().rposition(|open| *open == name) {
+                foreign.open.truncate(at);
+                return false;
+            }
             if foreign.root == name {
                 foreign.depth -= 1;
             }
@@ -780,6 +780,20 @@ struct Foreign {
     space: Space,
     root: String,
     depth: usize,
+    /// Under HTML read inside an SVG or MathML element: the HTML elements
+    /// open in it, so what is started right in that element is told apart.
+    open: Vec<String>,
+}
+
+impl Foreign {
+    fn new(space: Space, root: String) -> Self {
+        Self {
+            space,
+            root,
+            depth: 1,
+            open: Vec::new(),
+        }
+    }
 }
 
 /// The construct `event` is, when a browser ends it before quick-xml does, so
