@@ -53,20 +53,19 @@ const CSS_LOADING_FUNCTIONS: [&str; 3] = ["url(", "src(", "image-set("];
 /// read here, both ways round and not at all, since a comment marker may
 /// stand inside a string: a load any reading finds counts.
 pub(super) fn css_loads_remote(css: &str) -> bool {
-    let css = css.to_ascii_lowercase();
-    let decoded = css_unescaped(&css);
+    let decoded = css_unescaped(css);
     [
-        css_uncommented(&css),
+        css_uncommented(css),
         css_uncommented(&decoded),
-        css_unescaped(&css_uncommented(&css)),
+        css_unescaped(&css_uncommented(css)),
         decoded,
-        css,
+        css.to_owned(),
     ]
     .iter()
-    .any(|css| css_reaches_server(css))
+    .any(|css| css_reaches_server(&css.to_ascii_lowercase()))
 }
 
-/// Whether the CSS `css`, read as written, names a remote URL in a loading
+/// Whether the CSS `css`, read as written and lowercased, names a remote URL in a loading
 /// function or an `@import`.
 fn css_reaches_server(css: &str) -> bool {
     let arguments = CSS_LOADING_FUNCTIONS.iter().flat_map(|function| {

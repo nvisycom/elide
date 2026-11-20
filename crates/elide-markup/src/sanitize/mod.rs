@@ -879,12 +879,18 @@ fn ends_early(event: &Event<'_>) -> Option<&'static str> {
     }
 }
 
-/// Whether `text` holds the start of an end tag for the element `name`
-/// (lowercased), in any case.
+/// Whether `text` holds an end tag for the element `name` (lowercased), in
+/// any case: its name followed by HTML whitespace, a `/`, a `>`, or the end
+/// of `text`.
 fn ends_text(text: &str, name: &str) -> bool {
+    let bytes = text.as_bytes();
     let len = name.len() + 2;
-    text.as_bytes().windows(len).any(|window| {
-        window.starts_with(b"</") && window[2..].eq_ignore_ascii_case(name.as_bytes())
+    bytes.windows(len).enumerate().any(|(at, window)| {
+        window.starts_with(b"</")
+            && window[2..].eq_ignore_ascii_case(name.as_bytes())
+            && bytes
+                .get(at + len)
+                .is_none_or(|b| matches!(b, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ' | b'/' | b'>'))
     })
 }
 

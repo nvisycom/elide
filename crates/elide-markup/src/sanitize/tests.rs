@@ -831,6 +831,9 @@ fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
         r"background: url(\2f\2f example.test/a.png)",
         r"background: image-set('https://example.test/a.png' 1x)",
         r"background: -webkit-image-set('https://example.test/a.png' 1x)",
+        r"background:\55rl(https://example.test/a.png)",
+        r"background: url(\48ttps://example.test/a.png)",
+        r"background: url(\48TTPS://example.test/a.png)",
         r"background: url(/**/https://example.test/a.png)",
         r"background: ur/**/l(https://example.test/a.png)",
     ] {
@@ -844,6 +847,8 @@ fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
         r#"@im\70ort "https://example.test/a.css";"#,
         r#"@import/**/"https://example.test/a.css";"#,
         r#"@\69mport 'https://example.test/a.css';"#,
+        r#"@\49mport 'https://example.test/a.css';"#,
+        r#"@import '\48ttps://example.test/a.css';"#,
         r#"@font-face { src: src("https://example.test/f.woff") }"#,
     ] {
         let raw = format!("<style>{css}</style><p>a</p>");
@@ -854,4 +859,56 @@ fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
     // A local reference and an escape that loads nothing stay.
     let raw = r#"<p style="background: url(\2f a.png); content: '\201C'">a</p>"#;
     assert_eq!(sanitize(html(policy), raw), raw);
+}
+
+/// An SVG attribute read as text keeps a value that only names a URL.
+#[test]
+fn svg_text_attributes_naming_a_url_stay() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        r#"<svg aria-label="Example: url(https://example.test/a.png)"></svg>"#,
+        r#"<svg><rect aria-describedby="x" class="url(https://example.test/a.png)"/></svg>"#,
+    ] {
+        assert_eq!(sanitize(html(policy), raw), raw);
+    }
+}
+
+/// CSS reads a backslash before a line break as a line continuation, so the
+/// break is not dropped as a URL parser would drop it before reading CSS.
+#[test]
+fn a_css_line_continuation_does_not_hide_a_remote_load() {
+    let policy = HiddenContentPolicy::default();
+    let escaped = "url('\\20\\\n\\68ttps://example.test/p.svg#g')";
+    for raw in [
+        format!(r#"<svg><rect fill="{escaped}"/></svg>"#),
+        format!(r#"<svg><rect style="fill: {escaped}"/></svg>"#),
+        format!(r#"<p style="background: {escaped}">a</p>"#),
+        format!("<style>p {{ background: {escaped} }}</style><p>a</p>"),
+        format!("<svg><style>rect {{ fill: {escaped} }}</style></svg>"),
+    ] {
+        let out = sanitize(html(policy), &raw);
+        assert!(!out.contains("example.test"), "{raw}: {out}");
+    }
+}
+
+/// Only an end tag of the element's own name ends a style sheet or a
+/// `<noscript>`, as a browser reads it.
+#[test]
+fn a_longer_end_tag_name_does_not_end_a_text_body() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        r#"<style>p::after{content:"</stylesheet>"}</style><p>a</p>"#,
+        r#"<noscript><p title="</noscripts>">a</p></noscript>"#,
+    ] {
+        assert_eq!(sanitize(html(policy), raw), raw);
+    }
+    let sanitizer = html(policy);
+    for raw in [
+        "<style><!--</style\t><img src=x onerror=alert(1)>--></style>",
+        "<style><!--</style/><img src=x onerror=alert(1)>--></style>",
+        "<style><!--</style\n--></style>",
+        r#"<noscript><p title="</noscript/x"></p></noscript>"#,
+    ] {
+        assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw:?}");
+    }
 }

@@ -341,6 +341,23 @@ const HTML_GLOBAL: &[&str] = &[
     "xmlns",
 ];
 
+/// SVG presentation attributes whose value a browser reads as CSS that may
+/// name an image or a resource: a `url()` in them loads like one in a style.
+const SVG_CSS_ATTRIBUTES: &[&str] = &[
+    "clip-path",
+    "color-profile",
+    "cursor",
+    "fill",
+    "filter",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
+    "mask",
+    "src",
+    "stroke",
+];
+
 /// Attributes every SVG element may carry: its geometry, presentation, and
 /// references to the definitions it draws with.
 const SVG_GLOBAL: &[&str] = &[
@@ -938,7 +955,7 @@ pub(super) fn breaks_out(space: Space, name: &str, attributes: &[HtmlAttribute<'
 /// `space` is left out as, or `None` when it is copied: an `on*` event
 /// handler or a URL that runs script, a URL the page loads from a server, a
 /// `ping` that reports a followed link, inline style or an SVG presentation
-/// attribute that loads from a server, and anything else that no reader of
+/// attribute read as CSS that loads from a server, and anything else that no reader of
 /// the page sees.
 pub(super) fn attribute(
     space: Space,
@@ -956,9 +973,8 @@ pub(super) fn attribute(
     if local == "ping"
         || (LOADING_ATTRIBUTES.contains(&local) && loads_remote(value, local))
         || (local == "href" && !hyperlink && is_remote(value))
-        || (local == "style" && css_loads_remote(&url))
-        // An SVG presentation attribute is CSS, whose `url()` loads too.
-        || (space == Space::Svg && css_loads_remote(&url))
+        || ((local == "style" || (space == Space::Svg && SVG_CSS_ATTRIBUTES.contains(&local)))
+            && css_loads_remote(&decode_references(value, 0, CharacterReferences::Html).0))
     {
         return Some(HiddenContent::Link);
     }
