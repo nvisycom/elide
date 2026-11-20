@@ -40,25 +40,107 @@ fn reaches_server(decoded: &str) -> bool {
     REMOTE_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
 }
 
-/// Whether the CSS `css` loads anything from a server, through a `url(...)` or
-/// an `@import`.
+/// The CSS functions whose arguments a browser may load: `url()`, `src()`,
+/// and `image-set()` (with its `-webkit-` form), whose strings are URLs too.
+const CSS_LOADING_FUNCTIONS: [&str; 3] = ["url(", "src(", "image-set("];
+
+/// Whether the CSS `css` loads anything from a server, through a loading
+/// function or an `@import`.
 ///
 /// `css` is the text CSS reads: the caller decodes the character references
 /// of a style attribute or a foreign style sheet, and leaves those of an HTML
-/// `<style>`, which a browser reads as written.
+/// `<style>`, which a browser reads as written. CSS escapes and comments are
+/// read here, both ways round and not at all, since a comment marker may
+/// stand inside a string: a load any reading finds counts.
 pub(super) fn css_loads_remote(css: &str) -> bool {
     let css = css.to_ascii_lowercase();
-    let urls = css.split("url(").skip(1).map(|rest| {
-        rest.split(')')
-            .next()
-            .unwrap_or_default()
-            .trim_matches(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+    let decoded = css_unescaped(&css);
+    [
+        css_uncommented(&css),
+        css_uncommented(&decoded),
+        css_unescaped(&css_uncommented(&css)),
+        decoded,
+        css,
+    ]
+    .iter()
+    .any(|css| css_reaches_server(css))
+}
+
+/// Whether the CSS `css`, read as written, names a remote URL in a loading
+/// function or an `@import`.
+fn css_reaches_server(css: &str) -> bool {
+    let arguments = CSS_LOADING_FUNCTIONS.iter().flat_map(|function| {
+        css.split(function).skip(1).flat_map(|rest| {
+            rest.split(')')
+                .next()
+                .unwrap_or_default()
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .map(|word| word.trim_matches(['"', '\'']))
+        })
     });
     let imports = css
         .split("@import")
         .skip(1)
         .map(|rest| rest.trim_start().trim_start_matches(['"', '\'']));
-    urls.chain(imports).any(reaches_server)
+    arguments.chain(imports).any(reaches_server)
+}
+
+/// The CSS `css` with its escapes read: a backslash and up to six hex digits
+/// (and one whitespace after) stand for that code point, a backslash before
+/// a line break continues the line, and before any other character stands
+/// for it.
+fn css_unescaped(css: &str) -> String {
+    let mut out = String::with_capacity(css.len());
+    let mut chars = css.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6
+            && let Some(digit) = chars.next_if(char::is_ascii_hexdigit)
+        {
+            hex.push(digit);
+        }
+        if hex.is_empty() {
+            match chars.next() {
+                Some('\r') => {
+                    chars.next_if_eq(&'\n');
+                }
+                Some('\n' | '\x0c') | None => {}
+                Some(other) => out.push(other),
+            }
+            continue;
+        }
+        let code = u32::from_str_radix(&hex, 16).unwrap_or_default();
+        out.push(
+            char::from_u32(code)
+                .filter(|c| *c != '\0')
+                .unwrap_or('\u{fffd}'),
+        );
+        if chars.next_if_eq(&'\r').is_some() {
+            chars.next_if_eq(&'\n');
+        } else {
+            chars.next_if(|c| matches!(c, ' ' | '\t' | '\n' | '\x0c'));
+        }
+    }
+    out
+}
+
+/// The CSS `css` with its comments taken out, an unclosed one running to the
+/// end.
+fn css_uncommented(css: &str) -> String {
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(at) = rest.find("/*") {
+        out.push_str(&rest[..at]);
+        rest = rest[at + 2..]
+            .find("*/")
+            .map_or("", |end| &rest[at + 2 + end + 2..]);
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A URL attribute's `value` as a browser reads its scheme: character

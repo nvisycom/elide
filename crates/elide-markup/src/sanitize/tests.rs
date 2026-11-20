@@ -685,3 +685,173 @@ fn mglyph_and_malignmark_stay_mathml() {
     );
     assert!(out.ends_with("<p>Visible</p>"), "{out}");
 }
+
+/// `raw` rebuilt well within a few seconds, ending in `Visible`.
+fn rebuilds_quickly(raw: &str) {
+    let started = std::time::Instant::now();
+    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    assert!(out.contains("Visible"), "{}", &out[..80.min(out.len())]);
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
+}
+
+/// Many distinct attributes, written `n` times.
+fn distinct_attributes(n: usize) -> String {
+    (0..n).map(|i| format!(" data-a{i}=\"1\"")).collect()
+}
+
+/// A `<meta>` of many distinct attributes is read in linear time, and one
+/// repeating an attribute still goes whole.
+#[test]
+fn a_meta_tag_of_many_attributes_stays_linear() {
+    rebuilds_quickly(&format!(
+        "<meta{}><p>Visible</p>",
+        distinct_attributes(50_000)
+    ));
+    let out = sanitize(
+        html(HiddenContentPolicy::default()),
+        r#"<meta name="a" NAME="b" content="c"><p>Visible</p>"#,
+    );
+    assert_eq!(out, "<p>Visible</p>");
+}
+
+/// A tag of many distinct attributes is read in linear time, and a removed
+/// first copy of an attribute still leaves its repeat out.
+#[test]
+fn a_tag_of_many_attributes_stays_linear() {
+    rebuilds_quickly(&format!(
+        "<div{}>Visible</div>",
+        distinct_attributes(50_000)
+    ));
+    let out = sanitize(
+        html(HiddenContentPolicy::default()),
+        r#"<a onclick="x()" ONCLICK="y()">a</a>"#,
+    );
+    assert_eq!(out, "<a>a</a>");
+}
+
+/// An SVG presentation attribute is CSS, whose `url()` may load from a
+/// server; a reference into the document stays.
+#[test]
+fn svg_paint_that_loads_from_a_server_is_removed() {
+    let policy = HiddenContentPolicy::default();
+    for key in [
+        "fill",
+        "stroke",
+        "filter",
+        "clip-path",
+        "mask",
+        "marker-start",
+        "marker-mid",
+        "marker-end",
+    ] {
+        let raw = format!(
+            r#"<svg><rect width="1" height="1" {key}="url(https://example.test/p.svg#g)"/></svg>"#
+        );
+        let out = sanitize(html(policy), &raw);
+        assert!(!out.contains("example.test"), "{out}");
+        let raw = format!(r#"<svg><rect {key}="URL( '&#x2f;/example.test/p')"/></svg>"#);
+        let out = sanitize(html(policy), &raw);
+        assert!(!out.contains("example.test"), "{out}");
+        let raw = format!(r##"<svg><rect {key}="url(#g)"/></svg>"##);
+        assert_eq!(sanitize(html(policy), &raw), raw);
+    }
+}
+
+/// A browser ends an HTML `<style>` at the first `</style`, wherever the XML
+/// reader sees a comment, a section or a tag around it.
+#[test]
+fn a_style_end_hidden_in_a_construct_is_refused() {
+    let sanitizer = html(HiddenContentPolicy::default());
+    for raw in [
+        "<style><!--</style><img src=x onerror=alert(1)>--></style>",
+        "<style><!--</STYLE ><img src=x onerror=alert(1)>--></style>",
+        "<style><![CDATA[</style><img src=x onerror=alert(1)>]]></style>",
+        "<style><?x </style><img src=x onerror=alert(1)>?></style>",
+        r#"<style><x a="</style><img src=x onerror=alert(1)>"></style>"#,
+        "<style><!DOCTYPE </style/><img src=x onerror=alert(1)>></style>",
+    ] {
+        assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw}");
+        assert!(sanitizer.check(raw).is_err(), "{raw}");
+    }
+    // An ordinary comment in a style sheet stays.
+    let raw = "<style><!-- p { color: red } --></style><p>a</p>";
+    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+}
+
+/// A style sheet nested in an SVG one leaves the outer one still checked.
+#[test]
+fn a_nested_svg_style_sheet_is_refused() {
+    let sanitizer = html(HiddenContentPolicy::default());
+    for raw in [
+        r#"<svg><style>@import "https://example.test/a.css";<style></style></style></svg>"#,
+        r#"<svg><style><style></style>@import "https://example.test/a.css";</style></svg>"#,
+    ] {
+        let rebuilt = sanitizer.sanitize(raw.to_owned());
+        assert!(
+            rebuilt
+                .as_ref()
+                .is_err_and(|_| sanitizer.check(raw).is_err()),
+            "{rebuilt:?}"
+        );
+    }
+    let raw = "<svg><style>rect { fill: red }</style></svg>";
+    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+}
+
+/// With script on, a browser reads a `<noscript>` body as text up to the
+/// first `</noscript`, wherever the XML reader sees it.
+#[test]
+fn a_noscript_end_hidden_in_a_construct_is_refused() {
+    for raw in [
+        r#"<noscript><p title="</noscript><img src=x onerror=alert(1)>"></p></noscript>"#,
+        "<noscript><style></noscript><img src=x onerror=alert(1)></style></noscript>",
+        "<noscript><!--</NOSCRIPT><img src=x onerror=alert(1)>--></noscript>",
+    ] {
+        for sanitizer in [html(HiddenContentPolicy::default()), html(keep_comments())] {
+            assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw}");
+        }
+    }
+    let raw = r#"<noscript><p title="a">Enable script</p></noscript><p>b</p>"#;
+    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+}
+
+/// CSS reads its escapes and comments before its tokens, so a remote load
+/// spelled with them is still caught, in a style attribute, a style sheet
+/// and an SVG presentation attribute.
+#[test]
+fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
+    let policy = HiddenContentPolicy::default();
+    for css in [
+        r"background: url(htt\70s://example.test/a.png)",
+        r"background: url(htt\000070 s://example.test/a.png)",
+        r"background: u\72l(https://example.test/a.png)",
+        r"background: \75 rl(https://example.test/a.png)",
+        r"background: url('ht\tps://example.test/a.png')",
+        "background: url('ht\\\ntps://example.test/a.png')",
+        r"background: url(\2f\2f example.test/a.png)",
+        r"background: image-set('https://example.test/a.png' 1x)",
+        r"background: -webkit-image-set('https://example.test/a.png' 1x)",
+        r"background: url(/**/https://example.test/a.png)",
+        r"background: ur/**/l(https://example.test/a.png)",
+    ] {
+        let raw = format!(r#"<p style="{css}">a</p>"#);
+        let out = sanitize(html(policy), &raw);
+        assert_eq!(out, "<p>a</p>", "{raw}");
+        let raw = format!("<style>p {{ {css} }}</style><p>a</p>");
+        assert_eq!(sanitize(html(policy), &raw), "<p>a</p>", "{raw}");
+    }
+    for css in [
+        r#"@im\70ort "https://example.test/a.css";"#,
+        r#"@import/**/"https://example.test/a.css";"#,
+        r#"@\69mport 'https://example.test/a.css';"#,
+        r#"@font-face { src: src("https://example.test/f.woff") }"#,
+    ] {
+        let raw = format!("<style>{css}</style><p>a</p>");
+        assert_eq!(sanitize(html(policy), &raw), "<p>a</p>", "{raw}");
+    }
+    let raw = r#"<svg><rect fill="url(htt\70s://example.test/p#g)"/></svg>"#;
+    assert!(!sanitize(html(policy), raw).contains("example.test"));
+    // A local reference and an escape that loads nothing stay.
+    let raw = r#"<p style="background: url(\2f a.png); content: '\201C'">a</p>"#;
+    assert_eq!(sanitize(html(policy), raw), raw);
+}

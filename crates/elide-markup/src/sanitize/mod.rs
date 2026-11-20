@@ -51,6 +51,7 @@ mod html;
 mod open;
 mod url;
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use elide_codec::StrippedContent;
@@ -170,6 +171,8 @@ struct Rebuild<'a> {
     spaces: Vec<Foreign>,
     /// The HTML `<textarea>` or `<title>` whose body is being read.
     rcdata: Option<String>,
+    /// Whether a kept HTML `<noscript>` is open.
+    noscript: bool,
     /// How many XML elements are open.
     depth: usize,
 }
@@ -195,6 +198,7 @@ impl<'a> Rebuild<'a> {
             style: None,
             spaces: Vec::new(),
             rcdata: None,
+            noscript: false,
             depth: 0,
         }
     }
@@ -250,6 +254,23 @@ impl<'a> Rebuild<'a> {
                     Skip::Inside => continue,
                     Skip::End => break,
                     Skip::Outside => {}
+                }
+            }
+            // With script on, a browser reads a `<noscript>` body as text up
+            // to its first `</noscript`, which markup copied as written must
+            // not hold, nor a style sheet read as text.
+            if self.noscript {
+                let in_style = self.style.as_ref().is_some_and(|sheet| sheet.raw);
+                match &event {
+                    Event::End(e) if !in_style && end_name(e, raw, true)? == "noscript" => {
+                        self.noscript = false;
+                    }
+                    _ if ends_text(&raw[span.clone()], "noscript") => {
+                        return Err(Error::malformed(
+                            "a browser ends this HTML <noscript> at a `</noscript` inside markup, so what follows it renders",
+                        ));
+                    }
+                    _ => {}
                 }
             }
             if self.style.as_ref().is_some_and(|sheet| sheet.raw) {
@@ -541,8 +562,14 @@ impl<'a> Rebuild<'a> {
                 return Ok(false);
             }
             // The body is raw text, read as written: a comment, a tag or a
-            // reference in it is text too.
+            // reference in it is text too, but for a `</style` in it, which a
+            // browser ends the body at.
             _ => {
+                if ends_text(&self.raw[span.clone()], "style") {
+                    return Err(Error::malformed(
+                        "a browser ends this HTML <style> at a `</style` inside markup, so what follows it renders",
+                    ));
+                }
                 if let Some(sheet) = self.style.as_mut() {
                     sheet.css.push_str(&self.raw[span.clone()]);
                 }
@@ -632,18 +659,17 @@ impl<'a> Rebuild<'a> {
         let style_start = self.out.len();
         self.out.push('<');
         self.out.push_str(tag.name);
-        let mut seen: Vec<String> = Vec::new();
+        let mut seen = HashSet::with_capacity(tag.attributes.len());
         let mut last: Option<&HtmlAttribute<'_>> = None;
         for attr in &tag.attributes {
             let key = attr.name.to_ascii_lowercase();
             // A browser reads the first of a repeated attribute and ignores
             // the rest, which still carry their value, even when the first is
             // left out.
-            let content = if seen.contains(&key) {
-                Some(HiddenContent::Undisplayed)
-            } else {
-                seen.push(key);
+            let content = if seen.insert(key) {
                 html::attribute(attributes_space, &name, attr)
+            } else {
+                Some(HiddenContent::Undisplayed)
             };
             if let Some(content) = content {
                 self.record(content);
@@ -682,10 +708,19 @@ impl<'a> Rebuild<'a> {
                 }
             }
         }
+        if space == Space::Html && name == "noscript" {
+            self.noscript = true;
+        }
         if space == Space::Html && RCDATA_ELEMENTS.contains(&name.as_str()) {
             self.rcdata = Some(name.clone());
         }
         if name == "style" {
+            // A style sheet in another leaves the outer one's end unchecked.
+            if self.style.is_some() {
+                return Err(Error::malformed(
+                    "a style sheet nested in another is not read as one",
+                ));
+            }
             self.style = Some(StyleSheet {
                 start: style_start,
                 css: String::new(),
@@ -842,6 +877,15 @@ fn ends_early(event: &Event<'_>) -> Option<&'static str> {
         Event::DocType(text) => text.as_ref().contains('>').then_some("document type"),
         _ => None,
     }
+}
+
+/// Whether `text` holds the start of an end tag for the element `name`
+/// (lowercased), in any case.
+fn ends_text(text: &str, name: &str) -> bool {
+    let len = name.len() + 2;
+    text.as_bytes().windows(len).any(|window| {
+        window.starts_with(b"</") && window[2..].eq_ignore_ascii_case(name.as_bytes())
+    })
 }
 
 /// Whether the namespace `uri`, as written, is XInclude's once its character

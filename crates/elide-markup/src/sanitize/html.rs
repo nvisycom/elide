@@ -5,6 +5,8 @@
 //! Element and attribute names are compared lowercased, as a browser matches
 //! them in an HTML document.
 
+use std::collections::HashSet;
+
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
@@ -880,11 +882,10 @@ fn undisplayed_svg(value: &dyn Fn(&str) -> Option<String>) -> bool {
 
 /// Whether an attribute of `attributes` is written twice.
 fn repeats(attributes: &[HtmlAttribute<'_>]) -> bool {
-    attributes.iter().enumerate().any(|(at, attr)| {
-        attributes[..at]
-            .iter()
-            .any(|earlier| earlier.name.eq_ignore_ascii_case(attr.name))
-    })
+    let mut seen = HashSet::with_capacity(attributes.len());
+    !attributes
+        .iter()
+        .all(|attr| seen.insert(attr.name.to_ascii_lowercase()))
 }
 
 /// What a `<meta>` tag with `attributes` is left out as, or `None` when it
@@ -936,8 +937,9 @@ pub(super) fn breaks_out(space: Space, name: &str, attributes: &[HtmlAttribute<'
 /// What the attribute `attr` of the element `element` (lowercased) read in
 /// `space` is left out as, or `None` when it is copied: an `on*` event
 /// handler or a URL that runs script, a URL the page loads from a server, a
-/// `ping` that reports a followed link, inline style that loads from a server,
-/// and anything else that no reader of the page sees.
+/// `ping` that reports a followed link, inline style or an SVG presentation
+/// attribute that loads from a server, and anything else that no reader of
+/// the page sees.
 pub(super) fn attribute(
     space: Space,
     element: &str,
@@ -955,6 +957,8 @@ pub(super) fn attribute(
         || (LOADING_ATTRIBUTES.contains(&local) && loads_remote(value, local))
         || (local == "href" && !hyperlink && is_remote(value))
         || (local == "style" && css_loads_remote(&url))
+        // An SVG presentation attribute is CSS, whose `url()` loads too.
+        || (space == Space::Svg && css_loads_remote(&url))
     {
         return Some(HiddenContent::Link);
     }
