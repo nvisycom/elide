@@ -347,24 +347,29 @@ mod tests {
     /// A tag's attributes as `(name, value)` pairs.
     type Pairs = Vec<(String, Option<String>)>;
 
-    /// The name and attributes of the first start tag of `raw`.
-    fn read(raw: &str) -> Result<(String, Pairs)> {
+    /// The first start tag of `raw`, or `None` when quick-xml reads none
+    /// before the end or an error.
+    fn first_start(raw: &str) -> Option<BytesStart<'_>> {
         let mut reader = Reader::from_str(raw);
         loop {
-            match reader.read_event().expect("quick-xml reads the tag") {
-                Event::Start(e) | Event::Empty(e) => {
-                    let tag = e.html5_tag(raw)?;
-                    let attributes = tag
-                        .attributes
-                        .iter()
-                        .map(|attr| (attr.name.to_owned(), attr.value.map(str::to_owned)))
-                        .collect();
-                    return Ok((tag.name.to_owned(), attributes));
-                }
-                Event::Eof => panic!("no start tag in {raw:?}"),
+            match reader.read_event().ok()? {
+                Event::Start(e) | Event::Empty(e) => return Some(e),
+                Event::Eof => return None,
                 _ => {}
             }
         }
+    }
+
+    /// The name and attributes of the first start tag of `raw`.
+    fn read(raw: &str) -> Result<(String, Pairs)> {
+        let e = first_start(raw).unwrap_or_else(|| panic!("no start tag in {raw:?}"));
+        let tag = e.html5_tag(raw)?;
+        let attributes = tag
+            .attributes
+            .iter()
+            .map(|attr| (attr.name.to_owned(), attr.value.map(str::to_owned)))
+            .collect();
+        Ok((tag.name.to_owned(), attributes))
     }
 
     fn attrs(pairs: &[(&str, Option<&str>)]) -> Pairs {
@@ -423,11 +428,7 @@ mod tests {
     #[test]
     fn the_source_spans_the_whole_attribute() {
         let raw = r#"<a title="x" onclick=b disabled>"#;
-        let mut reader = Reader::from_str(raw);
-        let Ok(Event::Start(e)) = reader.read_event() else {
-            panic!("a start tag");
-        };
-        let tag = e.html5_tag(raw).unwrap();
+        let tag = first_start(raw).unwrap().html5_tag(raw).unwrap();
         let sources: Vec<&str> = tag.attributes.iter().map(|attr| attr.source).collect();
         assert_eq!(sources, [r#"title="x""#, "onclick=b", "disabled"]);
     }
@@ -572,11 +573,7 @@ mod tests {
     /// a missing value empty); `None` when quick-xml cannot read the tag or
     /// this reader refuses it.
     fn ours(raw: &str) -> Option<ReferenceTag> {
-        let mut reader = Reader::from_str(raw);
-        let (Event::Start(e) | Event::Empty(e)) = reader.read_event().ok()? else {
-            return None;
-        };
-        let tag = e.html5_tag(raw).ok()?;
+        let tag = first_start(raw)?.html5_tag(raw).ok()?;
         let mut attributes: Vec<(String, String)> = Vec::new();
         for attr in &tag.attributes {
             let name = attr.name.to_ascii_lowercase();

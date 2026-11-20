@@ -89,10 +89,11 @@ mod tests {
     use elide_codec::{Document, TypedStream};
     use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextReplacement};
-    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
+    use elide_core::modality::{Chunk, ChunkReader, DataReader, DataWriter};
     use elide_core::redaction::{Disposition, HiddenContentKind, Redactions};
 
     use super::*;
+    use crate::engine::test_util::hint_texts;
 
     /// The body stream of a decoded HTML document, as `Text`.
     fn body(doc: &mut Document) -> TypedStream<'_, Text> {
@@ -113,6 +114,28 @@ mod tests {
 
     fn encoded(doc: &Document) -> String {
         doc.encode().unwrap().decode().unwrap()
+    }
+
+    /// The body chunk reading `text`.
+    fn chunk(doc: &mut Document, text: &str) -> Chunk<Text> {
+        body(doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str() == text)
+            .expect("chunk")
+    }
+
+    /// Redact the body chunk reading `text` whole with `replacement`.
+    async fn redact(doc: &mut Document, text: &str, replacement: &str) {
+        let location = chunk(doc, text).location;
+        body(doc)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted(replacement),
+            )]))
+            .await
+            .unwrap();
     }
 
     fn values(doc: &mut Document) -> Vec<String> {
@@ -148,19 +171,7 @@ mod tests {
         let mut doc = load(raw).await;
         let vs = values(&mut doc);
         assert!(vs.iter().any(|v| v == "jane@example.com"), "{vs:?}");
-        let chunk = body(&mut doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|chunk| chunk.data.as_str() == "jane@example.com")
-            .expect("chunk");
-        body(&mut doc)
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[EMAIL]"),
-            )]))
-            .await
-            .unwrap();
+        redact(&mut doc, "jane@example.com", "[EMAIL]").await;
         assert!(encoded(&doc).contains("<input value=[EMAIL] disabled>"));
     }
 
@@ -234,19 +245,7 @@ mod tests {
     async fn attribute_redact_round_trips() {
         let raw = r#"<html><body><img alt="alice@example.com"></body></html>"#;
         let mut doc = load(raw).await;
-        let chunk = body(&mut doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|c| c.data.as_str() == "alice@example.com")
-            .expect("chunk");
-        body(&mut doc)
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[email]"),
-            )]))
-            .await
-            .unwrap();
+        redact(&mut doc, "alice@example.com", "[email]").await;
         assert!(
             encoded(&doc).contains(r#"alt="[email]""#),
             "alt not rewritten: {}",
@@ -268,28 +267,13 @@ mod tests {
         assert_eq!(encoded(&doc), "<html><body><p>Hi</p></body></html>");
     }
 
-    /// The hint texts of the chunk reading `text`.
-    fn hint_texts(doc: &mut Document, text: &str) -> Vec<String> {
-        let chunk = body(doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|chunk| chunk.data.as_str() == text)
-            .expect("chunk");
-        chunk
-            .hints
-            .iter()
-            .map(|hint| hint.data.as_str().to_owned())
-            .collect()
-    }
-
     #[tokio::test]
     async fn a_sibling_hint_links_passages_of_one_block() {
         // The <td> (in the real BLOCK_ELEMENTS) holds the label and, in a
         // nested <p>, the number: two passages its sibling hints link.
         let raw = "<table><tr><td>Card number<p>4111 1111 1111 1111</p></td></tr></table>";
         let mut doc = load(raw).await;
-        let hints = hint_texts(&mut doc, "4111 1111 1111 1111");
+        let hints = hint_texts(&chunk(&mut doc, "4111 1111 1111 1111"));
         assert!(hints.iter().any(|hint| hint == "Card number"), "{hints:?}");
     }
 
@@ -297,7 +281,7 @@ mod tests {
     async fn text_in_one_passage_gets_no_sibling_hint() {
         let raw = "<table><tr><td>Card <code>4111 1111 1111 1111</code> on file</td></tr></table>";
         let mut doc = load(raw).await;
-        let hints = hint_texts(&mut doc, "Card 4111 1111 1111 1111 on file");
+        let hints = hint_texts(&chunk(&mut doc, "Card 4111 1111 1111 1111 on file"));
         assert!(!hints.iter().any(|hint| hint == "on file"), "{hints:?}");
     }
 }

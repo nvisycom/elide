@@ -17,3 +17,5 @@ pub(crate) mod parser;
 pub(crate) mod reader;
 pub(crate) mod sink;
 pub(crate) mod tag;
+#[cfg(test)]
+pub(crate) mod test_util;

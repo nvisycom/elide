@@ -464,32 +464,17 @@ fn attach_sibling_hints(group: &[TextRecord], items: &mut MarkupSink) {
 
 #[cfg(test)]
 mod tests {
-
     use elide_codec::Stream;
     use elide_codec::extract::ExtractStream;
     use elide_core::modality::Chunk;
 
     use super::*;
-    use crate::engine::address::{MarkupAddresser, MarkupSpan};
-    use crate::xml::FORMAT_ID;
-
-    /// Build a body stream over `raw` with an explicit config so a test can read
-    /// out what the parser extracted (values and hints).
-    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<MarkupSpan> {
-        let items = build_items(raw, config).expect("markup decode succeeds");
-        ExtractStream::new(FORMAT_ID, items, MarkupAddresser)
-    }
+    #[cfg(feature = "html")]
+    use crate::engine::test_util::TEST_BLOCKS;
+    use crate::engine::test_util::{hint_texts, stream, values};
 
     fn xml(raw: &str) -> ExtractStream<MarkupSpan> {
-        handler_with(raw, MarkupConfig::xml())
-    }
-
-    fn values(h: &ExtractStream<MarkupSpan>) -> Vec<String> {
-        h.chunks()
-            .unwrap()
-            .into_iter()
-            .map(|chunk| chunk.data.as_str().to_owned())
-            .collect()
+        stream(raw, MarkupConfig::xml())
     }
 
     /// The first chunk a stream yields.
@@ -497,38 +482,28 @@ mod tests {
         h.chunks().unwrap().into_iter().next().expect("one chunk")
     }
 
-    #[tokio::test]
-    async fn the_element_name_hints_its_text() {
+    #[test]
+    fn the_element_name_hints_its_text() {
         // `<paymentCard>` should reach its text as a `payment Card` hint, so a
         // context keyword (`card`) can boost the value inside, the markup
         // counterpart of a JSON key or CSV header vouching for its value.
-        let raw = "<paymentCard>4111 1111 1111 1111</paymentCard>";
-        let h = xml(raw);
-        let chunk = first_chunk(&h);
+        let chunk = first_chunk(&xml("<paymentCard>4111 1111 1111 1111</paymentCard>"));
         assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
+        let hints = hint_texts(&chunk);
         assert!(
-            chunk
-                .hints
-                .iter()
-                .any(|hint| hint.data.as_str() == "payment Card"),
-            "expected a `payment Card` element-name hint, got {:?}",
-            chunk
-                .hints
-                .iter()
-                .map(|h| h.data.as_str())
-                .collect::<Vec<_>>(),
+            hints.iter().any(|hint| hint == "payment Card"),
+            "expected a `payment Card` element-name hint, got {hints:?}",
         );
     }
 
-    #[tokio::test]
-    async fn an_attribute_value_is_hinted_by_its_name() {
+    #[test]
+    fn an_attribute_value_is_hinted_by_its_name() {
         // `ssn="123-45-6789"` reaches its value as an `ssn` hint located at the
         // attribute name, so a context keyword can boost the value. This also
         // pins that the name's source span resolves (the hint text and location
         // both come from slicing the source at the name).
         let raw = r#"<r paymentCard="4111 1111 1111 1111"/>"#;
-        let h = xml(raw);
-        let chunk = first_chunk(&h);
+        let chunk = first_chunk(&xml(raw));
         assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
         let hint = chunk.hints.first().expect("attribute-name hint present");
         // The name is split into context words for word-boundary matching.
@@ -544,54 +519,44 @@ mod tests {
         assert_eq!(&raw[refs[0].range.clone()], "paymentCard");
     }
 
-    #[tokio::test]
-    async fn a_namespaced_attribute_hint_keys_on_the_local_name() {
+    #[test]
+    fn a_namespaced_attribute_hint_keys_on_the_local_name() {
         // A namespace prefix (`c:ssn`) is stripped so the hint keys on the local
         // name, matching how the element path uses the local name.
-        let raw = r#"<r c:ssn="123-45-6789"/>"#;
-        let h = xml(raw);
-        let chunk = first_chunk(&h);
-        let hint = chunk.hints.first().expect("attribute-name hint present");
-        assert_eq!(hint.data.as_str(), "ssn");
+        let chunk = first_chunk(&xml(r#"<r c:ssn="123-45-6789"/>"#));
+        assert_eq!(hint_texts(&chunk), ["ssn"]);
     }
 
-    #[tokio::test]
-    async fn a_leading_bom_does_not_shift_extracted_text() {
+    #[test]
+    fn a_leading_bom_does_not_shift_extracted_text() {
         // quick-xml reports positions past a leading BOM; the extractor must add
         // it back so the streamed text is exact (not shifted into garbage) and a
         // recognizer can match it.
-        let raw = "\u{feff}<?xml version=\"1.0\"?><r>alice@example.com</r>";
-        let h = xml(raw);
-        let vs = values(&h);
+        let vs = values(&xml(
+            "\u{feff}<?xml version=\"1.0\"?><r>alice@example.com</r>",
+        ));
         assert!(
             vs.iter().any(|v| v == "alice@example.com"),
             "BOM shifted the extracted text: {vs:?}"
         );
     }
 
-    #[tokio::test]
-    async fn stream_yields_text_comment_cdata_and_attributes() {
+    #[test]
+    fn stream_yields_text_comment_cdata_and_attributes() {
         // The four redactable item kinds our parser surfaces from one document:
         // element text, an attribute value, a comment body, and a CDATA payload.
         let raw =
             r#"<root id="A1"><name>Alice</name><!-- c --><data><![CDATA[secret]]></data></root>"#;
-        let h = xml(raw);
-        let vs = values(&h);
+        let vs = values(&xml(raw));
         assert!(vs.iter().any(|v| v == "Alice"), "text: {vs:?}");
         assert!(vs.iter().any(|v| v == " c "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "secret"), "cdata: {vs:?}");
         assert!(vs.iter().any(|v| v == "A1"), "attr: {vs:?}");
     }
 
-    /// A small synthetic block/skip vocabulary. The real HTML vocabulary is
-    /// exercised by the HTML loader's own tests; here it is a stand-in so the
-    /// test targets *our* skip-region tracking, not the HTML element lists.
     #[cfg(feature = "html")]
-    const TEST_BLOCKS: &[&str] = &["p", "div"];
-
-    #[cfg(feature = "html")]
-    #[tokio::test]
-    async fn skipped_body_stays_opaque_through_nested_and_stray_markup() {
+    #[test]
+    fn skipped_body_stays_opaque_through_nested_and_stray_markup() {
         // Our skip-region depth tracking: a skipped body is opaque, so nested
         // markup-like tags and a stray end tag inside it must not leak its text
         // or pop the skip early. (The plain skip-vs-scan case is the HTML
@@ -606,8 +571,10 @@ mod tests {
             r#"<p>ok</p><script>x<script>alice@example.com</script>y</script><p>after</p>"#,
         ];
         for raw in cases {
-            let h = handler_with(raw, MarkupConfig::html(TEST_BLOCKS, &["script"], &[]));
-            let vs = values(&h);
+            let vs = values(&stream(
+                raw,
+                MarkupConfig::html(TEST_BLOCKS, &["script"], &[]),
+            ));
             assert!(
                 !vs.iter().any(|v| v.contains("alice@example.com")),
                 "skipped body leaked for {raw:?}: {vs:?}"
@@ -628,9 +595,8 @@ mod tests {
             "<div><p>Contact <b>jane.roe@</b>example.com <a href=\"tel:x\">now</a><br>Rack 7</p>",
             "<p>Next</p></div>",
         );
-        let h = handler_with(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]));
         assert_eq!(
-            values(&h),
+            values(&stream(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]))),
             ["Contact jane.roe@example.com now\nRack 7", "tel:x", "Next"],
             "the passage is unbroken, and the link's attribute follows it",
         );
@@ -643,28 +609,21 @@ mod tests {
     }
 
     #[cfg(feature = "html")]
-    #[tokio::test]
-    async fn a_stray_end_tag_does_not_pop_the_wrong_frame() {
+    #[test]
+    fn a_stray_end_tag_does_not_pop_the_wrong_frame() {
         // Lenient parsing emits an `End(div)` for a `</div>` with no open
         // `<div>`. Popping unconditionally would discard the still-open
         // `<paymentCard>` frame, stripping the element-name hint from the text
         // that follows, which can change context-gated detection. The stray
         // end tag must be ignored so the following number keeps its hint.
         let raw = "<paymentCard>4111 <b>1111</b></div> 1111 1111</paymentCard>";
-        let h = handler_with(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]));
-        let mut hinted = false;
-        for chunk in h.chunks().unwrap() {
-            // The text after the stray `</div>` must still carry the
-            // `payment Card` element-name hint.
-            if chunk.data.as_str().contains("1111 1111")
-                && chunk
-                    .hints
-                    .iter()
-                    .any(|hint| hint.data.as_str() == "payment Card")
-            {
-                hinted = true;
-            }
-        }
+        let h = stream(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]));
+        // The text after the stray `</div>` must still carry the
+        // `payment Card` element-name hint.
+        let hinted = h.chunks().unwrap().iter().any(|chunk| {
+            chunk.data.as_str().contains("1111 1111")
+                && hint_texts(chunk).iter().any(|hint| hint == "payment Card")
+        });
         assert!(
             hinted,
             "text after a stray </div> lost its enclosing paymentCard hint"
