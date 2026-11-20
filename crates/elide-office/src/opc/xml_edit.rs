@@ -43,7 +43,7 @@ impl Name<'_> {
     }
 
     /// Whether this is in `namespace`.
-    pub(crate) fn in_namespace(&self, namespace: &str) -> bool {
+    fn in_namespace(&self, namespace: &str) -> bool {
         self.namespace == Some(namespace)
     }
 }
@@ -165,7 +165,7 @@ impl<R: Rules> Edit for R {
 }
 
 /// A namespace-qualified name to match: `(namespace URI, local name)`.
-pub(crate) type QName = (&'static str, &'static str);
+type QName = (&'static str, &'static str);
 
 /// How an attribute's local name is matched.
 #[derive(Debug, Clone, Copy)]
@@ -434,6 +434,12 @@ fn attributes<'a>(
         });
     }
     Ok(out)
+}
+
+/// The local name of the element `e` opens, its prefix dropped (`dc:creator`
+/// is `creator`).
+pub(crate) fn local_name(e: &BytesStart<'_>) -> String {
+    e.local_name().into_inner().to_owned()
 }
 
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml

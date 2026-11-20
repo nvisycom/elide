@@ -328,6 +328,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     let mut reader = SpannedReader::new_ns(raw);
     let mut rebuild = Rebuild::new(raw);
     let mut seen_root = false;
+    let drawingml = namespace_index(Some(A));
 
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
@@ -384,7 +385,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                 };
                 let decision = match decision {
                     Decision::Keep(Frame::Typed(ty))
-                        if namespace_index(namespace.as_deref()) == namespace_index(Some(A))
+                        if namespace_index(namespace.as_deref()) == drawingml
                             && local == "graphicData" =>
                     {
                         Decision::Keep(Frame::Graphic(ty, payload(e)?))
@@ -702,6 +703,15 @@ enum Decision {
     Drop(HiddenContent),
 }
 
+/// The type of the global element `local` in the namespace indexed
+/// `namespace`, if the schemas declare one.
+fn root_type(namespace: u8, local: &str) -> Option<u16> {
+    ROOTS
+        .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(namespace, local)))
+        .ok()
+        .map(|at| ROOTS[at].2)
+}
+
 /// The frame of the root element `local` in `namespace`, which must be `root`.
 fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decision> {
     let mismatch = || {
@@ -718,10 +728,8 @@ fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decisi
             if index != expected || local != expected_local {
                 return Err(mismatch());
             }
-            let at = ROOTS
-                .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(index, local)))
-                .map_err(|_| mismatch())?;
-            Ok(Decision::Keep(Frame::Typed(ROOTS[at].2)))
+            let ty = root_type(index, local).ok_or_else(mismatch)?;
+            Ok(Decision::Keep(Frame::Typed(ty)))
         }
     }
 }
@@ -753,10 +761,9 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
         }
         Scope::Graphic(..) => None,
         // A VML drawing holds the global VML shapes.
-        Scope::Vml if namespace.is_some_and(|namespace| VML_SHAPES.contains(&namespace)) => ROOTS
-            .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(index, local)))
-            .ok()
-            .map(|at| ROOTS[at].2),
+        Scope::Vml if namespace.is_some_and(|namespace| VML_SHAPES.contains(&namespace)) => {
+            root_type(index, local)
+        }
         Scope::Vml | Scope::Document => None,
     };
     match ty {

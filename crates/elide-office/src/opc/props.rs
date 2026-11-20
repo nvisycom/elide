@@ -24,7 +24,9 @@ use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 
-use crate::opc::xml_edit::{Edit, Edited, Skipped, SpannedReader, attribute_source, bom_len};
+use crate::opc::xml_edit::{
+    Edit, Edited, Skipped, SpannedReader, attribute_source, bom_len, local_name,
+};
 use crate::opc::{attribute_value, malformed_xml};
 
 /// The core and extended property elements surfaced as fields, each holding
@@ -680,12 +682,6 @@ fn split_bom(bytes: &[u8]) -> Option<(&str, &str)> {
 /// matched by local name.
 fn is_text_type(elem: &BytesStart<'_>) -> bool {
     TEXT_TYPES.contains(&elem.local_name().into_inner())
-}
-
-/// The local name of an element, dropping any namespace prefix (`dc:creator` →
-/// `creator`), via quick-xml's own prefix handling.
-fn local_name(elem: &BytesStart<'_>) -> String {
-    elem.local_name().as_ref().to_owned()
 }
 
 /// Resolve an entity reference to the text it stands for, so an entity-encoded

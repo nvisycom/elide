@@ -162,11 +162,8 @@ pub(crate) fn spanned_entries(
             _ => continue,
         };
         if depth == 1
-            && let Some((name, allowed)) = vocabulary
-                .entries
-                .iter()
-                .find(|(name, _)| *name == e.local_name().into_inner())
-            && vocabulary.owns(namespace.as_deref())
+            && let Some((name, allowed)) =
+                vocabulary.entry(namespace.as_deref(), e.local_name().into_inner())
         {
             let mut attributes = Vec::new();
             let mut values = Vec::new();
@@ -213,16 +210,17 @@ impl Vocabulary {
         namespace.is_none_or(|namespace| namespace == self.namespace)
     }
 
-    /// The attributes of the entry `local` in `namespace`, or `None` when the
-    /// root holds no such entry.
-    fn entry(&self, namespace: Option<&str>, local: &str) -> Option<&'static [&'static str]> {
+    /// The entry `local` in `namespace` with the attributes it may carry, or
+    /// `None` when the root holds no such entry.
+    fn entry(
+        &self,
+        namespace: Option<&str>,
+        local: &str,
+    ) -> Option<&'static (&'static str, &'static [&'static str])> {
         if !self.owns(namespace) {
             return None;
         }
-        self.entries
-            .iter()
-            .find(|(name, _)| *name == local)
-            .map(|(_, attributes)| *attributes)
+        self.entries.iter().find(|(name, _)| *name == local)
     }
 }
 
@@ -283,7 +281,7 @@ impl Edit for PackageMarkup {
                             )));
                         }
                         Some(Kept::Root) => match vocabulary.entry(namespace.as_deref(), local) {
-                            Some(attributes) => Kept::Entry(attributes),
+                            Some(&(_, attributes)) => Kept::Entry(attributes),
                             None => {
                                 removing = Skipped::begin(span, is_start, &mut cuts);
                                 continue;

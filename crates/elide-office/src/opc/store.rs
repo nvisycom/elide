@@ -14,8 +14,8 @@ use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
 use crate::opc::xml_edit::check_cuts;
 use crate::opc::xml_span::{
-    BlockKind, PRESERVE_SPACE, Span, attribute_spans, cell_markup_spans, preserve_space_at,
-    relationship_spans, text_spans,
+    BlockKind, PRESERVE_SPACE, Readable, Span, attribute_spans, cell_markup_spans,
+    preserve_space_at, relationship_spans, text_spans,
 };
 
 /// One package part: its path, its role, and its bytes, retained for extraction
@@ -134,7 +134,7 @@ impl StoredPart {
     /// [`RelationshipTargets`](PartRole::RelationshipTargets) part; and the
     /// values of its text attributes. An attribute inside a passage follows the
     /// whole passage, which stays unbroken. Errs on malformed XML.
-    fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
+    fn spans(&self, raw: &str) -> Readable<Vec<Span>> {
         let text = match self.role {
             PartRole::RelationshipTargets => return relationship_spans(raw),
             PartRole::ElementText => text_spans(raw)?,

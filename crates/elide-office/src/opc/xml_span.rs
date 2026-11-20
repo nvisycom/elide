@@ -24,14 +24,18 @@ use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
 use quick_xml::escape::{escape, partial_escape, unescape};
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::Event;
 
 use crate::opc::attribute_value;
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
 use crate::opc::ns::{W, X, transitional};
 use crate::opc::relationships::{self, HYPERLINK};
-use crate::opc::xml_edit::{Action, Attribute, Name, Rules, SpannedReader, edit};
+use crate::opc::xml_edit::{Action, Attribute, Name, Rules, SpannedReader, edit, local_name};
+
+/// A read of a part's spans, which fails (with nothing more to say) on
+/// malformed XML; the caller reports the part as an issue.
+pub(crate) type Readable<T> = std::result::Result<T, ()>;
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -96,10 +100,7 @@ impl Span {
     /// byte-identical to its source, so its text is borrowed as-is over a
     /// single identity run. A separator reads as its character and maps to no
     /// source text.
-    pub(crate) fn decode<'a>(
-        &self,
-        raw: &'a str,
-    ) -> std::result::Result<(Cow<'a, str>, OffsetMap), ()> {
+    pub(crate) fn decode<'a>(&self, raw: &'a str) -> Readable<(Cow<'a, str>, OffsetMap)> {
         let slice = &raw[self.range.clone()];
         match self.kind {
             // XML refuses a reference it cannot decode, so the slice must
@@ -175,7 +176,7 @@ impl Span {
 /// logical text run splits into `Text`/`GeneralRef` events; a contiguous run of
 /// them is coalesced into one `Text` span (covering the entity bytes) so
 /// unescaping the whole span yields the decoded logical text.
-pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn text_spans(raw: &str) -> Readable<Vec<Span>> {
     text_spans_where(raw, |_| true)
 }
 
@@ -184,7 +185,7 @@ pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
 /// runs (`<c>…<t>`), and a shared string's runs (`<si>…<t>`, its phonetic
 /// reading `<rPh>` excepted). A header or footer, a validation list, a formula,
 /// and a phonetic reading are all surfaced. Errs on malformed XML.
-pub(crate) fn cell_markup_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn cell_markup_spans(raw: &str) -> Readable<Vec<Span>> {
     text_spans_where(raw, |open| !is_cell_text(open))
 }
 
@@ -201,10 +202,7 @@ fn is_cell_text(open: &[String]) -> bool {
 
 /// The text/comment/CDATA spans of `raw` inside elements `keep` accepts, given
 /// the open elements' local names, outermost first.
-fn text_spans_where(
-    raw: &str,
-    keep: impl Fn(&[String]) -> bool,
-) -> std::result::Result<Vec<Span>, ()> {
+fn text_spans_where(raw: &str, keep: impl Fn(&[String]) -> bool) -> Readable<Vec<Span>> {
     let mut reader = SpannedReader::new(raw);
     let mut spans = Vec::new();
     let mut run: Option<Range<usize>> = None;
@@ -269,10 +267,7 @@ fn text_spans_where(
 /// The value spans of the attributes of `raw` that `attributes` names, each
 /// tagged [`BlockKind::Attribute`]; an empty value is skipped. Errs on
 /// malformed XML.
-pub(crate) fn attribute_spans(
-    raw: &str,
-    attributes: &[TextAttribute],
-) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn attribute_spans(raw: &str, attributes: &[TextAttribute]) -> Readable<Vec<Span>> {
     let mut spans: Vec<Span> = Vec::new();
     for (named, range) in named_values(raw, attributes)? {
         // The first entry naming an attribute says what it is.
@@ -293,7 +288,7 @@ pub(crate) fn attribute_spans(
 pub(crate) fn attribute_ranges(
     raw: &str,
     attributes: &[TextAttribute],
-) -> std::result::Result<Vec<Vec<Range<usize>>>, ()> {
+) -> Readable<Vec<Vec<Range<usize>>>> {
     let mut ranges = vec![Vec::new(); attributes.len()];
     for (named, range) in named_values(raw, attributes)? {
         ranges[named].push(range);
@@ -306,10 +301,7 @@ pub(crate) fn attribute_ranges(
 /// and, for one attribute, in the order of `attributes`. The part is read as
 /// every edit reads it ([`edit`]), names resolved and a strict namespace
 /// mapped. Errs on malformed XML.
-fn named_values(
-    raw: &str,
-    attributes: &[TextAttribute],
-) -> std::result::Result<Vec<(usize, Range<usize>)>, ()> {
+fn named_values(raw: &str, attributes: &[TextAttribute]) -> Readable<Vec<(usize, Range<usize>)>> {
     if attributes.is_empty() {
         return Ok(Vec::new());
     }
@@ -359,7 +351,7 @@ impl Rules for Named<'_> {
 /// hold no user data, so they are left untouched. The part is read by
 /// [`relationships::parse_spanned`], so what is surfaced is what the package
 /// reads.
-pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn relationship_spans(raw: &str) -> Readable<Vec<Span>> {
     Ok(relationships::parse_spanned(raw)
         .map_err(|_| ())?
         .into_iter()
@@ -565,11 +557,6 @@ fn separator(local: &str, open: &[String]) -> Option<char> {
         "br" | "cr" => Some('\n'),
         _ => None,
     }
-}
-
-/// The local name of the element `e` opens.
-fn local_name(e: &BytesStart<'_>) -> String {
-    AsRef::<str>::as_ref(&e.local_name()).to_owned()
 }
 
 /// Narrow `span` by its `open`/`close` delimiters to the inner range.

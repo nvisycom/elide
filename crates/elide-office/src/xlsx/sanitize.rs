@@ -100,7 +100,7 @@ impl Edit for CommentNotes {
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        cut_notes(raw, true)
+        cut_notes(raw, NoteCut::Shape)
     }
 }
 
@@ -110,17 +110,34 @@ impl Edit for CommentNoteText {
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        cut_notes(raw, false)
+        cut_notes(raw, NoteCut::Text)
     }
 }
 
-/// `raw` without its comment notes: each `whole` shape, or else the text of each
-/// one's text box. The count is of the notes changed.
-fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
+/// What [`cut_notes`] cuts of a comment note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoteCut {
+    /// The whole shape.
+    Shape,
+    /// The text of its text box.
+    Text,
+}
+
+/// What an open element of a VML drawing is, as [`cut_notes`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Opened {
+    Shape,
+    TextBox,
+    Other,
+}
+
+/// `raw` without its comment notes, each cut as `cut` says. The count is of
+/// the notes changed.
+fn cut_notes(raw: &str, cut: NoteCut) -> Result<Option<Edited>> {
     let mut reader = SpannedReader::new_ns(raw);
     let mut shapes: Vec<OpenShape> = Vec::new();
     // What each open element is.
-    let mut open: Vec<(bool, bool)> = Vec::new();
+    let mut open: Vec<Opened> = Vec::new();
     let mut cuts: Vec<Range<usize>> = Vec::new();
     let mut count = 0;
     loop {
@@ -134,10 +151,12 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
                 if in_ns(VML_EXCEL) && local == "ClientData" {
                     // The kind as XML reads it, its references decoded; one
                     // that does not decode may be a note.
-                    let note = e.attributes().flatten().any(|attr| {
-                        attr.key.local_name().as_ref() == "ObjectType"
-                            && attribute_value(&attr.value).map_or(true, |kind| kind == "Note")
-                    });
+                    let mut note = false;
+                    for attr in e.attributes() {
+                        let attr = attr.map_err(malformed_xml)?;
+                        note |= attr.key.local_name().as_ref() == "ObjectType"
+                            && attribute_value(&attr.value).map_or(true, |kind| kind == "Note");
+                    }
                     if note && let Some(shape) = shapes.last_mut() {
                         shape.note = true;
                     }
@@ -151,28 +170,37 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
                             text: Vec::new(),
                         });
                     }
-                    open.push((shape, in_ns(VML) && local == "textbox"));
+                    open.push(if shape {
+                        Opened::Shape
+                    } else if in_ns(VML) && local == "textbox" {
+                        Opened::TextBox
+                    } else {
+                        Opened::Other
+                    });
                 }
             }
             Event::Text(_) | Event::GeneralRef(_) | Event::CData(_)
-                if open.iter().any(|&(_, textbox)| textbox)
-                    && !raw[span.clone()].trim().is_empty() =>
+                if open.contains(&Opened::TextBox) && !raw[span.clone()].trim().is_empty() =>
             {
                 if let Some(shape) = shapes.last_mut() {
                     shape.text.push(span);
                 }
             }
             Event::End(_) => {
-                if open.pop().is_some_and(|(shape, _)| shape)
+                if open.pop() == Some(Opened::Shape)
                     && let Some(shape) = shapes.pop()
                     && shape.note
                 {
-                    if whole {
-                        count += 1;
-                        cuts.push(shape.start..span.end);
-                    } else if !shape.text.is_empty() {
-                        count += 1;
-                        cuts.extend(shape.text);
+                    match cut {
+                        NoteCut::Shape => {
+                            count += 1;
+                            cuts.push(shape.start..span.end);
+                        }
+                        NoteCut::Text if !shape.text.is_empty() => {
+                            count += 1;
+                            cuts.extend(shape.text);
+                        }
+                        NoteCut::Text => {}
                     }
                 }
             }
@@ -361,6 +389,14 @@ mod tests {
         let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><x:ClientData ObjectType="Not&#101;"/></v:shape></xml>"#;
         let edited = expect_edit(raw, &CommentNotes);
         assert!(!edited.text.contains("v:shape"), "{}", edited.text);
+    }
+
+    /// A note's kind that cannot be read refuses the drawing rather than
+    /// passing for no note.
+    #[test]
+    fn a_malformed_note_kind_is_refused() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><x:ClientData Other="1" Other="2" ObjectType="Note"/></v:shape></xml>"#;
+        assert!(CommentNotes.apply(raw).is_err());
     }
 
     /// One note counts once, however its text is split.
