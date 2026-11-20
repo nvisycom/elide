@@ -43,6 +43,8 @@ fn a_handler_after_a_slash_or_unquoted_is_removed() {
     assert_eq!(out, r#"<img alt="Jane">"#);
 }
 
+// HTML's named references are decoded only with the `html` feature.
+#[cfg(feature = "html")]
 #[test]
 fn a_script_url_spelled_with_html_references_is_removed() {
     // A browser decodes HTML's named references and numeric ones without
