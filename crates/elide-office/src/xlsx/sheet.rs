@@ -10,14 +10,16 @@
 //! and the preceding cell, so a sparse or reference-less sheet is placed
 //! correctly.
 
+use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::ops::Range;
 
 use elide_core::{Error, Result};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::Attribute;
-use quick_xml::{Reader, XmlVersion};
 
-use crate::opc::xml_edit::bom_len;
+use crate::opc::attribute_value;
+use crate::opc::xml_edit::SpannedReader;
 use crate::xlsx::cellref::parse_cell_ref;
 
 /// The entity-decoded value of an attribute, for comparison or parsing.
@@ -28,39 +30,7 @@ use crate::xlsx::cellref::parse_cell_ref;
 /// reference are read correctly regardless of how they were escaped. The raw
 /// value is still used where an attribute is re-emitted verbatim.
 fn normalized(attr: &Attribute<'_>) -> Result<String> {
-    attr.normalized_value(XmlVersion::Implicit1_0)
-        .map(|value| value.into_owned())
-        .map_err(|e| Error::malformed(format!("attribute value: {e}")))
-}
-
-/// Where a cell's text lives, and the byte spans to rewrite it.
-///
-/// Both variants rewrite by replacing the *whole* `<c>…</c>` element with a
-/// fresh inline string: a shared cell is de-shared, and an inline cell (which may
-/// hold several rich-text runs) is collapsed to one run so no run's text is left
-/// behind.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CellSource {
-    /// A shared string: the index into the shared-string table, plus the byte
-    /// range of the whole `<c>…</c>` element.
-    Shared {
-        /// Index into the shared-string table.
-        index: usize,
-        /// Byte range of the whole `<c …>…</c>` element in the sheet's bytes.
-        cell: Range<usize>,
-        /// The cell's attributes other than `t` (e.g. `r`, `s`), verbatim, so a
-        /// rewrite preserves them and only swaps the type and body.
-        attributes: String,
-    },
-    /// An inline string (`t="inlineStr"`) or a cached string-formula result
-    /// (`t="str"`): the byte range of the whole `<c>…</c>` element, replaced
-    /// wholesale so every run of a multi-run value is redacted.
-    Inline {
-        /// Byte range of the whole `<c …>…</c>` element in the sheet's bytes.
-        cell: Range<usize>,
-        /// The cell's attributes other than `t`, verbatim.
-        attributes: String,
-    },
+    attribute_value(&attr.value).map(Cow::into_owned)
 }
 
 /// One text-bearing cell of a worksheet.
@@ -76,8 +46,15 @@ pub(crate) struct SheetCell {
     /// The cell's own text (inline or cached-formula), already concatenated
     /// across every run; `None` for a shared cell whose text is in the table.
     pub(crate) inline_text: Option<String>,
-    /// The cell's byte span and attributes, retained for the rewrite.
-    pub(crate) source: CellSource,
+    /// Byte range of the whole `<c …>…</c>` element in the sheet's bytes.
+    ///
+    /// A rewrite replaces the whole element with a fresh inline string: a
+    /// shared cell is de-shared, and an inline cell (which may hold several
+    /// rich-text runs) is collapsed to one run so no run's text is left behind.
+    pub(crate) cell: Range<usize>,
+    /// The cell's attributes other than `t` (e.g. `r`, `s`), verbatim, so a
+    /// rewrite preserves them and only swaps the type and body.
+    pub(crate) attributes: String,
 }
 
 /// The text-bearing cells of a worksheet part `raw`, in document order.
@@ -85,9 +62,7 @@ pub(crate) struct SheetCell {
 /// quick-xml reports byte positions relative to the text after a leading BOM, so
 /// every recorded span is shifted back onto the original bytes.
 pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
-    let mut reader = Reader::from_str(raw);
-    let bom = bom_len(raw);
-    let mut last = bom;
+    let mut reader = SpannedReader::new(raw);
     let mut cells = Vec::new();
     let mut open: Option<OpenCell> = None;
     // Row/column tracking so a cell with an omitted `r` reference can be placed:
@@ -97,11 +72,9 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
     let mut next_column: u32 = 0;
 
     loop {
-        let event = reader
+        let (event, span) = reader
             .read_event()
             .map_err(|e| Error::malformed(format!("worksheet malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
 
         match event {
             Event::Eof => break,
@@ -254,7 +227,8 @@ impl OpenCell {
             // single-quoted source value may contain a bare `"`.
             let name = attr.key.as_ref();
             let value = escape_attr_value(attr.value.as_ref());
-            attributes.push_str(&format!(r#" {name}="{value}""#));
+            // Writing to a `String` cannot fail.
+            let _ = write!(attributes, r#" {name}="{value}""#);
         }
         // A cell may omit `r`; when present it must be a valid reference.
         let (row, column) = match reference.as_deref() {
@@ -296,11 +270,8 @@ impl OpenCell {
                     column: self.column,
                     shared_index: Some(index),
                     inline_text: None,
-                    source: CellSource::Shared {
-                        index,
-                        cell: self.start..end,
-                        attributes: self.attributes,
-                    },
+                    cell: self.start..end,
+                    attributes: self.attributes,
                 }))
             }
             CellType::Inline => {
@@ -308,21 +279,19 @@ impl OpenCell {
                     return Ok(None);
                 }
                 // Concatenate every run's decoded text: the value a reader sees.
-                let text = self.decoded_runs(raw)?;
+                let text = self.decoded_runs(raw);
                 Ok(Some(SheetCell {
                     row: self.row,
                     column: self.column,
                     shared_index: None,
                     inline_text: Some(text),
-                    source: CellSource::Inline {
-                        cell: self.start..end,
-                        attributes: self.attributes,
-                    },
+                    cell: self.start..end,
+                    attributes: self.attributes,
                 }))
             }
             CellType::Formula => {
                 // `t="str"` caches the string result of a formula in `<v>`.
-                let Some(text) = self.value_text.clone() else {
+                let Some(text) = self.value_text else {
                     return Ok(None);
                 };
                 Ok(Some(SheetCell {
@@ -330,10 +299,8 @@ impl OpenCell {
                     column: self.column,
                     shared_index: None,
                     inline_text: Some(unescape_text(&text)),
-                    source: CellSource::Inline {
-                        cell: self.start..end,
-                        attributes: self.attributes,
-                    },
+                    cell: self.start..end,
+                    attributes: self.attributes,
                 }))
             }
             CellType::Other => Ok(None),
@@ -341,12 +308,11 @@ impl OpenCell {
     }
 
     /// The concatenated, entity-decoded text of every `<t>` run.
-    fn decoded_runs(&self, raw: &str) -> Result<String> {
-        let mut text = String::new();
-        for run in &self.text_runs {
-            text.push_str(&unescape_text(&raw[run.clone()]));
-        }
-        Ok(text)
+    fn decoded_runs(&self, raw: &str) -> String {
+        self.text_runs
+            .iter()
+            .map(|run| unescape_text(&raw[run.clone()]))
+            .collect()
     }
 }
 
@@ -399,10 +365,11 @@ mod tests {
     #[test]
     fn shared_cell_span_covers_the_whole_element() {
         let cells = parse_cells(SHEET).unwrap();
-        let CellSource::Shared { cell, .. } = &cells[0].source else {
-            panic!("A1 is shared");
-        };
-        assert_eq!(&SHEET[cell.clone()], r#"<c r="A1" t="s"><v>0</v></c>"#);
+        assert!(cells[0].shared_index.is_some(), "A1 is shared");
+        assert_eq!(
+            &SHEET[cells[0].cell.clone()],
+            r#"<c r="A1" t="s"><v>0</v></c>"#
+        );
     }
 
     #[test]
@@ -413,9 +380,8 @@ mod tests {
             r#"</sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        let CellSource::Shared { attributes, .. } = &cells[0].source else {
-            panic!("shared");
-        };
+        assert!(cells[0].shared_index.is_some(), "shared");
+        let attributes = &cells[0].attributes;
         assert!(attributes.contains(r#"r="A1""#));
         assert!(attributes.contains(r#"s="3""#));
         assert!(
@@ -521,9 +487,8 @@ mod tests {
             r#"</row></sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        let CellSource::Shared { attributes, .. } = &cells[0].source else {
-            panic!("shared");
-        };
+        assert!(cells[0].shared_index.is_some(), "shared");
+        let attributes = &cells[0].attributes;
         assert!(
             attributes.contains(r#"foo="a&quot;b""#),
             "attributes: {attributes}"

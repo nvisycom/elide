@@ -1,5 +1,5 @@
 //! [`MarkupDocument`]: a decoded markup document, its body stream and how it is
-//! re-serialised, and [`markup_document`], which assembles one.
+//! re-serialised, and [`decode`], which reads one.
 //!
 //! Re-serialisation preserves the document **verbatim**: [`MarkupDocument`]
 //! writes back only the stretch of each item's value a redaction changed,
@@ -15,9 +15,12 @@ use elide_codec::content::ContentData;
 use elide_codec::extract::{ExtractStream, Passage};
 use elide_codec::{Blob, Document, FormatId, LocalId, Native, StreamMut};
 use elide_core::modality::text::Text;
+use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
-use super::address::{MarkupAddresser, XmlItem, XmlSpan};
+use super::address::{MarkupAddresser, MarkupItem, MarkupSpan};
+use super::config::MarkupConfig;
+use super::parser::build_items;
 use crate::sanitize::MarkupSanitizer;
 
 /// The id of a markup document's one stream.
@@ -28,7 +31,7 @@ const BODY_ID: &str = "body";
 /// checked against the sanitizer the decode applied.
 pub(crate) struct MarkupDocument {
     /// The body items.
-    body: ExtractStream<XmlSpan>,
+    body: ExtractStream<MarkupSpan>,
     /// The retained (sanitized) raw document.
     raw: String,
     /// The sanitizer the decode applied, which the output must pass.
@@ -53,21 +56,25 @@ impl Native for MarkupDocument {
     }
 }
 
-/// Assemble a markup [`Document`] under `format_id` from the parsed `items` over
-/// the retained (sanitized) `raw` source, checked on encode against
-/// `sanitizer`. Shared by the XML and HTML loaders.
-pub(crate) fn markup_document(
+/// Decode `content` as a markup [`Document`] under `format_id`, read by
+/// `config`: rebuilt by the sanitizer of its dialect under `policy`, then
+/// parsed into its body items over the rebuilt source, which the output is
+/// checked against on encode. Shared by the XML and HTML loaders.
+pub(crate) fn decode(
     format_id: FormatId,
-    raw: String,
-    items: Vec<XmlItem>,
-    sanitizer: MarkupSanitizer,
-) -> Document {
+    config: MarkupConfig<'_>,
+    content: ContentData,
+    policy: HiddenContentPolicy,
+) -> Result<Document> {
+    let sanitizer = MarkupSanitizer::new(config.dialect, policy);
+    let (raw, stripped) = sanitizer.sanitize(content.decode()?)?;
+    let items = build_items(&raw, config)?;
     let native = MarkupDocument {
         body: ExtractStream::new(format_id, items, MarkupAddresser),
         raw,
         sanitizer,
     };
-    Document::new(format_id, native, Vec::new())
+    Ok(Document::new(format_id, native, Vec::new()).with_stripped(stripped))
 }
 
 /// Write each item's current value back into `raw`, returning the rebuilt
@@ -78,7 +85,7 @@ pub(crate) fn markup_document(
 /// they never overlap. Applying them right-to-left means each splice's
 /// length delta can't shift the spans of items earlier in the document. A
 /// separator stands for its markup and is never written back.
-pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
+fn splice(raw: &str, items: &[MarkupItem]) -> Result<String> {
     let mut edits: Vec<(Range<usize>, String)> = items
         .iter()
         .filter(|item| item.passage != Passage::Separator)
@@ -90,18 +97,13 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
     for (Range { start, end }, text) in edits {
         // Spans index into `out`, which starts as `raw` and only ever
         // grows/shrinks to the right of the current splice, so they stay
-        // in-bounds and on char boundaries by construction. The guards are
+        // in-bounds and on char boundaries by construction. The guard is
         // defensive: a malformed loader would surface here rather than
         // panic in `replace_range`.
-        if end > out.len() || start > end {
+        if out.get(start..end).is_none() {
             return Err(Error::processing(format!(
-                "xml splice span {start}..{end} out of bounds (len {})",
+                "markup splice span {start}..{end} is out of bounds or mid-character (len {})",
                 out.len()
-            )));
-        }
-        if !out.is_char_boundary(start) || !out.is_char_boundary(end) {
-            return Err(Error::processing(format!(
-                "xml splice span {start}..{end} falls mid-character"
             )));
         }
         out.replace_range(start..end, &text);
@@ -113,27 +115,26 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
 mod tests {
     use elide_codec::Stream;
     use elide_core::ErrorKind;
-    use elide_core::modality::DataWriter;
     use elide_core::modality::text::{SourceRef, TextLocation, TextReplacement};
+    use elide_core::modality::{Chunk, DataWriter};
     use elide_core::redaction::Redactions;
 
     use super::*;
-    use crate::engine::config::MarkupConfig;
-    use crate::engine::parser::build_items;
-    use crate::xml::FORMAT_ID;
+    #[cfg(feature = "html")]
+    use crate::engine::test_util::TEST_BLOCKS;
+    use crate::engine::test_util::stream;
 
     /// A markup body stream over its raw source, spliced back the way
     /// [`MarkupDocument`] does.
     struct Doc {
-        stream: ExtractStream<XmlSpan>,
+        stream: ExtractStream<MarkupSpan>,
         raw: String,
     }
 
     impl Doc {
         fn new(raw: &str, config: MarkupConfig<'_>) -> Self {
-            let items = build_items(raw, config).expect("markup decode succeeds");
             Doc {
-                stream: ExtractStream::new(FORMAT_ID, items, MarkupAddresser),
+                stream: stream(raw, config),
                 raw: raw.to_owned(),
             }
         }
@@ -148,16 +149,26 @@ mod tests {
     }
 
     /// The first body chunk whose text satisfies `pred`.
-    fn chunk_where(
-        doc: &mut Doc,
-        pred: impl Fn(&str) -> bool,
-    ) -> elide_core::modality::Chunk<Text> {
+    fn chunk_where(doc: &mut Doc, pred: impl Fn(&str) -> bool) -> Chunk<Text> {
         doc.stream
             .chunks()
             .unwrap()
             .into_iter()
             .find(|c| pred(c.data.as_str()))
             .expect("chunk")
+    }
+
+    /// Where `needle` reads in `chunk`, in the stream's coordinates.
+    fn inline_at(chunk: &Chunk<Text>, needle: &str) -> TextLocation {
+        let start =
+            chunk.location.range().unwrap().start + chunk.data.as_str().find(needle).unwrap();
+        TextLocation::inline(start..start + needle.len())
+    }
+
+    /// Write `replacement` over `location`.
+    async fn write(doc: &mut Doc, location: TextLocation, replacement: &str) -> Result<()> {
+        let redactions = Redactions::from([(location, TextReplacement::substituted(replacement))]);
+        doc.stream.write_at(redactions).await
     }
 
     /// Redact each of `needles` where it reads in the decoded body, the way the
@@ -206,15 +217,15 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn encode_unchanged_round_trips_verbatim() {
+    #[test]
+    fn encode_unchanged_round_trips_verbatim() {
         let raw = "<?xml version=\"1.0\"?>\n<root attr=\"x\">\n  <name>Alice</name>\n  <!-- note -->\n</root>\n";
         let doc = load(raw);
         assert_eq!(doc.encoded(), raw);
     }
 
-    #[tokio::test]
-    async fn round_trips_verbatim_across_tricky_inputs() {
+    #[test]
+    fn round_trips_verbatim_across_tricky_inputs() {
         for raw in [
             "\u{FEFF}<?xml version=\"1.0\"?><r>x</r>",
             "  <r>x</r>",
@@ -227,8 +238,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn lift_carries_the_exact_source_span() {
+    #[test]
+    fn lift_carries_the_exact_source_span() {
         // Text preceded by tags: the chunk's stream offset differs from the raw
         // byte offset, so `source` must point at the raw bytes, not the stream.
         let raw = "<root><name>Alice Carter</name></root>";
@@ -256,13 +267,7 @@ mod tests {
         let mut doc = load(raw);
         let at = raw.find("Alice").unwrap();
         let location = TextLocation::marked_source(SourceRef::new(at..at + "Alice".len()));
-        doc.stream
-            .write_at(Redactions::from([(
-                location,
-                TextReplacement::substituted("[NAME]"),
-            )]))
-            .await
-            .unwrap();
+        write(&mut doc, location, "[NAME]").await.unwrap();
         assert_eq!(doc.encoded(), "<root><name>[NAME]</name></root>");
     }
 
@@ -279,12 +284,7 @@ mod tests {
             at..at + "Alice".len(),
             "some/part.xml",
         ));
-        let err = doc
-            .stream
-            .write_at(Redactions::from([(
-                location,
-                TextReplacement::substituted("[NAME]"),
-            )]))
+        let err = write(&mut doc, location, "[NAME]")
             .await
             .expect_err("part-tagged ref must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -299,12 +299,7 @@ mod tests {
         let mut doc = load(raw);
         let past = raw.len() + 4;
         let location = TextLocation::marked_source(SourceRef::new(past..past + 3));
-        let err = doc
-            .stream
-            .write_at(Redactions::from([(
-                location,
-                TextReplacement::substituted("[NAME]"),
-            )]))
+        let err = write(&mut doc, location, "[NAME]")
             .await
             .expect_err("out-of-range source must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -312,76 +307,39 @@ mod tests {
 
     #[tokio::test]
     async fn redact_text_node() {
-        let raw = "<root><name>Alice</name></root>";
-        let mut doc = load(raw);
+        let mut doc = load("<root><name>Alice</name></root>");
         let chunk = chunk_where(&mut doc, |t| t == "Alice");
-        doc.stream
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[NAME]"),
-            )]))
-            .await
-            .unwrap();
+        write(&mut doc, chunk.location, "[NAME]").await.unwrap();
         assert_eq!(doc.encoded(), "<root><name>[NAME]</name></root>");
     }
 
     #[tokio::test]
     async fn redact_attribute_value() {
-        let raw = r#"<user email="alice@example.com">Bob</user>"#;
-        let mut doc = load(raw);
+        let mut doc = load(r#"<user email="alice@example.com">Bob</user>"#);
         let chunk = chunk_where(&mut doc, |t| t == "alice@example.com");
-        doc.stream
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[EMAIL]"),
-            )]))
-            .await
-            .unwrap();
+        write(&mut doc, chunk.location, "[EMAIL]").await.unwrap();
         assert_eq!(doc.encoded(), r#"<user email="[EMAIL]">Bob</user>"#);
     }
 
     #[tokio::test]
     async fn redact_cdata_body() {
-        let raw = "<doc><![CDATA[alice@example.com]]></doc>";
-        let mut doc = load(raw);
+        let mut doc = load("<doc><![CDATA[alice@example.com]]></doc>");
         let chunk = chunk_where(&mut doc, |t| t == "alice@example.com");
-        doc.stream
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[EMAIL]"),
-            )]))
-            .await
-            .unwrap();
+        write(&mut doc, chunk.location, "[EMAIL]").await.unwrap();
         assert_eq!(doc.encoded(), "<doc><![CDATA[[EMAIL]]]></doc>");
     }
 
     #[tokio::test]
     async fn redact_partial_text() {
-        let raw = "<p>contact alice@example.com today</p>";
-        let mut doc = load(raw);
+        let mut doc = load("<p>contact alice@example.com today</p>");
         let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
-        let at = chunk.data.as_str().find("alice@example.com").unwrap();
-        let loc = TextLocation::inline(
-            chunk.location.range().unwrap().start + at
-                ..chunk.location.range().unwrap().start + at + "alice@example.com".len(),
-        );
-        doc.stream
-            .write_at(Redactions::from([(
-                loc,
-                TextReplacement::substituted("[EMAIL]"),
-            )]))
-            .await
-            .unwrap();
+        let location = inline_at(&chunk, "alice@example.com");
+        write(&mut doc, location, "[EMAIL]").await.unwrap();
         assert_eq!(doc.encoded(), "<p>contact [EMAIL] today</p>");
     }
 
-    // A lenient round-trip over the same engine, exercising our splice
-    // bookkeeping across a skipped region. Gated on `html`: the lenient config
-    // only exists when HTML is compiled. A small synthetic vocabulary stands in
-    // for the real HTML element lists, which the HTML loader tests directly.
-    #[cfg(feature = "html")]
-    const TEST_BLOCKS: &[&str] = &["p", "div"];
-
+    /// A lenient round-trip over the same engine, exercising our splice
+    /// bookkeeping across a skipped region.
     #[cfg(feature = "html")]
     #[tokio::test]
     async fn redaction_after_a_skipped_script_is_byte_faithful() {
@@ -389,20 +347,10 @@ mod tests {
         // other markup byte-identical, changing only the targeted span, the
         // splice offsets stay correct across the skipped region.
         let raw = r#"<p><script>var a="keep@x.com";</script>mail alice@example.com</p>"#;
-        let mut doc = Doc::new(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+        let mut doc = Doc::new(raw, MarkupConfig::html(TEST_BLOCKS, &["script"], &[]));
         let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
-        let at = chunk.data.as_str().find("alice@example.com").unwrap();
-        let loc = TextLocation::inline(
-            chunk.location.range().unwrap().start + at
-                ..chunk.location.range().unwrap().start + at + "alice@example.com".len(),
-        );
-        doc.stream
-            .write_at(Redactions::from([(
-                loc,
-                TextReplacement::substituted("[EMAIL]"),
-            )]))
-            .await
-            .unwrap();
+        let location = inline_at(&chunk, "alice@example.com");
+        write(&mut doc, location, "[EMAIL]").await.unwrap();
         assert_eq!(
             doc.encoded(),
             r#"<p><script>var a="keep@x.com";</script>mail [EMAIL]</p>"#

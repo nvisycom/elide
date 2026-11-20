@@ -1,21 +1,18 @@
-//! [`OoxmlLoader`] + [`decode_document`]: build a [`Document`] from a text-only
-//! OOXML package.
+//! [`OoxmlLoader`]: build a [`Document`] from a text-only OOXML package.
 
 use std::marker::PhantomData;
 
-use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::extract::ExtractStream;
-use elide_codec::{Blob, Document, DocumentLoader, LocalId, StrippedContent};
-use elide_core::redaction::{Disposition, HiddenContentPolicy};
-use elide_core::{Error, Result};
+use elide_codec::{Blob, Document, DocumentLoader, StrippedContent};
+use elide_core::Result;
+use elide_core::redaction::HiddenContentPolicy;
 
 use super::addresser::OoxmlAddresser;
 use super::document::OoxmlDocument;
-use super::{OoxmlCodec, items};
+use super::{OoxmlCodec, blobs, items, refuse_issues, sanitized};
 use crate::codec::props::DocProps;
 use crate::ooxml::{OoxmlFormat, OoxmlPackage};
-use crate::opc::sanitize::sanitize;
 
 /// A decoded OOXML package: its native document, its embedded blobs, and what
 /// decode stripped.
@@ -42,48 +39,14 @@ fn decode_package<C: OoxmlCodec>(
     content: ContentData,
     policy: HiddenContentPolicy,
 ) -> Result<Decoded<C>> {
-    let source = content.to_bytes();
-    let (sanitized, stripped) = sanitize(&source, policy, &C::Format::classifier())?;
-    let archive = sanitized.map_or(source, Bytes::from);
+    let (archive, stripped) = sanitized(&content, policy, &C::Format::classifier())?;
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
-    let properties = match policy.metadata {
-        Disposition::ScanAsContent | Disposition::FlagEverything => {
-            DocProps::read(|path| pkg.part_bytes(path))
-        }
-        Disposition::KeepOnlyEssential => DocProps::default(),
-    };
+    let properties = DocProps::under(policy, |path| pkg.part_bytes(path));
     let extraction = pkg.extract();
-
-    if !extraction.issues.is_empty() {
-        let parts = extraction
-            .issues
-            .iter()
-            .map(|issue| format!("{} ({:?})", issue.part, issue.kind))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(Error::malformed(format!(
-            "{}: text-bearing part(s) could not be extracted: {parts}",
-            C::LABEL
-        )));
-    }
+    refuse_issues(C::LABEL, &extraction.issues)?;
 
     let body = ExtractStream::new(C::FORMAT_ID, items(extraction.blocks), OoxmlAddresser);
-
-    // Each binary embedding the engine classifies (images, media, embedded
-    // objects), keyed by its zip entry path and hinted by its extension.
-    let blobs = extraction
-        .embeddings
-        .into_iter()
-        .map(|embedding| {
-            let id = LocalId::new(embedding.part.as_str().to_owned());
-            let hint = id.extension().unwrap_or_default().to_owned();
-            Blob {
-                id,
-                bytes: embedding.bytes,
-                hint,
-            }
-        })
-        .collect();
+    let blobs = blobs(extraction.embeddings);
 
     Ok(Decoded {
         native: OoxmlDocument {
@@ -98,25 +61,8 @@ fn decode_package<C: OoxmlCodec>(
     })
 }
 
-/// Decode `content` into a [`Document`]: an [`OoxmlDocument`] (a body
-/// [`ExtractStream`] and a metadata stream per document-property part) plus a
-/// [`Blob`] per surfaced embedding. Shared by the DOCX and PPTX loaders.
-///
-/// # Errors
-///
-/// - [`MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a valid
-///   package of the format, hold a part this crate cannot redact, or a
-///   text-bearing part could not be extracted.
-pub(crate) fn decode_document<C: OoxmlCodec>(
-    content: ContentData,
-    policy: HiddenContentPolicy,
-) -> Result<Document> {
-    let decoded = decode_package::<C>(content, policy)?;
-    Ok(Document::new(C::FORMAT_ID, decoded.native, decoded.blobs).with_stripped(decoded.stripped))
-}
-
-/// A [`DocumentLoader`] for one text-only OOXML format, decoding via
-/// [`decode_document`].
+/// A [`DocumentLoader`] for one text-only OOXML format. Shared by the DOCX and
+/// PPTX codecs.
 #[derive(Debug)]
 pub(crate) struct OoxmlLoader<C: OoxmlCodec>(PhantomData<C>);
 
@@ -129,8 +75,19 @@ impl<C: OoxmlCodec> OoxmlLoader<C> {
 
 #[async_trait::async_trait]
 impl<C: OoxmlCodec> DocumentLoader for OoxmlLoader<C> {
+    /// Decode `content` into a [`Document`]: an [`OoxmlDocument`] (a body
+    /// [`ExtractStream`] and a metadata stream per document-property part)
+    /// plus a [`Blob`] per surfaced embedding.
+    ///
+    /// # Errors
+    ///
+    /// - [`MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+    ///   bytes are not a valid package of the format, hold a part this crate
+    ///   cannot redact, or a text-bearing part could not be extracted.
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
-        decode_document::<C>(content, policy)
+        let decoded = decode_package::<C>(content, policy)?;
+        Ok(Document::new(C::FORMAT_ID, decoded.native, decoded.blobs)
+            .with_stripped(decoded.stripped))
     }
 }
 

@@ -1387,8 +1387,6 @@ dependencies = [
  "elide-markup",
  "hipstr",
  "quick-xml 0.42.0",
- "serde",
- "serde_json",
  "tokio",
  "zip",
 ]

@@ -38,6 +38,34 @@ pub fn pack_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {
     zip.finish().expect("finish fixture package").into_inner()
 }
 
+/// The content type of a relationships part.
+const RELATIONSHIPS_TYPE: &str = "application/vnd.openxmlformats-package.relationships+xml";
+
+/// Pack `(part name, content type, bytes)` triples into an OPC package with
+/// its content-types manifest: each part typed by an `Override` naming it, a
+/// relationships part (`.rels`) by the manifest's `Default` for its extension
+/// when its content type is empty.
+///
+/// # Panics
+///
+/// As [`pack_parts`].
+pub fn pack_typed(parts: &[(&str, &str, &[u8])]) -> Vec<u8> {
+    let mut manifest = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="{RELATIONSHIPS_TYPE}"/>"#
+    );
+    for (name, content_type, _) in parts {
+        if !content_type.is_empty() {
+            manifest.push_str(&format!(
+                r#"<Override PartName="/{name}" ContentType="{content_type}"/>"#
+            ));
+        }
+    }
+    manifest.push_str("</Types>");
+    let mut packed: Vec<(&str, &[u8])> = vec![("[Content_Types].xml", manifest.as_bytes())];
+    packed.extend(parts.iter().map(|&(name, _, bytes)| (name, bytes)));
+    pack_parts(&packed)
+}
+
 /// Read one part out of an OPC package by its full name, decompressed.
 ///
 /// The name is the full part name (e.g. `word/document.xml`). Returns `None` if
@@ -48,6 +76,18 @@ pub fn read_part(package: &[u8], name: &str) -> Option<Vec<u8>> {
     let mut buf = Vec::new();
     entry.read_to_end(&mut buf).ok()?;
     Some(buf)
+}
+
+/// Read one text part out of an OPC package by its full name, as UTF-8.
+///
+/// # Panics
+///
+/// Panics if the package cannot be opened, the part is absent, or it is not
+/// valid UTF-8: a test reading a part it expects to be there.
+#[must_use]
+pub fn read_text_part(package: &[u8], name: &str) -> String {
+    let bytes = read_part(package, name).unwrap_or_else(|| panic!("part `{name}` is missing"));
+    String::from_utf8(bytes).unwrap_or_else(|_| panic!("part `{name}` is not valid UTF-8"))
 }
 
 /// Every part name in the package, in archive order.
@@ -105,7 +145,10 @@ pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
 /// The privacy-relevant fields of a document-property part, with their values.
 ///
 /// The part is `docProps/core.xml`, `app.xml`, or `custom.xml`; each field
-/// comes back as a `(local_name, value)` pair with a non-empty value.
+/// comes back as a `(key, value)` pair with a non-empty value, keyed as
+/// the property reader keys it: an element's local name (`creator`, a repeat
+/// `creator#2`), a list entry by position (`TitlesOfParts/0`), or a custom
+/// property by position (`property/0`, its name `property/0/name`).
 #[must_use]
 pub fn property_fields(xml: &[u8]) -> Vec<(String, String)> {
     props::fields(xml)
@@ -134,5 +177,33 @@ mod tests {
         let names = part_names(&package);
         assert!(names.contains(&"[Content_Types].xml".to_owned()));
         assert!(names.contains(&"word/document.xml".to_owned()));
+    }
+
+    #[test]
+    fn pack_typed_writes_the_manifest() {
+        let package = pack_typed(&[
+            ("_rels/.rels", "", b"<Relationships/>"),
+            (
+                "word/document.xml",
+                "application/main+xml",
+                b"<w:document/>",
+            ),
+        ]);
+        let manifest = read_text_part(&package, "[Content_Types].xml");
+        assert!(
+            manifest.contains(r#"<Default Extension="rels""#),
+            "{manifest}"
+        );
+        assert!(
+            manifest.contains(
+                r#"<Override PartName="/word/document.xml" ContentType="application/main+xml"/>"#
+            ),
+            "{manifest}"
+        );
+        assert!(!manifest.contains("/_rels/.rels"), "{manifest}");
+        assert_eq!(
+            read_part(&package, "word/document.xml").as_deref(),
+            Some(&b"<w:document/>"[..])
+        );
     }
 }

@@ -16,17 +16,24 @@ detection reads what a reader sees, and writes back only the stretch of each
 value a redaction changed, escaped for where it lands. Everything outside a
 redaction stays byte-identical.
 
-Before a document is read, a sanitizer removes its hidden content under the
-caller's `HiddenContentPolicy`: scripts and other active content, event
-handlers, remote loads, comments, and metadata. HTML is read as a browser
-reads it — tag names and attributes by the HTML tokenizer's rules, URLs and
-text by HTML's character reference rules — and a document a browser would read
+Before a document is read, it is rebuilt from an allowlist under the caller's
+`HiddenContentPolicy`: each HTML element is copied only if it renders (in HTML,
+or in the SVG and MathML a page embeds), with only the attributes it renders
+with, and an XML document is copied as parsed without processing instructions,
+its document type, or XInclude. Text and attribute values are copied as
+written. Whatever is left out (scripts and other active content, event
+handlers, remote loads, undisplayed content, comments, metadata, and anything
+the allowlist does not name) is recorded by what it is, and an encoded
+document must be a fixed point of the rebuild. HTML is read as a browser reads
+it — tag names and attributes by the HTML tokenizer's rules, URLs and text by
+HTML's character reference rules — and a document a browser would read
 differently from this engine is refused.
 
 `html_format()` and `xml_format()` are behind the `html` and `xml` features;
 `elide-format`'s `FormatRegistry::with_builtin` wires the enabled ones in. With
-no feature, the crate is only `decode_references`, which a format that reads
-XML another way (`elide-office`'s OOXML parts) decodes its text with.
+no feature, the crate is only `decode_references` and the `CharacterReferences`
+rules it decodes by, which a format that reads XML another way
+(`elide-office`'s OOXML parts) decodes its text with.
 
 ## Documentation
 

@@ -21,13 +21,9 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-## No default features: the crate is a self-contained bytes-in/bytes-out
-## library with no elide dependencies.
+## No default features: the crate is a bytes-in/bytes-out library over the
+## elide core, codec, and markup crates.
 default = []
-
-## Derive `serde::{Serialize, Deserialize}` on the extraction/coverage model,
-## so a caller can ship an extraction result across a boundary.
-serde = ["dep:serde"]
 
 ## Expose `fixtures`: build an OPC package from its parts and read a rewritten
 ## one back (decompressed parts, document-property fields), so a dependent
@@ -40,9 +36,6 @@ fixtures = []
 elide-core = { workspace = true, features = ["metadata", "tabular"] }
 elide-codec = { workspace = true, features = ["extract", "metadata"] }
 elide-markup = { workspace = true, features = [] }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"], optional = true }
 
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }
@@ -61,9 +54,6 @@ zip = { workspace = true, features = [] }
 # Internal crates
 elide-codec = { workspace = true, features = [] }
 elide-core = { workspace = true, features = [] }
-
-# (De)serialization
-serde_json = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

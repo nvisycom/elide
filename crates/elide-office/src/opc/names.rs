@@ -14,12 +14,12 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use elide_core::{Error, Result};
-use quick_xml::escape::unescape;
 
+use crate::opc::attribute_value;
 use crate::opc::attributes::TextAttribute;
 use crate::opc::block::Replacement;
 use crate::opc::part::PartPath;
-use crate::opc::xml_span::attribute_spans;
+use crate::opc::xml_span::attribute_ranges;
 
 /// A format's names and the attributes referring to them.
 #[derive(Debug, Clone, Copy)]
@@ -122,9 +122,11 @@ pub(crate) fn fit_names<'a>(
 
     // Every name, with the redaction that lands in it.
     let mut found: Vec<Found> = Vec::new();
+    let rule_attributes: Vec<TextAttribute> = names.rules.iter().map(|r| r.attribute).collect();
     for (part, raw) in parts.clone() {
-        for rule in names.rules {
-            for range in spans(part, raw, rule.attribute)? {
+        let ranges = spans(part, raw, &rule_attributes)?;
+        for (rule, ranges) in names.rules.iter().zip(ranges) {
+            for range in ranges {
                 let (inside, outside) = take_inside(pending, &range);
                 pending = outside;
                 found.push(Found {
@@ -178,9 +180,12 @@ pub(crate) fn fit_names<'a>(
     // that may refer to names of several groups is retargeted once.
     if !renamed.is_empty() {
         let mut retargeted: HashSet<(PartPath, usize)> = HashSet::new();
+        let reference_attributes: Vec<TextAttribute> =
+            names.references.iter().map(|r| r.attribute).collect();
         for (part, raw) in parts {
-            for reference in names.references {
-                for range in spans(part, raw, reference.attribute)? {
+            let ranges = spans(part, raw, &reference_attributes)?;
+            for (reference, ranges) in names.references.iter().zip(ranges) {
+                for range in ranges {
                     if retargeted.contains(&(part.clone(), range.start)) {
                         continue;
                     }
@@ -206,10 +211,14 @@ pub(crate) fn fit_names<'a>(
     Ok(out)
 }
 
-/// The value ranges of `attribute` in `raw`.
-fn spans(part: &PartPath, raw: &str, attribute: TextAttribute) -> Result<Vec<Range<usize>>> {
-    attribute_spans(raw, &[attribute])
-        .map(|spans| spans.into_iter().map(|span| span.range).collect())
+/// The value ranges in `raw` of each of `attributes`, one list per attribute,
+/// read in one pass over the part.
+fn spans(
+    part: &PartPath,
+    raw: &str,
+    attributes: &[TextAttribute],
+) -> Result<Vec<Vec<Range<usize>>>> {
+    attribute_ranges(raw, attributes)
         .map_err(|()| Error::malformed(format!("`{part}` malformed XML")))
 }
 
@@ -245,7 +254,7 @@ fn redacted(
 
 /// `raw` attribute text with its entities resolved.
 fn decoded(part: &PartPath, raw: &str) -> Result<String> {
-    unescape(raw)
+    attribute_value(raw)
         .map(|text| text.into_owned())
         .map_err(|e| Error::malformed(format!("`{part}` has a malformed attribute value: {e}")))
 }
@@ -297,13 +306,9 @@ fn retarget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::attributes::Ns;
-    use crate::opc::xml_edit::Local;
 
-    const SHEET: TextAttribute =
-        TextAttribute::new((Ns::Any, Local::Exact("sheet")), (Ns::None, "name"));
-    const LOCATION: TextAttribute =
-        TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "location"));
+    const SHEET: TextAttribute = TextAttribute::unqualified("sheet", "name");
+    const LOCATION: TextAttribute = TextAttribute::unqualified("hyperlink", "location");
 
     static NAMES: Names = Names {
         rules: &[NameRule {

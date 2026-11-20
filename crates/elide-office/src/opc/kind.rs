@@ -10,6 +10,7 @@
 use elide_core::redaction::HiddenContent;
 
 use crate::opc::block::EmbeddingKind;
+use crate::opc::ct::{self, PML, SML, WML};
 use crate::opc::part::PartPath;
 
 /// What a package part is, decided by its content type and the relationship
@@ -68,13 +69,6 @@ const THUMBNAIL: &str =
 /// The relationship type of a WordprocessingML imported chunk (`w:altChunk`).
 const IMPORTED_CHUNK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk";
-
-/// The prefix of every WordprocessingML content type.
-const WML: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
-/// The prefix of every PresentationML content type.
-const PML: &str = "application/vnd.openxmlformats-officedocument.presentationml.";
-/// The prefix of every SpreadsheetML content type.
-const SML: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
 
 impl PartKind {
     /// Classify `part` from its `content_type` and the relationship types that
@@ -223,8 +217,9 @@ impl PartKind {
             | "application/vnd.ms-office.chartex+xml" => Self::Chart,
             "application/vnd.openxmlformats-officedocument.drawingml.diagramdata+xml"
             | "application/vnd.ms-office.drawingml.diagramdrawing+xml" => Self::Diagram,
-            "application/vnd.openxmlformats-officedocument.drawing+xml"
-            | "application/vnd.openxmlformats-officedocument.vmldrawing" => Self::Drawing,
+            "application/vnd.openxmlformats-officedocument.drawing+xml" | ct::VML_DRAWING => {
+                Self::Drawing
+            }
             "application/vnd.ms-word.commentsextended+xml"
             | "application/vnd.ms-word.commentsids+xml"
             | "application/vnd.ms-word.commentsextensible+xml"

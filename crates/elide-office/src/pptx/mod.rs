@@ -21,21 +21,14 @@ use crate::opc::{PartClassifier, PartKind, PartRole, TextAttribute};
 /// embedding is binary; the document properties are a property part; the
 /// presentation part and everything else is structure. Section and custom-show
 /// names and comment authors are text attributes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SlideFormat;
 
 impl PartClassifier for SlideFormat {
     fn role(&self, kind: PartKind) -> PartRole {
         match kind {
-            PartKind::Story
-            | PartKind::Comments
-            | PartKind::Chart
-            | PartKind::Diagram
-            | PartKind::Drawing => PartRole::ElementText,
-            PartKind::Relationships => PartRole::RelationshipTargets,
-            PartKind::Embedding(kind) => PartRole::Binary(kind),
-            PartKind::Properties => PartRole::Property,
-            _ => PartRole::Structure,
+            PartKind::Story => PartRole::ElementText,
+            kind => PartRole::common(kind),
         }
     }
 
@@ -46,15 +39,12 @@ impl PartClassifier for SlideFormat {
 
 impl OoxmlFormat for SlideFormat {
     const MAIN_LABEL: &'static str = "presentation";
-
-    fn classifier() -> Self {
-        Self
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::{pack_typed, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
 
@@ -67,7 +57,18 @@ mod tests {
 
     #[test]
     fn open_requires_a_presentation_part() {
-        assert!(Pptx::open(b"not a zip").is_err());
+        // A well-formed package holding a slide but no presentation part.
+        let slide = r#"<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>"#;
+        let package = pack_typed(&[(
+            "ppt/slides/slide1.xml",
+            "application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
+            slide.as_bytes(),
+        )]);
+        let error = Pptx::open(&package).unwrap_err();
+        assert!(
+            error.to_string().contains("missing presentation part"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -102,18 +103,8 @@ mod tests {
         };
         let out = pptx.rewrite_with_parts(&[replacement], &[]).unwrap();
 
-        let slide = read_part(&out, "ppt/slides/slide1.xml");
-        let slide = String::from_utf8(slide).unwrap();
+        let slide = read_text_part(&out, "ppt/slides/slide1.xml");
         assert!(slide.contains("[EMAIL]"), "slide: {slide}");
         assert!(!slide.contains("alice@example.com"));
-    }
-
-    fn read_part(bytes: &[u8], name: &str) -> Vec<u8> {
-        use std::io::Read;
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
-        let mut entry = zip.by_name(name).unwrap();
-        let mut buf = Vec::new();
-        entry.read_to_end(&mut buf).unwrap();
-        buf
     }
 }

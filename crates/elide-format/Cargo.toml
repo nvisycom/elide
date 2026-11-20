@@ -33,7 +33,6 @@ serde = [
     "elide-codec/serde",
     "elide-audio?/serde",
     "elide-image?/serde",
-    "elide-office?/serde",
     "elide-pdf?/serde",
 ]
 

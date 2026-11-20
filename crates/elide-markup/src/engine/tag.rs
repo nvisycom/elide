@@ -1,5 +1,7 @@
-//! [`HtmlTagExt`]: reading an HTML tag's name and attributes the way a
-//! browser does, as an extension of quick-xml's tag events.
+//! Reading a start tag: [`start_tag`], the name and redactable attributes the
+//! engine reads from a tag in either dialect, over [`HtmlTagExt`], which reads
+//! an HTML tag's name and attributes the way a browser does, as an extension
+//! of quick-xml's tag events.
 //!
 //! quick-xml finds where a tag starts and ends, but reads its name and
 //! attributes by XML's rules, which differ from the HTML tokenizer's
@@ -14,10 +16,133 @@
 //! earlier than quick-xml does, and a tag a browser ends early is refused
 //! here.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
+use elide_codec::extract::ItemFlag;
+use elide_core::redaction::HiddenContentKind;
 use elide_core::{Error, Result};
 use quick_xml::events::{BytesEnd, BytesStart};
+
+use super::config::Dialect;
+use super::meta::MetaTag;
+use crate::references::{CharacterReferences, decoded};
+
+/// A start tag as the engine reads it.
+pub(crate) struct StartTag {
+    /// The name, lowercased for matching.
+    pub(crate) name: String,
+    /// The name as written, for its context hint.
+    pub(crate) written: String,
+    /// The redactable attributes, in source order.
+    pub(crate) attributes: Vec<AttributeSpan>,
+}
+
+/// One redactable attribute's source spans: its `value` (the redactable inner
+/// bytes) and its `name` (the located context hint), the latter `None` when the
+/// name could not be placed in the source.
+pub(crate) struct AttributeSpan {
+    pub(crate) name: Option<Range<usize>>,
+    pub(crate) value: Range<usize>,
+    /// The hidden content the value is, when its format flags it.
+    pub(crate) flag: Option<ItemFlag>,
+}
+
+/// The start tag `e`, read from `raw`, as the engine reads it: its name, and
+/// each redactable attribute with the source span of its name (a located
+/// context hint) and of its value, the inner bytes between the quotes, as
+/// written. The name lets a context-gated value (`ssn="…"`) be boosted by its
+/// attribute name.
+///
+/// HTML reads the tag as a browser does ([`HtmlTagExt`]): unquoted and missing
+/// values, and a `/` between attributes, included; every `content` of a
+/// `<meta>` field is flagged as the metadata it is. Strict XML validates
+/// attributes (rejecting e.g. a duplicate key or an unquoted value) and reports
+/// an [`AttrError`] as
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput). An
+/// attribute without a value, or with only whitespace, has nothing to redact
+/// and is left out.
+///
+/// [`AttrError`]: quick_xml::events::attributes::AttrError
+pub(crate) fn start_tag(raw: &str, e: &BytesStart<'_>, dialect: Dialect) -> Result<StartTag> {
+    let mut attributes = Vec::new();
+    if dialect == Dialect::Html {
+        let tag = e.html5_tag(raw)?;
+        let meta = if tag.name.eq_ignore_ascii_case("meta") {
+            MetaTag::from_html(&tag.attributes).label()
+        } else {
+            None
+        };
+        for attr in &tag.attributes {
+            let Some(value) = attr.value else {
+                continue;
+            };
+            let flag = meta
+                .clone()
+                .filter(|_| attr.name.eq_ignore_ascii_case("content"))
+                .map(|label| ItemFlag::new(label, HiddenContentKind::Metadata));
+            push_attribute(raw, &mut attributes, attr.name, value, flag)?;
+        }
+        return Ok(StartTag {
+            name: tag.name.to_ascii_lowercase(),
+            written: tag.name.to_owned(),
+            attributes,
+        });
+    }
+    for attr in e.attributes() {
+        let attr = attr.map_err(|e| Error::malformed(format!("malformed attribute: {e}")))?;
+        // Over a `Reader::from_str`, the key and the raw value (entity
+        // spellings intact) borrow straight out of the source buffer.
+        let Cow::Borrowed(value) = attr.value else {
+            return Err(Error::malformed(
+                "an XML attribute value is not in the source",
+            ));
+        };
+        push_attribute(raw, &mut attributes, attr.key.into_inner(), value, None)?;
+    }
+    let written = e.xml_name().to_owned();
+    Ok(StartTag {
+        name: written.to_ascii_lowercase(),
+        written,
+        attributes,
+    })
+}
+
+/// Push the attribute `name` with `value`, both borrowed from `raw`, flagged
+/// by `flag`, unless its value is blank. Fails closed when the value cannot be
+/// placed in the source, which would leave it unredactable.
+fn push_attribute(
+    raw: &str,
+    out: &mut Vec<AttributeSpan>,
+    name: &str,
+    value: &str,
+    flag: Option<ItemFlag>,
+) -> Result<()> {
+    let value_span = span_in(raw, value)
+        .ok_or_else(|| Error::malformed("an attribute value is not in the source"))?;
+    if value.trim().is_empty() {
+        return Ok(());
+    }
+    out.push(AttributeSpan {
+        name: span_in(raw, name),
+        value: value_span,
+        flag,
+    });
+    Ok(())
+}
+
+/// The byte range `slice`, borrowed out of `raw`, occupies in it, or `None` if
+/// it is not a subslice of it.
+fn span_in(raw: &str, slice: &str) -> Option<Range<usize>> {
+    raw.substr_range(slice).map(Range::from)
+}
+
+/// An HTML attribute's raw `value` as a browser compares an enumerated
+/// keyword: character references decoded and lowercased, but not trimmed, so
+/// `" hidden "` is no keyword at all.
+pub(crate) fn keyword(value: &str) -> String {
+    decoded(value, CharacterReferences::Html).to_ascii_lowercase()
+}
 
 /// An HTML tag as a browser reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +151,9 @@ pub(crate) struct HtmlTag<'a> {
     pub(crate) name: &'a str,
     /// The attributes, in source order.
     pub(crate) attributes: Vec<HtmlAttribute<'a>>,
+    /// Whether the tag carries the self-closing flag: a `/` before its `>`
+    /// that no unquoted value read as its own.
+    pub(crate) self_closing: bool,
 }
 
 /// One attribute of an HTML tag, borrowed from the tag as written.
@@ -43,6 +171,9 @@ pub(crate) struct HtmlAttribute<'a> {
 
 /// Reads a quick-xml tag event the way a browser reads the HTML tag.
 pub(crate) trait HtmlTagExt {
+    /// The tag's local name as XML reads it, its namespace prefix left out.
+    fn xml_name(&self) -> &str;
+
     /// The tag's name and attributes as a browser reads them, borrowed from
     /// `raw`, the document the event was read from.
     ///
@@ -57,19 +188,34 @@ pub(crate) trait HtmlTagExt {
 }
 
 impl HtmlTagExt for BytesStart<'_> {
+    fn xml_name(&self) -> &str {
+        self.local_name().into_inner()
+    }
+
     fn html5_tag<'a>(&self, raw: &'a str) -> Result<HtmlTag<'a>> {
         let mut text = place(raw, self)?;
         // quick-xml leaves the `/` of an empty tag's `/>` out of its bytes,
         // but a browser reads it: as the end of an unquoted value, or as the
         // self-closing flag.
-        if raw[text.end..].starts_with("/>") {
+        let slash = raw[text.end..].starts_with("/>");
+        if slash {
             text.end += 1;
         }
-        read_tag(&raw[text])
+        let mut tag = read_tag(&raw[text.clone()])?;
+        tag.self_closing = slash
+            && !tag.attributes.last().is_some_and(|attr| {
+                raw.substr_range(attr.source)
+                    .is_some_and(|range| range.end == text.end)
+            });
+        Ok(tag)
     }
 }
 
 impl HtmlTagExt for BytesEnd<'_> {
+    fn xml_name(&self) -> &str {
+        self.local_name().into_inner()
+    }
+
     /// An end tag's attributes are ignored by a browser, so only its name is
     /// read.
     fn html5_tag<'a>(&self, raw: &'a str) -> Result<HtmlTag<'a>> {
@@ -77,32 +223,51 @@ impl HtmlTagExt for BytesEnd<'_> {
         Ok(HtmlTag {
             name: &text[..read_name(text)],
             attributes: Vec::new(),
+            self_closing: false,
         })
     }
 }
 
-/// Where the tag bytes `tag`, borrowed from `raw`, sit in it.
-fn place(raw: &str, tag: &str) -> Result<Range<usize>> {
-    raw.substr_range(tag)
-        .map(Range::from)
-        .ok_or_else(|| Error::malformed("an HTML tag was not read from its document"))
+/// The lowercased name of the tag `e`, read from `raw` as `dialect` reads it:
+/// as a browser reads it in HTML, its local name in XML. HTML is
+/// case-insensitive, so lowercasing makes `<SCRIPT>` and `<P>` match too.
+pub(crate) fn tag_name(e: &impl HtmlTagExt, raw: &str, dialect: Dialect) -> Result<String> {
+    let name = match dialect {
+        Dialect::Html => e.html5_tag(raw)?.name,
+        Dialect::Xml => e.xml_name(),
+    };
+    Ok(name.to_ascii_lowercase())
 }
 
-/// Whether `byte` is HTML whitespace between the parts of a tag.
+/// Where the tag bytes `tag`, borrowed from `raw`, sit in it.
+fn place(raw: &str, tag: &str) -> Result<Range<usize>> {
+    span_in(raw, tag).ok_or_else(|| Error::malformed("an HTML tag was not read from its document"))
+}
+
+/// Whether `byte` is HTML whitespace between the parts of a tag. A browser
+/// reads a carriage return as a line feed before it reads any tag.
 fn is_space(byte: u8) -> bool {
-    matches!(byte, b'\t' | b'\n' | b'\x0C' | b' ')
+    matches!(byte, b'\t' | b'\n' | b'\x0C' | b'\r' | b' ')
 }
 
 /// Where the tag name at the start of `text` ends: at whitespace, `/`, or the
 /// end of the tag.
 fn read_name(text: &str) -> usize {
-    text.bytes()
-        .position(|byte| is_space(byte) || byte == b'/' || byte == b'>')
-        .unwrap_or(text.len())
+    skip(text.as_bytes(), 0, |byte| {
+        !(is_space(byte) || byte == b'/' || byte == b'>')
+    })
+}
+
+/// Where the bytes from `at` that satisfy `pred` end in `bytes`.
+fn skip(bytes: &[u8], at: usize, pred: impl Fn(u8) -> bool) -> usize {
+    bytes[at..]
+        .iter()
+        .position(|&byte| !pred(byte))
+        .map_or(bytes.len(), |i| at + i)
 }
 
 /// The tag `text` (between `<` and `>`, as quick-xml found it) read by the
-/// tokenizer's tag states.
+/// tokenizer's tag states; the caller sets its self-closing flag.
 fn read_tag(text: &str) -> Result<HtmlTag<'_>> {
     let bytes = text.as_bytes();
     let mut at = read_name(text);
@@ -111,9 +276,7 @@ fn read_tag(text: &str) -> Result<HtmlTag<'_>> {
     loop {
         // Before attribute name: skip whitespace, and a `/` not ending the
         // tag reads like whitespace.
-        while at < bytes.len() && (is_space(bytes[at]) || bytes[at] == b'/') {
-            at += 1;
-        }
+        at = skip(bytes, at, |byte| is_space(byte) || byte == b'/');
         if at == bytes.len() {
             break;
         }
@@ -123,25 +286,18 @@ fn read_tag(text: &str) -> Result<HtmlTag<'_>> {
         // Attribute name: up to whitespace, `/`, `>`, or `=`; a leading `=` is
         // part of the name.
         let name_start = at;
-        at += 1;
-        while at < bytes.len() && !matches!(bytes[at], b'/' | b'>' | b'=') && !is_space(bytes[at]) {
-            at += 1;
-        }
+        at = skip(bytes, at + 1, |byte| {
+            !matches!(byte, b'/' | b'>' | b'=') && !is_space(byte)
+        });
         let name_end = at;
         // After attribute name: skip whitespace; an `=` brings a value.
-        let mut look = at;
-        while look < bytes.len() && is_space(bytes[look]) {
-            look += 1;
-        }
+        let look = skip(bytes, at, is_space);
         if look == bytes.len() || bytes[look] != b'=' {
             attributes.push(attribute(text, name_start..name_end, None, name_end));
             continue;
         }
         // Before attribute value: skip whitespace.
-        at = look + 1;
-        while at < bytes.len() && is_space(bytes[at]) {
-            at += 1;
-        }
+        at = skip(bytes, look + 1, is_space);
         let (value, end) = match bytes.get(at) {
             // A missing value: `<a title=>` reads as an empty one.
             None => (at..at, at),
@@ -154,17 +310,18 @@ fn read_tag(text: &str) -> Result<HtmlTag<'_>> {
                 (at + 1..close, close + 1)
             }
             Some(_) => {
-                let start = at;
-                while at < bytes.len() && !is_space(bytes[at]) && bytes[at] != b'>' {
-                    at += 1;
-                }
-                (start..at, at)
+                let end = skip(bytes, at, |byte| !is_space(byte) && byte != b'>');
+                (at..end, end)
             }
         };
         attributes.push(attribute(text, name_start..name_end, Some(value), end));
         at = end;
     }
-    Ok(HtmlTag { name, attributes })
+    Ok(HtmlTag {
+        name,
+        attributes,
+        self_closing: false,
+    })
 }
 
 /// The attribute of `text` named at `name`, with its `value` range, ending at
@@ -205,24 +362,29 @@ mod tests {
     /// A tag's attributes as `(name, value)` pairs.
     type Pairs = Vec<(String, Option<String>)>;
 
-    /// The name and attributes of the first start tag of `raw`.
-    fn read(raw: &str) -> Result<(String, Pairs)> {
+    /// The first start tag of `raw`, or `None` when quick-xml reads none
+    /// before the end or an error.
+    fn first_start(raw: &str) -> Option<BytesStart<'_>> {
         let mut reader = Reader::from_str(raw);
         loop {
-            match reader.read_event().expect("quick-xml reads the tag") {
-                Event::Start(e) | Event::Empty(e) => {
-                    let tag = e.html5_tag(raw)?;
-                    let attributes = tag
-                        .attributes
-                        .iter()
-                        .map(|attr| (attr.name.to_owned(), attr.value.map(str::to_owned)))
-                        .collect();
-                    return Ok((tag.name.to_owned(), attributes));
-                }
-                Event::Eof => panic!("no start tag in {raw:?}"),
+            match reader.read_event().ok()? {
+                Event::Start(e) | Event::Empty(e) => return Some(e),
+                Event::Eof => return None,
                 _ => {}
             }
         }
+    }
+
+    /// The name and attributes of the first start tag of `raw`.
+    fn read(raw: &str) -> Result<(String, Pairs)> {
+        let e = first_start(raw).unwrap_or_else(|| panic!("no start tag in {raw:?}"));
+        let tag = e.html5_tag(raw)?;
+        let attributes = tag
+            .attributes
+            .iter()
+            .map(|attr| (attr.name.to_owned(), attr.value.map(str::to_owned)))
+            .collect();
+        Ok((tag.name.to_owned(), attributes))
     }
 
     fn attrs(pairs: &[(&str, Option<&str>)]) -> Pairs {
@@ -281,11 +443,7 @@ mod tests {
     #[test]
     fn the_source_spans_the_whole_attribute() {
         let raw = r#"<a title="x" onclick=b disabled>"#;
-        let mut reader = Reader::from_str(raw);
-        let Ok(Event::Start(e)) = reader.read_event() else {
-            panic!("a start tag");
-        };
-        let tag = e.html5_tag(raw).unwrap();
+        let tag = first_start(raw).unwrap().html5_tag(raw).unwrap();
         let sources: Vec<&str> = tag.attributes.iter().map(|attr| attr.source).collect();
         assert_eq!(sources, [r#"title="x""#, "onclick=b", "disabled"]);
     }
@@ -311,14 +469,15 @@ mod tests {
         }
     }
 
-    /// The first start tag html5ever's tokenizer reads: its name and its
+    /// The first start tag html5ever's tokenizer reads: its name, its
     /// attributes as `(name, value)`, names lowercased and the first of a
-    /// repeated name kept.
+    /// repeated name kept, and its self-closing flag.
     #[derive(Default)]
     struct FirstStartTag(RefCell<Option<ReferenceTag>>);
 
-    /// A tag as the reference reads it: its name and `(name, value)` pairs.
-    type ReferenceTag = (String, Vec<(String, String)>);
+    /// A tag as the reference reads it: its name, `(name, value)` pairs, and
+    /// self-closing flag.
+    type ReferenceTag = (String, Vec<(String, String)>, bool);
 
     impl TokenSink for FirstStartTag {
         type Handle = ();
@@ -333,7 +492,7 @@ mod tests {
                     .iter()
                     .map(|attr| (attr.name.local.to_string(), attr.value.to_string()))
                     .collect();
-                *self.0.borrow_mut() = Some((tag.name.to_string(), attributes));
+                *self.0.borrow_mut() = Some((tag.name.to_string(), attributes, tag.self_closing));
             }
             TokenSinkResult::Continue
         }
@@ -379,6 +538,12 @@ mod tests {
             r#"<p//class="x"//>t</p>"#,
             "<p//class=x//>t</p>",
             "<img alt=Jane/>",
+            "<br/>",
+            "<img alt=x />",
+            "<img alt=x/ />",
+            "<img alt=/>",
+            "<img alt/>",
+            "<img =/>",
         ];
         for raw in corpus {
             let ours = ours(raw).unwrap_or_else(|| panic!("{raw} is refused"));
@@ -391,7 +556,7 @@ mod tests {
         // The pieces a tag's name and attributes are built from: names, the
         // characters that separate or quote them, and mixed case.
         const PIECES: &[&str] = &[
-            "a", "B", "x", "on", "=", "\"", "'", "`", "/", " ", "\t", "\n", "\x0C",
+            "a", "B", "x", "on", "=", "\"", "'", "`", "/", " ", "\t", "\n", "\x0C", "\r",
         ];
         // A fixed xorshift sequence, so a failure reproduces.
         let mut state: u64 = 0x5EED_1234_ABCD_9876;
@@ -410,10 +575,16 @@ mod tests {
             raw.push_str(">t");
             // Only a tag quick-xml reads whole and this reader does not refuse
             // is compared.
-            let Some(ours) = ours(&raw) else {
+            let Some((name, attributes, self_closing)) = ours(&raw) else {
                 continue;
             };
-            assert_eq!(ours, reference(&raw), "{raw:?}");
+            // A browser reads a carriage return as a line feed, in a value
+            // too; this reader keeps values as written.
+            let attributes = attributes
+                .into_iter()
+                .map(|(key, value)| (key, value.replace("\r\n", "\n").replace('\r', "\n")))
+                .collect::<Vec<_>>();
+            assert_eq!((name, attributes, self_closing), reference(&raw), "{raw:?}");
             compared += 1;
         }
         assert!(compared > 5_000, "only {compared} generated tags compared");
@@ -421,14 +592,10 @@ mod tests {
 
     /// The first start tag of `raw` as this reader reads it, in the
     /// reference's terms (names lowercased, the first of a repeated name kept,
-    /// a missing value empty); `None` when quick-xml cannot read the tag or
-    /// this reader refuses it.
+    /// a missing value empty, the self-closing flag); `None` when quick-xml
+    /// cannot read the tag or this reader refuses it.
     fn ours(raw: &str) -> Option<ReferenceTag> {
-        let mut reader = Reader::from_str(raw);
-        let (Event::Start(e) | Event::Empty(e)) = reader.read_event().ok()? else {
-            return None;
-        };
-        let tag = e.html5_tag(raw).ok()?;
+        let tag = first_start(raw)?.html5_tag(raw).ok()?;
         let mut attributes: Vec<(String, String)> = Vec::new();
         for attr in &tag.attributes {
             let name = attr.name.to_ascii_lowercase();
@@ -436,6 +603,6 @@ mod tests {
                 attributes.push((name, attr.value.unwrap_or_default().to_owned()));
             }
         }
-        Some((tag.name.to_ascii_lowercase(), attributes))
+        Some((tag.name.to_ascii_lowercase(), attributes, tag.self_closing))
     }
 }

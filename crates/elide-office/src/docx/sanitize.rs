@@ -28,70 +28,48 @@ use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::WordFormat;
 use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
+use crate::opc::ns::{W, W14, W15};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
-use crate::opc::{Collaboration, Names, Ns, PartKind, StripAttributes, TextAttribute};
-
-/// The WordprocessingML main namespace.
-const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-/// The Word 2010 extension namespace (paragraph and text ids, document id).
-const W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
-/// The Word 2012 extension namespace (document id).
-const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
+use crate::opc::{Collaboration, HiddenAttributes, Names, Ns, PartKind, TextAttribute};
 
 /// The editing-session ids: the `rsid` table and attributes, and the paragraph
 /// and text ids.
-const EDITING_SESSION_IDS: Declared = Declared {
-    content: HiddenContent::EditingSessionId,
-    remove: &[(W, "rsids")],
-    unwrap: &[],
-    attributes: &[
+const EDITING_SESSION_IDS: Declared =
+    Declared::removing(HiddenContent::EditingSessionId, &[(W, "rsids")]).with_attributes(&[
         (W, Local::Prefix("rsid")),
         (W14, Local::Exact("paraId")),
         (W14, Local::Exact("textId")),
-    ],
-};
+    ]);
 
 /// The document ids.
-const DOCUMENT_IDS: Declared = Declared {
-    content: HiddenContent::DocumentId,
-    remove: &[(W14, "docId"), (W15, "docId")],
-    unwrap: &[],
-    attributes: &[],
-};
+const DOCUMENT_IDS: Declared =
+    Declared::removing(HiddenContent::DocumentId, &[(W14, "docId"), (W15, "docId")]);
 
 /// Range permissions, which name the users allowed to edit, and document and
 /// write protection, which carry a password hash.
-const CREDENTIALS: Declared = Declared {
-    content: HiddenContent::Credential,
-    remove: &[
+const CREDENTIALS: Declared = Declared::removing(
+    HiddenContent::Credential,
+    &[
         (W, "permStart"),
         (W, "permEnd"),
         (W, "documentProtection"),
         (W, "writeProtection"),
     ],
-    unwrap: &[],
-    attributes: &[],
-};
+);
 
 /// Settings that reach outside the document: the attached template and an XSLT
 /// save transform. Their relationships are external, so the reference cascade
 /// would drop them too; naming them keeps a setting with no relationship from
 /// surviving.
-const LINKS: Declared = Declared {
-    content: HiddenContent::Link,
-    remove: &[(W, "attachedTemplate"), (W, "saveThroughXslt")],
-    unwrap: &[],
-    attributes: &[],
-};
+const LINKS: Declared = Declared::removing(
+    HiddenContent::Link,
+    &[(W, "attachedTemplate"), (W, "saveThroughXslt")],
+);
 
 /// The mail-merge data source, inline or linked.
-const DATA_CONNECTIONS: Declared = Declared {
-    content: HiddenContent::DataConnection,
-    remove: &[(W, "mailMerge")],
-    unwrap: &[],
-    attributes: &[],
-};
+const DATA_CONNECTIONS: Declared =
+    Declared::removing(HiddenContent::DataConnection, &[(W, "mailMerge")]);
 
 /// The elements that accept every tracked revision.
 const REVISIONS: Declared = Declared {
@@ -130,70 +108,54 @@ const REVISIONS: Declared = Declared {
 };
 
 /// The comment anchors in the stories.
-const COMMENT_ANCHORS: Declared = Declared {
-    content: HiddenContent::Comment,
-    remove: &[
+const COMMENT_ANCHORS: Declared = Declared::removing(
+    HiddenContent::Comment,
+    &[
         (W, "commentRangeStart"),
         (W, "commentRangeEnd"),
         (W, "commentReference"),
     ],
-    unwrap: &[],
-    attributes: &[],
-};
+);
 
 /// Document variables: name-value metadata no field surfaces.
-const VARIABLES: Declared = Declared {
-    content: HiddenContent::Properties,
-    remove: &[(W, "docVars")],
-    unwrap: &[],
-    attributes: &[],
-};
+const VARIABLES: Declared = Declared::removing(HiddenContent::Properties, &[(W, "docVars")]);
 
 /// Content-control bindings into the custom XML data store.
-const BINDINGS: Declared = Declared {
-    content: HiddenContent::CustomData,
-    remove: &[(W, "dataBinding")],
-    unwrap: &[],
-    attributes: &[],
-};
+const BINDINGS: Declared = Declared::removing(HiddenContent::CustomData, &[(W, "dataBinding")]);
 
 /// A legacy form field's help and status text, and a content control's title
 /// and tag: labels shown only while editing.
-const FORM_LABELS: Declared = Declared {
-    content: HiddenContent::FormField,
-    remove: &[(W, "helpText"), (W, "statusText"), (W, "alias"), (W, "tag")],
-    unwrap: &[],
-    attributes: &[],
-};
+const FORM_LABELS: Declared = Declared::removing(
+    HiddenContent::FormField,
+    &[(W, "helpText"), (W, "statusText"), (W, "alias"), (W, "tag")],
+);
 
 /// A table's caption and description.
-const TABLE_ALTERNATIVE_TEXT: Declared = Declared {
-    content: HiddenContent::AlternativeText,
-    remove: &[(W, "tblCaption"), (W, "tblDescription")],
-    unwrap: &[],
-    attributes: &[],
-};
+const TABLE_ALTERNATIVE_TEXT: Declared = Declared::removing(
+    HiddenContent::AlternativeText,
+    &[(W, "tblCaption"), (W, "tblDescription")],
+);
 
 /// When a comment was written.
-const COMMENT_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::Comment,
-    attributes: &[
+const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::Comment,
+    &[
         TextAttribute::new((Ns::In(W), Local::Exact("comment")), (Ns::In(W), "date")),
         TextAttribute::new(
             (Ns::Any, Local::Exact("commentExtensible")),
             (Ns::Any, "dateUtc"),
         ),
     ],
-};
+);
 
 /// When a tracked change was made.
-const CHANGE_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::TrackedChange,
-    attributes: &[TextAttribute::new(
+const CHANGE_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::TrackedChange,
+    &[TextAttribute::new(
         (Ns::In(W), Local::Any),
         (Ns::In(W), "date"),
     )],
-};
+);
 
 /// A bookmark's name, which a person may name after anyone.
 const BOOKMARK_NAME: TextAttribute =
@@ -300,13 +262,18 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, read_part};
+    use crate::fixtures::{pack_typed, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
     use crate::opc::check::check;
     use crate::opc::sanitize::sanitize;
 
-    const TYPES: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>"#;
+    /// The content type of a Word document's body.
+    const DOCUMENT: &str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+    /// The content type of a Word document's comments.
+    const COMMENTS: &str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
 
     /// A Word document whose body carries a picture's description, a
     /// hyperlink's tooltip, a content control's title and tag, a table caption,
@@ -318,16 +285,48 @@ mod tests {
         let comments = format!(
             r#"<?xml version="1.0"?><w:comments xmlns:w="{W}"><w:comment w:id="0" w:author="John Doe" w:initials="JD" w:date="2024-01-02T03:04:05Z"><w:p><w:r><w:t>check this</w:t></w:r></w:p></w:comment></w:comments>"#
         );
-        pack_parts(&[
-            ("[Content_Types].xml", TYPES.as_bytes()),
-            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
-            ("word/document.xml", body.as_bytes()),
-            ("word/comments.xml", comments.as_bytes()),
+        pack_typed(&[
+            ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/comments.xml", COMMENTS, comments.as_bytes()),
         ])
     }
 
-    fn part(package: &[u8], name: &str) -> String {
-        String::from_utf8(read_part(package, name).unwrap()).unwrap()
+    /// A picture's payload, a VML picture bullet, and an SVG image survive
+    /// the schema rebuild.
+    #[test]
+    fn pictures_and_svg_images_are_kept() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{W}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:drawing><wp:inline><wp:extent cx="1" cy="1"/><wp:docPr id="1" name="Picture 1"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="logo.svg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r><w:r><w:pict><v:shape id="s" style="width:9pt"><v:imagedata r:id="rId1"/></v:shape></w:pict></w:r></w:p></w:body></w:document>"#
+        );
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.svg"/></Relationships>"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><text>Jane Roe</text></svg>"#;
+        let package = pack_typed(&[
+            ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/_rels/document.xml.rels", "", rels.as_bytes()),
+            ("word/media/logo.svg", "image/svg+xml", svg.as_bytes()),
+        ]);
+        let (out, stripped) =
+            sanitize(&package, HiddenContentPolicy::default(), &WordFormat).unwrap();
+        let out = out.unwrap_or(package);
+        let document = read_text_part(&out, "word/document.xml");
+        assert!(
+            document.contains(r#"<a:blip r:embed="rId1"/>"#),
+            "{document}"
+        );
+        assert!(
+            document.contains(r#"<v:imagedata r:id="rId1"/>"#),
+            "{document}"
+        );
+        assert_eq!(read_text_part(&out, "word/media/logo.svg"), svg);
+        assert!(
+            stripped
+                .iter()
+                .all(|entry| entry.content != HiddenContent::ApplicationData),
+            "{stripped:?}"
+        );
+        check(&out, HiddenContentPolicy::default(), &WordFormat).unwrap();
     }
 
     #[test]
@@ -335,11 +334,7 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document xmlns:w="{W}"><w:body><w:p><w:bookmarkStart w:id="0" w:name="JaneRoe"/><w:r><w:t>x</w:t></w:r><w:bookmarkEnd w:id="0"/><w:hyperlink w:anchor="JaneRoe"><w:r><w:t>see</w:t></w:r></w:hyperlink></w:p></w:body></w:document>"#
         );
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("word/document.xml", body.as_bytes()),
-        ]);
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
         let package = OoxmlPackage::<WordFormat>::open(&package).unwrap();
         let bookmark = body.find(r#"w:name="JaneRoe""#).unwrap() + r#"w:name=""#.len();
         let block = package
@@ -359,7 +354,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-        let body = part(&out, "word/document.xml");
+        let body = read_text_part(&out, "word/document.xml");
         assert!(body.contains(r#"w:name="PERSON_""#), "{body}");
         assert!(body.contains(r#"w:anchor="PERSON_""#), "{body}");
     }
@@ -369,7 +364,7 @@ mod tests {
         let (out, stripped) =
             sanitize(&document(), HiddenContentPolicy::default(), &WordFormat).unwrap();
         let out = out.unwrap();
-        let body = part(&out, "word/document.xml");
+        let body = read_text_part(&out, "word/document.xml");
         for hidden in [
             "photo.jpg",
             "Jane's page",
@@ -397,21 +392,94 @@ mod tests {
         let (out, _) = sanitize(&document(), policy, &WordFormat).unwrap();
         let out = out.unwrap();
         for name in ["word/document.xml", "word/comments.xml"] {
-            assert!(!part(&out, name).contains("w:date="), "a date in {name}");
+            assert!(
+                !read_text_part(&out, name).contains("w:date="),
+                "a date in {name}"
+            );
         }
         let package = OoxmlPackage::<WordFormat>::open(&out).unwrap();
-        let texts: Vec<String> = package
-            .extract()
-            .blocks
-            .iter()
-            .map(|block| block.text.to_string())
-            .collect();
+        let texts = package.extract().texts();
         for author in ["Jane Roe", "John Doe", "JD"] {
             assert!(
                 texts.iter().any(|text| text == author),
                 "{author} not in {texts:?}"
             );
         }
+        check(&out, policy, &WordFormat).unwrap();
+    }
+
+    /// The strict wordprocessing namespace.
+    const STRICT_W: &str = "http://purl.oclc.org/ooxml/wordprocessingml/main";
+
+    /// A strict document's tracked revisions and comment anchors are resolved
+    /// as a transitional one's.
+    #[test]
+    fn strict_revisions_are_resolved() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}"><w:body><w:p><w:r><w:t>kept</w:t></w:r><w:del w:id="1" w:author="Jane Roe" w:date="2024-01-02T03:04:05Z"><w:r><w:delText>deleted</w:delText></w:r></w:del><w:ins w:id="2" w:author="Jane Roe"><w:r><w:t>added</w:t></w:r></w:ins><w:commentRangeStart w:id="0"/></w:p></w:body></w:document>"#
+        );
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
+        let policy = HiddenContentPolicy::default();
+        let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap();
+        let body = read_text_part(&out, "word/document.xml");
+        for hidden in ["deleted", "w:del ", "w:ins ", "commentRangeStart", "w:date"] {
+            assert!(!body.contains(hidden), "{hidden} in {body}");
+        }
+        assert!(body.contains("added"), "{body}");
+        assert!(body.contains(STRICT_W), "{body}");
+        check(&out, policy, &WordFormat).unwrap();
+    }
+
+    /// An accepted insertion's children keep the namespaces it declared, and
+    /// its siblings are left as they were.
+    #[test]
+    fn an_accepted_insertion_hands_its_namespaces_to_its_children() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}"><w:body><w:p><w:ins w:id="2" xmlns:s="{STRICT_W}"><s:r><s:t>added</s:t></s:r><s:r xmlns:s="{STRICT_W}"><s:t>again</s:t></s:r></w:ins><w:r><w:t>kept</w:t></w:r></w:p></w:body></w:document>"#
+        );
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
+        let policy = HiddenContentPolicy::default();
+        let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap();
+        let body = read_text_part(&out, "word/document.xml");
+        assert!(
+            body.contains(&format!(
+                r#"<w:p><s:r xmlns:s="{STRICT_W}"><s:t>added</s:t></s:r><s:r xmlns:s="{STRICT_W}"><s:t>again</s:t></s:r><w:r><w:t>kept</w:t></w:r></w:p>"#
+            )),
+            "{body}"
+        );
+        check(&out, policy, &WordFormat).unwrap();
+        let (again, _) = sanitize(&out, policy, &WordFormat).unwrap();
+        assert!(again.is_none_or(|again| again == out));
+    }
+
+    /// A strict external hyperlink is visible content, kept with its text.
+    #[test]
+    fn a_strict_external_hyperlink_is_kept() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}" xmlns:r="http://purl.oclc.org/ooxml/officeDocument/relationships"><w:body><w:p><w:hyperlink r:id="rId1"><w:r><w:t>visit</w:t></w:r></w:hyperlink></w:p></w:body></w:document>"#
+        );
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>"#;
+        let package = pack_typed(&[
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/_rels/document.xml.rels", "", rels.as_bytes()),
+        ]);
+        let policy = HiddenContentPolicy::default();
+        let (out, stripped) = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap_or(package);
+        let body = read_text_part(&out, "word/document.xml");
+        assert!(body.contains(r#"<w:hyperlink r:id="rId1">"#), "{body}");
+        assert!(
+            read_text_part(&out, "word/_rels/document.xml.rels").contains("example.com"),
+            "the hyperlink's relationship is kept"
+        );
+        assert!(
+            stripped
+                .iter()
+                .all(|entry| entry.content != HiddenContent::Link),
+            "{stripped:?}"
+        );
         check(&out, policy, &WordFormat).unwrap();
     }
 
@@ -423,10 +491,9 @@ mod tests {
         let comments = format!(
             r#"<?xml version="1.0"?><w:comments xmlns:w="{W}"><w:comment w:id="0" w:author="John Doe" w:initials="JD"><w:p><w:r><w:t>check this</w:t></w:r></w:p></w:comment></w:comments>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", TYPES.as_bytes()),
-            ("word/document.xml", body.as_bytes()),
-            ("word/comments.xml", comments.as_bytes()),
+        let package = pack_typed(&[
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/comments.xml", COMMENTS, comments.as_bytes()),
         ]);
         let package = OoxmlPackage::<WordFormat>::open(&package).unwrap();
         let flags: Vec<(String, Option<String>)> = package

@@ -1,4 +1,4 @@
-//! [`XmlSpan`]: where a markup item's value was read from and how a new value
+//! [`MarkupSpan`]: where a markup item's value was read from and how a new value
 //! is written back, and the [`MarkupAddresser`] that maps a decoded range to
 //! and from the raw bytes through it.
 
@@ -10,11 +10,11 @@ use quick_xml::escape::{escape, partial_escape};
 
 use crate::references::{CharacterReferences, decode_references};
 
-/// An XML [`ExtractedItem`] addressed by the source bytes its `value` was read
+/// A markup [`ExtractedItem`] addressed by the source bytes its `value` was read
 /// from.
 ///
 /// [`ExtractedItem`]: elide_codec::extract::ExtractedItem
-pub(crate) type XmlItem = ExtractedItem<XmlSpan>;
+pub(crate) type MarkupItem = ExtractedItem<MarkupSpan>;
 
 /// Where an [`ExtractedItem`]'s value was read from in the retained raw
 /// document, and how a new value is written back there.
@@ -25,7 +25,7 @@ pub(crate) type XmlItem = ExtractedItem<XmlSpan>;
 ///
 /// [`ExtractedItem`]: elide_codec::extract::ExtractedItem
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct XmlSpan {
+pub(crate) struct MarkupSpan {
     /// The *inner* raw bytes the value was read from: a text run, an
     /// attribute value between its quotes, a comment body between `<!--` and
     /// `-->`, a CDATA payload between `<![CDATA[` and `]]>`.
@@ -39,7 +39,7 @@ pub(crate) struct XmlSpan {
     pub(crate) read: String,
 }
 
-/// How a new value is escaped where an [`XmlSpan`] lands.
+/// How a new value is escaped where an [`MarkupSpan`] lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SpanKind {
     /// Character data: `<`, `>`, and `&` are escaped.
@@ -51,39 +51,35 @@ pub(crate) enum SpanKind {
     Verbatim,
 }
 
-impl XmlSpan {
-    /// The value of the escaped `kind` text at `range` of `raw`, its
-    /// references decoded by `references`, and its span.
+impl MarkupSpan {
+    /// The span of the escaped `kind` text at `range` of `raw`, its references
+    /// decoded by `references`.
     pub(crate) fn escaped(
         raw: &str,
         range: Range<usize>,
         kind: SpanKind,
         references: CharacterReferences,
-    ) -> (String, Self) {
-        let (value, offsets) = decode_references(&raw[range.clone()], range.start, references);
-        (value.clone(), Self::new(range, offsets, kind, value))
+    ) -> Self {
+        let (read, offsets) = decode_references(&raw[range.clone()], range.start, references);
+        Self::new(range, offsets, kind, read)
     }
 
-    /// The value of the verbatim text at `range` of `raw`, and its span.
-    pub(crate) fn verbatim(raw: &str, range: Range<usize>) -> (String, Self) {
-        let value = raw[range.clone()].to_owned();
+    /// The span of the verbatim text at `range` of `raw`.
+    pub(crate) fn verbatim(raw: &str, range: Range<usize>) -> Self {
+        let read = raw[range.clone()].to_owned();
         let offsets = OffsetMap::identity(range.start, range.len());
-        (
-            value.clone(),
-            Self::new(range, offsets, SpanKind::Verbatim, value),
-        )
+        Self::new(range, offsets, SpanKind::Verbatim, read)
     }
 
     /// The span of a separator reading as `value`, which stands for the markup
     /// at `range` and maps to no source text.
-    pub(crate) fn separator(range: Range<usize>, value: &str) -> (String, Self) {
-        let span = Self::new(
+    pub(crate) fn separator(range: Range<usize>, value: &str) -> Self {
+        Self::new(
             range,
             OffsetMap::default(),
             SpanKind::Verbatim,
             value.to_owned(),
-        );
-        (value.to_owned(), span)
+        )
     }
 
     fn new(range: Range<usize>, offsets: OffsetMap, kind: SpanKind, read: String) -> Self {
@@ -152,12 +148,12 @@ fn common_suffix(a: &str, b: &str) -> usize {
 }
 
 /// Maps a markup item's decoded value range to/from its raw source bytes
-/// through its [`XmlSpan`]'s offset map, single-file (no part tag).
+/// through its [`MarkupSpan`]'s offset map, single-file (no part tag).
 #[derive(Debug, Default)]
 pub(crate) struct MarkupAddresser;
 
-impl SourceAddresser<XmlSpan> for MarkupAddresser {
-    fn source_span(&self, item: &XmlItem, local: Range<usize>) -> Vec<SourceRef> {
+impl SourceAddresser<MarkupSpan> for MarkupAddresser {
+    fn source_span(&self, item: &MarkupItem, local: Range<usize>) -> Vec<SourceRef> {
         item.address
             .offsets
             .raw_ranges(local)
@@ -166,7 +162,7 @@ impl SourceAddresser<XmlSpan> for MarkupAddresser {
             .collect()
     }
 
-    fn locate_source(&self, items: &[XmlItem], source: &[SourceRef]) -> Vec<ItemEdit> {
+    fn locate_source(&self, items: &[MarkupItem], source: &[SourceRef]) -> Vec<ItemEdit> {
         // XML is a single file, so its source references carry no part; reject
         // any part-tagged reference rather than misresolve it. Each reference
         // must lie within one item.
@@ -201,8 +197,7 @@ mod tests {
     #[test]
     fn a_write_back_rewrites_only_the_changed_stretch_widened_to_whole_references() {
         let raw = "a&amp;b&amp;c";
-        let (_, span) =
-            XmlSpan::escaped(raw, 0..raw.len(), SpanKind::Text, CharacterReferences::Xml);
+        let span = MarkupSpan::escaped(raw, 0..raw.len(), SpanKind::Text, CharacterReferences::Xml);
         // "a&b&c" → "a&X&c": the middle `b` alone.
         assert_eq!(span.write_back("a&X&c"), Some((6..7, "X".to_owned())));
         // "a&b&c" → "a?b&c": the first reference, whole.

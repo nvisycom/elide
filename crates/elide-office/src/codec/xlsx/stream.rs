@@ -24,6 +24,7 @@ impl Stream<Tabular> for XlsxStream {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
+        let headers = self.state.column_headers();
         Ok(self
             .state
             .cells()
@@ -39,13 +40,16 @@ impl Stream<Tabular> for XlsxStream {
                 // with itself.
                 let mut hints = Vec::new();
                 if cell.row > 0
-                    && let Some(header) = self.state.column_header(&cell.sheet, cell.column)
+                    && let Some(header) = headers.get(&(cell.sheet.as_str(), cell.column))
                 {
-                    location = location.clone().with_column_name(header.clone());
+                    location = location.with_column_name(header.clone());
                     let header_location = TabularLocation::new(0, cell.column)
                         .with_sheet_name(cell.sheet.clone())
                         .with_column_name(header.clone());
-                    hints.push(ResolvedHint::new(header_location, TextData::new(header)));
+                    hints.push(ResolvedHint::new(
+                        header_location,
+                        TextData::new(header.clone()),
+                    ));
                 }
                 Chunk {
                     location,

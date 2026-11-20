@@ -1,14 +1,14 @@
 //! [`XlsxState`]: the workbook's editable cell state, owned by the body stream.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use elide_codec::string::RedactRange;
 use elide_core::modality::tabular::TabularLocation;
 use elide_core::modality::text::TextReplacement;
 use elide_core::{Error, Result};
+use hipstr::HipStr;
 
-use super::XlsxCell;
-use crate::xlsx::CellEdit;
+use crate::xlsx::{Cell, CellEdit};
 
 /// The workbook's editable cell state, owned by the body
 /// [`XlsxStream`](super::stream::XlsxStream): redactions edit it, and the
@@ -17,7 +17,7 @@ use crate::xlsx::CellEdit;
 #[derive(Debug)]
 pub(super) struct XlsxState {
     /// The workbook's text-bearing cells, in extraction order.
-    cells: Vec<XlsxCell>,
+    cells: Vec<Cell>,
     /// Indices of the cells a redaction actually changed, so the re-pack rewrites
     /// only those, leaving unedited shared-string cells shared.
     changed: BTreeSet<usize>,
@@ -25,7 +25,7 @@ pub(super) struct XlsxState {
 
 impl XlsxState {
     /// Wrap the extracted `cells`.
-    pub(super) fn new(cells: Vec<XlsxCell>) -> Self {
+    pub(super) fn new(cells: Vec<Cell>) -> Self {
         Self {
             cells,
             changed: BTreeSet::new(),
@@ -33,26 +33,28 @@ impl XlsxState {
     }
 
     /// The extracted cells, in extraction order.
-    pub(super) fn cells(&self) -> &[XlsxCell] {
+    pub(super) fn cells(&self) -> &[Cell] {
         &self.cells
     }
 
-    /// The header text for `column` on `sheet`: the text of the cell at row 0 of
-    /// that column, if any. Provides column context to the recognizer.
-    pub(super) fn column_header(&self, sheet: &str, column: u32) -> Option<String> {
-        self.cells
-            .iter()
-            .find(|c| c.sheet == sheet && c.row == 0 && c.column == column)
-            .map(|c| c.text.clone())
+    /// The header text of every column, keyed by `(sheet, column)`: the text of
+    /// the first cell at row 0 of that column, built once so each cell's lookup
+    /// is cheap. Provides column context to the recognizer.
+    pub(super) fn column_headers(&self) -> HashMap<(&str, u32), HipStr<'static>> {
+        let mut headers = HashMap::new();
+        for cell in self.cells.iter().filter(|c| c.row == 0) {
+            headers
+                .entry((cell.sheet.as_str(), cell.column))
+                .or_insert_with(|| HipStr::from(cell.text.clone()));
+        }
+        headers
     }
 
     /// The cell text at `location`, if a unique cell exists.
-    pub(super) fn cell_at(&self, location: &TabularLocation) -> Result<Option<String>> {
+    pub(super) fn cell_at(&self, location: &TabularLocation) -> Result<Option<&str>> {
         let sheet = location.sheet_name.as_deref();
-        let Some(index) = self.cell_index(sheet, location.row_index, location.column_index)? else {
-            return Ok(None);
-        };
-        Ok(Some(self.cells[index].text.clone()))
+        let index = self.cell_index(sheet, location.row_index, location.column_index)?;
+        Ok(index.map(|index| self.cells[index].text.as_str()))
     }
 
     /// Apply a batch of cell edits atomically: every edit's cell is resolved and

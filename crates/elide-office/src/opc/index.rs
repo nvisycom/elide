@@ -6,19 +6,17 @@
 //! can never disagree about what a part is.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
 
-use crate::opc::archive;
 use crate::opc::content_types::{CONTENT_TYPES_PART, ContentTypes};
 use crate::opc::kind::PartKind;
 use crate::opc::part::PartPath;
 use crate::opc::relationships::{self, Relationship};
-
-/// The content type of a legacy VML drawing.
-const VML: &str = "application/vnd.openxmlformats-officedocument.vmldrawing";
+use crate::opc::{archive, ct};
 
 /// The relationship type of a part's comments.
 const COMMENTS: &str =
@@ -28,7 +26,7 @@ const COMMENTS: &str =
 /// relationships.
 pub(crate) struct Index {
     pub(crate) parts: Vec<(PartPath, Bytes)>,
-    content_types: ContentTypes,
+    pub(crate) content_types: ContentTypes,
     /// Each relationships part, keyed by its path, with its source part (`None`
     /// for the package's own) and its relationships.
     pub(crate) relationships: HashMap<PartPath, (Option<PartPath>, Vec<Relationship>)>,
@@ -100,14 +98,8 @@ impl Index {
         part.as_str() != CONTENT_TYPES_PART
             && self.content_type(part).is_some_and(|content_type| {
                 content_type.to_ascii_lowercase().ends_with("xml")
-                    || content_type.eq_ignore_ascii_case(VML)
+                    || ct::is_vml_drawing(content_type)
             })
-    }
-
-    /// Whether `part` is a legacy VML drawing.
-    pub(crate) fn is_vml(&self, part: &PartPath) -> bool {
-        self.content_type(part)
-            .is_some_and(|content_type| content_type.eq_ignore_ascii_case(VML))
     }
 
     /// The kind of `part`.
@@ -130,7 +122,7 @@ impl Index {
         let content_type = self.content_type(part);
         let kinds: Vec<&str> = incoming.iter().map(|(_, kind)| *kind).collect();
         let kind = PartKind::of(part, content_type, &kinds);
-        let is_vml = content_type.is_some_and(|ct| ct.eq_ignore_ascii_case(VML));
+        let is_vml = content_type.is_some_and(ct::is_vml_drawing);
         let beside_comments = || {
             incoming.iter().any(|(source, _)| {
                 source.is_some_and(|source| {
@@ -149,6 +141,6 @@ impl Index {
 }
 
 /// The part `path`'s bytes as UTF-8 text.
-pub(crate) fn text<'a>(path: &PartPath, bytes: &'a Bytes) -> Result<&'a str> {
+pub(crate) fn text(path: impl Display, bytes: &[u8]) -> Result<&str> {
     str::from_utf8(bytes).map_err(|_| Error::malformed(format!("part `{path}` is not UTF-8")))
 }

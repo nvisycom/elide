@@ -29,7 +29,8 @@ default = ["pattern", "ner", "llm"]
 ## Derive `serde::{Serialize, Deserialize}` on the re-exported domain types.
 ## Recognizer crates (`pattern`/`ner`/`llm`) need serde structurally and pull
 ## it in regardless; each optional modality/codec crate (`audio`/`image`/`pdf`/
-## `office`/`codec`/`format`) is forwarded only when it is enabled.
+## `codec`/`format`) is forwarded only when it is enabled. (`elide-office`
+## exposes no serializable types, so no forward there.)
 ## (`elide-engine` requires serde unconditionally, so the `engine` feature
 ## pulls it in on its own — no forward needed here.)
 serde = [
@@ -39,7 +40,6 @@ serde = [
     "elide-audio?/serde",
     "elide-image?/serde",
     "elide-pdf?/serde",
-    "elide-office?/serde",
     "elide-codec?/serde",
     "elide-format?/serde",
 ]

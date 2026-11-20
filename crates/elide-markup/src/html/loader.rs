@@ -1,13 +1,17 @@
-//! HTML loader: runs the XML markup engine over HTML with lenient parsing.
+//! HTML loader: runs the shared markup engine over HTML with lenient parsing.
 //!
-//! HTML has no engine of its own. Its hidden content (scripts and other active
-//! content, comments, `<meta>` fields) is cut out first by the
-//! [`MarkupSanitizer`]; then the shared XML engine ([`build_items`]) reads the
-//! rest leniently (tolerating void elements, stray end tags, and bare `&`) with
-//! the two HTML vocabularies it takes as plain element-name lists: the block
-//! elements that group sibling text for context hints, and the `<style>` bodies
-//! not to scan. Everything downstream, streaming, redaction, byte-faithful
-//! splice, is the XML handler.
+//! HTML has no engine of its own. The [`MarkupSanitizer`] first rebuilds the
+//! document from what renders, leaving out scripts and other active content,
+//! anything else it does not name, and, under the policy, comments and
+//! `<meta>` fields; then the markup engine ([`decode`]) reads the rest
+//! leniently (tolerating void elements, stray end tags, and bare `&`) with the
+//! three HTML vocabularies it takes as plain element-name lists: the block
+//! elements that group sibling text for context hints, the `<style>` bodies
+//! not to scan, and the other elements text does not read across. Everything
+//! downstream, streaming, redaction, byte-faithful splice, is the markup
+//! engine's, as for XML.
+//!
+//! [`MarkupSanitizer`]: crate::sanitize::MarkupSanitizer
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document, DocumentLoader};
@@ -16,15 +20,14 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::handler::FORMAT_ID;
 use crate::engine::config::MarkupConfig;
-use crate::engine::document::markup_document;
-use crate::engine::parser::build_items;
-use crate::sanitize::{Dialect, MarkupSanitizer};
+use crate::engine::document::decode;
 
 /// HTML block-level elements: each ends a passage, and its text children form
 /// one sibling-hint group, so a label and a value in separate passages of one
-/// block (`<td>Card number<p>4111…</p></td>`) still surface to a boost. Names are lowercased and
-/// sorted. Membership is a linear scan (see `MarkupConfig::is_block`), fine for
-/// a list this size checked once per closing tag.
+/// block (`<td>Card number<p>4111…</p></td>`) still surface to a boost. Names
+/// are lowercased and sorted. Membership is a linear scan (see
+/// `MarkupConfig::is_block`), fine for a list this size checked once per start
+/// and end tag.
 const BLOCK_ELEMENTS: &[&str] = &[
     "address",
     "article",
@@ -81,13 +84,8 @@ pub(crate) struct HtmlLoader;
 #[async_trait::async_trait]
 impl DocumentLoader for HtmlLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
-        let sanitizer = MarkupSanitizer::new(Dialect::Html, policy);
-        let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
-        let config = MarkupConfig::lenient(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS)
-            .with_passage_bounds(PASSAGE_BOUNDS);
-        // `build_items` already reports a `MalformedInput` parse error.
-        let items = build_items(&text, config)?;
-        Ok(markup_document(FORMAT_ID, text, items, sanitizer).with_stripped(stripped))
+        let config = MarkupConfig::html(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS, PASSAGE_BOUNDS);
+        decode(FORMAT_ID, config, content, policy)
     }
 }
 
@@ -96,10 +94,11 @@ mod tests {
     use elide_codec::{Document, TypedStream};
     use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextReplacement};
-    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
+    use elide_core::modality::{Chunk, ChunkReader, DataReader, DataWriter};
     use elide_core::redaction::{Disposition, HiddenContentKind, Redactions};
 
     use super::*;
+    use crate::engine::test_util::hint_texts;
 
     /// The body stream of a decoded HTML document, as `Text`.
     fn body(doc: &mut Document) -> TypedStream<'_, Text> {
@@ -120,6 +119,28 @@ mod tests {
 
     fn encoded(doc: &Document) -> String {
         doc.encode().unwrap().decode().unwrap()
+    }
+
+    /// The body chunk reading `text`.
+    fn chunk(doc: &mut Document, text: &str) -> Chunk<Text> {
+        body(doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str() == text)
+            .expect("chunk")
+    }
+
+    /// Redact the body chunk reading `text` whole with `replacement`.
+    async fn redact(doc: &mut Document, text: &str, replacement: &str) {
+        let location = chunk(doc, text).location;
+        body(doc)
+            .write_at(Redactions::from([(
+                location,
+                TextReplacement::substituted(replacement),
+            )]))
+            .await
+            .unwrap();
     }
 
     fn values(doc: &mut Document) -> Vec<String> {
@@ -155,19 +176,7 @@ mod tests {
         let mut doc = load(raw).await;
         let vs = values(&mut doc);
         assert!(vs.iter().any(|v| v == "jane@example.com"), "{vs:?}");
-        let chunk = body(&mut doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|chunk| chunk.data.as_str() == "jane@example.com")
-            .expect("chunk");
-        body(&mut doc)
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[EMAIL]"),
-            )]))
-            .await
-            .unwrap();
+        redact(&mut doc, "jane@example.com", "[EMAIL]").await;
         assert!(encoded(&doc).contains("<input value=[EMAIL] disabled>"));
     }
 
@@ -241,19 +250,7 @@ mod tests {
     async fn attribute_redact_round_trips() {
         let raw = r#"<html><body><img alt="alice@example.com"></body></html>"#;
         let mut doc = load(raw).await;
-        let chunk = body(&mut doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|c| c.data.as_str() == "alice@example.com")
-            .expect("chunk");
-        body(&mut doc)
-            .write_at(Redactions::from([(
-                chunk.location,
-                TextReplacement::substituted("[email]"),
-            )]))
-            .await
-            .unwrap();
+        redact(&mut doc, "alice@example.com", "[email]").await;
         assert!(
             encoded(&doc).contains(r#"alt="[email]""#),
             "alt not rewritten: {}",
@@ -275,28 +272,13 @@ mod tests {
         assert_eq!(encoded(&doc), "<html><body><p>Hi</p></body></html>");
     }
 
-    /// The hint texts of the chunk reading `text`.
-    fn hint_texts(doc: &mut Document, text: &str) -> Vec<String> {
-        let chunk = body(doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|chunk| chunk.data.as_str() == text)
-            .expect("chunk");
-        chunk
-            .hints
-            .iter()
-            .map(|hint| hint.data.as_str().to_owned())
-            .collect()
-    }
-
     #[tokio::test]
     async fn a_sibling_hint_links_passages_of_one_block() {
         // The <td> (in the real BLOCK_ELEMENTS) holds the label and, in a
         // nested <p>, the number: two passages its sibling hints link.
         let raw = "<table><tr><td>Card number<p>4111 1111 1111 1111</p></td></tr></table>";
         let mut doc = load(raw).await;
-        let hints = hint_texts(&mut doc, "4111 1111 1111 1111");
+        let hints = hint_texts(&chunk(&mut doc, "4111 1111 1111 1111"));
         assert!(hints.iter().any(|hint| hint == "Card number"), "{hints:?}");
     }
 
@@ -304,7 +286,7 @@ mod tests {
     async fn text_in_one_passage_gets_no_sibling_hint() {
         let raw = "<table><tr><td>Card <code>4111 1111 1111 1111</code> on file</td></tr></table>";
         let mut doc = load(raw).await;
-        let hints = hint_texts(&mut doc, "Card 4111 1111 1111 1111 on file");
+        let hints = hint_texts(&chunk(&mut doc, "Card 4111 1111 1111 1111 on file"));
         assert!(!hints.iter().any(|hint| hint == "on file"), "{hints:?}");
     }
 }

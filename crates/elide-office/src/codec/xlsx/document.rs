@@ -12,9 +12,9 @@ use elide_core::modality::tabular::Tabular;
 use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 
+use super::TEXT_PART_ID;
 use super::stream::XlsxStream;
-use super::{BODY_PART_ID, TEXT_PART_ID};
-use crate::codec::ooxml::{OoxmlAddress, blob_replacements, replacements, without_removed};
+use crate::codec::ooxml::{BODY_PART_ID, OoxmlAddress, finish, part_replacements, replacements};
 use crate::codec::props::DocProps;
 use crate::opc::check::check;
 use crate::xlsx::{SheetClassifier, Xlsx};
@@ -60,12 +60,9 @@ impl Native for XlsxDocument {
     fn encode(&self, blobs: &[Blob], removed: &[LocalId]) -> Result<ContentData> {
         let edits = self.cells.state.cell_edits();
         let text = replacements(self.text.items());
-        let mut parts = self.properties.replacements();
-        parts.extend(blob_replacements(blobs));
-        let bytes =
-            Xlsx::open(&self.archive).and_then(|xlsx| xlsx.rewrite(&edits, &text, &parts))?;
-        let bytes = without_removed(bytes, removed)?;
-        Ok(ContentData::new(Bytes::from(bytes)))
+        let parts = part_replacements(&self.properties, blobs);
+        let out = Xlsx::open(&self.archive).and_then(|xlsx| xlsx.rewrite(&edits, &text, &parts))?;
+        finish(out, removed)
     }
 
     fn validate(&self, output: &ContentData) -> Result<()> {

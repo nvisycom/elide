@@ -14,34 +14,64 @@ mod attributes;
 mod block;
 pub(crate) mod check;
 pub(crate) mod content_types;
+pub(crate) mod ct;
 pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod names;
+pub(crate) mod ns;
+pub(crate) mod package_xml;
 mod part;
 pub mod props;
 pub(crate) mod references;
 pub(crate) mod relationships;
 pub(crate) mod sanitize;
+pub(crate) mod schema;
 mod store;
 pub(crate) mod vocabulary;
 pub(crate) mod xml_edit;
 pub(crate) mod xml_span;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
+use quick_xml::escape::{EscapeError, unescape};
 
 pub use self::attributes::TextAttribute;
-pub(crate) use self::attributes::{
-    Collaboration, NEUTRAL_DATE, NeutralizeAttributes, Ns, StripAttributes,
-};
+pub(crate) use self::attributes::{Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns};
 pub use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
+use self::content_types::ContentTypes;
 use self::index::Index;
 pub use self::kind::PartKind;
 pub use self::names::Names;
 pub use self::part::{PartClassifier, PartPath, PartRole};
 use self::store::StoredPart;
+
+/// A part's XML failing to read, as `e` says.
+pub(crate) fn malformed_xml(e: impl std::fmt::Display) -> Error {
+    Error::malformed(format!("malformed part XML: {e}"))
+}
+
+/// The attribute value written `raw` (inside its quotes) as XML reads it
+/// (XML 1.0 §3.3.3, for an attribute of no declared type): a literal tab,
+/// line feed, or carriage return (a CR-LF pair as one) read as a space, and
+/// every reference decoded, a character reference to whitespace kept as that
+/// character.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
+/// reference does not decode.
+pub(crate) fn attribute_value(raw: &str) -> Result<Cow<'_, str>> {
+    let malformed = |e: EscapeError| Error::malformed(format!("malformed attribute value: {e}"));
+    if !raw.contains(['\t', '\n', '\r']) {
+        return unescape(raw).map_err(malformed);
+    }
+    let spaced = raw.replace("\r\n", " ").replace(['\t', '\n', '\r'], " ");
+    let value = unescape(&spaced).map_err(malformed)?.into_owned();
+    Ok(Cow::Owned(value))
+}
 
 /// An opened OOXML package: every part read once and classified, ready to
 /// [`extract`](Package::extract) the text of every text-bearing part or
@@ -53,6 +83,8 @@ use self::store::StoredPart;
 pub struct Package {
     /// Every package part, in archive order.
     parts: Vec<StoredPart>,
+    /// The content-types manifest, which types every part.
+    content_types: ContentTypes,
     /// The format's names, fitted to their rules when redacted.
     names: &'static Names,
     /// The original archive bytes, retained so [`rewrite_with_parts`](Self::rewrite_with_parts) can
@@ -117,6 +149,7 @@ impl Package {
             .collect();
         Ok(Self {
             parts,
+            content_types: index.content_types,
             names: classifier.names(),
             source: Bytes::copy_from_slice(document),
         })
@@ -126,6 +159,17 @@ impl Package {
     /// format's required part (e.g. a Word document must have its main part).
     pub fn contains_kind(&self, kind: PartKind) -> bool {
         self.parts.iter().any(|p| p.kind() == kind)
+    }
+
+    /// The content type the manifest names for the part at `path`, if the
+    /// package has that part; part names compare ASCII case-insensitively, as
+    /// OPC requires.
+    pub(crate) fn content_type(&self, path: &PartPath) -> Option<&str> {
+        let part = self
+            .parts
+            .iter()
+            .find(|p| p.path().as_str().eq_ignore_ascii_case(path.as_str()))?;
+        self.content_types.of(part.path())
     }
 
     /// Whether the package contains a part at `path`.
@@ -259,10 +303,7 @@ impl Package {
             if !part.is_text() || part.role() == PartRole::RelationshipTargets {
                 continue;
             }
-            let text = part
-                .text()
-                .ok_or_else(|| Error::malformed(format!("part `{}` not UTF-8", part.path())))?;
-            texts.push((part.path(), text));
+            texts.push((part.path(), part.utf8()?));
         }
         names::fit_names(self.names, texts.iter().copied(), replacements)
     }
@@ -331,21 +372,21 @@ impl Package {
         // Re-pack in archive order: a changed part (spliced text or replaced
         // bytes) is re-deflated; an untouched part is copied straight from the
         // source with its data still compressed, no inflate/deflate round-trip.
-        let mut changed: Vec<(&PartPath, Vec<u8>)> = Vec::new();
+        let mut spliced: HashMap<&PartPath, String> = HashMap::new();
         for part in &self.parts {
-            match by_part.get(part.path()) {
-                Some(edits) => changed.push((part.path(), part.splice(edits)?.into_bytes())),
-                None => {
-                    if let Some(bytes) = part_bytes.get(part.path()) {
-                        changed.push((part.path(), bytes.to_vec()));
-                    }
-                }
+            if let Some(edits) = by_part.get(part.path()) {
+                spliced.insert(part.path(), part.splice(edits)?);
             }
         }
         let entries = self.parts.iter().map(|part| {
-            match changed.iter().find(|(path, _)| *path == part.path()) {
-                Some((path, bytes)) => archive::Entry::Changed(path, bytes),
-                None => archive::Entry::Unchanged(part.path()),
+            let path = part.path();
+            let bytes = match spliced.get(path) {
+                Some(text) => Some(text.as_bytes()),
+                None => part_bytes.get(path).copied(),
+            };
+            match bytes {
+                Some(bytes) => archive::Entry::Changed(path, bytes),
+                None => archive::Entry::Unchanged(path),
             }
         });
         archive::write(&self.source, entries)
@@ -354,12 +395,24 @@ impl Package {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Write};
-
-    use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
-
     use super::*;
+    use crate::fixtures::pack_typed;
+
+    #[test]
+    fn an_attribute_value_reads_as_xml_normalizes_it() {
+        assert_eq!(
+            attribute_value("Jane\tRoe\r\nand\nco").unwrap(),
+            "Jane Roe and co"
+        );
+        // A reference to whitespace is that character, not a space.
+        assert_eq!(attribute_value("a&#10;b&amp;c").unwrap(), "a\nb&c");
+        assert!(matches!(
+            attribute_value("plain").unwrap(),
+            Cow::Borrowed("plain")
+        ));
+        assert!(attribute_value("a&unknown;").is_err());
+        assert!(attribute_value("a\n&unknown;").is_err());
+    }
 
     /// A classifier that makes the main part text, an image binary, and the
     /// rest structure, so every replacement guard can be exercised.
@@ -378,20 +431,19 @@ mod tests {
     /// A package of a main text part, a style part, and an image, with its
     /// content-types manifest.
     fn package() -> Vec<u8> {
-        let manifest = br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="png" ContentType="image/png"/><Override PartName="/doc/text.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>"#;
-        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        let entries: [(&str, &[u8]); 4] = [
-            ("[Content_Types].xml", manifest),
-            ("doc/text.xml", b"<t>hi</t>"),
-            ("styles.xml", b"<styles/>"),
-            ("media/image1.png", b"\x89PNG original"),
-        ];
-        for (name, bytes) in entries {
-            zip.start_file(name, opts).unwrap();
-            zip.write_all(bytes).unwrap();
-        }
-        zip.finish().unwrap().into_inner()
+        pack_typed(&[
+            (
+                "doc/text.xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+                b"<t>hi</t>",
+            ),
+            (
+                "styles.xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+                b"<styles/>",
+            ),
+            ("media/image1.png", "image/png", b"\x89PNG original"),
+        ])
     }
 
     #[test]

@@ -16,18 +16,29 @@
 //! relationships part.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ops::Range;
 
-use elide_codec::extract::{OffsetMap, Passage};
+use elide_codec::extract::{OffsetMap, OffsetRun, Passage};
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
 use quick_xml::escape::{escape, partial_escape, unescape};
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::{NsReader, Reader};
+use quick_xml::events::Event;
 
+use crate::opc::attribute_value;
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
-use crate::opc::xml_edit::{Name, bom_len, bound};
+use crate::opc::ns::{W, X, XML, transitional};
+use crate::opc::relationships::{self, HYPERLINK};
+use crate::opc::xml_edit::{
+    Action, Attribute, Name, Rules, SpannedReader, edit, local_name, namespace_of,
+};
+
+/// A read of a part's spans, which fails (with nothing more to say) on
+/// malformed XML; the caller reports the part as an issue.
+pub(crate) type Readable<T> = std::result::Result<T, ()>;
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -86,21 +97,26 @@ impl Span {
     /// in that text back to its raw source range. Errs on malformed XML.
     ///
     /// Text and attribute values carry entities, so they unescape and get an
-    /// entity-aware map; a comment or CDATA body is byte-identical to its source,
-    /// so its text is borrowed as-is over a single identity run. A separator
-    /// reads as its character and maps to no source text.
-    pub(crate) fn decode<'a>(
-        &self,
-        raw: &'a str,
-    ) -> std::result::Result<(Cow<'a, str>, OffsetMap), ()> {
+    /// entity-aware map; an attribute value reads a literal tab, line feed, or
+    /// carriage return as a space, as [`attribute_value`] does (a CR-LF pair
+    /// as one, mapped onto both bytes). A comment or CDATA body is
+    /// byte-identical to its source, so its text is borrowed as-is over a
+    /// single identity run. A separator reads as its character and maps to no
+    /// source text.
+    pub(crate) fn decode<'a>(&self, raw: &'a str) -> Readable<(Cow<'a, str>, OffsetMap)> {
         let slice = &raw[self.range.clone()];
         match self.kind {
-            BlockKind::Text | BlockKind::Attribute => {
-                // XML refuses a reference it cannot decode, so the slice must
-                // unescape whole before it is mapped reference by reference.
+            // XML refuses a reference it cannot decode, so the slice must
+            // decode whole before it is mapped reference by reference.
+            BlockKind::Text => {
                 unescape(slice).map_err(|_| ())?;
                 let (text, offsets) =
                     decode_references(slice, self.range.start, CharacterReferences::Xml);
+                Ok((Cow::Owned(text), offsets))
+            }
+            BlockKind::Attribute => {
+                attribute_value(slice).map_err(|_| ())?;
+                let (text, offsets) = decode_attribute(slice, self.range.start);
                 Ok((Cow::Owned(text), offsets))
             }
             BlockKind::Comment | BlockKind::Cdata => Ok((
@@ -151,6 +167,49 @@ impl Span {
     }
 }
 
+/// The attribute value `raw`, one [`attribute_value`] reads, decoded with its
+/// map back to the source at `base`. A literal tab, line feed, or carriage
+/// return reads as a space; a CR-LF pair reads as one space and, like a
+/// reference, maps onto all its bytes.
+fn decode_attribute(raw: &str, base: usize) -> (String, OffsetMap) {
+    let mut text = String::with_capacity(raw.len());
+    let mut runs = Vec::new();
+    let literal = |text: &mut String, runs: &mut Vec<OffsetRun>, from: usize, to: usize| {
+        if from < to {
+            let start = text.len();
+            text.push_str(&raw[from..to].replace(['\t', '\n', '\r'], " "));
+            runs.push(OffsetRun::identity(
+                start..text.len(),
+                base + from..base + to,
+            ));
+        }
+    };
+    let bytes = raw.as_bytes();
+    let (mut copied, mut at) = (0, 0);
+    while at < raw.len() {
+        let end = match bytes[at] {
+            b'\r' if bytes.get(at + 1) == Some(&b'\n') => at + 2,
+            b'&' => raw[at..].find(';').map_or(raw.len(), |end| at + end + 1),
+            _ => {
+                at += 1;
+                continue;
+            }
+        };
+        literal(&mut text, &mut runs, copied, at);
+        let start = text.len();
+        if bytes[at] == b'&' {
+            let (decoded, _) = decode_references(&raw[at..end], 0, CharacterReferences::Xml);
+            text.push_str(&decoded);
+        } else {
+            text.push(' ');
+        }
+        runs.push(OffsetRun::entity(start..text.len(), base + at..base + end));
+        (copied, at) = (end, end);
+    }
+    literal(&mut text, &mut runs, copied, raw.len());
+    (text, OffsetMap::new(runs))
+}
+
 /// The text/comment/CDATA spans of `raw`, each with its inner byte range
 /// (delimiters stripped), the [`BlockKind`] it belongs to, and its
 /// [`Passage`]; whitespace-only text runs are dropped unless they are the text
@@ -161,7 +220,7 @@ impl Span {
 /// logical text run splits into `Text`/`GeneralRef` events; a contiguous run of
 /// them is coalesced into one `Text` span (covering the entity bytes) so
 /// unescaping the whole span yields the decoded logical text.
-pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn text_spans(raw: &str) -> Readable<Vec<Span>> {
     text_spans_where(raw, |_| true)
 }
 
@@ -170,7 +229,7 @@ pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
 /// runs (`<c>…<t>`), and a shared string's runs (`<si>…<t>`, its phonetic
 /// reading `<rPh>` excepted). A header or footer, a validation list, a formula,
 /// and a phonetic reading are all surfaced. Errs on malformed XML.
-pub(crate) fn cell_markup_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn cell_markup_spans(raw: &str) -> Readable<Vec<Span>> {
     text_spans_where(raw, |open| !is_cell_text(open))
 }
 
@@ -187,24 +246,15 @@ fn is_cell_text(open: &[String]) -> bool {
 
 /// The text/comment/CDATA spans of `raw` inside elements `keep` accepts, given
 /// the open elements' local names, outermost first.
-fn text_spans_where(
-    raw: &str,
-    keep: impl Fn(&[String]) -> bool,
-) -> std::result::Result<Vec<Span>, ()> {
-    let mut reader = Reader::from_str(raw);
+fn text_spans_where(raw: &str, keep: impl Fn(&[String]) -> bool) -> Readable<Vec<Span>> {
+    let mut reader = SpannedReader::new(raw);
     let mut spans = Vec::new();
-    // quick-xml reports positions relative to the text *after* a leading BOM, but
-    // our spans index the original bytes, so shift every span past the BOM.
-    let bom = bom_len(raw);
-    let mut last = bom;
     let mut run: Option<Range<usize>> = None;
     let mut open: Vec<String> = Vec::new();
     let mut passages = Passages::default();
 
     loop {
-        let event = reader.read_event().map_err(|_| ())?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
+        let (event, span) = reader.read_event().map_err(|_| ())?;
 
         match event {
             // Extend (or open) the current text run across text and entities.
@@ -261,52 +311,77 @@ fn text_spans_where(
 /// The value spans of the attributes of `raw` that `attributes` names, each
 /// tagged [`BlockKind::Attribute`]; an empty value is skipped. Errs on
 /// malformed XML.
-pub(crate) fn attribute_spans(
-    raw: &str,
-    attributes: &[TextAttribute],
-) -> std::result::Result<Vec<Span>, ()> {
-    if attributes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut reader = NsReader::from_str(raw);
-    let mut spans = Vec::new();
-    loop {
-        let (resolved, event) = reader.read_resolved_event().map_err(|_| ())?;
-        let element_ns = bound(&resolved);
-        let elem = match event {
-            Event::Eof => break,
-            Event::Start(e) | Event::Empty(e) => e,
-            _ => continue,
-        };
-        let element = Name {
-            namespace: element_ns.as_deref(),
-            local: elem.local_name().into_inner(),
-        };
-        for attr in elem.attributes() {
-            let attr = attr.map_err(|_| ())?;
-            let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-            let attribute_ns = bound(&resolved);
-            let attribute = Name {
-                namespace: attribute_ns.as_deref(),
-                local: local.into_inner(),
-            };
-            let named = attributes
-                .iter()
-                .find(|text| text.matches(element, attribute));
-            if let Some(named) = named
-                && !attr.value.is_empty()
-            {
-                spans.push(Span {
-                    collaboration: named.collaboration,
-                    ..Span::new(
-                        sub_slice_range(raw, attr.value.as_ref())?,
-                        BlockKind::Attribute,
-                    )
-                });
-            }
+pub(crate) fn attribute_spans(raw: &str, attributes: &[TextAttribute]) -> Readable<Vec<Span>> {
+    let mut spans: Vec<Span> = Vec::new();
+    for (named, range) in named_values(raw, attributes)? {
+        // The first entry naming an attribute says what it is.
+        if spans.last().is_none_or(|span| span.range != range) {
+            spans.push(Span {
+                collaboration: attributes[named].collaboration,
+                ..Span::new(range, BlockKind::Attribute)
+            });
         }
     }
     Ok(spans)
+}
+
+/// The value ranges of the attributes of `raw` that `attributes` names, one
+/// list per entry of `attributes`, each in document order, read in one pass;
+/// an empty value is skipped, and an attribute two entries name is in both
+/// lists. Errs on malformed XML.
+pub(crate) fn attribute_ranges(
+    raw: &str,
+    attributes: &[TextAttribute],
+) -> Readable<Vec<Vec<Range<usize>>>> {
+    let mut ranges = vec![Vec::new(); attributes.len()];
+    for (named, range) in named_values(raw, attributes)? {
+        ranges[named].push(range);
+    }
+    Ok(ranges)
+}
+
+/// Each non-empty value of an attribute of `raw` that `attributes` names, as
+/// the index of the entry naming it and the value's range, in document order
+/// and, for one attribute, in the order of `attributes`. The part is read as
+/// every edit reads it ([`edit`]), names resolved and a strict namespace
+/// mapped. Errs on malformed XML.
+fn named_values(raw: &str, attributes: &[TextAttribute]) -> Readable<Vec<(usize, Range<usize>)>> {
+    if attributes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let named = Named {
+        attributes,
+        found: RefCell::new(Vec::new()),
+    };
+    edit(raw, &named).map_err(|_| ())?;
+    Ok(named.found.into_inner())
+}
+
+/// Rules that change nothing and collect the values [`named_values`] reads.
+struct Named<'t> {
+    attributes: &'t [TextAttribute],
+    found: RefCell<Vec<(usize, Range<usize>)>>,
+}
+
+impl Rules for Named<'_> {
+    fn content(&self) -> Option<HiddenContent> {
+        None
+    }
+
+    fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
+        let mut found = self.found.borrow_mut();
+        for attribute in attributes
+            .iter()
+            .filter(|attribute| !attribute.value.is_empty())
+        {
+            for (index, text) in self.attributes.iter().enumerate() {
+                if text.matches(name, attribute.name) {
+                    found.push((index, attribute.value_range.clone()));
+                }
+            }
+        }
+        Action::Keep
+    }
 }
 
 /// The external-hyperlink `Target` attribute *value* spans of a relationships
@@ -317,58 +392,17 @@ pub(crate) fn attribute_spans(
 /// `TargetMode` is `External` are surfaced: those are the user-authored URLs
 /// (`mailto:`, `https://…`) that carry the same PII as the body. Internal
 /// relationships (styles, headers, fonts, …) target other package parts and
-/// hold no user data, so they are left untouched.
-pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
-    /// The OPC relationship type of an external hyperlink.
-    const HYPERLINK_TYPE: &str =
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
-
-    let mut reader = Reader::from_str(raw);
-    let mut spans = Vec::new();
-
-    loop {
-        let elem = match reader.read_event().map_err(|_| ())? {
-            Event::Eof => break,
-            Event::Empty(e) | Event::Start(e) => e,
-            _ => continue,
-        };
-        if elem.local_name().as_ref() != "Relationship" {
-            continue;
-        }
-
-        // Scan the element's attributes once for the hyperlink type, the external
-        // mode, and the `Target` value's source range, the latter derived from
-        // the value bytes quick-xml borrowed straight out of `raw`. A span is
-        // emitted only when the relationship is an external hyperlink.
-        let mut is_hyperlink = false;
-        let mut is_external = false;
-        let mut target: Option<Range<usize>> = None;
-        for attr in elem.attributes() {
-            let attr = attr.map_err(|_| ())?;
-            match attr.key.local_name().as_ref() {
-                "Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK_TYPE,
-                "TargetMode" => is_external = attr.value.as_ref() == "External",
-                "Target" => target = Some(sub_slice_range(raw, attr.value.as_ref())?),
-                _ => {}
-            }
-        }
-        if is_hyperlink
-            && is_external
-            && let Some(range) = target
-        {
-            spans.push(Span::new(range, BlockKind::Attribute));
-        }
-    }
-    Ok(spans)
-}
-
-/// The byte range of `value` within `raw`, where `value` is a slice quick-xml
-/// borrowed out of `raw` (its attribute values are the raw source text, entity
-/// spellings intact, borrowed straight from the buffer). Errs, fail-closed, if
-/// `value` is not a sub-slice of `raw`, so a caller surfaces the part as an issue
-/// rather than dropping a redaction.
-fn sub_slice_range(raw: &str, value: &str) -> std::result::Result<Range<usize>, ()> {
-    raw.substr_range(value).map(Range::from).ok_or(())
+/// hold no user data, so they are left untouched. The part is read by
+/// [`relationships::parse_spanned`], so what is surfaced is what the package
+/// reads.
+pub(crate) fn relationship_spans(raw: &str) -> Readable<Vec<Span>> {
+    Ok(relationships::parse_spanned(raw)
+        .map_err(|_| ())?
+        .into_iter()
+        .filter(|(relationship, _)| relationship.external && relationship.kind == HYPERLINK)
+        .filter_map(|(_, target)| target)
+        .map(|range| Span::new(range, BlockKind::Attribute))
+        .collect())
 }
 
 /// Emit the pending text run as a `Text` span in its passage, then clear it. A
@@ -420,54 +454,63 @@ const RUN_TEXT_ELEMENTS: &[&str] = &["t", "instrText", "delText", "delInstrText"
 
 /// The namespaces whose run text drops leading and trailing whitespace unless
 /// its element says `xml:space="preserve"`: WordprocessingML and SpreadsheetML,
-/// transitional and strict. DrawingML text keeps its whitespace as written.
-const SPACE_COLLAPSING_NAMESPACES: &[&str] = &[
-    "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-    "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "http://purl.oclc.org/ooxml/wordprocessingml/main",
-    "http://purl.oclc.org/ooxml/spreadsheetml/main",
-];
+/// a strict namespace read as its transitional twin. DrawingML text keeps its
+/// whitespace as written.
+const SPACE_COLLAPSING_NAMESPACES: &[&str] = &[W, X];
 
 /// The attribute that keeps a run text element's leading and trailing
 /// whitespace.
 pub(crate) const PRESERVE_SPACE: &str = " xml:space=\"preserve\"";
 
-/// Where to insert [`PRESERVE_SPACE`] so `text`, written as the text of `raw`
-/// at `start`, keeps its leading and trailing whitespace: at the `>` of the
-/// start tag before `start`, when that tag opens a run text element of a
-/// [space-collapsing namespace](SPACE_COLLAPSING_NAMESPACES) that does not
-/// already say how to treat space. `None` when `text` needs nothing.
-///
-/// The tag's prefix resolves against the first declaration of it in the part,
-/// where Office declares every prefix it uses: on the root element.
-pub(crate) fn preserve_space_at(raw: &str, start: usize, text: &str) -> Option<usize> {
-    let edge = |c: Option<char>| c.is_some_and(|c| matches!(c, ' ' | '\t' | '\n' | '\r'));
-    if !edge(text.chars().next()) && !edge(text.chars().next_back()) {
-        return None;
+/// The run text elements of a part whose text drops its leading and trailing
+/// whitespace: those of a [space-collapsing namespace](SPACE_COLLAPSING_NAMESPACES)
+/// that do not say how to treat space, each by where its start tag ends.
+#[derive(Debug, Default)]
+pub(crate) struct CollapsingRuns(HashSet<usize>);
+
+impl CollapsingRuns {
+    /// The collapsing run text elements of `raw`, each name and `xml:space`
+    /// resolved by the namespaces in scope where it is written. Errs on
+    /// malformed XML.
+    pub(crate) fn read(raw: &str) -> Readable<Self> {
+        let mut reader = SpannedReader::new_ns(raw);
+        let mut ends = HashSet::new();
+        loop {
+            let (namespace, event, span) = reader.read_resolved_event().map_err(|_| ())?;
+            let e = match event {
+                Event::Eof => break,
+                Event::Start(ref e) => e,
+                _ => continue,
+            };
+            let collapsing = namespace.as_deref().is_some_and(|namespace| {
+                SPACE_COLLAPSING_NAMESPACES.contains(&transitional(namespace))
+            });
+            if !collapsing || !RUN_TEXT_ELEMENTS.contains(&e.local_name().into_inner()) {
+                continue;
+            }
+            let mut says_space = false;
+            for attr in e.attributes() {
+                let attr = attr.map_err(|_| ())?;
+                let (resolved, local) = reader.reader.resolver().resolve_attribute(attr.key);
+                says_space |= namespace_of(&resolved).as_deref() == Some(XML)
+                    && local.into_inner() == "space";
+            }
+            if !says_space {
+                ends.insert(span.end);
+            }
+        }
+        Ok(Self(ends))
     }
-    let before = raw.get(..start)?;
-    if !before.ends_with('>') || before.ends_with("/>") {
-        return None;
+
+    /// Where to insert [`PRESERVE_SPACE`] so `text`, written as the text of
+    /// the part at `start`, keeps its leading and trailing whitespace: at the
+    /// `>` of a collapsing run text element's start tag ending at `start`.
+    /// `None` when `text` needs nothing.
+    pub(crate) fn preserve_space_at(&self, start: usize, text: &str) -> Option<usize> {
+        let edge = |c: Option<char>| c.is_some_and(|c| matches!(c, ' ' | '\t' | '\n' | '\r'));
+        let needs = edge(text.chars().next()) || edge(text.chars().next_back());
+        (needs && self.0.contains(&start)).then(|| start - 1)
     }
-    let tag = &before[before.rfind('<')? + 1..before.len() - 1];
-    if tag.contains("xml:space") {
-        return None;
-    }
-    let name = tag.split(|c: char| c.is_ascii_whitespace()).next()?;
-    let (prefix, local) = name.split_once(':').unwrap_or(("", name));
-    if !RUN_TEXT_ELEMENTS.contains(&local) {
-        return None;
-    }
-    let declaration = if prefix.is_empty() {
-        "xmlns=\"".to_owned()
-    } else {
-        format!("xmlns:{prefix}=\"")
-    };
-    let uri_start = raw.find(&declaration)? + declaration.len();
-    let uri = &raw[uri_start..uri_start + raw[uri_start..].find('"')?];
-    SPACE_COLLAPSING_NAMESPACES
-        .contains(&uri)
-        .then_some(start - 1)
 }
 
 /// The local names of the elements whose start and end end the passage before
@@ -573,11 +616,6 @@ fn separator(local: &str, open: &[String]) -> Option<char> {
     }
 }
 
-/// The local name of the element `e` opens.
-fn local_name(e: &BytesStart<'_>) -> String {
-    AsRef::<str>::as_ref(&e.local_name()).to_owned()
-}
-
 /// Narrow `span` by its `open`/`close` delimiters to the inner range.
 fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
     let start = span.start.checked_add(open.len())?;
@@ -592,6 +630,35 @@ mod tests {
     /// The `(range, kind)` pairs of `spans`, for terse assertions.
     fn pairs(spans: &[Span]) -> Vec<(Range<usize>, BlockKind)> {
         spans.iter().map(|s| (s.range.clone(), s.kind)).collect()
+    }
+
+    #[test]
+    fn an_attribute_span_reads_literal_whitespace_as_a_space() {
+        let raw = "<a v=\"Jane\nRoe&#10;x\"/>";
+        let start = raw.find("Jane").unwrap();
+        let span = Span::new(start..raw.rfind('"').unwrap(), BlockKind::Attribute);
+        let (text, offsets) = span.decode(raw).unwrap();
+        assert_eq!(text, "Jane Roe\nx");
+        assert_eq!(offsets.raw_ranges(5..8), vec![(start + 5)..(start + 8)]);
+    }
+
+    /// A literal CR-LF pair reads as one space, as `attribute_value` reads
+    /// it, and that space lifts back to both bytes.
+    #[test]
+    fn an_attribute_span_reads_a_crlf_pair_as_one_space() {
+        let raw = "<a v=\"Jane\r\nRoe&amp;\r\r\nx\"/>";
+        let start = raw.find("Jane").unwrap();
+        let span = Span::new(start..raw.rfind('"').unwrap(), BlockKind::Attribute);
+        let (text, offsets) = span.decode(raw).unwrap();
+        assert_eq!(
+            text,
+            crate::opc::attribute_value(&raw[span.range.clone()]).unwrap()
+        );
+        assert_eq!(text, "Jane Roe&  x");
+        assert_eq!(offsets.raw_ranges(4..5), vec![(start + 4)..(start + 6)]);
+        assert_eq!(offsets.raw_ranges(5..8), vec![(start + 6)..(start + 9)]);
+        assert_eq!(offsets.raw_ranges(8..9), vec![(start + 9)..(start + 14)]);
+        assert_eq!(offsets.raw_ranges(9..12), vec![(start + 14)..(start + 18)]);
     }
 
     #[test]
@@ -758,28 +825,45 @@ mod tests {
         );
     }
 
+    /// Where `raw` needs [`PRESERVE_SPACE`] for `text` written as the text
+    /// of its first `x`.
+    fn preserve_space_at(raw: &str, text: &str) -> Option<usize> {
+        let start = raw.find("x<").unwrap();
+        CollapsingRuns::read(raw)
+            .unwrap()
+            .preserve_space_at(start, text)
+    }
+
     #[test]
     fn edge_whitespace_in_word_run_text_needs_preserve_space() {
         let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>x</w:t></w:r></w:p>"#;
-        let start = raw.find("x<").unwrap();
-        let at = preserve_space_at(raw, start, " and").expect("needs preserve");
+        let at = preserve_space_at(raw, " and").expect("needs preserve");
         assert_eq!(&raw[at..=at], ">");
-        assert_eq!(preserve_space_at(raw, start, "and"), None);
+        assert_eq!(preserve_space_at(raw, "and"), None);
     }
 
     #[test]
     fn preserve_space_is_left_alone_where_it_is_said_or_not_needed() {
         let said = r#"<w:t xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xml:space="preserve">x</w:t>"#;
-        assert_eq!(
-            preserve_space_at(said, said.find("x<").unwrap(), " x"),
-            None
-        );
+        assert_eq!(preserve_space_at(said, " x"), None);
         let drawing =
             r#"<a:t xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">x</a:t>"#;
-        assert_eq!(
-            preserve_space_at(drawing, drawing.find("x<").unwrap(), " x"),
-            None
-        );
+        assert_eq!(preserve_space_at(drawing, " x"), None);
+    }
+
+    /// A prefix is resolved where the element is written: a nested
+    /// redeclaration decides, not the first declaration in the part.
+    #[test]
+    fn preserve_space_resolves_a_redeclared_prefix() {
+        let elsewhere = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t xmlns:w="urn:vendor">x</w:t></w:r></w:p>"#;
+        assert_eq!(preserve_space_at(elsewhere, " x"), None);
+        let word = r#"<w:p xmlns:w="urn:vendor"><w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:t>x</w:t></w:r></w:p>"#;
+        let at = preserve_space_at(word, " x").expect("needs preserve");
+        assert_eq!(&word[at - 4..=at], "<w:t>");
+        // A strict namespace collapses as its transitional twin, and a
+        // default namespace is resolved too.
+        let strict = r#"<t xmlns="http://purl.oclc.org/ooxml/spreadsheetml/main">x</t>"#;
+        assert!(preserve_space_at(strict, " x").is_some());
     }
 
     #[test]
@@ -837,6 +921,50 @@ mod tests {
         let spans = relationship_spans(raw).unwrap();
         assert_eq!(spans.len(), 1);
         assert_eq!(&raw[spans[0].range.clone()], "mailto:real@example.com");
+    }
+
+    /// A strict external hyperlink's target is surfaced as a transitional
+    /// one's.
+    #[test]
+    fn a_strict_hyperlink_target_is_surfaced() {
+        let raw = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink" Target="mailto:jane@example.com" TargetMode="External"/></Relationships>"#;
+        let start = raw.find("mailto:").unwrap();
+        let end = start + "mailto:jane@example.com".len();
+        assert_eq!(
+            pairs(&relationship_spans(raw).unwrap()),
+            vec![(start..end, BlockKind::Attribute)]
+        );
+    }
+
+    /// A hyperlink's type and mode are read as XML reads them, references
+    /// decoded, and a qualified attribute does not shadow the unqualified one.
+    #[test]
+    fn a_hyperlink_target_is_surfaced_however_its_type_is_spelled() {
+        for attributes in [
+            r#"Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlin&#107;" TargetMode="Externa&#x6C;""#,
+            r#"Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" TargetMode="External" v:Type="t/other" v:TargetMode="Internal""#,
+        ] {
+            let raw = format!(
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:v="urn:vendor"><Relationship Id="rId1" {attributes} Target="mailto:jane@example.com"/></Relationships>"#
+            );
+            let start = raw.find("mailto:").unwrap();
+            let end = start + "mailto:jane@example.com".len();
+            assert_eq!(
+                pairs(&relationship_spans(&raw).unwrap()),
+                vec![(start..end, BlockKind::Attribute)],
+                "{attributes}"
+            );
+        }
+    }
+
+    /// What is surfaced is what the package reads: a relationship nested
+    /// below the root's entries, or in another namespace, is not one.
+    #[test]
+    fn a_relationship_the_package_does_not_read_is_not_surfaced() {
+        let raw = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:v="urn:vendor"><v:x><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:a@example.com" TargetMode="External"/></v:x><v:Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:b@example.com" TargetMode="External"/></Relationships>"#;
+        assert!(relationship_spans(raw).unwrap().is_empty());
+        let unnamed = r#"<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:a@example.com" TargetMode="External"/></Relationships>"#;
+        assert!(relationship_spans(unnamed).is_err());
     }
 
     #[test]

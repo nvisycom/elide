@@ -5,15 +5,17 @@
 //!
 //! Emits items for element text content, attribute values, comment bodies, and
 //! CDATA payloads, each addressed by an exact source span recovered from
-//! quick-xml event positions. Each item's `value` is the raw on-the-wire slice
-//! (never a decoded form), so encode is a byte-for-byte splice at the recorded
-//! span: the declaration, whitespace, tags, and everything outside the redacted
-//! spans round-trip unchanged.
+//! quick-xml event positions. A text run's or an attribute value's `value` is
+//! read with its character references decoded, and its [`MarkupSpan`] maps it
+//! back onto the raw bytes, so encode writes back only the stretch a redaction
+//! changed: the declaration, whitespace, tags, and everything outside the
+//! changed stretches round-trip unchanged.
 //!
 //! The same parser serves HTML through a lenient [`MarkupConfig`]: it tolerates
 //! HTML's void elements, stray end tags, and bare `&`, and takes the HTML
-//! vocabulary (block elements, skipped bodies) as plain element-name lists, so
-//! the parser itself knows nothing of `<script>` or "block level".
+//! vocabulary (block elements, skipped bodies, passage bounds) as plain
+//! element-name lists, so the parser itself knows nothing of `<style>` or
+//! "block level".
 //!
 //! [`ExtractedItem`]: elide_codec::extract::ExtractedItem
 //! [`MarkupDocument`]: super::document::MarkupDocument
@@ -23,49 +25,45 @@ use std::ops::Range;
 
 use elide_codec::extract::{ItemFlag, Passage};
 use elide_codec::string::ContextWords;
+use elide_core::Result;
 use elide_core::entity::builtins;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::redaction::HiddenContentKind;
-use elide_core::{Error, Result};
 use quick_xml::Reader;
-use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::events::Event;
 
-use super::address::{SpanKind, XmlItem, XmlSpan};
+use super::address::{MarkupItem, MarkupSpan, SpanKind};
 use super::config::MarkupConfig;
-use super::meta::MetaTag;
-use super::source::{AttributeSpan, MarkupSink, MarkupSource, StartTag};
-use super::tag::HtmlTagExt;
+use super::reader::{EventSpans, configure, malformed_markup};
+use super::sink::MarkupSink;
+use super::tag::{AttributeSpan, start_tag, tag_name};
 
-/// Extract the redactable markup items from `raw` under `config`. Exposed for
-/// the HTML loader (lenient config) and for container formats that run the
-/// engine over a part.
-pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<XmlItem>> {
+/// Extract the redactable markup items from `raw` under `config`.
+pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<MarkupItem>> {
     MarkupParser::new(raw, config).run()
 }
 
 /// One streaming pass over a markup document. Owns the accumulating item
-/// stream and the parse state (the open-element stack, the pending
-/// text-node/hint records, and any skipped-subtree region), so the per-event
-/// handlers are methods sharing `self` rather than a function threading a
-/// half-dozen `&mut` locals.
+/// stream and the parse state (the open-element stack, the text-node records,
+/// and any skipped-subtree region), so the per-event handlers are methods
+/// sharing `self` rather than a function threading a half-dozen `&mut`
+/// locals.
 struct MarkupParser<'a> {
-    source: MarkupSource<'a>,
+    /// The document read.
+    raw: &'a str,
     config: MarkupConfig<'a>,
     /// The growing item stream (offset kept in step by `MarkupSink::push`).
     items: MarkupSink,
-    /// Text-node records, kept with their engine-space span so a second pass
-    /// can attach sibling hints once every text node's span is known.
+    /// Text-node records, kept with their engine-space span so a block
+    /// element can hint its text with its siblings when it closes; none
+    /// without block elements.
     text_items: Vec<TextRecord>,
-    /// Context hints for non-text items, an attribute value keyed by its
-    /// attribute name, a CDATA body by its enclosing element name, applied
-    /// alongside the text-node hints at the end.
-    extra_hints: Vec<(usize, Vec<ResolvedHint<Text>>)>,
     /// The open-element stack: each frame names the element and where its text
     /// children begin, so a block element can group them for sibling hints.
     stack: Vec<Frame>,
-    /// A skipped subtree (an HTML `<script>`/`<style>` the caller does not
-    /// scan) is opaque: while inside one, all content, text and any
+    /// A skipped subtree (an HTML `<style>` the caller does not scan) is
+    /// opaque: while inside one, all content, text and any
     /// markup-like inner tags, is ignored until the *matching* close, so a
     /// nested element or a stray end tag cannot leak the body or pop early.
     skip: Option<SkipRegion>,
@@ -84,11 +82,10 @@ struct MarkupParser<'a> {
 impl<'a> MarkupParser<'a> {
     fn new(raw: &'a str, config: MarkupConfig<'a>) -> Self {
         Self {
-            source: MarkupSource::new(raw),
+            raw,
             config,
             items: MarkupSink::new(),
             text_items: Vec::new(),
-            extra_hints: Vec::new(),
             stack: Vec::new(),
             skip: None,
             run: None,
@@ -98,113 +95,90 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    fn run(mut self) -> Result<Vec<XmlItem>> {
-        let raw = self.source.raw();
-        let mut reader = Reader::from_str(raw);
-        let cfg = reader.config_mut();
-        if self.config.lenient {
-            // HTML in the wild is not well-formed: void elements never close,
-            // end tags go unmatched, and `&` is often a literal, not an entity.
-            cfg.check_end_names = false;
-            cfg.allow_unmatched_ends = true;
-            cfg.allow_dangling_amp = true;
-        }
-        // quick-xml reports positions relative to the text *after* a leading
-        // BOM, but our spans index the original bytes, so shift past the BOM.
-        let bom = bom_len(raw);
-        let mut last = bom;
-
+    fn run(mut self) -> Result<Vec<MarkupItem>> {
+        let mut reader = Reader::from_str(self.raw);
+        configure(reader.config_mut(), self.config.dialect);
+        let mut spans = EventSpans::new(self.raw);
         loop {
-            let event = reader
-                .read_event()
-                .map_err(|e| Error::malformed(format!("malformed markup: {e}")))?;
-            let span = last..reader.buffer_position() as usize + bom;
-            last = span.end;
+            let event = reader.read_event().map_err(malformed_markup)?;
+            let span = spans.next(reader.buffer_position());
+            if let Event::Eof = event {
+                return Ok(self.finish());
+            }
+            self.event(&event, span)?;
+        }
+    }
 
-            if self.skipping(&event)? {
-                if matches!(event, Event::Eof) {
-                    break;
+    /// Read the `event` at `span`.
+    fn event(&mut self, event: &Event<'_>, span: Range<usize>) -> Result<()> {
+        if self.skipping(event)? {
+            return Ok(());
+        }
+        // quick-xml splits a text run at each character reference; the run is
+        // read whole once any other event ends it.
+        if let Event::Text(_) | Event::GeneralRef(_) = event {
+            self.run = Some(
+                self.run
+                    .take()
+                    .map_or(span.clone(), |run| run.start..span.end),
+            );
+            return Ok(());
+        }
+        if let Some(run) = self.run.take() {
+            self.text(run);
+        }
+        match event {
+            Event::Start(e) | Event::Empty(e) => {
+                let tag = start_tag(self.raw, e, self.config.dialect)?;
+                self.open_passage_element(&tag.name, span.clone());
+                for attr in tag.attributes {
+                    self.push_or_defer(Deferred::Attribute(attr));
                 }
-                continue;
-            }
-            // quick-xml splits a text run at each character reference; the
-            // run is read whole once any other event ends it.
-            if let Event::Text(_) | Event::GeneralRef(_) = event {
-                self.run = Some(
-                    self.run
-                        .take()
-                        .map_or(span.clone(), |run| run.start..span.end),
-                );
-                continue;
-            }
-            if let Some(run) = self.run.take() {
-                self.text(run);
-            }
-            match event {
-                Event::Eof => break,
-                Event::Start(ref e) => {
-                    let mut tag = self.source.start_tag(e, self.config.lenient)?;
-                    self.flag_meta(&mut tag);
-                    self.open_passage_element(&tag.name, span.clone());
-                    self.attributes(tag.attributes);
+                if let Event::Start(_) = event {
                     self.open_element(tag.name, &tag.written, span);
                 }
-                Event::Empty(ref e) => {
-                    let mut tag = self.source.start_tag(e, self.config.lenient)?;
-                    self.flag_meta(&mut tag);
-                    self.open_passage_element(&tag.name, span);
-                    self.attributes(tag.attributes);
-                }
-                Event::End(ref e) => {
-                    let name = end_name(e, self.source.raw(), self.config.lenient)?;
-                    if self.config.bounds_passage(&name) {
-                        self.end_passage();
-                    }
-                    self.close_element(&name);
-                }
-                Event::Comment(_) => {
-                    if let Some(inner) = strip(span, "<!--", "-->") {
-                        if self.in_passage {
-                            self.deferred.push(Deferred::Comment(inner));
-                        } else {
-                            self.comment(inner);
-                        }
-                    }
-                }
-                Event::CData(_) => self.cdata(span),
-                _ => {}
             }
+            Event::End(e) => {
+                let name = tag_name(e, self.raw, self.config.dialect)?;
+                if self.config.bounds_passage(&name) {
+                    self.end_passage();
+                }
+                self.close_element(&name);
+            }
+            Event::Comment(_) => {
+                if let Some(inner) = strip(span, "<!--", "-->") {
+                    self.push_or_defer(Deferred::Comment(inner));
+                }
+            }
+            Event::CData(_) => self.cdata(span),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Read what the end of the document leaves pending: the last text run,
+    /// the open passage, and the elements left open (lenient HTML with
+    /// unclosed blocks), whose gathered text is hinted too.
+    fn finish(mut self) -> Vec<MarkupItem> {
+        if let Some(run) = self.run.take() {
+            self.text(run);
         }
         self.end_passage();
-
-        // Any block frames still open at EOF (lenient HTML with unclosed
-        // blocks): hint their gathered text too.
-        while let Some(frame) = self.stack.pop() {
-            if self.config.is_block(&frame.name) {
-                attach_sibling_hints(&mut self.text_items[frame.text_start..]);
-            }
-        }
-
-        self.items.apply_hints(
-            self.text_items
-                .into_iter()
-                .map(|r| (r.item_index, r.pending_hints))
-                .chain(self.extra_hints),
-        );
-        Ok(self.items.into_items())
+        self.unwind_to(0);
+        self.items.into_items()
     }
 
     /// While inside a skipped subtree, track only that element's own open/close
     /// depth and swallow everything else. Returns whether `event` was consumed
     /// by the skip (the caller should `continue`).
     fn skipping(&mut self, event: &Event<'_>) -> Result<bool> {
-        let (raw, html) = (self.source.raw(), self.config.lenient);
+        let (raw, dialect) = (self.raw, self.config.dialect);
         let Some(region) = &mut self.skip else {
             return Ok(false);
         };
         match event {
-            Event::Start(e) if start_name(e, raw, html)? == region.name => region.depth += 1,
-            Event::End(e) if end_name(e, raw, html)? == region.name => {
+            Event::Start(e) if tag_name(e, raw, dialect)? == region.name => region.depth += 1,
+            Event::End(e) if tag_name(e, raw, dialect)? == region.name => {
                 region.depth -= 1;
                 if region.depth == 0 {
                     self.skip = None;
@@ -222,7 +196,7 @@ impl<'a> MarkupParser<'a> {
         if self.config.is_line_break(name) {
             if self.in_passage {
                 self.items
-                    .push(XmlSpan::separator(span, "\n"), Passage::Separator);
+                    .push(MarkupSpan::separator(span, "\n"), Passage::Separator);
             }
         } else if self.config.bounds_passage(name) {
             self.end_passage();
@@ -233,22 +207,24 @@ impl<'a> MarkupParser<'a> {
     fn end_passage(&mut self) {
         self.in_passage = false;
         for deferred in std::mem::take(&mut self.deferred) {
-            match deferred {
-                Deferred::Attribute(attr) => self.attribute(attr),
-                Deferred::Comment(inner) => self.comment(inner),
-            }
+            self.push_deferred(deferred);
         }
     }
 
-    /// Push each redactable attribute value, or defer it while a passage is
-    /// open.
-    fn attributes(&mut self, attributes: Vec<AttributeSpan>) {
-        for attr in attributes {
-            if self.in_passage {
-                self.deferred.push(Deferred::Attribute(attr));
-            } else {
-                self.attribute(attr);
-            }
+    /// Push `item`, or defer it while a passage is open.
+    fn push_or_defer(&mut self, item: Deferred) {
+        if self.in_passage {
+            self.deferred.push(item);
+        } else {
+            self.push_deferred(item);
+        }
+    }
+
+    /// Push an `item` that may be deferred.
+    fn push_deferred(&mut self, item: Deferred) {
+        match item {
+            Deferred::Attribute(attr) => self.attribute(attr),
+            Deferred::Comment(inner) => self.comment(inner),
         }
     }
 
@@ -256,7 +232,7 @@ impl<'a> MarkupParser<'a> {
     fn comment(&mut self, inner: Range<usize>) {
         let index = self
             .items
-            .push(XmlSpan::verbatim(self.source.raw(), inner), Passage::Start);
+            .push(MarkupSpan::verbatim(self.raw, inner), Passage::Start);
         let flag = ItemFlag::new(
             builtins::COMMUNICATIONS_CONTENT.to_ref(),
             HiddenContentKind::Collaboration,
@@ -264,27 +240,11 @@ impl<'a> MarkupParser<'a> {
         self.items.flag(index, flag);
     }
 
-    /// Flag every `content` of an HTML `<meta>` field as the metadata it is.
-    fn flag_meta(&self, tag: &mut StartTag) {
-        let Some(label) = tag.meta.as_ref().and_then(MetaTag::label) else {
-            return;
-        };
-        for attr in &mut tag.attributes {
-            let is_content = attr
-                .name
-                .clone()
-                .is_some_and(|name| self.source.slice(name).eq_ignore_ascii_case("content"));
-            if is_content {
-                attr.flag = Some(ItemFlag::new(label.clone(), HiddenContentKind::Metadata));
-            }
-        }
-    }
-
     /// Push a redactable attribute value as an item hinted by its attribute
     /// name (`ssn="123-45-6789"` → the value is boosted by `ssn`).
     fn attribute(&mut self, attr: AttributeSpan) {
-        let value = self.escaped(attr.value, SpanKind::Attribute);
-        let idx = self.items.push(value, Passage::Start);
+        let span = self.escaped(attr.value, SpanKind::Attribute);
+        let idx = self.items.push(span, Passage::Start);
         if let Some(flag) = attr.flag {
             self.items.flag(idx, flag);
         }
@@ -293,13 +253,10 @@ impl<'a> MarkupParser<'a> {
         // context that boosts it). Strip any namespace prefix (`ns:attr`)
         // so the hint keys on the local name, as the element path does.
         if let Some(name) = attr.name {
-            let raw = self.source.slice(name.clone());
+            let raw = &self.raw[name.clone()];
             let local = raw.rsplit(':').next().unwrap_or(raw);
-            // The attribute name is a raw *source* span, not a decoded one, so
-            // it is a source-only location; a consumer must resolve it against
-            // the source bytes, never the extracted value.
-            let location = TextLocation::marked_source(SourceRef::new(name));
-            self.hint_item(idx, location, local.context_words());
+            self.items
+                .hint(idx, source_hint(name, local.context_words()));
         }
     }
 
@@ -338,10 +295,16 @@ impl<'a> MarkupParser<'a> {
         };
         // Unwind every frame from the top down to (and including) the match,
         // an intervening unclosed inline element is closed implicitly here.
+        self.unwind_to(depth);
+    }
+
+    /// Pop every frame above `depth`, hinting the text each block element
+    /// gathered with its siblings.
+    fn unwind_to(&mut self, depth: usize) {
         while self.stack.len() > depth {
             let frame = self.stack.pop().expect("frame above the matched depth");
             if self.config.is_block(&frame.name) {
-                attach_sibling_hints(&mut self.text_items[frame.text_start..]);
+                attach_sibling_hints(&self.text_items[frame.text_start..], &mut self.items);
             }
         }
     }
@@ -354,10 +317,11 @@ impl<'a> MarkupParser<'a> {
     /// (the space between two inline elements); whitespace-only text opens no
     /// passage.
     fn text(&mut self, span: Range<usize>) {
-        let (value, address) = self.escaped(span, SpanKind::Text);
-        if value.trim().is_empty() {
+        let span = self.escaped(span, SpanKind::Text);
+        let value = span.read.trim();
+        if value.is_empty() {
             if self.in_passage {
-                self.items.push((value, address), Passage::Continue);
+                self.items.push(span, Passage::Continue);
             }
             return;
         }
@@ -367,24 +331,27 @@ impl<'a> MarkupParser<'a> {
             self.passages += 1;
             Passage::Start
         };
-        self.in_passage = self.config.inline_passages;
-        let engine = self.items.offset()..self.items.offset() + value.len();
-        let text = value.trim().to_owned();
-        let item_index = self.items.push((value, address), passage);
-        let name_hint = self.enclosing_hint();
-        self.text_items.push(TextRecord {
-            item_index,
-            engine,
-            passage: self.passages,
-            text,
-            pending_hints: name_hint.into_iter().collect(),
-        });
+        self.in_passage = self.config.inline_passages();
+        let engine = self.items.offset()..self.items.offset() + span.read.len();
+        // Only a block element groups text for sibling hints.
+        let text = (!self.config.block_elements.is_empty()).then(|| value.to_owned());
+        let item_index = self.items.push(span, passage);
+        if let Some(hint) = self.enclosing_hint() {
+            self.items.hint(item_index, hint);
+        }
+        if let Some(text) = text {
+            self.text_items.push(TextRecord {
+                item_index,
+                engine,
+                passage: self.passages,
+                text,
+            });
+        }
     }
 
-    /// The decoded value of the escaped `kind` text at `range`, and its
-    /// address.
-    fn escaped(&self, range: Range<usize>, kind: SpanKind) -> (String, XmlSpan) {
-        XmlSpan::escaped(self.source.raw(), range, kind, self.config.references)
+    /// The span of the escaped `kind` text at `range`, its references decoded.
+    fn escaped(&self, range: Range<usize>, kind: SpanKind) -> MarkupSpan {
+        MarkupSpan::escaped(self.raw, range, kind, self.config.references())
     }
 
     /// Record a CDATA body, hinted by its enclosing element name, CDATA is
@@ -394,9 +361,9 @@ impl<'a> MarkupParser<'a> {
         if let Some(inner) = strip(span, "<![CDATA[", "]]>") {
             let idx = self
                 .items
-                .push(XmlSpan::verbatim(self.source.raw(), inner), Passage::Start);
+                .push(MarkupSpan::verbatim(self.raw, inner), Passage::Start);
             if let Some(hint) = self.enclosing_hint() {
-                self.extra_hints.push((idx, vec![hint]));
+                self.items.hint(idx, hint);
             }
         }
     }
@@ -406,32 +373,29 @@ impl<'a> MarkupParser<'a> {
     /// words (`paymentCard` → `payment Card`) so a keyword matches on a word
     /// boundary.
     fn enclosing_hint(&self) -> Option<ResolvedHint<Text>> {
-        self.stack.last().map(|frame| {
-            // The start-tag span is a raw *source* range, so the hint is a
-            // source-only location, resolved against the source, not the value.
-            let location = TextLocation::marked_source(SourceRef::new(frame.tag_span.clone()));
-            ResolvedHint::new(location, TextData::new(frame.hint.clone()))
-        })
-    }
-
-    /// Record a located context hint on the item at `idx`, carrying `text` (the
-    /// context words of the labelling name) at `location`.
-    fn hint_item(&mut self, idx: usize, location: TextLocation, text: String) {
-        self.extra_hints
-            .push((idx, vec![ResolvedHint::new(location, TextData::new(text))]));
+        let frame = self.stack.last()?;
+        Some(source_hint(frame.tag_span.clone(), frame.hint.clone()))
     }
 }
 
+/// A context hint carrying `text` (the context words of a labelling name),
+/// located at `range` of the source. The range is a raw *source* range, not a
+/// decoded one, so the hint is a source-only location: a consumer resolves it
+/// against the source bytes, never the extracted value.
+fn source_hint(range: Range<usize>, text: String) -> ResolvedHint<Text> {
+    let location = TextLocation::marked_source(SourceRef::new(range));
+    ResolvedHint::new(location, TextData::new(text))
+}
+
 /// A text node's place in the item stream, its engine-space span, and its
-/// trimmed text, the raw material for the sibling-hint pass. `pending_hints` is
-/// filled when its block group closes and moved onto the item at the end.
+/// trimmed text, the raw material for the sibling hints its block group gives
+/// it when the group closes.
 struct TextRecord {
     item_index: usize,
     engine: Range<usize>,
     /// The number of the passage the text is in.
     passage: usize,
     text: String,
-    pending_hints: Vec<ResolvedHint<Text>>,
 }
 
 /// An item met inside an open passage, pushed once the passage ends.
@@ -456,36 +420,11 @@ struct Frame {
 }
 
 /// The active skipped subtree: the element whose body is opaque, and the open
-/// depth of that same element name, so a nested `<script>` inside a `<script>`
-/// (or a stray close) resolves to the matching close.
+/// depth of that same element name, so a nested element of the same name (or a
+/// stray close) resolves to the matching close.
 struct SkipRegion {
     name: String,
     depth: usize,
-}
-
-/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
-/// skips it and reports positions past it, so spans over the original bytes must
-/// add it back.
-pub(crate) fn bom_len(raw: &str) -> usize {
-    if raw.starts_with('\u{feff}') { 3 } else { 0 }
-}
-
-/// The lowercased name of the start tag `e`, read from `raw`: as a browser
-/// reads it in `html`, its local name in XML. HTML is case-insensitive, so
-/// lowercasing makes `<SCRIPT>` and `<P>` match too.
-pub(crate) fn start_name(e: &BytesStart<'_>, raw: &str, html: bool) -> Result<String> {
-    if html {
-        return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
-    }
-    Ok(e.local_name().as_ref().to_ascii_lowercase())
-}
-
-/// The end tag's lowercased name, read as [`start_name`] reads a start tag.
-pub(crate) fn end_name(e: &BytesEnd<'_>, raw: &str, html: bool) -> Result<String> {
-    if html {
-        return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
-    }
-    Ok(e.local_name().as_ref().to_ascii_lowercase())
 }
 
 /// Narrow `span` by its `open`/`close` delimiters, returning the inner range.
@@ -507,98 +446,64 @@ const MAX_SIBLING_HINT_GROUP: usize = 64;
 /// boost points back at when a label and its value sit in separate passages of
 /// one block (`<td>Card number<p>4111…</p></td>`). A sibling in the record's own
 /// passage is already in its chunk, so it adds no hint.
-fn attach_sibling_hints(group: &mut [TextRecord]) {
-    let siblings: Vec<(Range<usize>, usize, String)> = group
-        .iter()
-        .filter(|r| !r.text.is_empty())
-        .map(|r| (r.engine.clone(), r.passage, r.text.clone()))
-        .collect();
-    if siblings.len() < 2 || siblings.len() > MAX_SIBLING_HINT_GROUP {
+///
+/// The hints are appended to the item's, after its enclosing element-name
+/// hint.
+fn attach_sibling_hints(group: &[TextRecord], items: &mut MarkupSink) {
+    if group.len() < 2 || group.len() > MAX_SIBLING_HINT_GROUP {
         return;
     }
-    for record in group.iter_mut() {
-        let hints = siblings
-            .iter()
-            .filter(|(_, passage, _)| *passage != record.passage)
-            .map(|(engine, _, text)| {
-                ResolvedHint::new(
-                    TextLocation::inline(engine.clone()),
-                    TextData::new(text.clone()),
-                )
-            });
-        // Append, don't replace: a text node already carries its enclosing
-        // element-name hint, and the sibling prose hints add to it.
-        record.pending_hints.extend(hints);
+    for record in group {
+        for sibling in group.iter().filter(|s| s.passage != record.passage) {
+            let location = TextLocation::inline(sibling.engine.clone());
+            let hint = ResolvedHint::new(location, TextData::new(sibling.text.clone()));
+            items.hint(record.item_index, hint);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use elide_codec::Stream;
     use elide_codec::extract::ExtractStream;
     use elide_core::modality::Chunk;
 
     use super::*;
-    use crate::engine::address::{MarkupAddresser, XmlSpan};
-    use crate::xml::FORMAT_ID;
+    #[cfg(feature = "html")]
+    use crate::engine::test_util::TEST_BLOCKS;
+    use crate::engine::test_util::{hint_texts, stream, values};
 
-    /// Build a body stream over `raw` with an explicit config so a test can read
-    /// out what the parser extracted (values and hints).
-    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<XmlSpan> {
-        let items = build_items(raw, config).expect("markup decode succeeds");
-        ExtractStream::new(FORMAT_ID, items, MarkupAddresser)
-    }
-
-    fn xml(raw: &str) -> ExtractStream<XmlSpan> {
-        handler_with(raw, MarkupConfig::xml())
-    }
-
-    fn values(h: &ExtractStream<XmlSpan>) -> Vec<String> {
-        h.chunks()
-            .unwrap()
-            .into_iter()
-            .map(|chunk| chunk.data.as_str().to_owned())
-            .collect()
+    fn xml(raw: &str) -> ExtractStream<MarkupSpan> {
+        stream(raw, MarkupConfig::xml())
     }
 
     /// The first chunk a stream yields.
-    fn first_chunk(h: &ExtractStream<XmlSpan>) -> Chunk<Text> {
+    fn first_chunk(h: &ExtractStream<MarkupSpan>) -> Chunk<Text> {
         h.chunks().unwrap().into_iter().next().expect("one chunk")
     }
 
-    #[tokio::test]
-    async fn the_element_name_hints_its_text() {
+    #[test]
+    fn the_element_name_hints_its_text() {
         // `<paymentCard>` should reach its text as a `payment Card` hint, so a
         // context keyword (`card`) can boost the value inside, the markup
         // counterpart of a JSON key or CSV header vouching for its value.
-        let raw = "<paymentCard>4111 1111 1111 1111</paymentCard>";
-        let h = xml(raw);
-        let chunk = first_chunk(&h);
+        let chunk = first_chunk(&xml("<paymentCard>4111 1111 1111 1111</paymentCard>"));
         assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
+        let hints = hint_texts(&chunk);
         assert!(
-            chunk
-                .hints
-                .iter()
-                .any(|hint| hint.data.as_str() == "payment Card"),
-            "expected a `payment Card` element-name hint, got {:?}",
-            chunk
-                .hints
-                .iter()
-                .map(|h| h.data.as_str())
-                .collect::<Vec<_>>(),
+            hints.iter().any(|hint| hint == "payment Card"),
+            "expected a `payment Card` element-name hint, got {hints:?}",
         );
     }
 
-    #[tokio::test]
-    async fn an_attribute_value_is_hinted_by_its_name() {
+    #[test]
+    fn an_attribute_value_is_hinted_by_its_name() {
         // `ssn="123-45-6789"` reaches its value as an `ssn` hint located at the
         // attribute name, so a context keyword can boost the value. This also
         // pins that the name's source span resolves (the hint text and location
         // both come from slicing the source at the name).
         let raw = r#"<r paymentCard="4111 1111 1111 1111"/>"#;
-        let h = xml(raw);
-        let chunk = first_chunk(&h);
+        let chunk = first_chunk(&xml(raw));
         assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
         let hint = chunk.hints.first().expect("attribute-name hint present");
         // The name is split into context words for word-boundary matching.
@@ -614,54 +519,44 @@ mod tests {
         assert_eq!(&raw[refs[0].range.clone()], "paymentCard");
     }
 
-    #[tokio::test]
-    async fn a_namespaced_attribute_hint_keys_on_the_local_name() {
+    #[test]
+    fn a_namespaced_attribute_hint_keys_on_the_local_name() {
         // A namespace prefix (`c:ssn`) is stripped so the hint keys on the local
         // name, matching how the element path uses the local name.
-        let raw = r#"<r c:ssn="123-45-6789"/>"#;
-        let h = xml(raw);
-        let chunk = first_chunk(&h);
-        let hint = chunk.hints.first().expect("attribute-name hint present");
-        assert_eq!(hint.data.as_str(), "ssn");
+        let chunk = first_chunk(&xml(r#"<r c:ssn="123-45-6789"/>"#));
+        assert_eq!(hint_texts(&chunk), ["ssn"]);
     }
 
-    #[tokio::test]
-    async fn a_leading_bom_does_not_shift_extracted_text() {
+    #[test]
+    fn a_leading_bom_does_not_shift_extracted_text() {
         // quick-xml reports positions past a leading BOM; the extractor must add
         // it back so the streamed text is exact (not shifted into garbage) and a
         // recognizer can match it.
-        let raw = "\u{feff}<?xml version=\"1.0\"?><r>alice@example.com</r>";
-        let h = xml(raw);
-        let vs = values(&h);
+        let vs = values(&xml(
+            "\u{feff}<?xml version=\"1.0\"?><r>alice@example.com</r>",
+        ));
         assert!(
             vs.iter().any(|v| v == "alice@example.com"),
             "BOM shifted the extracted text: {vs:?}"
         );
     }
 
-    #[tokio::test]
-    async fn stream_yields_text_comment_cdata_and_attributes() {
+    #[test]
+    fn stream_yields_text_comment_cdata_and_attributes() {
         // The four redactable item kinds our parser surfaces from one document:
         // element text, an attribute value, a comment body, and a CDATA payload.
         let raw =
             r#"<root id="A1"><name>Alice</name><!-- c --><data><![CDATA[secret]]></data></root>"#;
-        let h = xml(raw);
-        let vs = values(&h);
+        let vs = values(&xml(raw));
         assert!(vs.iter().any(|v| v == "Alice"), "text: {vs:?}");
         assert!(vs.iter().any(|v| v == " c "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "secret"), "cdata: {vs:?}");
         assert!(vs.iter().any(|v| v == "A1"), "attr: {vs:?}");
     }
 
-    /// A small synthetic block/skip vocabulary. The real HTML vocabulary is
-    /// exercised by the HTML loader's own tests; here it is a stand-in so the
-    /// test targets *our* skip-region tracking, not the HTML element lists.
     #[cfg(feature = "html")]
-    const TEST_BLOCKS: &[&str] = &["p", "div"];
-
-    #[cfg(feature = "html")]
-    #[tokio::test]
-    async fn skipped_body_stays_opaque_through_nested_and_stray_markup() {
+    #[test]
+    fn skipped_body_stays_opaque_through_nested_and_stray_markup() {
         // Our skip-region depth tracking: a skipped body is opaque, so nested
         // markup-like tags and a stray end tag inside it must not leak its text
         // or pop the skip early. (The plain skip-vs-scan case is the HTML
@@ -676,8 +571,10 @@ mod tests {
             r#"<p>ok</p><script>x<script>alice@example.com</script>y</script><p>after</p>"#,
         ];
         for raw in cases {
-            let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
-            let vs = values(&h);
+            let vs = values(&stream(
+                raw,
+                MarkupConfig::html(TEST_BLOCKS, &["script"], &[]),
+            ));
             assert!(
                 !vs.iter().any(|v| v.contains("alice@example.com")),
                 "skipped body leaked for {raw:?}: {vs:?}"
@@ -698,9 +595,8 @@ mod tests {
             "<div><p>Contact <b>jane.roe@</b>example.com <a href=\"tel:x\">now</a><br>Rack 7</p>",
             "<p>Next</p></div>",
         );
-        let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
         assert_eq!(
-            values(&h),
+            values(&stream(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]))),
             ["Contact jane.roe@example.com now\nRack 7", "tel:x", "Next"],
             "the passage is unbroken, and the link's attribute follows it",
         );
@@ -713,28 +609,21 @@ mod tests {
     }
 
     #[cfg(feature = "html")]
-    #[tokio::test]
-    async fn a_stray_end_tag_does_not_pop_the_wrong_frame() {
+    #[test]
+    fn a_stray_end_tag_does_not_pop_the_wrong_frame() {
         // Lenient parsing emits an `End(div)` for a `</div>` with no open
         // `<div>`. Popping unconditionally would discard the still-open
         // `<paymentCard>` frame, stripping the element-name hint from the text
         // that follows, which can change context-gated detection. The stray
         // end tag must be ignored so the following number keeps its hint.
         let raw = "<paymentCard>4111 <b>1111</b></div> 1111 1111</paymentCard>";
-        let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
-        let mut hinted = false;
-        for chunk in h.chunks().unwrap() {
-            // The text after the stray `</div>` must still carry the
-            // `payment Card` element-name hint.
-            if chunk.data.as_str().contains("1111 1111")
-                && chunk
-                    .hints
-                    .iter()
-                    .any(|hint| hint.data.as_str() == "payment Card")
-            {
-                hinted = true;
-            }
-        }
+        let h = stream(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]));
+        // The text after the stray `</div>` must still carry the
+        // `payment Card` element-name hint.
+        let hinted = h.chunks().unwrap().iter().any(|chunk| {
+            chunk.data.as_str().contains("1111 1111")
+                && hint_texts(chunk).iter().any(|hint| hint == "payment Card")
+        });
         assert!(
             hinted,
             "text after a stray </div> lost its enclosing paymentCard hint"

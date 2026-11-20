@@ -1,193 +1,1392 @@
-//! The HTML half of the sanitizer: which elements go whole, which attributes go,
-//! and what a `<meta>` tag is.
+//! The HTML allowlist: the elements and attributes a browser renders, in
+//! HTML and in the SVG and MathML it embeds, and what anything else is
+//! recorded as when the rebuild leaves it out.
+//!
+//! Element and attribute names are compared lowercased, as a browser matches
+//! them in an HTML document.
 
-use std::ops::Range;
+use std::collections::HashSet;
 
-use elide_core::redaction::HiddenContent;
-use elide_core::{Error, Result};
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
-use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
-use super::{MarkupSanitizer, Removal, Verdict};
+use super::open::OpenElements;
+use super::url::{css_loads_remote, is_remote, reaches_server, runs_script, srcset_reaches_server};
 use crate::engine::meta::MetaTag;
-use crate::engine::tag::HtmlTag;
+use crate::engine::tag::{HtmlAttribute, keyword};
+use crate::references::{CharacterReferences, decoded};
 
-/// HTML elements that run or embed active content, removed with their whole
-/// subtree: a script, a plugin object, and a frame that loads another page or
-/// carries one inline (`srcdoc`).
-const ACTIVE_ELEMENTS: [&str; 6] = ["script", "object", "applet", "iframe", "frame", "frameset"];
+/// The vocabulary an element is read in: HTML, or the SVG or MathML a
+/// document embeds with an `<svg>` or `<math>` element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Space {
+    Html,
+    Svg,
+    Math,
+}
 
-/// HTML void elements: they have no end tag, so removing one removes its tag.
-const VOID_ELEMENTS: [&str; 14] = [
+/// HTML elements that render: the document structure, the elements of a
+/// page's body, and the presentational ones a browser still renders. A
+/// `<meta>`, `<link>`, or `<style>` is kept only when it neither describes nor
+/// loads (see [`element`]).
+const HTML_ELEMENTS: &[&str] = &[
+    "a",
+    "abbr",
+    "acronym",
+    "address",
+    "area",
+    "article",
+    "aside",
+    "audio",
+    "b",
+    "bdi",
+    "bdo",
+    "big",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "canvas",
+    "caption",
+    "center",
+    "cite",
+    "code",
+    "col",
+    "colgroup",
+    "data",
+    "datalist",
+    "dd",
+    "del",
+    "details",
+    "dfn",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "font",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "i",
+    "img",
+    "input",
+    "ins",
+    "kbd",
+    "label",
+    "legend",
+    "li",
+    "link",
+    "main",
+    "map",
+    "mark",
+    "menu",
+    "meta",
+    "meter",
+    "nav",
+    "nobr",
+    "noscript",
+    "ol",
+    "optgroup",
+    "option",
+    "output",
+    "p",
+    "picture",
+    "pre",
+    "progress",
+    "q",
+    "rp",
+    "rt",
+    "ruby",
+    "s",
+    "samp",
+    "search",
+    "section",
+    "select",
+    "small",
+    "source",
+    "span",
+    "strike",
+    "strong",
+    "style",
+    "sub",
+    "summary",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "title",
+    "tr",
+    "track",
+    "tt",
+    "u",
+    "ul",
+    "var",
+    "video",
+    "wbr",
+];
+
+/// HTML elements that run or embed active content: a script, a plugin object,
+/// and a frame that loads another page or carries one inline.
+const ACTIVE_ELEMENTS: &[&str] = &[
+    "applet",
+    "embed",
+    "fencedframe",
+    "frame",
+    "frameset",
+    "iframe",
+    "object",
+    "portal",
+];
+
+/// HTML void elements: they have no end tag, so leaving one out leaves out its
+/// tag alone.
+const VOID_ELEMENTS: &[&str] = &[
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
     "track", "wbr",
 ];
 
+/// The HTML elements that end SVG or MathML when met inside it, so a browser
+/// reads them, and what follows, as HTML (WHATWG HTML §13.2.6.5).
+const BREAKOUT_ELEMENTS: &[&str] = &[
+    "b",
+    "big",
+    "blockquote",
+    "body",
+    "br",
+    "center",
+    "code",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "embed",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "hr",
+    "i",
+    "img",
+    "li",
+    "listing",
+    "menu",
+    "meta",
+    "nobr",
+    "ol",
+    "p",
+    "pre",
+    "ruby",
+    "s",
+    "small",
+    "span",
+    "strike",
+    "strong",
+    "sub",
+    "sup",
+    "table",
+    "tt",
+    "u",
+    "ul",
+    "var",
+];
+
+/// SVG elements that draw, or define what is drawn, lowercased.
+const SVG_ELEMENTS: &[&str] = &[
+    "a",
+    "circle",
+    "clippath",
+    "defs",
+    "desc",
+    "ellipse",
+    "feblend",
+    "fecolormatrix",
+    "fecomponenttransfer",
+    "fecomposite",
+    "feconvolvematrix",
+    "fediffuselighting",
+    "fedisplacementmap",
+    "fedistantlight",
+    "fedropshadow",
+    "feflood",
+    "fefunca",
+    "fefuncb",
+    "fefuncg",
+    "fefuncr",
+    "fegaussianblur",
+    "feimage",
+    "femerge",
+    "femergenode",
+    "femorphology",
+    "feoffset",
+    "fepointlight",
+    "fespecularlighting",
+    "fespotlight",
+    "fetile",
+    "feturbulence",
+    "filter",
+    "g",
+    "image",
+    "line",
+    "lineargradient",
+    "marker",
+    "mask",
+    "path",
+    "pattern",
+    "polygon",
+    "polyline",
+    "radialgradient",
+    "rect",
+    "stop",
+    "style",
+    "svg",
+    "switch",
+    "symbol",
+    "text",
+    "textpath",
+    "title",
+    "tspan",
+    "use",
+    "view",
+];
+
+/// SVG elements that animate: each can set another element's attributes, a
+/// link's target among them, as the document runs.
+const SVG_ANIMATIONS: &[&str] = &["animate", "animatemotion", "animatetransform", "set"];
+
+/// MathML elements that render.
+const MATH_ELEMENTS: &[&str] = &[
+    "math",
+    "menclose",
+    "merror",
+    "mfenced",
+    "mfrac",
+    "mi",
+    "mlabeledtr",
+    "mmultiscripts",
+    "mn",
+    "mo",
+    "mover",
+    "mpadded",
+    "mprescripts",
+    "mroot",
+    "mrow",
+    "ms",
+    "mspace",
+    "msqrt",
+    "mstyle",
+    "msub",
+    "msubsup",
+    "msup",
+    "mtable",
+    "mtd",
+    "mtext",
+    "mtr",
+    "munder",
+    "munderover",
+    "none",
+    "semantics",
+];
+
+/// MathML elements that never show: a phantom only takes up its room, and an
+/// annotation describes the expression for software.
+const MATH_UNDISPLAYED: &[&str] = &["annotation", "annotation-xml", "mphantom"];
+
+/// Attributes every HTML element may carry. `hidden` is kept only as
+/// `until-found`, which a reader can still find and show; `aria-*` attributes
+/// are read below.
+const HTML_GLOBAL: &[&str] = &[
+    "accesskey",
+    "autocapitalize",
+    "autofocus",
+    "class",
+    "contenteditable",
+    "dir",
+    "draggable",
+    "enterkeyhint",
+    "hidden",
+    "id",
+    "inert",
+    "inputmode",
+    "lang",
+    "popover",
+    "role",
+    "spellcheck",
+    "style",
+    "tabindex",
+    "title",
+    "translate",
+    "xml:lang",
+    "xmlns",
+];
+
+/// SVG presentation attributes whose value a browser reads as CSS that may
+/// name an image or a resource: a `url()` in them loads like one in a style.
+const SVG_CSS_ATTRIBUTES: &[&str] = &[
+    "clip-path",
+    "color-profile",
+    "cursor",
+    "fill",
+    "filter",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
+    "mask",
+    "src",
+    "stroke",
+];
+
+/// Attributes every SVG element may carry: its geometry, presentation, and
+/// references to the definitions it draws with.
+const SVG_GLOBAL: &[&str] = &[
+    "alignment-baseline",
+    "baseline-shift",
+    "class",
+    "clip-path",
+    "clip-rule",
+    "clippathunits",
+    "color",
+    "color-interpolation",
+    "color-interpolation-filters",
+    "cx",
+    "cy",
+    "d",
+    "direction",
+    "dominant-baseline",
+    "dx",
+    "dy",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "filter",
+    "filterunits",
+    "flood-color",
+    "flood-opacity",
+    "font-family",
+    "font-size",
+    "font-size-adjust",
+    "font-stretch",
+    "font-style",
+    "font-variant",
+    "font-weight",
+    "fr",
+    "fx",
+    "fy",
+    "gradienttransform",
+    "gradientunits",
+    "height",
+    "href",
+    "id",
+    "image-rendering",
+    "isolation",
+    "lang",
+    "lengthadjust",
+    "letter-spacing",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
+    "markerheight",
+    "markerunits",
+    "markerwidth",
+    "mask",
+    "maskcontentunits",
+    "maskunits",
+    "mix-blend-mode",
+    "opacity",
+    "orient",
+    "overflow",
+    "paint-order",
+    "pathlength",
+    "patterncontentunits",
+    "patterntransform",
+    "patternunits",
+    "points",
+    "preserveaspectratio",
+    "primitiveunits",
+    "r",
+    "refx",
+    "refy",
+    "role",
+    "rotate",
+    "rx",
+    "ry",
+    "shape-rendering",
+    "spreadmethod",
+    "startoffset",
+    "stop-color",
+    "stop-opacity",
+    "stroke",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-opacity",
+    "stroke-width",
+    "style",
+    "tabindex",
+    "text-anchor",
+    "text-decoration",
+    "text-rendering",
+    "textlength",
+    "transform",
+    "transform-origin",
+    "vector-effect",
+    "version",
+    "viewbox",
+    "visibility",
+    "width",
+    "word-spacing",
+    "writing-mode",
+    "x",
+    "x1",
+    "x2",
+    "xlink:href",
+    "xml:lang",
+    "xml:space",
+    "xmlns",
+    "xmlns:xlink",
+    "y",
+    "y1",
+    "y2",
+];
+
+/// The attributes of SVG's filter primitives.
+const SVG_FILTER: &[&str] = &[
+    "amplitude",
+    "azimuth",
+    "basefrequency",
+    "bias",
+    "diffuseconstant",
+    "divisor",
+    "edgemode",
+    "elevation",
+    "exponent",
+    "in",
+    "in2",
+    "intercept",
+    "k1",
+    "k2",
+    "k3",
+    "k4",
+    "kernelmatrix",
+    "kernelunitlength",
+    "limitingconeangle",
+    "mode",
+    "numoctaves",
+    "offset",
+    "operator",
+    "order",
+    "pointsatx",
+    "pointsaty",
+    "pointsatz",
+    "preservealpha",
+    "radius",
+    "result",
+    "scale",
+    "seed",
+    "slope",
+    "specularconstant",
+    "specularexponent",
+    "stddeviation",
+    "stitchtiles",
+    "surfacescale",
+    "tablevalues",
+    "targetx",
+    "targety",
+    "type",
+    "values",
+    "xchannelselector",
+    "ychannelselector",
+    "z",
+];
+
+/// Attributes every MathML element may carry.
+const MATH_GLOBAL: &[&str] = &[
+    "accent",
+    "accentunder",
+    "align",
+    "class",
+    "close",
+    "columnalign",
+    "columnlines",
+    "columnspacing",
+    "columnspan",
+    "depth",
+    "dir",
+    "display",
+    "displaystyle",
+    "fence",
+    "frame",
+    "height",
+    "id",
+    "largeop",
+    "linethickness",
+    "lspace",
+    "mathbackground",
+    "mathcolor",
+    "mathsize",
+    "mathvariant",
+    "maxsize",
+    "minsize",
+    "movablelimits",
+    "notation",
+    "open",
+    "rowalign",
+    "rowlines",
+    "rowspacing",
+    "rowspan",
+    "rspace",
+    "scriptlevel",
+    "separator",
+    "separators",
+    "stretchy",
+    "style",
+    "symmetric",
+    "voffset",
+    "width",
+    "xmlns",
+];
+
+/// The attributes an HTML element carries besides the global ones.
+fn html_attributes(element: &str) -> &'static [&'static str] {
+    match element {
+        "a" => &[
+            "download",
+            "href",
+            "hreflang",
+            "referrerpolicy",
+            "rel",
+            "target",
+            "type",
+        ],
+        "area" => &[
+            "alt",
+            "coords",
+            "download",
+            "href",
+            "referrerpolicy",
+            "rel",
+            "shape",
+            "target",
+        ],
+        "audio" => &[
+            "autoplay",
+            "controls",
+            "crossorigin",
+            "loop",
+            "muted",
+            "preload",
+            "src",
+        ],
+        "blockquote" | "q" => &["cite"],
+        "body" => &["alink", "background", "bgcolor", "link", "text", "vlink"],
+        "br" => &["clear"],
+        "button" => &[
+            "disabled",
+            "form",
+            "formaction",
+            "formenctype",
+            "formmethod",
+            "formnovalidate",
+            "formtarget",
+            "name",
+            "popovertarget",
+            "popovertargetaction",
+            "type",
+            "value",
+        ],
+        "canvas" => &["height", "width"],
+        "caption" | "legend" | "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => &["align"],
+        "col" | "colgroup" => &["align", "span", "valign", "width"],
+        "data" => &["value"],
+        "del" | "ins" => &["cite", "datetime"],
+        "details" => &["name", "open"],
+        "dialog" => &["open"],
+        "fieldset" => &["disabled", "form", "name"],
+        "font" => &["color", "face", "size"],
+        "form" => &[
+            "accept-charset",
+            "action",
+            "autocomplete",
+            "enctype",
+            "method",
+            "name",
+            "novalidate",
+            "rel",
+            "target",
+        ],
+        "hr" => &["align", "color", "noshade", "size", "width"],
+        "html" => &["version"],
+        "img" => &[
+            "align",
+            "alt",
+            "border",
+            "crossorigin",
+            "decoding",
+            "fetchpriority",
+            "height",
+            "hspace",
+            "ismap",
+            "loading",
+            "referrerpolicy",
+            "sizes",
+            "src",
+            "srcset",
+            "usemap",
+            "vspace",
+            "width",
+        ],
+        "input" => &[
+            "accept",
+            "alt",
+            "autocomplete",
+            "checked",
+            "dirname",
+            "disabled",
+            "form",
+            "formaction",
+            "formenctype",
+            "formmethod",
+            "formnovalidate",
+            "formtarget",
+            "height",
+            "list",
+            "max",
+            "maxlength",
+            "min",
+            "minlength",
+            "multiple",
+            "name",
+            "pattern",
+            "placeholder",
+            "popovertarget",
+            "popovertargetaction",
+            "readonly",
+            "required",
+            "size",
+            "src",
+            "step",
+            "type",
+            "value",
+            "width",
+        ],
+        "label" => &["for"],
+        "li" => &["type", "value"],
+        "link" => &[
+            "as",
+            "crossorigin",
+            "href",
+            "hreflang",
+            "media",
+            "referrerpolicy",
+            "rel",
+            "sizes",
+            "type",
+        ],
+        "map" => &["name"],
+        "meta" => &[
+            "charset",
+            "content",
+            "http-equiv",
+            "itemprop",
+            "name",
+            "property",
+        ],
+        "meter" => &["high", "low", "max", "min", "optimum", "value"],
+        "ol" => &["reversed", "start", "type"],
+        "optgroup" => &["disabled", "label"],
+        "option" => &["disabled", "label", "selected", "value"],
+        "output" => &["for", "form", "name"],
+        "pre" => &["width"],
+        "progress" => &["max", "value"],
+        "select" => &[
+            "autocomplete",
+            "disabled",
+            "form",
+            "multiple",
+            "name",
+            "required",
+            "size",
+        ],
+        "source" => &["height", "media", "sizes", "src", "srcset", "type", "width"],
+        "style" => &["media", "type"],
+        "table" => &[
+            "align",
+            "bgcolor",
+            "border",
+            "cellpadding",
+            "cellspacing",
+            "frame",
+            "rules",
+            "summary",
+            "width",
+        ],
+        "tbody" | "tfoot" | "thead" | "tr" => &["align", "bgcolor", "valign"],
+        "td" | "th" => &[
+            "abbr", "align", "bgcolor", "colspan", "headers", "height", "nowrap", "rowspan",
+            "scope", "valign", "width",
+        ],
+        "textarea" => &[
+            "autocomplete",
+            "cols",
+            "dirname",
+            "disabled",
+            "form",
+            "maxlength",
+            "minlength",
+            "name",
+            "placeholder",
+            "readonly",
+            "required",
+            "rows",
+            "wrap",
+        ],
+        "time" => &["datetime"],
+        "track" => &["default", "kind", "label", "src", "srclang"],
+        "ul" => &["type"],
+        "video" => &[
+            "autoplay",
+            "controls",
+            "crossorigin",
+            "height",
+            "loop",
+            "muted",
+            "playsinline",
+            "poster",
+            "preload",
+            "src",
+            "width",
+        ],
+        _ => &[],
+    }
+}
+
 /// The attributes whose value is a URL the page loads when it is opened. A
 /// hyperlink's `href` is not among them: a link a reader follows is visible
 /// content.
-const LOADING_ATTRIBUTES: [&str; 10] = [
-    "src",
-    "srcset",
+const LOADING_ATTRIBUTES: &[&str] = &[
     "action",
-    "formaction",
     "background",
-    "poster",
     "data",
+    "formaction",
+    "icon",
     "longdesc",
     "manifest",
-    "icon",
+    "poster",
+    "src",
+    "srcset",
 ];
 
 /// The `http-equiv` directives that act when the page opens: a redirect, and a
 /// cookie set on the reader's browser.
-const ACTING_DIRECTIVES: [&str; 2] = ["refresh", "set-cookie"];
+const ACTING_DIRECTIVES: &[&str] = &["refresh", "set-cookie"];
 
-impl MarkupSanitizer {
-    /// What happens to the HTML element `e` named `name`.
-    pub(super) fn html_verdict(
-        &self,
-        attributes: &[Attribute<'_>],
-        name: &str,
-        is_start: bool,
-    ) -> Verdict {
-        let attribute = |key: &str| {
-            attributes
-                .iter()
-                .find(|attr| attr.key.eq_ignore_ascii_case(key))
-                .map(|attr| attr.value)
-        };
-        let removal = |content| {
-            if is_start && !VOID_ELEMENTS.contains(&name) {
-                Verdict::Tree(content)
-            } else {
-                Verdict::Tag(content)
-            }
-        };
-        if ACTIVE_ELEMENTS.contains(&name) {
-            let content = if name == "script" {
-                HiddenContent::Script
-            } else {
-                HiddenContent::Control
-            };
-            return removal(content);
-        }
-        match name {
-            "embed" => return Verdict::Tag(HiddenContent::Control),
-            "template" => return removal(HiddenContent::Undisplayed),
-            "base" => return Verdict::Tag(HiddenContent::Link),
-            "link" if attribute("href").is_some_and(is_remote) => {
-                return Verdict::Tag(HiddenContent::Link);
-            }
-            "meta" => {
-                if let Some(content) = self.meta_removal(attributes) {
-                    return Verdict::Tag(content);
-                }
-            }
-            _ => {}
-        }
-        let hidden =
-            attribute("hidden").is_some_and(|value| !value.eq_ignore_ascii_case("until-found"));
-        if hidden {
-            return removal(HiddenContent::Undisplayed);
-        }
-        Verdict::Keep
+/// What the rebuild does with an element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Element {
+    /// Copy it, with the attributes [`attribute`] keeps.
+    Keep,
+    /// Copy it, entering the vocabulary it opens (`<svg>`, `<math>`).
+    Enter(Space),
+    /// Leave it out with everything inside it, as the hidden content it is.
+    Drop(HiddenContent),
+}
+
+/// What the rebuild does with the element `name` (lowercased) read in `space`,
+/// with `attributes` as written, under `policy`.
+pub(super) fn element(
+    space: Space,
+    name: &str,
+    attributes: &[HtmlAttribute<'_>],
+    policy: HiddenContentPolicy,
+) -> Element {
+    let attributes = Attributes(attributes);
+    if attributes
+        .keyword("hidden")
+        .is_some_and(|hidden| hidden != "until-found")
+    {
+        return Element::Drop(HiddenContent::Undisplayed);
     }
-
-    /// What a `<meta>` tag with `attributes` is removed as, or `None` when it
-    /// stays: a directive that acts on opening goes whatever the policy, one
-    /// that renders the page stays, and any other field is metadata.
-    fn meta_removal(&self, attributes: &[Attribute<'_>]) -> Option<HiddenContent> {
-        let tag = MetaTag::new(attributes.iter().map(|attr| (attr.key, attr.value)));
-        if tag
-            .directive()
-            .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive))
-        {
-            return Some(HiddenContent::Action);
-        }
-        (!tag.renders() && !self.policy.metadata.treats_as_content())
-            .then_some(HiddenContent::Properties)
+    match space {
+        Space::Html => html_element(name, attributes, policy),
+        Space::Svg => match name {
+            "script" => Element::Drop(HiddenContent::Script),
+            _ if SVG_ANIMATIONS.contains(&name) => Element::Drop(HiddenContent::Action),
+            "metadata" => Element::Drop(HiddenContent::Properties),
+            _ if undisplayed_svg(attributes) => Element::Drop(HiddenContent::Undisplayed),
+            _ if SVG_ELEMENTS.contains(&name) => Element::Keep,
+            _ => Element::Drop(HiddenContent::ApplicationData),
+        },
+        Space::Math => match name {
+            _ if MATH_UNDISPLAYED.contains(&name) => Element::Drop(HiddenContent::Undisplayed),
+            _ if MATH_ELEMENTS.contains(&name) => Element::Keep,
+            _ => Element::Drop(HiddenContent::ApplicationData),
+        },
     }
 }
 
-/// One attribute of a tag: its key and raw value as written, and the byte range
-/// that removes it: the attribute with what separates it from the one before.
-pub(super) struct Attribute<'a> {
-    key: &'a str,
-    value: &'a str,
-    range: Range<usize>,
-}
-
-/// Every attribute of the HTML `tag`, read from `raw`, placed in it.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) when a
-/// browser reads the tag differently from quick-xml, or an attribute cannot be
-/// placed in `raw`: an attribute the sanitizer cannot see is one it cannot
-/// remove.
-pub(super) fn attributes<'a>(raw: &'a str, tag: &HtmlTag<'a>) -> Result<Vec<Attribute<'a>>> {
-    let place = |slice: &str| {
-        raw.substr_range(slice)
-            .map(Range::from)
-            .ok_or_else(|| Error::malformed("an HTML tag is not in the source"))
-    };
-    let bytes = raw.as_bytes();
-    let mut previous = place(tag.name)?.end;
-    let mut out = Vec::new();
-    for attr in &tag.attributes {
-        let source = place(attr.source)?;
-        // The removal takes the whitespace and stray `/`s before the attribute,
-        // back to the one before it, and keeps one when the attribute runs
-        // straight into the next, so the two around it never join.
-        let mut from = raw[..source.start]
-            .trim_end_matches(|c: char| c.is_ascii_whitespace() || c == '/')
-            .len()
-            .max(previous);
-        let joins_next = bytes
-            .get(source.end)
-            .is_some_and(|&b| !b.is_ascii_whitespace() && b != b'/' && b != b'>');
-        if joins_next && from < source.start {
-            from += 1;
+/// [`element`] in HTML.
+fn html_element(
+    name: &str,
+    attributes: Attributes<'_, '_>,
+    policy: HiddenContentPolicy,
+) -> Element {
+    match name {
+        "script" => Element::Drop(HiddenContent::Script),
+        _ if ACTIVE_ELEMENTS.contains(&name) => Element::Drop(HiddenContent::Control),
+        "template" => Element::Drop(HiddenContent::Undisplayed),
+        "base" => Element::Drop(HiddenContent::Link),
+        "link" if attributes.remote_href() => Element::Drop(HiddenContent::Link),
+        // Writing a repeated attribute once could turn a field into a tag that
+        // renders the page, whose content is then never flagged, so such a
+        // tag goes whole.
+        "meta" if repeats(attributes.0) => Element::Drop(HiddenContent::Properties),
+        "meta" => match meta_removal(attributes.0, policy) {
+            Some(content) => Element::Drop(content),
+            None => Element::Keep,
+        },
+        // A dialog shows only once opened by script, which never runs.
+        "dialog" if attributes.keyword("open").is_none() => {
+            Element::Drop(HiddenContent::Undisplayed)
         }
-        out.push(Attribute {
-            key: attr.name,
-            value: attr.value.unwrap_or_default(),
-            range: from..source.end,
-        });
-        previous = source.end;
+        "input" if attributes.keyword("type").as_deref() == Some("hidden") => {
+            Element::Drop(HiddenContent::Undisplayed)
+        }
+        // The root of SVG is read in SVG, where `display` is a property.
+        "svg" if undisplayed_svg(attributes) => Element::Drop(HiddenContent::Undisplayed),
+        "svg" => Element::Enter(Space::Svg),
+        "math" => Element::Enter(Space::Math),
+        _ if HTML_ELEMENTS.contains(&name) => Element::Keep,
+        _ => Element::Drop(HiddenContent::ApplicationData),
     }
-    Ok(out)
 }
 
-/// The ranges of the HTML element `name`'s attributes to remove, each with the
-/// hidden content it holds: an `on*` event handler or a URL that runs script,
-/// a URL the page loads from a server, a `ping` that reports a followed link,
-/// and inline style that loads from a server.
-pub(super) fn hidden_attributes(attributes: Vec<Attribute<'_>>, name: &str) -> Vec<Removal> {
-    let hyperlink = name == "a" || name == "area";
+/// A tag's attributes as written, read as a browser compares them.
+#[derive(Clone, Copy)]
+struct Attributes<'t, 'a>(&'t [HtmlAttribute<'a>]);
+
+impl Attributes<'_, '_> {
+    /// The value of the first attribute named `key`, read as a keyword.
+    fn keyword(self, key: &str) -> Option<String> {
+        self.0
+            .iter()
+            .find(|attr| attr.name.eq_ignore_ascii_case(key))
+            .map(|attr| keyword(attr.value.unwrap_or_default()))
+    }
+
+    /// Whether an `href` among them reaches a server.
+    fn remote_href(self) -> bool {
+        self.0
+            .iter()
+            .any(|attr| attr.name.eq_ignore_ascii_case("href") && attr.value.is_some_and(is_remote))
+    }
+}
+
+/// Whether an SVG element with `attributes` is not displayed: its `display`
+/// property, read as CSS, is `none`.
+fn undisplayed_svg(attributes: Attributes<'_, '_>) -> bool {
     attributes
-        .into_iter()
-        .filter_map(|attr| {
-            let key = attr.key.to_ascii_lowercase();
-            let local = key.rsplit(':').next().unwrap_or(&key);
-            let url = normalized_url(attr.value);
-            let content = if key.starts_with("on")
-                || SCRIPT_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
-            {
-                HiddenContent::Script
-            } else if local == "ping"
-                || (LOADING_ATTRIBUTES.contains(&local) && loads_remote(attr.value, local))
-                || (local == "href" && !hyperlink && is_remote(attr.value))
-                || (local == "style" && css_loads_remote(&url))
-            {
-                HiddenContent::Link
-            } else {
-                return None;
-            };
-            Some(Removal {
-                range: attr.range,
-                content,
-            })
+        .keyword("display")
+        .is_some_and(|display| display.trim() == "none")
+}
+
+/// Whether an attribute of `attributes` is written twice.
+fn repeats(attributes: &[HtmlAttribute<'_>]) -> bool {
+    let mut seen = HashSet::with_capacity(attributes.len());
+    !attributes
+        .iter()
+        .all(|attr| seen.insert(attr.name.to_ascii_lowercase()))
+}
+
+/// What a `<meta>` tag with `attributes` is left out as, or `None` when it
+/// stays: a directive that acts on opening goes whatever the policy, one that
+/// renders the page stays, and any other field is metadata.
+fn meta_removal(
+    attributes: &[HtmlAttribute<'_>],
+    policy: HiddenContentPolicy,
+) -> Option<HiddenContent> {
+    let tag = MetaTag::from_html(attributes);
+    if tag
+        .directive()
+        .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive))
+    {
+        return Some(HiddenContent::Action);
+    }
+    (!tag.renders() && !policy.metadata.treats_as_content()).then_some(HiddenContent::Properties)
+}
+
+/// Whether the allowlist names the element `name` (lowercased) in `space`,
+/// whatever its attributes.
+pub(super) fn names(space: Space, name: &str) -> bool {
+    match space {
+        Space::Html => HTML_ELEMENTS.contains(&name) || enters(name).is_some(),
+        Space::Svg => SVG_ELEMENTS.contains(&name),
+        Space::Math => MATH_ELEMENTS.contains(&name),
+    }
+}
+
+/// The vocabulary the HTML element `name` (lowercased) enters: SVG for an
+/// `svg`, MathML for a `math`.
+pub(super) fn enters(name: &str) -> Option<Space> {
+    match name {
+        "svg" => Some(Space::Svg),
+        "math" => Some(Space::Math),
+        _ => None,
+    }
+}
+
+/// Whether the element `name` (lowercased), whose content is read in `own`,
+/// holds what follows: a void HTML element never does, and a browser ignores
+/// the `self_closing` flag on any other HTML element, but not on an SVG or
+/// MathML one, the root of either included.
+pub(super) fn opens(own: Space, name: &str, self_closing: bool) -> bool {
+    if own == Space::Html {
+        !VOID_ELEMENTS.contains(&name)
+    } else {
+        !self_closing
+    }
+}
+
+/// Whether the element `name` in `space` ends SVG or MathML, so a browser
+/// reads it as HTML.
+pub(super) fn breaks_out(space: Space, name: &str, attributes: &[HtmlAttribute<'_>]) -> bool {
+    if space == Space::Html {
+        return false;
+    }
+    BREAKOUT_ELEMENTS.contains(&name)
+        || (name == "font"
+            && attributes.iter().any(|attr| {
+                ["color", "face", "size"]
+                    .iter()
+                    .any(|key| attr.name.eq_ignore_ascii_case(key))
+            }))
+}
+
+/// What the attribute `key` (lowercased) with `value` (as written) of the
+/// element `element` (lowercased) read in `space` is left out as, or `None`
+/// when it is copied: an `on*` event handler or a URL that runs script, a URL
+/// the page loads from a server, a `ping` that reports a followed link, inline
+/// style or an SVG presentation attribute read as CSS that loads from a
+/// server, and anything else that no reader of the page sees.
+///
+/// The value is read with its character references decoded, as a browser
+/// reads it; CSS reads its line breaks, which a URL parser drops.
+pub(super) fn attribute(
+    space: Space,
+    element: &str,
+    key: &str,
+    value: Option<&str>,
+) -> Option<HiddenContent> {
+    let local = key.rsplit(':').next().unwrap_or(key);
+    let value = decoded(value.unwrap_or_default(), CharacterReferences::Html);
+    if key.starts_with("on") || runs_script(&value) {
+        return Some(HiddenContent::Script);
+    }
+    let hyperlink = element == "a" || element == "area";
+    let loads = LOADING_ATTRIBUTES.contains(&local)
+        && if local == "srcset" {
+            srcset_reaches_server(&value)
+        } else {
+            reaches_server(&value)
+        };
+    if local == "ping"
+        || loads
+        || (local == "href" && !hyperlink && reaches_server(&value))
+        || ((local == "style" || (space == Space::Svg && SVG_CSS_ATTRIBUTES.contains(&local)))
+            && css_loads_remote(&value))
+    {
+        return Some(HiddenContent::Link);
+    }
+    let allowed = match space {
+        Space::Html => HTML_GLOBAL.contains(&key) || html_attributes(element).contains(&key),
+        Space::Svg => {
+            SVG_GLOBAL.contains(&key) || (element.starts_with("fe") && SVG_FILTER.contains(&key))
+        }
+        Space::Math => MATH_GLOBAL.contains(&key),
+    };
+    // Accessible names and descriptions are read to the reader by assistive
+    // technology, and extracted like any other attribute value.
+    (!allowed && !key.starts_with("aria-")).then_some(HiddenContent::ApplicationData)
+}
+
+/// The HTML elements whose body a browser reads as text with references
+/// decoded (RCDATA), never as markup.
+const RCDATA_ELEMENTS: &[&str] = &["textarea", "title"];
+
+/// The HTML elements whose body a browser reads as text as written, never as
+/// markup. A `<plaintext>` has no end tag, so its text runs to the end of the
+/// document.
+const RAW_TEXT_ELEMENTS: &[&str] = &[
+    "iframe",
+    "noembed",
+    "noframes",
+    "noscript",
+    "plaintext",
+    "script",
+    "style",
+    "xmp",
+];
+
+/// The HTML element `name` (lowercased), when its body is RCDATA.
+pub(super) fn rcdata_element(name: &str) -> Option<&'static str> {
+    RCDATA_ELEMENTS
+        .iter()
+        .find(|element| **element == name)
+        .copied()
+}
+
+/// The HTML element `name` (lowercased), when a browser reads its body as
+/// text up to its end tag: an RCDATA or a raw-text one.
+pub(super) fn text_element(name: &str) -> Option<&'static str> {
+    RCDATA_ELEMENTS
+        .iter()
+        .chain(RAW_TEXT_ELEMENTS)
+        .find(|element| **element == name)
+        .copied()
+}
+
+/// Whether the SVG or MathML element `name` (lowercased) read in `space` is
+/// one whose content a browser reads as HTML: an SVG `foreignObject`, `desc`,
+/// or `title`, and a MathML token element.
+pub(super) fn integration_point(space: Space, name: &str) -> bool {
+    match space {
+        Space::Html => false,
+        Space::Svg => matches!(name, "foreignobject" | "desc" | "title"),
+        Space::Math => matches!(name, "mi" | "mo" | "mn" | "ms" | "mtext"),
+    }
+}
+
+/// Whether the element `name` (lowercased), started in a MathML token
+/// element, stays MathML where any other element is read as HTML.
+pub(super) fn stays_math(name: &str) -> bool {
+    matches!(name, "mglyph" | "malignmark")
+}
+
+/// Whether the start tag `start` (lowercased) closes an open HTML element
+/// `open` that holds nothing else open: the end tags HTML lets a document
+/// leave out.
+pub(super) fn closes(open: &str, start: &str) -> bool {
+    match open {
+        "p" => P_CLOSERS.contains(&start),
+        "li" => start == "li",
+        "dt" | "dd" => matches!(start, "dt" | "dd"),
+        "option" => matches!(start, "option" | "optgroup"),
+        "optgroup" => start == "optgroup",
+        "rb" | "rt" | "rp" | "rtc" => matches!(start, "rb" | "rt" | "rp" | "rtc"),
+        "tr" => start == "tr",
+        "td" | "th" => matches!(start, "td" | "th" | "tr"),
+        "thead" | "tbody" | "tfoot" => matches!(start, "thead" | "tbody" | "tfoot"),
+        _ => false,
+    }
+}
+
+/// The start tags that close an open `<p>`.
+const P_CLOSERS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "center",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hgroup",
+    "hr",
+    "li",
+    "listing",
+    "main",
+    "menu",
+    "nav",
+    "ol",
+    "p",
+    "plaintext",
+    "pre",
+    "search",
+    "section",
+    "summary",
+    "table",
+    "ul",
+    "xmp",
+];
+
+/// The HTML end tags that close their element, open in scope, with every
+/// element open inside it: the grouping elements' and the list items'.
+const SCOPED_ENDS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "center",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "header",
+    "hgroup",
+    "li",
+    "listing",
+    "main",
+    "menu",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "search",
+    "section",
+    "summary",
+    "ul",
+];
+
+/// The HTML elements that bound the scope an end tag looks for its element
+/// in, and a `<select>`, whose content is read by other rules.
+const SCOPE_BOUNDS: &[&str] = &[
+    "applet", "caption", "html", "marquee", "object", "select", "table", "td", "template", "th",
+];
+
+/// The HTML elements a browser stops at when it looks for the element an
+/// end tag outside [`SCOPED_ENDS`] closes, so the tag closes nothing.
+const SPECIAL: &[&str] = &[
+    "address",
+    "applet",
+    "area",
+    "article",
+    "aside",
+    "base",
+    "basefont",
+    "bgsound",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "caption",
+    "center",
+    "col",
+    "colgroup",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "iframe",
+    "img",
+    "input",
+    "keygen",
+    "li",
+    "link",
+    "listing",
+    "main",
+    "marquee",
+    "menu",
+    "meta",
+    "nav",
+    "noembed",
+    "noframes",
+    "noscript",
+    "object",
+    "ol",
+    "p",
+    "param",
+    "plaintext",
+    "pre",
+    "script",
+    "search",
+    "section",
+    "select",
+    "source",
+    "style",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "track",
+    "ul",
+    "wbr",
+    "xmp",
+];
+
+/// The HTML formatting elements, which a browser reopens past an element
+/// that closed them.
+const FORMATTING: &[&str] = &[
+    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u",
+];
+
+/// Whether the HTML element `inner`, open inside the HTML element whose end
+/// tag is `end` (both lowercased), keeps a browser from reading that tag as
+/// its end.
+fn keeps_end(end: &str, inner: &str) -> bool {
+    if !SCOPED_ENDS.contains(&end) {
+        return SPECIAL.contains(&inner);
+    }
+    SCOPE_BOUNDS.contains(&inner)
+        || (end == "p" && inner == "button")
+        || (end == "li" && matches!(inner, "ol" | "ul"))
+}
+
+/// Whether the elements `above` (innermost first, each with the vocabulary
+/// it is read in), open inside the element the end tag `end` (lowercased)
+/// names, read in `target`, keep a browser from reading the tag as its end.
+///
+/// SVG and MathML close by name from the current element, while it and all
+/// passed are theirs. Past an HTML element, HTML's rules read the tag: an
+/// element reading HTML stops them, as does a scope boundary for a grouping
+/// element's end, any of HTML's special elements for another's, and anything
+/// for a form's, which closes the form alone.
+pub(super) fn keeps_open<'a>(
+    end: &str,
+    target: Space,
+    above: impl IntoIterator<Item = (&'a str, Space)>,
+) -> bool {
+    let mut above = above.into_iter().peekable();
+    if above.peek().is_none() {
+        return false;
+    }
+    if end == "form" && target == Space::Html {
+        return true;
+    }
+    above.any(|(inner, space)| match space {
+        Space::Html => target != Space::Html || keeps_end(end, inner),
+        _ => {
+            target == Space::Html && (integration_point(space, inner) || inner == "annotation-xml")
+        }
+    })
+}
+
+/// Whether the HTML end tag `end` (lowercased), closing its element past the
+/// elements `above` it (innermost first), closes just those, as a browser
+/// does: none reopens, and none keeps the tag from closing its element.
+pub(super) fn closes_cleanly<'a>(end: &str, above: impl Iterator<Item = &'a str>) -> bool {
+    let mut above = above.peekable();
+    if above.peek().is_none() {
+        return true;
+    }
+    end != "form"
+        && !FORMATTING.contains(&end)
+        && above.all(|inner| !FORMATTING.contains(&inner) && !keeps_end(end, inner))
+}
+
+/// Whether the HTML start tag `start` (lowercased) may close more of `open`
+/// than [`closes`] reads, or is read by rules other than those of a body.
+pub(super) fn may_close_more<T>(start: &str, open: &OpenElements<T>) -> bool {
+    let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+    match start {
+        "li" => open.contains("li"),
+        "dd" | "dt" => open.contains("dd") || open.contains("dt"),
+        "button" | "a" | "nobr" | "form" => open.contains(start),
+        "body" | "caption" | "col" | "colgroup" | "frame" | "frameset" | "head" | "html"
+        | "image" | "rb" | "rp" | "rt" | "rtc" | "select" | "table" | "tbody" | "td"
+        | "template" | "tfoot" | "th" | "thead" | "tr" => true,
+        _ if heading(start) => open.last().is_some_and(|(name, _)| heading(name)),
+        _ => P_CLOSERS.contains(&start) && open.contains("p"),
+    }
+}
+
+/// The names a browser reads in text without their `;`.
+const LEGACY_NAMES: &[&str] = &[
+    "AElig", "AMP", "Aacute", "Acirc", "Agrave", "Aring", "Atilde", "Auml", "COPY", "Ccedil",
+    "ETH", "Eacute", "Ecirc", "Egrave", "Euml", "GT", "Iacute", "Icirc", "Igrave", "Iuml", "LT",
+    "Ntilde", "Oacute", "Ocirc", "Ograve", "Oslash", "Otilde", "Ouml", "QUOT", "REG", "THORN",
+    "Uacute", "Ucirc", "Ugrave", "Uuml", "Yacute", "aacute", "acirc", "acute", "aelig", "agrave",
+    "amp", "aring", "atilde", "auml", "brvbar", "ccedil", "cedil", "cent", "copy", "curren", "deg",
+    "divide", "eacute", "ecirc", "egrave", "eth", "euml", "frac12", "frac14", "frac34", "gt",
+    "iacute", "icirc", "iexcl", "igrave", "iquest", "iuml", "laquo", "lt", "macr", "micro",
+    "middot", "nbsp", "not", "ntilde", "oacute", "ocirc", "ograve", "ordf", "ordm", "oslash",
+    "otilde", "ouml", "para", "plusmn", "pound", "quot", "raquo", "reg", "sect", "shy", "sup1",
+    "sup2", "sup3", "szlig", "thorn", "times", "uacute", "ucirc", "ugrave", "uml", "uuml",
+    "yacute", "yen", "yuml",
+];
+
+/// The text a browser reads `tail` as, a `&` and the letters, digits, or `#`
+/// after it that end a text: a number, or the longest name it reads without
+/// its `;`, decoded, the rest as written.
+pub(super) fn text_reference(tail: &str) -> String {
+    let rest = &tail[1..];
+    if rest.starts_with('#') {
+        return decoded(tail, CharacterReferences::Html);
+    }
+    LEGACY_NAMES
+        .iter()
+        .filter(|name| rest.starts_with(**name))
+        .max_by_key(|name| name.len())
+        .and_then(|name| {
+            // Without the `html` feature, only XML's names decode.
+            let reference = format!("&{name};");
+            let reads = decoded(&reference, CharacterReferences::Html);
+            (reads != reference).then(|| format!("{reads}{}", &rest[name.len()..]))
         })
-        .collect()
+        .unwrap_or_else(|| tail.to_owned())
 }

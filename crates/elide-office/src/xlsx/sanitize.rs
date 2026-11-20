@@ -18,18 +18,21 @@
 
 use std::ops::Range;
 
+use elide_core::Result;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
-use elide_core::{Error, Result};
-use quick_xml::NsReader;
 use quick_xml::events::Event;
 
 use super::SheetClassifier;
+use super::names::{
+    DEFINED_NAME, HYPERLINK_LOCATION, SHEET_NAME, TABLE_COLUMN_NAME, TABLE_DISPLAY_NAME, TABLE_NAME,
+};
+use crate::opc::ns::{VML, VML_EXCEL, X};
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bom_len, bound};
-use crate::opc::{Collaboration, Ns, PartKind, StripAttributes, TextAttribute};
+use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader};
+use crate::opc::{
+    Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, attribute_value, malformed_xml,
+};
 
-/// The SpreadsheetML main namespace.
-const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 /// The Excel 2010 application-compatibility namespace (the saved-to path).
 const X15AC: &str = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac";
 /// The Excel revision-id namespaces.
@@ -40,68 +43,39 @@ const XR6: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revisi
 const XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
 
 /// The revision ids Excel stamps on the workbook, sheets, and tables.
-const EDITING_SESSION_IDS: Declared = Declared {
-    content: HiddenContent::EditingSessionId,
-    remove: &[(XR, "revisionPtr")],
-    unwrap: &[],
-    attributes: &[
+const EDITING_SESSION_IDS: Declared =
+    Declared::removing(HiddenContent::EditingSessionId, &[(XR, "revisionPtr")]).with_attributes(&[
         (XR, Local::Any),
         (XR2, Local::Any),
         (XR3, Local::Any),
         (XR6, Local::Any),
         (XR10, Local::Any),
-    ],
-};
+    ]);
 
 /// The absolute path the workbook was last saved to.
-const FILE_PATH: Declared = Declared {
-    content: HiddenContent::FilePath,
-    remove: &[(X15AC, "absPath")],
-    unwrap: &[],
-    attributes: &[],
-};
+const FILE_PATH: Declared = Declared::removing(HiddenContent::FilePath, &[(X15AC, "absPath")]);
 
 /// The file-sharing reservation: a user name and a password hash.
-const CREDENTIALS: Declared = Declared {
-    content: HiddenContent::Credential,
-    remove: &[(SML, "fileSharing")],
-    unwrap: &[],
-    attributes: &[],
-};
+const CREDENTIALS: Declared = Declared::removing(HiddenContent::Credential, &[(X, "fileSharing")]);
 
 /// The workbook's list of linked external workbooks.
-const EXTERNAL_WORKBOOKS: Declared = Declared {
-    content: HiddenContent::Link,
-    remove: &[(SML, "externalReferences")],
-    unwrap: &[],
-    attributes: &[],
-};
+const EXTERNAL_WORKBOOKS: Declared =
+    Declared::removing(HiddenContent::Link, &[(X, "externalReferences")]);
 
 /// The threaded-comments namespace.
 const THREADED: &str = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 
 /// When a threaded comment was written.
-const COMMENT_DATES: StripAttributes = StripAttributes {
-    content: HiddenContent::Comment,
-    attributes: &[TextAttribute::new(
+const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::Comment,
+    &[TextAttribute::new(
         (Ns::In(THREADED), Local::Exact("threadedComment")),
         (Ns::None, "dT"),
     )],
-};
+);
 
 /// A threaded comment's mentions.
-const MENTIONS: Declared = Declared {
-    content: HiddenContent::Comment,
-    remove: &[(THREADED, "mentions")],
-    unwrap: &[],
-    attributes: &[],
-};
-
-/// The legacy VML namespace.
-const VML: &str = "urn:schemas-microsoft-com:vml";
-/// The legacy Excel drawing namespace, whose `ClientData` says what a VML
-/// shape is.
-const EXCEL: &str = "urn:schemas-microsoft-com:office:excel";
+const MENTIONS: Declared = Declared::removing(HiddenContent::Comment, &[(THREADED, "mentions")]);
 
 /// The VML shapes that draw comment notes: a `v:shape` whose `x:ClientData`
 /// has `ObjectType="Note"`. A shape's kind is in a child, so this edit reads
@@ -126,7 +100,7 @@ impl Edit for CommentNotes {
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        cut_notes(raw, true)
+        cut_notes(raw, NoteCut::Shape)
     }
 }
 
@@ -136,39 +110,53 @@ impl Edit for CommentNoteText {
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        cut_notes(raw, false)
+        cut_notes(raw, NoteCut::Text)
     }
 }
 
-/// `raw` without its comment notes: each `whole` shape, or else the text of each
-/// one's text box. The count is of the notes changed.
-fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
-    let mut reader = NsReader::from_str(raw);
-    let bom = bom_len(raw);
-    let mut last = bom;
+/// What [`cut_notes`] cuts of a comment note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoteCut {
+    /// The whole shape.
+    Shape,
+    /// The text of its text box.
+    Text,
+}
+
+/// What an open element of a VML drawing is, as [`cut_notes`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Opened {
+    Shape,
+    TextBox,
+    Other,
+}
+
+/// `raw` without its comment notes, each cut as `cut` says. The count is of
+/// the notes changed.
+fn cut_notes(raw: &str, cut: NoteCut) -> Result<Option<Edited>> {
+    let mut reader = SpannedReader::new_ns(raw);
     let mut shapes: Vec<OpenShape> = Vec::new();
     // What each open element is.
-    let mut open: Vec<(bool, bool)> = Vec::new();
+    let mut open: Vec<Opened> = Vec::new();
     let mut cuts: Vec<Range<usize>> = Vec::new();
     let mut count = 0;
     loop {
-        let (resolved, event) = reader
-            .read_resolved_event()
-            .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-        let namespace = bound(&resolved);
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
+        let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
         match event {
             Event::Eof => break,
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let local = e.local_name();
                 let local = local.into_inner();
                 let in_ns = |ns: &str| namespace.as_deref() == Some(ns);
-                if in_ns(EXCEL) && local == "ClientData" {
-                    let note = e.attributes().flatten().any(|attr| {
-                        attr.key.local_name().as_ref() == "ObjectType"
-                            && attr.value.as_ref() == "Note"
-                    });
+                if in_ns(VML_EXCEL) && local == "ClientData" {
+                    // The kind as XML reads it, its references decoded; one
+                    // that does not decode may be a note.
+                    let mut note = false;
+                    for attr in e.attributes() {
+                        let attr = attr.map_err(malformed_xml)?;
+                        note |= attr.key.as_ref() == "ObjectType"
+                            && attribute_value(&attr.value).map_or(true, |kind| kind == "Note");
+                    }
                     if note && let Some(shape) = shapes.last_mut() {
                         shape.note = true;
                     }
@@ -182,80 +170,47 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
                             text: Vec::new(),
                         });
                     }
-                    open.push((shape, in_ns(VML) && local == "textbox"));
+                    open.push(if shape {
+                        Opened::Shape
+                    } else if in_ns(VML) && local == "textbox" {
+                        Opened::TextBox
+                    } else {
+                        Opened::Other
+                    });
                 }
             }
             Event::Text(_) | Event::GeneralRef(_) | Event::CData(_)
-                if open.iter().any(|&(_, textbox)| textbox)
-                    && !raw[span.clone()].trim().is_empty() =>
+                if open.contains(&Opened::TextBox) && !raw[span.clone()].trim().is_empty() =>
             {
                 if let Some(shape) = shapes.last_mut() {
                     shape.text.push(span);
                 }
             }
             Event::End(_) => {
-                if open.pop().is_some_and(|(shape, _)| shape)
+                if open.pop() == Some(Opened::Shape)
                     && let Some(shape) = shapes.pop()
                     && shape.note
                 {
-                    if whole {
-                        count += 1;
-                        cuts.push(shape.start..span.end);
-                    } else if !shape.text.is_empty() {
-                        count += 1;
-                        cuts.extend(shape.text);
+                    match cut {
+                        NoteCut::Shape => {
+                            count += 1;
+                            cuts.push(shape.start..span.end);
+                        }
+                        NoteCut::Text if !shape.text.is_empty() => {
+                            count += 1;
+                            cuts.extend(shape.text);
+                        }
+                        NoteCut::Text => {}
                     }
                 }
             }
             _ => {}
         }
     }
-    Ok(cut(raw, cuts).map(|text| Edited { text, count }))
+    // The cuts may nest: a crafted drawing can put a shape inside another.
+    let cuts = cuts.into_iter().map(|cut| (cut, "")).collect();
+    Ok(Edited::from_cuts(raw, cuts, count))
 }
-
-/// `raw` without the `cuts`, which may nest (a crafted drawing can put a shape
-/// inside another), or `None` when there are none.
-fn cut(raw: &str, mut cuts: Vec<Range<usize>>) -> Option<String> {
-    if cuts.is_empty() {
-        return None;
-    }
-    cuts.sort_unstable_by_key(|cut| cut.start);
-    let mut text = String::with_capacity(raw.len());
-    let mut cursor = 0;
-    for cut in cuts {
-        if cut.start >= cursor {
-            text.push_str(&raw[cursor..cut.start]);
-        }
-        cursor = cursor.max(cut.end);
-    }
-    text.push_str(&raw[cursor..]);
-    Some(text)
-}
-
-/// A sheet's name, shown on its tab.
-pub(super) const SHEET_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("sheet")), (Ns::None, "name"));
-
-/// A defined name.
-pub(super) const DEFINED_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("definedName")), (Ns::None, "name"));
-
-/// A table's name.
-pub(super) const TABLE_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("table")), (Ns::None, "name"));
-
-/// A table's display name, the one formulas use.
-pub(super) const TABLE_DISPLAY_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("table")), (Ns::None, "displayName"));
-
-/// A table column's name, its header.
-pub(super) const TABLE_COLUMN_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("tableColumn")), (Ns::None, "name"));
-
-/// Where a hyperlink inside the workbook goes: a defined name or a
-/// sheet-qualified cell.
-pub(super) const HYPERLINK_LOCATION: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "location"));
 
 /// The text attributes a workbook surfaces for detection: its sheet, defined,
 /// table, and table column names and the hyperlink locations that refer to
@@ -271,35 +226,17 @@ pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
     TABLE_DISPLAY_NAME,
     TABLE_COLUMN_NAME,
     HYPERLINK_LOCATION,
-    TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "display")),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "promptTitle"),
-    ),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "prompt"),
-    ),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "errorTitle"),
-    ),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "error"),
-    ),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "comment")),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "user"))
-        .of(Collaboration::Author),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("customWorkbookView")),
-        (Ns::None, "name"),
-    ),
-    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "displayName"))
-        .of(Collaboration::Author),
-    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "userId"))
-        .of(Collaboration::Author),
+    TextAttribute::unqualified("hyperlink", "display"),
+    TextAttribute::unqualified("dataValidation", "promptTitle"),
+    TextAttribute::unqualified("dataValidation", "prompt"),
+    TextAttribute::unqualified("dataValidation", "errorTitle"),
+    TextAttribute::unqualified("dataValidation", "error"),
+    TextAttribute::unqualified("scenario", "name"),
+    TextAttribute::unqualified("scenario", "comment"),
+    TextAttribute::unqualified("scenario", "user").of(Collaboration::Author),
+    TextAttribute::unqualified("customWorkbookView", "name"),
+    TextAttribute::unqualified("person", "displayName").of(Collaboration::Author),
+    TextAttribute::unqualified("person", "userId").of(Collaboration::Author),
 ];
 
 impl Sanitizer for SheetClassifier {
@@ -331,23 +268,20 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, part_names, read_part};
+    use crate::fixtures::{pack_typed, part_names, read_text_part};
     use crate::opc::sanitize::sanitize;
     use crate::opc::xml_edit::expect_edit;
-
-    const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
     /// A workbook with a revision log and a legacy drawing holding one comment
     /// note and one button.
     fn workbook() -> Vec<u8> {
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/revisions/revisionHeaders.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.revisionHeaders+xml"/></Types>"#;
-        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}"/>"#);
+        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
         let revisions = format!(
-            r#"<?xml version="1.0"?><headers xmlns="{SML_NS}"><header userName="Jane Roe"/></headers>"#
+            r#"<?xml version="1.0"?><headers xmlns="{X}"><header userName="Jane Roe"/></headers>"#
         );
         let shape = |kind: &str| {
             format!(
-                r##""<v:shape id="s{kind}" type="#_x0000_t202"><v:textbox><div>{kind}</div></v:textbox><x:ClientData ObjectType="{kind}"><x:Row>0</x:Row></x:ClientData></v:shape>""##
+                r##"<v:shape id="s{kind}" type="#_x0000_t202"><v:textbox><div>{kind}</div></v:textbox><x:ClientData ObjectType="{kind}"><x:Row>0</x:Row></x:ClientData></v:shape>"##
             )
         };
         let vml = format!(
@@ -355,11 +289,22 @@ mod tests {
             shape("Note"),
             shape("Button")
         );
-        pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("xl/workbook.xml", workbook.as_bytes()),
-            ("xl/revisions/revisionHeaders.xml", revisions.as_bytes()),
-            ("xl/drawings/vmlDrawing1.vml", vml.as_bytes()),
+        pack_typed(&[
+            (
+                "xl/workbook.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                workbook.as_bytes(),
+            ),
+            (
+                "xl/revisions/revisionHeaders.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.revisionHeaders+xml",
+                revisions.as_bytes(),
+            ),
+            (
+                "xl/drawings/vmlDrawing1.vml",
+                "application/vnd.openxmlformats-officedocument.vmlDrawing",
+                vml.as_bytes(),
+            ),
         ])
     }
 
@@ -372,40 +317,44 @@ mod tests {
     }
 
     #[test]
-    fn redacted_threaded_comments_keep_their_text_and_authors_only() {
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/threadedComments/threadedComment1.xml" ContentType="application/vnd.ms-excel.threadedcomments+xml"/><Override PartName="/xl/persons/person.xml" ContentType="application/vnd.ms-excel.person+xml"/></Types>"#;
-        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}"/>"#);
+    fn threaded_comments_go_under_every_policy() {
+        let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
         let comments = format!(
             r#"<?xml version="1.0"?><ThreadedComments xmlns="{THREADED}"><threadedComment ref="A1" dT="2024-01-02T03:04:05.00" personId="{{P}}" id="{{C}}"><text>@Jane Roe please check</text><mentions><mention mentionpersonId="{{P}}" mentionId="{{M}}" startIndex="0" length="9"/></mentions></threadedComment></ThreadedComments>"#
         );
         let persons = format!(
             r#"<?xml version="1.0"?><personList xmlns="{THREADED}"><person displayName="Jane Roe" id="{{P}}" userId="jane@example.com" providerId="PeoplePicker"/></personList>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("xl/workbook.xml", workbook.as_bytes()),
+        let package = pack_typed(&[
+            (
+                "xl/workbook.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                workbook.as_bytes(),
+            ),
             (
                 "xl/threadedComments/threadedComment1.xml",
+                "application/vnd.ms-excel.threadedcomments+xml",
                 comments.as_bytes(),
             ),
-            ("xl/persons/person.xml", persons.as_bytes()),
+            (
+                "xl/persons/person.xml",
+                "application/vnd.ms-excel.person+xml",
+                persons.as_bytes(),
+            ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, _) = sanitize(&package, policy, &SheetClassifier).unwrap();
+        let (out, stripped) = sanitize(&package, policy, &SheetClassifier).unwrap();
         let out = out.unwrap();
-        let comments =
-            String::from_utf8(read_part(&out, "xl/threadedComments/threadedComment1.xml").unwrap())
-                .unwrap();
+        // No schema describes a threaded comment or its people, so neither
+        // can be rebuilt, and both go.
+        let names = part_names(&out);
         assert!(
-            !comments.contains("dT=") && !comments.contains("mention"),
-            "{comments}"
+            !names
+                .iter()
+                .any(|name| name.contains("threaded") || name.contains("person")),
+            "{names:?}"
         );
-
-        let markup = crate::xlsx::Xlsx::open(&out).unwrap().markup();
-        let texts: Vec<&str> = markup.blocks.iter().map(|b| b.text.as_str()).collect();
-        for text in ["@Jane Roe please check", "Jane Roe", "jane@example.com"] {
-            assert!(texts.contains(&text), "{text} not in {texts:?}");
-        }
+        assert_eq!(count(&stripped, HiddenContent::ApplicationData), 2);
         crate::opc::check::check(&out, policy, &SheetClassifier).unwrap();
     }
 
@@ -429,18 +378,14 @@ mod tests {
             &SheetClassifier,
         )
         .unwrap();
-        let vml =
-            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
-                .unwrap();
+        let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(!vml.contains("Note") && vml.contains("Button"), "{vml}");
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
 
         // Redacted comments keep their notes.
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
-        let vml =
-            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
-                .unwrap();
+        let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(vml.contains("Note"), "{vml}");
     }
 
@@ -453,6 +398,30 @@ mod tests {
             edited.text,
             r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:rect/></xml>"#
         );
+    }
+
+    /// A note's kind is read as XML reads it, its references decoded.
+    #[test]
+    fn an_escaped_note_kind_is_a_note() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><x:ClientData ObjectType="Not&#101;"/></v:shape></xml>"#;
+        let edited = expect_edit(raw, &CommentNotes);
+        assert!(!edited.text.contains("v:shape"), "{}", edited.text);
+    }
+
+    /// Only the unqualified `ObjectType` is a shape's kind; a foreign one is
+    /// an undeclared attribute the rebuild drops.
+    #[test]
+    fn a_qualified_object_type_is_not_a_kind() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:z="urn:vendor"><v:shape><x:ClientData ObjectType="Button" z:ObjectType="Note"/></v:shape></xml>"#;
+        assert!(CommentNotes.apply(raw).unwrap().is_none());
+    }
+
+    /// A note's kind that cannot be read refuses the drawing rather than
+    /// passing for no note.
+    #[test]
+    fn a_malformed_note_kind_is_refused() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><x:ClientData Other="1" Other="2" ObjectType="Note"/></v:shape></xml>"#;
+        assert!(CommentNotes.apply(raw).is_err());
     }
 
     /// One note counts once, however its text is split.
@@ -468,13 +437,13 @@ mod tests {
     fn flagging_every_comment_empties_each_note_and_keeps_its_shape() {
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
         let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
-        let vml =
-            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
-                .unwrap();
+        let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(!vml.contains("<div>Note</div>"), "{vml}");
         assert!(vml.contains(r#"ObjectType="Note""#), "{vml}");
         assert!(vml.contains("<x:Row>0</x:Row>"), "{vml}");
-        assert!(vml.contains("<div>Button</div>"), "{vml}");
+        // A text box's legacy markup is outside the VML schema, so a button's
+        // label goes in the rebuild.
+        assert!(!vml.contains("<div>"), "{vml}");
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
     }
 }

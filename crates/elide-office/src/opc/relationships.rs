@@ -6,30 +6,26 @@
 //! image) does so through a relationship in its sidecar `_rels/<name>.rels`
 //! part; the package itself keeps its own in `_rels/.rels`. A relationship's
 //! target is a URI relative to its source part's directory, or, with
-//! `TargetMode="External"`, a URL outside the package.
+//! `TargetMode="External"`, a URL outside the package. A relationships part
+//! is read as [`package_xml`](super::package_xml) cuts it down to its OPC
+//! vocabulary, so it reads the same before and after.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
 use elide_core::{Error, Result};
-use quick_xml::Reader;
-use quick_xml::escape::unescape;
-use quick_xml::events::Event;
 
+use crate::opc::ns::transitional_type;
+use crate::opc::package_xml::{RELATIONSHIPS, SpannedEntry, spanned_entries, without_entries};
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::bom_len;
 
 /// The relationship type of an external hyperlink, the one external target that
 /// is visible content (a link a reader follows) rather than a hidden reference.
 pub(crate) const HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
-/// The namespace of the attributes (`r:id`, `r:embed`, `r:link`, …) by which an
-/// XML part names one of its relationships.
-pub(crate) const RELATIONSHIP_ATTRIBUTES: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-
-/// One relationship: its id, its type URI, its raw target, and whether the
-/// target lies outside the package.
+/// One relationship: its id, its type URI (a strict one as its transitional
+/// twin), its raw target, and whether the target lies outside the package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Relationship {
     pub(crate) id: String,
@@ -51,41 +47,58 @@ impl Relationship {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+/// part is not well-formed, or a relationship has no `Id`.
 pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
-    let mut reader = Reader::from_str(xml);
-    let mut relationships = Vec::new();
-    loop {
-        let element = match reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?
-        {
-            Event::Eof => break,
-            Event::Empty(e) | Event::Start(e) if e.local_name().as_ref() == "Relationship" => e,
-            _ => continue,
-        };
-        let mut relationship = Relationship {
-            id: String::new(),
-            kind: String::new(),
-            target: String::new(),
-            external: false,
-        };
-        for attr in element.attributes() {
-            let attr =
-                attr.map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-            let value = unescape(&attr.value)
-                .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-            match attr.key.local_name().as_ref() {
-                "Id" => relationship.id = value.into_owned(),
-                "Type" => relationship.kind = value.into_owned(),
-                "Target" => relationship.target = value.into_owned(),
-                "TargetMode" => relationship.external = value == "External",
-                _ => {}
+    Ok(parse_spanned(xml)?
+        .into_iter()
+        .map(|(relationship, _)| relationship)
+        .collect())
+}
+
+/// Parse the relationships part `xml`, each relationship with the range of
+/// its `Target` value inside the quotes, if it has one.
+///
+/// # Errors
+///
+/// As [`parse`].
+pub(crate) fn parse_spanned(xml: &str) -> Result<Vec<(Relationship, Option<Range<usize>>)>> {
+    spanned_entries(xml, &RELATIONSHIPS, "relationships part")?
+        .into_iter()
+        .map(|SpannedEntry { entry, values, .. }| {
+            let mut id = None;
+            let mut kind = String::new();
+            let mut target = String::new();
+            let mut target_range = None;
+            let mut external = false;
+            for ((key, value), range) in entry.1.into_iter().zip(values) {
+                match key {
+                    "Id" => id = Some(value),
+                    "Type" => kind = transitional_type(&value).into_owned(),
+                    "Target" => {
+                        target = value;
+                        target_range = Some(range);
+                    }
+                    "TargetMode" => external = value == "External",
+                    _ => {}
+                }
             }
-        }
-        relationships.push(relationship);
-    }
-    Ok(relationships)
+            // A relationship is removed by its id, so one without could not
+            // be.
+            let Some(id) = id else {
+                return Err(Error::malformed(
+                    "relationships part malformed: a relationship without an `Id`",
+                ));
+            };
+            let relationship = Relationship {
+                id,
+                kind,
+                target,
+                external,
+            };
+            Ok((relationship, target_range))
+        })
+        .collect()
 }
 
 /// The relationships part `xml` with every relationship whose id is in
@@ -95,34 +108,9 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
-    let mut reader = Reader::from_str(xml);
-    let bom = bom_len(xml);
-    let mut out = String::with_capacity(xml.len());
-    let mut cursor = 0;
-    let mut last = bom;
-    loop {
-        let event = reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize + bom;
-        last = span.end;
-        let element = match event {
-            Event::Eof => break,
-            Event::Empty(e) if e.local_name().as_ref() == "Relationship" => e,
-            _ => continue,
-        };
-        let id = element
-            .attributes()
-            .flatten()
-            .find(|attr| attr.key.local_name().as_ref() == "Id")
-            .and_then(|attr| unescape(&attr.value).ok().map(|v| v.into_owned()));
-        if id.is_some_and(|id| removed.contains(&id)) {
-            out.push_str(&xml[cursor..span.start]);
-            cursor = span.end;
-        }
-    }
-    out.push_str(&xml[cursor..]);
-    Ok(out)
+    without_entries(xml, &RELATIONSHIPS, "relationships part", "Id", |id| {
+        removed.contains(id)
+    })
 }
 
 /// The source part of the relationships part `rels`: `word/document.xml` for
@@ -180,6 +168,42 @@ mod tests {
     use super::*;
 
     const RELS: &str = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t/styles" Target="styles.xml"/><Relationship Id="rId2" Type="t/attachedTemplate" Target="file:///C:/Users/jsmith/Normal.dotm" TargetMode="External"/><Relationship Id="rId3" Type="t/image" Target="../media/image1.png"/></Relationships>"#;
+
+    /// A qualified `Id` is not the relationship's id, in either order: the
+    /// unqualified one decides whether the entry goes.
+    #[test]
+    fn a_qualified_id_does_not_shadow_the_id() {
+        let entry = |attributes: &str| {
+            format!(
+                r#"<Relationship xmlns:v="urn:vendor" {attributes} Type="t/template" Target="https://example.com/private" TargetMode="External"/>"#
+            )
+        };
+        let rels = |entry: &str| {
+            format!(
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{entry}<Relationship Id="rId1" Type="t/styles" Target="styles.xml"/></Relationships>"#
+            )
+        };
+        let removed: HashSet<String> = ["drop".to_owned()].into();
+        for attributes in [r#"v:Id="keep" Id="drop""#, r#"Id="drop" v:Id="keep""#] {
+            let raw = rels(&entry(attributes));
+            assert_eq!(without(&raw, &removed).unwrap(), rels(""), "{attributes}");
+        }
+        // A kept id stays whatever its qualified shadow names.
+        let raw = rels(&entry(r#"v:Id="drop" Id="keep""#));
+        assert_eq!(without(&raw, &removed).unwrap(), raw);
+    }
+
+    /// A relationship without an unqualified `Id` is refused, a qualified
+    /// one standing in for it or not.
+    #[test]
+    fn a_relationship_without_an_id_is_refused() {
+        for attributes in ["", r#"xmlns:v="urn:vendor" v:Id="rId9""#] {
+            let raw = format!(
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship {attributes} Type="t/template" Target="https://example.com/private" TargetMode="External"/></Relationships>"#
+            );
+            assert!(parse(&raw).is_err(), "{raw}");
+        }
+    }
 
     #[test]
     fn parses_ids_types_targets_and_modes() {

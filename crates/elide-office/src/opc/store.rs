@@ -9,10 +9,12 @@ use hipstr::HipStr;
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::{Block, IssueKind, Replacement};
+use crate::opc::index;
 use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
+use crate::opc::xml_edit::check_cuts;
 use crate::opc::xml_span::{
-    BlockKind, PRESERVE_SPACE, Span, attribute_spans, cell_markup_spans, preserve_space_at,
+    BlockKind, CollapsingRuns, PRESERVE_SPACE, Readable, Span, attribute_spans, cell_markup_spans,
     relationship_spans, text_spans,
 };
 
@@ -49,7 +51,8 @@ impl StoredPart {
     }
 
     /// Whether the part's text is read into blocks and spliced: every XML part
-    /// but a property part, which is redacted whole, and a relationships part.
+    /// but a property part, which is redacted whole. A relationships part is
+    /// one, its text the external hyperlink targets.
     pub(crate) fn is_text(&self) -> bool {
         self.attributes.is_some() && self.role != PartRole::Property
             || self.role == PartRole::RelationshipTargets
@@ -70,9 +73,14 @@ impl StoredPart {
         self.role
     }
 
-    /// The part's bytes as UTF-8 text, or `None` when they are not.
-    pub(crate) fn text(&self) -> Option<&str> {
-        self.as_text().ok()
+    /// The part's bytes as UTF-8 text.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// they are not UTF-8.
+    pub(crate) fn utf8(&self) -> Result<&str> {
+        index::text(&self.path, &self.bytes)
     }
 
     /// The part's raw bytes (a cheap ref-counted share).
@@ -126,7 +134,7 @@ impl StoredPart {
     /// [`RelationshipTargets`](PartRole::RelationshipTargets) part; and the
     /// values of its text attributes. An attribute inside a passage follows the
     /// whole passage, which stays unbroken. Errs on malformed XML.
-    fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
+    fn spans(&self, raw: &str) -> Readable<Vec<Span>> {
         let text = match self.role {
             PartRole::RelationshipTargets => return relationship_spans(raw),
             PartRole::ElementText => text_spans(raw)?,
@@ -150,40 +158,28 @@ impl StoredPart {
         Ok(anchored.into_iter().map(|(_, span)| span).collect())
     }
 
+    /// The collapsing run text elements of this part's XML `raw`, read into
+    /// `read` the first time.
+    fn collapsing_runs<'c>(
+        &self,
+        raw: &str,
+        read: &'c mut Option<CollapsingRuns>,
+    ) -> Result<&'c CollapsingRuns> {
+        if read.is_none() {
+            let runs = CollapsingRuns::read(raw)
+                .map_err(|_| Error::malformed(format!("part `{}` malformed XML", self.path)))?;
+            *read = Some(runs);
+        }
+        Ok(read.get_or_insert_default())
+    }
+
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
     pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
-        let raw = self
-            .as_text()
-            .map_err(|_| Error::malformed(format!("part `{}` not UTF-8", self.path)))?;
+        let raw = self.utf8()?;
         let mut ordered = replacements.to_vec();
         ordered.sort_by_key(|r| (r.start, r.end));
-
-        let mut prev_end = 0usize;
-        for r in &ordered {
-            if r.start > r.end || r.end > raw.len() {
-                return Err(Error::processing(format!(
-                    "span {}..{} out of bounds in `{}` (len {})",
-                    r.start,
-                    r.end,
-                    r.part,
-                    raw.len()
-                )));
-            }
-            if !raw.is_char_boundary(r.start) || !raw.is_char_boundary(r.end) {
-                return Err(Error::processing(format!(
-                    "span {}..{} falls mid-character in `{}`",
-                    r.start, r.end, r.part
-                )));
-            }
-            if r.start < prev_end {
-                return Err(Error::processing(format!(
-                    "span {}..{} overlaps an earlier one in `{}`",
-                    r.start, r.end, r.part
-                )));
-            }
-            prev_end = r.end;
-        }
+        check_cuts(raw, &self.path, ordered.iter().map(|r| r.start..r.end))?;
 
         // Recover each span's event kind so the replacement text is escaped for
         // its context (text content, attribute value) or validated against
@@ -194,6 +190,8 @@ impl StoredPart {
 
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
+        // Read once a replacement needs it.
+        let mut collapsing: Option<CollapsingRuns> = None;
         for r in ordered {
             let span = Span::covering(&spans, r.start, r.end).ok_or_else(|| {
                 Error::processing(format!(
@@ -204,7 +202,9 @@ impl StoredPart {
             let safe = span.escape(&r.text, r)?;
             // A run whose new text starts or ends with whitespace keeps it.
             if span.kind == BlockKind::Text
-                && let Some(at) = preserve_space_at(raw, r.start, &safe)
+                && let Some(at) = self
+                    .collapsing_runs(raw, &mut collapsing)?
+                    .preserve_space_at(r.start, &safe)
                 && at >= cursor
             {
                 out.push_str(&raw[cursor..at]);
@@ -251,7 +251,7 @@ mod tests {
         let part = element(
             r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Roe and</w:t></w:r></w:p>"#,
         );
-        let raw = part.text().unwrap();
+        let raw = part.utf8().unwrap();
         let start = raw.find("Roe and").unwrap();
         let replacement = Replacement {
             part: part.path().clone(),

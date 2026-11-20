@@ -28,13 +28,15 @@ use crate::opc::{Extraction, Package, PartClassifier, PartKind, PartReplacement,
 /// The classifier ([`PartClassifier`]) is what the engine consumes, and the
 /// [`Sanitizer`] the element edits decode applies. A format implements this on
 /// a zero-sized marker type, so [`OoxmlPackage`] carries no per-format state.
-pub(crate) trait OoxmlFormat: PartClassifier + Sanitizer + Clone {
+pub(crate) trait OoxmlFormat: PartClassifier + Sanitizer + Clone + Default {
     /// A short human name for the format's main part, used in the open-time
     /// error (e.g. `body` for a WordprocessingML document).
     const MAIN_LABEL: &'static str;
 
     /// The classifier instance the engine opens the package with.
-    fn classifier() -> Self;
+    fn classifier() -> Self {
+        Self::default()
+    }
 }
 
 /// An opened text-only OOXML package: every part read once and classified by the
@@ -93,14 +95,17 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     }
 
     /// Rewrite text `replacements` *and* replace binary `parts` (each a part
-    /// path mapped to its new bytes).
+    /// path mapped to its new bytes), re-packing every other part byte for
+    /// byte.
     ///
-    /// A [`PartReplacement`] naming a part not in the package refuses the
-    /// rewrite; the text rules match [`rewrite_with_parts`](Self::rewrite_with_parts).
+    /// Fail-closed: a replacement out of bounds, overlapping another, or
+    /// splitting a character, or a replacement or [`PartReplacement`] naming a
+    /// part not in the package, refuses the whole rewrite.
     ///
     /// # Errors
     ///
-    /// As [`rewrite_with_parts`](Self::rewrite_with_parts).
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if a
+    /// replacement can't be applied.
     pub fn rewrite_with_parts(
         &self,
         replacements: &[Replacement],
