@@ -595,3 +595,25 @@ fn a_removed_region_reads_each_element_in_its_own_vocabulary() {
         assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
     }
 }
+
+/// An `mglyph` or `malignmark` in a MathML token element stays MathML, so a
+/// `title` in it is not HTML text and `</math>` still ends the math.
+#[test]
+fn mglyph_and_malignmark_stay_mathml() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        "<math hidden><mi><mglyph><title></math><p>Visible</p>",
+        "<math hidden><mi><malignmark><title></math><p>Visible</p>",
+    ] {
+        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+    }
+    // Other children of `mi` are still HTML: a `title` there is text.
+    let raw = "<math hidden><mi><b><title></math></title></b></mi></math><p>Visible</p>";
+    assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>");
+    // A kept `mi` holding a self-closed `mglyph` does not hold what follows.
+    let out = sanitize(
+        html(policy),
+        "<math><mi><mglyph/>x</mi></math><p>Visible</p>",
+    );
+    assert!(out.ends_with("<p>Visible</p>"), "{out}");
+}

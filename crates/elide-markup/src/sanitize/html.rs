@@ -1012,6 +1012,12 @@ pub(super) fn integration_point(space: Space, name: &str) -> bool {
     }
 }
 
+/// Whether the element `name` (lowercased), started in a MathML token
+/// element, stays MathML where any other element is read as HTML.
+pub(super) fn stays_math(name: &str) -> bool {
+    matches!(name, "mglyph" | "malignmark")
+}
+
 /// Whether the start tag `start` (lowercased) closes an open HTML element
 /// `open` that holds nothing else open: the end tags HTML lets a document
 /// leave out.

@@ -443,8 +443,9 @@ impl<'a> Rebuild<'a> {
                 // `math` root; else the current element's, but for an `svg`
                 // in a MathML `annotation-xml`.
                 let (current, current_space) = region.current();
-                let as_html =
-                    current_space == Space::Html || html::integration_point(current_space, current);
+                let as_html = current_space == Space::Html
+                    || (html::integration_point(current_space, current)
+                        && !(current_space == Space::Math && html::stays_math(&name)));
                 let space = match name.as_str() {
                     "svg" if as_html || current == "annotation-xml" => Space::Svg,
                     "math" if as_html => Space::Math,
@@ -558,7 +559,18 @@ impl<'a> Rebuild<'a> {
         let tag = e.html5_tag(self.raw)?;
         let name = tag.name.to_ascii_lowercase();
         let left = html::breaks_out(self.space(), &name, &tag.attributes) && self.leave_foreign();
-        let space = self.space();
+        // A MathML token element reads HTML, but for an `mglyph` or
+        // `malignmark`, which stays MathML.
+        let space = match self.spaces.last() {
+            Some(foreign)
+                if foreign.space == Space::Html
+                    && html::integration_point(Space::Math, &foreign.root)
+                    && html::stays_math(&name) =>
+            {
+                Space::Math
+            }
+            _ => self.space(),
+        };
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
         let self_closing = self_closing(self.raw, &span, &tag.attributes, is_start);
         // Whether the element holds what follows: a browser ignores the
