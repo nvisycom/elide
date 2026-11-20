@@ -106,10 +106,10 @@ impl Redact for AttachmentRedaction<'_> {
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Dictionary, Document, Object, Stream, dictionary, text_string};
+    use lopdf::{Document, Object, Stream, dictionary, text_string};
 
     use super::*;
-    use crate::fixtures::{with_attachments, with_pages};
+    use crate::fixtures::{DocBuilder, Page, blank, with_attachments};
 
     /// `pdf` with `replaced` written back and `removed` dropped.
     fn redacted(pdf: &Pdf, replaced: &[AttachmentReplacement], removed: &[AttachmentId]) -> Pdf {
@@ -167,8 +167,7 @@ mod tests {
     /// does not name it.
     #[test]
     fn reads_a_legacy_file_under_a_referenced_name() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let stream = doc.add_object(Stream::new(
             dictionary! { "Type" => "EmbeddedFile" },
             b"Jane Roe".to_vec(),
@@ -198,8 +197,7 @@ mod tests {
     /// A file held under `/EF /F` is named by its Unicode `/UF` first.
     #[test]
     fn a_portable_file_takes_its_unicode_name() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let stream = doc.add_object(Stream::new(
             dictionary! { "Type" => "EmbeddedFile" },
             b"<a/>".to_vec(),
@@ -227,13 +225,10 @@ mod tests {
     /// array and whose catalog associates `on_catalog` through a referenced
     /// one; neither file is in the attachment tree.
     fn with_associated(on_page: (&str, &[u8]), on_catalog: (&str, &[u8])) -> Vec<u8> {
-        let mut doc = Document::with_version("2.0");
+        let mut pdf = DocBuilder::with_version("2.0");
         let mut spec = |(name, bytes): (&str, &[u8])| {
-            let stream = doc.add_object(Stream::new(
-                dictionary! { "Type" => "EmbeddedFile" },
-                bytes.to_vec(),
-            ));
-            doc.add_object(dictionary! {
+            let stream = pdf.stream(dictionary! { "Type" => "EmbeddedFile" }, bytes.to_vec());
+            pdf.add(dictionary! {
                 "Type" => "Filespec",
                 "F" => Object::string_literal(name),
                 "EF" => dictionary! { "F" => stream },
@@ -241,12 +236,10 @@ mod tests {
         };
         let page_spec = spec(on_page);
         let catalog_spec = spec(on_catalog);
-        let catalog_af = doc.add_object(Object::Array(vec![catalog_spec.into()]));
-        with_pages(&mut doc, [dictionary! { "AF" => vec![page_spec.into()] }]);
-        doc.catalog_mut().unwrap().set("AF", catalog_af);
-        let mut out = Vec::new();
-        doc.save_to(&mut out).unwrap();
-        out
+        let catalog_af = pdf.add(Object::Array(vec![catalog_spec.into()]));
+        pdf.page(Page::new().set("AF", vec![page_spec.into()]))
+            .catalog("AF", catalog_af);
+        pdf.bytes()
     }
 
     #[test]

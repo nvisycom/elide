@@ -187,13 +187,12 @@ mod tests {
     use lopdf::dictionary;
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::blank;
 
     /// A document whose `/Dests` tree has a kid that does not resolve, then
     /// a leaf held in a referenced `/Names` array.
     fn document() -> Document {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let names = doc.add_object(Object::Array(vec![
             Object::string_literal("a"),
             1.into(),
@@ -225,8 +224,7 @@ mod tests {
     /// An array shared among many nodes is read once, its pairs taken once.
     #[test]
     fn a_shared_array_is_read_once() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let names = doc.add_object(Object::Array(vec![Object::string_literal("a"), 1.into()]));
         let leaves: Vec<Object> = (0..3)
             .map(|_| doc.add_object(dictionary! { "Names" => names }).into())
@@ -248,8 +246,7 @@ mod tests {
     /// once.
     #[test]
     fn a_node_named_through_another_reference_is_read_once() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let leaf = doc.add_object(dictionary! {
             "Names" => vec![Object::string_literal("a"), 1.into()],
         });
@@ -266,8 +263,7 @@ mod tests {
     /// node's kids are still read.
     #[test]
     fn a_null_names_entry_is_skipped() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let leaf = doc.add_object(dictionary! {
             "Names" => vec![Object::string_literal("a"), 1.into()],
         });
@@ -287,8 +283,7 @@ mod tests {
     /// still read; a null root is no tree, read whole.
     #[test]
     fn a_dangling_names_entry_and_a_null_root_are_absent() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let leaf = doc.add_object(dictionary! {
             "Names" => vec![Object::string_literal("a"), 1.into()],
         });

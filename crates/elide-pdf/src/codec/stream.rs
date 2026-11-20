@@ -174,13 +174,11 @@ fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
 #[cfg(test)]
 mod tests {
     use elide_core::modality::text::TextReplacement;
-    use lopdf::content::{Content, Operation};
-    use lopdf::{Document, Object, Stream as PdfObjectStream, dictionary};
 
     use super::*;
     use crate::codec::state::Pages;
     use crate::content::text::Text;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{DocBuilder, Page, shown, type1};
     use crate::pdf::Pdf;
     #[cfg(feature = "render")]
     use crate::pdf::reader::{DeviceRect, GlyphRect, PageFrame};
@@ -189,29 +187,10 @@ mod tests {
 
     /// The body stream of a one-page document showing `Jane Roe`.
     fn body() -> PdfStream {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-        });
-        let operations = vec![
-            Operation::new("BT", vec![]),
-            Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal("Jane Roe")]),
-            Operation::new("ET", vec![]),
-        ];
-        let content = doc.add_object(PdfObjectStream::new(
-            dictionary! {},
-            Content { operations }.encode().unwrap(),
-        ));
-        with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
-            }],
-        );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        pdf.page(Page::new().font("F1", font).ops(shown("Jane Roe")));
+        let bytes = pdf.bytes();
         let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
         PdfStream {
             state: PdfState::new(Pages::Glyph(blocks)),

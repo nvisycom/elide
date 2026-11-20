@@ -226,17 +226,20 @@ mod tests {
     use lopdf::{Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{DocBuilder, Page};
 
     /// A one-page document drawing nothing, its page as `page` and with its
     /// own resources unless `page` sets them.
     fn document(page: Dictionary) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.7");
-        let content = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
-        let mut dict = dictionary! { "Contents" => content, "Resources" => dictionary! {} };
-        dict.extend(&page);
-        let id = with_pages(&mut doc, [dict])[0];
-        (doc, id)
+        let mut pdf = DocBuilder::new();
+        pdf.page(
+            Page::new()
+                .content(Vec::new())
+                .set("Resources", Dictionary::new())
+                .entries(page),
+        );
+        let (doc, pages) = pdf.finish();
+        (doc, pages[0])
     }
 
     fn faulted(doc: &Document) -> bool {

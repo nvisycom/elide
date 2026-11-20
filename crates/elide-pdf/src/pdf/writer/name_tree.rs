@@ -75,17 +75,16 @@ fn names_mut<'a>(doc: &'a mut Document, tree: &[u8], node: Node) -> Option<&'a m
 
 #[cfg(test)]
 mod tests {
-    use lopdf::{Dictionary, dictionary};
+    use lopdf::dictionary;
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::blank;
     use crate::pdf::reader::NameTree;
 
     /// A document whose `/Dests` tree has one leaf held in a referenced
     /// `/Names` array.
     fn document() -> Document {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let names = doc.add_object(Object::Array(vec![
             Object::string_literal("a"),
             1.into(),
