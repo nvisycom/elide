@@ -13,6 +13,8 @@
 //! [`Metadata`]: elide_core::modality::metadata::Metadata
 //! [`write_at`]: elide_core::modality::DataWriter::write_at
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use elide_codec::metadata::MetadataFields;
 use elide_codec::{FlaggedItem, FormatId, LocalId, Stream, StreamMut};
@@ -88,6 +90,13 @@ impl DocProps {
 /// the property XML as each batch of redactions edits them.
 #[derive(Debug)]
 pub(crate) struct DocPropsStream {
+    /// The property part's XML bytes as read, which every rewrite starts
+    /// from: a custom property is keyed by its position here, and one
+    /// dropped by a rewrite would shift those after it.
+    original: Bytes,
+    /// Each field's value as edited so far, by key, the latest batch's
+    /// winning.
+    edits: BTreeMap<String, String>,
     /// The property part's XML bytes, as edited so far.
     xml: Bytes,
     /// Every field, parsed once at decode and kept in document order.
@@ -102,6 +111,8 @@ impl DocPropsStream {
             .map(|field| MetadataData::new(field.key, field.value, field.label))
             .collect();
         Self {
+            original: xml.clone(),
+            edits: BTreeMap::new(),
             xml,
             fields: MetadataFields::new(fields),
         }
@@ -132,12 +143,13 @@ impl DataReader<Metadata> for DocPropsStream {
 #[::async_trait::async_trait]
 impl DataWriter<Metadata> for DocPropsStream {
     async fn write_at(&mut self, redactions: Redactions<Metadata>) -> Result<()> {
-        let edits = self.fields.redact(redactions)?;
-        let edits: Vec<(&str, &str)> = edits
+        self.edits.extend(self.fields.redact(redactions)?);
+        let edits: Vec<(&str, &str)> = self
+            .edits
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
-        self.xml = props::rewrite(&self.xml, &edits);
+        self.xml = props::rewrite(&self.original, &edits);
         Ok(())
     }
 }
@@ -197,5 +209,38 @@ mod tests {
                 .any(|field| field.key == "creator" && field.value == "[REDACTED]")
         );
         assert!(!fields.iter().any(|field| field.key == "title"));
+    }
+
+    /// A custom property is keyed by its position when the part is read; one
+    /// dropped by a batch must not shift the property a later batch names.
+    #[tokio::test]
+    async fn a_later_batch_edits_the_property_it_was_read_as() {
+        const CUSTOM: &[u8] = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Acme</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Owner"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="4" name="City"><vt:lpwstr>Kyiv</vt:lpwstr></property></Properties>"#;
+        let mut stream = DocPropsStream::new(Bytes::from_static(CUSTOM));
+        stream
+            .write_at(Redactions::from([(
+                MetadataLocation::new("property/0"),
+                TextReplacement::Removed,
+            )]))
+            .await
+            .unwrap();
+        stream
+            .write_at(Redactions::from([(
+                MetadataLocation::new("property/1"),
+                TextReplacement::substituted("[NAME]"),
+            )]))
+            .await
+            .unwrap();
+        let xml = stream.xml.clone();
+        let text = std::str::from_utf8(&xml).unwrap();
+        assert!(
+            !text.contains("Acme") && !text.contains("Jane Roe"),
+            "{text}"
+        );
+        let values: Vec<String> = props::fields(&xml)
+            .into_iter()
+            .map(|field| field.value)
+            .collect();
+        assert_eq!(values, ["Owner", "[NAME]", "City", "Kyiv"]);
     }
 }
