@@ -466,3 +466,31 @@ fn cells_in_a_chart_sheet_fail_the_check() {
         crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier).is_err()
     );
 }
+
+/// A chart sheet's relationship names its part as OPC does, ASCII case
+/// aside.
+#[test]
+fn a_chart_sheet_target_matches_its_part_whatever_its_case() {
+    let source = workbook_with_sheet_kinds();
+    let parts: Vec<(String, Vec<u8>)> = crate::fixtures::part_names(&source)
+        .into_iter()
+        .map(|name| {
+            let bytes = crate::fixtures::read_part(&source, &name).unwrap();
+            let bytes = if name == "xl/_rels/workbook.xml.rels" {
+                String::from_utf8(bytes)
+                    .unwrap()
+                    .replace("chartsheets/sheet1.xml", "ChartSheets/Sheet1.XML")
+                    .into_bytes()
+            } else {
+                bytes
+            };
+            (name, bytes)
+        })
+        .collect();
+    let parts: Vec<(&str, &[u8])> = parts
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    let xlsx = Xlsx::open(&crate::fixtures::pack_parts(&parts)).unwrap();
+    assert_eq!(xlsx.sheets.len(), 1);
+}

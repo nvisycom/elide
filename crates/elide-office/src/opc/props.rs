@@ -5,9 +5,11 @@
 //! editor, the timestamps, the company and manager, free text (the title,
 //! description, keywords, template path), the names of the document's parts,
 //! and custom properties. This says what each field is, reads the fields out of
-//! a part's bytes, and edits them back, matching by element **local name** so
-//! it works whether the property uses the `cp:`/`dc:`/`ap:` prefix or the
-//! default namespace, and tolerating a leading byte-order mark. When metadata
+//! a part's bytes, and edits them back, matching each element by its local
+//! name in its own vocabulary (`dc:`, `dcterms:`, `cp:`, the extended or
+//! custom properties, `vt:`) under whatever prefix binds it, and tolerating a
+//! leading byte-order mark. An element in an unreviewed namespace holds
+//! nothing read. When metadata
 //! is treated as content, [`UnsurfacedProperties`] strips everything else by
 //! the same walk, so the part keeps exactly what [`fields`] reads.
 
@@ -19,17 +21,20 @@ use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::redaction::HiddenContent;
+use quick_xml::NsReader;
 use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::name::QName;
 use quick_xml::writer::Writer;
-use quick_xml::{NsReader, Reader};
 
-use crate::opc::ns::{DCTERMS, XSI, transitional};
+use crate::opc::ns::{
+    CORE_PROPERTIES, CUSTOM_PROPERTIES, DC, DCTERMS, DOC_PROPS_VTYPES, EXTENDED_PROPERTIES, XSI,
+    transitional,
+};
 use crate::opc::vocabulary::is_known;
 use crate::opc::xml_edit::{
-    Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, bom_len, local_name,
-    namespace_of,
+    Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, bom_len, bound,
+    local_name, namespace_of,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
@@ -110,8 +115,9 @@ pub struct Field {
 /// applied when metadata is treated as content, so what stays is exactly what
 /// detection sees.
 ///
-/// It walks the part as [`fields`] does, by local name in any namespace, and
-/// keeps the root, each surfaced field with everything inside it, and the
+/// It walks the part as [`fields`] does, by local name in its vocabulary, and
+/// keeps the root, each surfaced field with everything inside it but what
+/// is in an unreviewed namespace, and the
 /// list containers, vectors, and variants on the path to a kept list entry.
 /// Every other element goes with its subtree, as do text, CDATA, and entity
 /// references outside a field, an entity reference no field resolves, and
@@ -147,25 +153,50 @@ impl Edit for UnsurfacedProperties {
         let mut properties = 0usize;
         // The heading counts, written once the titles they group are known.
         let mut counts: Vec<Count<'_>> = Vec::new();
-        // A heading count being read: where its content begins, and how many
-        // elements are open inside it, itself included.
-        let mut counting: Option<(usize, usize)> = None;
+        // A heading count being read: where its content begins, how many
+        // elements are open inside it, itself included, and its character
+        // data as XML reads it (none once an element or a reference that
+        // does not decode is met).
+        let mut counting: Option<(usize, usize, Option<String>)> = None;
         // How many titles of parts are kept.
         let mut titles = 0usize;
 
         loop {
             let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
-            if let Some((start, depth)) = &mut counting {
+            if let Some((start, depth, text)) = &mut counting {
                 match event {
-                    Event::Start(_) => *depth += 1,
+                    Event::Start(_) => {
+                        *depth += 1;
+                        *text = None;
+                    }
+                    Event::Empty(_) => *text = None,
                     Event::End(_) => *depth -= 1,
                     Event::Eof => return Err(malformed_xml("unclosed element")),
+                    Event::Text(ref t) => {
+                        let decoded = unescape(t.as_ref()).ok();
+                        *text = text.take().zip(decoded).map(|(text, t)| text + &t);
+                    }
+                    Event::CData(ref t) => {
+                        if let Some(text) = text {
+                            text.push_str(t.as_ref());
+                        }
+                    }
+                    Event::GeneralRef(ref r) => {
+                        let resolved = resolve_ref(r);
+                        if resolved.is_empty() {
+                            *text = None;
+                        } else if let Some(text) = text {
+                            text.push_str(&resolved);
+                        }
+                    }
                     _ => {}
                 }
                 if *depth == 0 {
+                    let said = text.as_deref().and_then(|text| text.trim().parse().ok());
                     counts.push(Count {
                         range: *start..span.start,
                         close: None,
+                        said,
                     });
                     counting = None;
                     walk.leave();
@@ -180,7 +211,7 @@ impl Edit for UnsurfacedProperties {
                 Event::Start(ref e) | Event::Empty(ref e) => {
                     let is_start = matches!(event, Event::Start(_));
                     let depth = walk.depth();
-                    let field = walk.enter(e);
+                    let field = walk.enter(namespace.as_deref(), e);
                     let local = e.local_name().into_inner();
                     // A heading's count is kept, its value written from the
                     // titles it groups.
@@ -194,20 +225,22 @@ impl Edit for UnsurfacedProperties {
                         };
                         cut_attributes(&reader.reader, raw, e, &element, &mut cuts)?;
                         if is_start {
-                            counting = Some((span.end, 1));
+                            counting = Some((span.end, 1, Some(String::new())));
                         } else {
                             walk.leave();
                             counts.push(Count {
                                 range: span.end - 2..span.end,
                                 close: Some(&raw[span.start + 1..][..e.name().as_ref().len()]),
+                                said: None,
                             });
                         }
                         continue;
                     }
                     let mut pid = None;
                     let kept = if reading.is_some() {
-                        // An array's bounds are numbers nothing reads.
-                        local != "array"
+                        // An array's bounds are numbers nothing reads, and
+                        // nothing reads an unreviewed vocabulary.
+                        local != "array" && !walk.is_foreign()
                     } else if depth == 0 {
                         true
                     } else if let Some(field) = field {
@@ -302,6 +335,8 @@ struct Count<'a> {
     range: Range<usize>,
     /// For an empty one, its name, to close it with once it holds a value.
     close: Option<&'a str>,
+    /// The number its character data says, if it says one.
+    said: Option<usize>,
 }
 
 /// Write each of `counts` as the titles of parts its heading groups: of the
@@ -319,12 +354,7 @@ fn write_counts(
         let value = if at + 1 == counts.len() {
             rest
         } else {
-            let said = count
-                .close
-                .is_none()
-                .then(|| unescape(written).ok()?.trim().parse::<usize>().ok())
-                .flatten();
-            said.unwrap_or(0).min(rest)
+            count.said.unwrap_or(0).min(rest)
         };
         rest -= value;
         let value = value.to_string();
@@ -571,18 +601,54 @@ struct Walk {
     properties: usize,
     /// How many times each element field has been entered.
     seen: HashMap<String, usize>,
+    /// Where the outermost open element in an unreviewed namespace sits:
+    /// nothing in it is a field or read.
+    outside: Option<usize>,
+}
+
+/// The namespace an element this walk reads by name must be in to be that
+/// element, a strict one read as its transitional twin.
+fn vocabulary(local: &str) -> Option<&'static str> {
+    match local {
+        "creator" | "title" | "subject" | "description" => Some(DC),
+        "lastModifiedBy" | "keywords" | "category" => Some(CORE_PROPERTIES),
+        "created" | "modified" => Some(DCTERMS),
+        "Manager" | "Company" | "Template" | "HyperlinkBase" | "TitlesOfParts" | "HeadingPairs" => {
+            Some(EXTENDED_PROPERTIES)
+        }
+        CUSTOM_PROPERTY => Some(CUSTOM_PROPERTIES),
+        "vector" | "variant" | "array" | "lpwstr" | "lpstr" | "bstr" | "i4" => {
+            Some(DOC_PROPS_VTYPES)
+        }
+        _ => None,
+    }
 }
 
 impl Walk {
-    /// Enter `elem`, returning the field it holds, if any.
+    /// Enter `elem`, in `namespace`, returning the field it holds, if any.
+    ///
+    /// An element is the one its local name says only in that name's
+    /// vocabulary; in another namespace it is no field, and one in an
+    /// unreviewed namespace holds nothing read.
     ///
     /// Every key is unique in its part. An element field is keyed by its name,
     /// a repeated one with `#<n>` after it (no element name holds a `#`). A
     /// list entry is keyed `<list>/<n>`, and a custom property by its position,
     /// `property/<n>`, since its name is free text that could look like any
     /// key; the name is a field of its own, `property/<n>/name`.
-    fn enter(&mut self, elem: &BytesStart<'_>) -> Option<Entered> {
+    fn enter(&mut self, namespace: Option<&str>, elem: &BytesStart<'_>) -> Option<Entered> {
+        let namespace = namespace.map(transitional);
+        if self.outside.is_some() || namespace.is_some_and(|namespace| !is_known(namespace)) {
+            self.outside.get_or_insert(self.open.len());
+            self.open.push(String::new());
+            return None;
+        }
         let local = local_name(elem);
+        // A name out of its vocabulary is kept marked, so it matches none.
+        let local = match vocabulary(&local) {
+            Some(expected) if namespace != Some(expected) => format!("?{local}"),
+            _ => local,
+        };
         let entered = match self.open.len() {
             1 if ELEMENT_FIELDS.contains(&local.as_str()) => {
                 let count = self.seen.entry(local.clone()).or_default();
@@ -640,6 +706,14 @@ impl Walk {
     /// Leave the innermost open element.
     fn leave(&mut self) {
         self.open.pop();
+        if self.outside == Some(self.open.len()) {
+            self.outside = None;
+        }
+    }
+
+    /// Whether an open element is in an unreviewed namespace.
+    fn is_foreign(&self) -> bool {
+        self.outside.is_some()
     }
 
     /// How many elements are open.
@@ -691,16 +765,19 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
     let Some((_, text)) = split_bom(xml) else {
         return Vec::new();
     };
-    let mut reader = Reader::from_str(text);
+    let mut reader = NsReader::from_str(text);
     reader.config_mut().trim_text(false);
     let mut fields = Vec::new();
     let mut walk = Walk::default();
     let mut reading: Option<Reading> = None;
 
     loop {
-        match reader.read_event() {
-            Ok(Event::Start(elem)) => {
-                let field = walk.enter(&elem);
+        let read = reader
+            .read_resolved_event()
+            .map(|(resolved, event)| (bound(&resolved), event));
+        match read {
+            Ok((namespace, Event::Start(elem))) => {
+                let field = walk.enter(namespace.as_deref(), &elem);
                 // A custom property holding a list reads one entry per line,
                 // so no match runs from one entry into the next.
                 if let Some(open) = &mut reading
@@ -727,12 +804,14 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
                     });
                 }
             }
-            Ok(Event::Empty(elem)) => {
-                walk.enter(&elem);
+            Ok((namespace, Event::Empty(elem))) => {
+                walk.enter(namespace.as_deref(), &elem);
                 walk.leave();
             }
-            Ok(Event::Text(t)) => {
-                if let Some(open) = &mut reading {
+            Ok((_, Event::Text(t))) => {
+                if let Some(open) = &mut reading
+                    && !walk.is_foreign()
+                {
                     open.value
                         .push_str(&unescape(t.as_ref()).unwrap_or_default());
                 }
@@ -740,8 +819,10 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
             // A field value written as CDATA carries its text verbatim (no entity
             // escaping), so it is appended as-is; without this a `<dc:creator>`
             // stored as CDATA would read as empty and never be surfaced.
-            Ok(Event::CData(t)) => {
-                if let Some(open) = &mut reading {
+            Ok((_, Event::CData(t))) => {
+                if let Some(open) = &mut reading
+                    && !walk.is_foreign()
+                {
                     open.value.push_str(&t);
                 }
             }
@@ -749,12 +830,14 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
             // event, not as part of the surrounding text. Resolve it into the
             // value; without this a name like `Jos&#233;`, or a wholly
             // entity-encoded value, would be read short and slip past detection.
-            Ok(Event::GeneralRef(r)) => {
-                if let Some(open) = &mut reading {
+            Ok((_, Event::GeneralRef(r))) => {
+                if let Some(open) = &mut reading
+                    && !walk.is_foreign()
+                {
                     open.value.push_str(&resolve_ref(&r));
                 }
             }
-            Ok(Event::End(_)) => {
+            Ok((_, Event::End(_))) => {
                 if reading
                     .as_ref()
                     .is_some_and(|open| walk.depth() == open.depth)
@@ -769,8 +852,7 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
                 }
                 walk.leave();
             }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
+            Ok((_, Event::Eof)) | Err(_) => break,
             _ => {}
         }
     }
@@ -805,7 +887,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
             .find(|(name, _)| *name == key)
             .map(|(_, value)| value.trim())
     };
-    let mut reader = Reader::from_str(text);
+    let mut reader = NsReader::from_str(text);
     reader.config_mut().trim_text(false);
     // The output keeps the part's BOM, written ahead of everything else.
     let mut writer = Writer::new(bom.as_bytes().to_vec());
@@ -822,15 +904,15 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
     let mut pids = Pids::default();
 
     loop {
-        let event = match reader.read_event() {
-            Ok(Event::Eof) => break,
-            Ok(event) => event,
+        let (namespace, event) = match reader.read_resolved_event() {
+            Ok((_, Event::Eof)) => break,
+            Ok((resolved, event)) => (bound(&resolved), event),
             Err(_) => return Bytes::copy_from_slice(xml),
         };
         if dropping > 0 {
             match event {
                 Event::Start(elem) => {
-                    walk.enter(&elem);
+                    walk.enter(namespace.as_deref(), &elem);
                     dropping += 1;
                 }
                 Event::End(_) => {
@@ -844,7 +926,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
         if let Some((property, value)) = held.take() {
             match event {
                 Event::Start(elem) if is_text_type(&elem) => {
-                    walk.enter(&elem);
+                    walk.enter(namespace.as_deref(), &elem);
                     let property = pids.number(property);
                     let _ = writer.write_event(Event::Start(property));
                     let _ = writer.write_event(Event::Start(elem));
@@ -852,7 +934,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                     clearing = 2;
                 }
                 Event::Start(elem) => {
-                    walk.enter(&elem);
+                    walk.enter(namespace.as_deref(), &elem);
                     dropping = 2;
                     pids.dropped = true;
                 }
@@ -872,7 +954,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
         }
         match event {
             Event::Start(elem) => {
-                let field = walk.enter(&elem);
+                let field = walk.enter(namespace.as_deref(), &elem);
                 if clearing > 0 {
                     clearing += 1;
                     let _ = writer.write_event(Event::Start(elem));
@@ -936,7 +1018,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                 }
             }
             Event::Empty(elem) => {
-                walk.enter(&elem);
+                walk.enter(namespace.as_deref(), &elem);
                 let elem = if walk.is_property() {
                     pids.number(elem.into_owned())
                 } else {
@@ -1134,14 +1216,15 @@ mod tests {
             .into_iter()
             .map(|field| field.value)
             .collect();
-        let mut reader = Reader::from_str(xml);
+        let mut reader = NsReader::from_str(xml);
         let mut unread = Vec::new();
         let mut walk = Walk::default();
         loop {
-            let event = reader.read_event().unwrap();
+            let (resolved, event) = reader.read_resolved_event().unwrap();
+            let namespace = bound(&resolved);
             match &event {
                 Event::Start(e) => {
-                    walk.enter(e);
+                    walk.enter(namespace.as_deref(), e);
                 }
                 Event::End(_) => walk.leave(),
                 Event::Text(_) if walk.is_count() => continue,
@@ -1238,6 +1321,45 @@ mod tests {
             r#"{EXTENDED}<HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Pages</vt:lpstr></vt:variant><vt:variant><vt:i4/></vt:variant></vt:vector></HeadingPairs></Properties>"#
         );
         assert!(surfaced_only(&empty).contains("<vt:i4>0</vt:i4>"));
+    }
+
+    /// A field is its name in its own vocabulary: the same name in another
+    /// namespace is no field, and an element in an unreviewed namespace is
+    /// neither read nor kept, even inside a field.
+    #[test]
+    fn a_field_is_matched_by_its_namespace() {
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:v="urn:vendor"><v:title>Jane Roe</v:title><cp:title>John Doe</cp:title><dc:title>Plan</dc:title><dc:subject>a<v:x>Ada</v:x>b</dc:subject></cp:coreProperties>"#;
+        assert_eq!(
+            pairs(core.as_bytes()),
+            [
+                ("title".to_owned(), "Plan".to_owned()),
+                ("subject".to_owned(), "ab".to_owned()),
+            ]
+        );
+        let text = surfaced_only(core);
+        assert_eq!(
+            text,
+            r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Plan</dc:title><dc:subject>ab</dc:subject></cp:coreProperties>"#
+        );
+        let app = format!(
+            r#"{EXTENDED}<Company xmlns="urn:vendor">Acme</Company><TitlesOfParts><vt:vector size="1" baseType="lpstr"><lpstr>Jane</lpstr></vt:vector></TitlesOfParts></Properties>"#
+        );
+        assert!(pairs(app.as_bytes()).is_empty());
+        let text = surfaced_only(&app);
+        assert!(!text.contains("Acme") && !text.contains("Jane"), "{text}");
+    }
+
+    /// A count reads as XML reads it, however its digits are written.
+    #[test]
+    fn a_heading_count_reads_its_character_data() {
+        let app = |count: &str| {
+            format!(
+                r#"{EXTENDED}<HeadingPairs><vt:vector size="4" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>{count}</vt:i4></vt:variant><vt:variant><vt:lpstr>Charts</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr>Payroll</vt:lpstr><vt:lpstr>Chart 1</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#
+            )
+        };
+        for count in ["<![CDATA[1]]>", "&#49;", " 1 "] {
+            assert_eq!(surfaced_only(&app(count)), app("1"), "{count}");
+        }
     }
 
     /// Where a cut joins text into a `]]>`, its `>` is written as a

@@ -41,6 +41,7 @@ use quick_xml::escape::{EscapeError, unescape};
 pub use self::attributes::TextAttribute;
 pub(crate) use self::attributes::{Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns};
 pub use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
+use self::content_types::ContentTypes;
 use self::index::Index;
 pub use self::kind::PartKind;
 pub use self::names::Names;
@@ -82,6 +83,8 @@ pub(crate) fn attribute_value(raw: &str) -> Result<Cow<'_, str>> {
 pub struct Package {
     /// Every package part, in archive order.
     parts: Vec<StoredPart>,
+    /// The content-types manifest, which types every part.
+    content_types: ContentTypes,
     /// The format's names, fitted to their rules when redacted.
     names: &'static Names,
     /// The original archive bytes, retained so [`rewrite_with_parts`](Self::rewrite_with_parts) can
@@ -142,11 +145,11 @@ impl Package {
                     bytes.clone(),
                     attributes,
                 )
-                .with_content_type(index.content_type(path))
             })
             .collect();
         Ok(Self {
             parts,
+            content_types: index.content_types,
             names: classifier.names(),
             source: Bytes::copy_from_slice(document),
         })
@@ -158,12 +161,15 @@ impl Package {
         self.parts.iter().any(|p| p.kind() == kind)
     }
 
-    /// The content type the manifest names for the part at `path`, if any.
+    /// The content type the manifest names for the part at `path`, if the
+    /// package has that part; part names compare ASCII case-insensitively, as
+    /// OPC requires.
     pub(crate) fn content_type(&self, path: &PartPath) -> Option<&str> {
-        self.parts
+        let part = self
+            .parts
             .iter()
-            .find(|p| p.path() == path)
-            .and_then(StoredPart::content_type)
+            .find(|p| p.path().as_str().eq_ignore_ascii_case(path.as_str()))?;
+        self.content_types.of(part.path())
     }
 
     /// Whether the package contains a part at `path`.

@@ -26,7 +26,7 @@ const COMMENTS: &str =
 /// relationships.
 pub(crate) struct Index {
     pub(crate) parts: Vec<(PartPath, Bytes)>,
-    content_types: ContentTypes,
+    pub(crate) content_types: ContentTypes,
     /// Each relationships part, keyed by its path, with its source part (`None`
     /// for the package's own) and its relationships.
     pub(crate) relationships: HashMap<PartPath, (Option<PartPath>, Vec<Relationship>)>,
