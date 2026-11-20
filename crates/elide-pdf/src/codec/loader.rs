@@ -211,7 +211,7 @@ mod tests {
     use elide_codec::{Blob, Document, DocumentLoader, LocalId};
     use elide_core::ErrorKind;
     use elide_core::modality::text::Text;
-    use elide_core::modality::{ChunkReader, DataWriter};
+    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
     use elide_core::redaction::{HiddenContentPolicy, Redactions};
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
@@ -324,6 +324,21 @@ mod tests {
         let render = png(100, 100, [255, 255, 255]);
         let page = PageStream::new(1, Bytes::from(render)).replaced();
         let doc = rendered_document(&scanned_doc(), page, vec![]);
+        let error = doc.encode().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+    }
+
+    /// Reading one region of a replaced page's render is not reading the
+    /// page: it is refused as if nothing read it.
+    #[tokio::test]
+    async fn a_region_read_does_not_count_as_reading_the_page() {
+        let render = png(100, 100, [255, 255, 255]);
+        let page = PageStream::new(1, Bytes::from(render)).replaced();
+        let mut doc = rendered_document(&scanned_doc(), page, vec![]);
+        let page = doc
+            .stream_mut::<Image>("page-1")
+            .expect("the page is a stream");
+        page.read_at(&region(0.0, 0.0, 10.0, 10.0)).await.unwrap();
         let error = doc.encode().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
     }

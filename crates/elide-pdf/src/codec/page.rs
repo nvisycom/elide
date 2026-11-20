@@ -31,7 +31,8 @@ pub(super) struct PageStream {
     /// Whether the page is replaced by its render even with nothing redacted
     /// on it: one redacted from its render, whose text layer must not ship.
     replaced: bool,
-    /// Whether the render was read, as detection reads it.
+    /// Whether the whole render was read, as detection reads it: a read of
+    /// one region of it does not count.
     read: AtomicBool,
 }
 
@@ -112,13 +113,14 @@ impl Stream<Image> for PageStream {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
-        self.read.store(true, Ordering::Relaxed);
         let render = self.open()?;
-        Ok(vec![Chunk {
+        let chunk = Chunk {
             location: render.frame().with_page(self.number),
             data: render.data()?,
             hints: Vec::new(),
-        }])
+        };
+        self.read.store(true, Ordering::Relaxed);
+        Ok(vec![chunk])
     }
 }
 
@@ -126,7 +128,6 @@ impl Stream<Image> for PageStream {
 impl DataReader<Image> for PageStream {
     async fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
         self.on_this_page(location)?;
-        self.read.store(true, Ordering::Relaxed);
         self.open()?.read_at(location)
     }
 }
