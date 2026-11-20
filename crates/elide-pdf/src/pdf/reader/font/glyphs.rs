@@ -18,7 +18,6 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::cmap::{Codespace, mapped_codes};
 use super::encoding::{self, BaseEncoding, NONSYMBOLIC, SYMBOLIC};
-use super::program::built_in_names;
 use super::{Standard, descendant, subset_free};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 
@@ -250,12 +249,13 @@ fn collection_text(doc: &Document, font: &Dictionary, encoding: &CMap) -> Option
 ///
 /// The base is the encoding the font names; else, for a font whose encoding
 /// is its program's own (the Symbol and ZapfDingbats faces it embeds, a
-/// Type1 font it embeds, or one flagged symbolic only), the built-in
-/// encoding of the program it embeds, when that is read; else the standard
-/// encoding. A code the base gives no glyph, or that names `.notdef`, draws
-/// nothing and reads as no text. A code whose text can't be known is `None`:
-/// one only a built-in encoding that isn't read would name, or one whose
-/// glyph name spells no text.
+/// Type1 font it embeds, or one flagged symbolic only), none known; else the
+/// standard encoding. The rebuild writes the names a program's built-in
+/// encoding gives into the font's `/Differences`, so a font it rebuilt names
+/// every code its program does. A code the base gives no glyph, or that
+/// names `.notdef`, draws nothing and reads as no text. A code whose text
+/// can't be known is `None`: one only an unknown base would name, or one
+/// whose glyph name spells no text.
 fn encoded_text(doc: &Document, font: &Dictionary) -> Box<[Option<String>; 256]> {
     let encoding = encoding::Encoding::of(doc, font);
     let base = encoding.base().map(BaseEncoding::names).or_else(|| {
@@ -269,23 +269,14 @@ fn encoded_text(doc: &Document, font: &Dictionary) -> Box<[Option<String>; 256]>
             };
         (!own).then(|| BaseEncoding::Standard.names())
     });
-    let built_in = base.is_none().then(|| built_in_names(doc, font)).flatten();
-    let known = base.is_some() || built_in.is_some();
+    let known = base.is_some();
     let mut names = base.unwrap_or([None; 256]);
     encoding.apply(doc, &mut names);
     let dingbats = font.name(doc, b"BaseFont").map(subset_free) == Some(b"ZapfDingbats");
-    let text = |name: &str| match name {
-        ".notdef" => Some(String::new()),
-        name => encoding::text(name, dingbats),
-    };
-    Box::new(array::from_fn(|code| {
-        match (
-            names[code],
-            built_in.as_ref().and_then(|names| names[code].as_deref()),
-        ) {
-            (Some(name), _) | (None, Some(name)) => text(name),
-            (None, None) => known.then(String::new),
-        }
+    Box::new(array::from_fn(|code| match names[code] {
+        Some(".notdef") => Some(String::new()),
+        Some(name) => encoding::text(name, dingbats),
+        None => known.then(String::new),
     }))
 }
 
@@ -486,7 +477,6 @@ pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures::{FontFile, Type1, embedding};
 
     /// A one-byte-and-two-byte `/ToUnicode` CMap mapping `<41>` to `J`,
     /// `<8140>` to `a` (as a Shift-JIS font's would), and `<5C71>` to `x`.
@@ -793,10 +783,15 @@ mod tests {
     /// program's own encoding names, is refused rather than read as nothing.
     #[test]
     fn a_code_whose_text_cant_be_known_is_refused() {
-        let custom =
-            Object::Dictionary(dictionary! { "Differences" => vec![1.into(), "g7".into()] });
-        let refused = encoded("TrueType", false, custom, b"\x01");
-        assert!(refused.is_err_and(|e| e.kind() == ErrorKind::Redaction));
+        for name in ["g7", "A_nosuchglyph"] {
+            let custom =
+                Object::Dictionary(dictionary! { "Differences" => vec![1.into(), name.into()] });
+            let refused = encoded("TrueType", false, custom, b"\x01");
+            assert!(
+                refused.is_err_and(|e| e.kind() == ErrorKind::Redaction),
+                "{name}"
+            );
+        }
 
         let embedded =
             || Object::Dictionary(dictionary! { "Differences" => vec![1.into(), "J".into()] });
@@ -804,25 +799,6 @@ mod tests {
         let refused = encoded("Type1", true, embedded(), b"A");
         assert!(refused.is_err_and(|e| e.kind() == ErrorKind::Redaction));
         assert_eq!(encoded("Type1", false, embedded(), b"A").unwrap(), "A");
-    }
-
-    /// An embedded Type 1 program's built-in encoding names the codes the
-    /// font's encoding leaves to it, so they read as text; a code it maps no
-    /// glyph to draws nothing.
-    #[test]
-    fn a_built_in_encoding_names_its_codes() {
-        let mut doc = Document::with_version("1.7");
-        let program = Type1::new(&[(".notdef", 250), ("J", 500), ("a", 500)])
-            .encoding(&[(1, "J"), (2, "a")])
-            .build();
-        let font = embedding(&mut doc, "Type1", FontFile::Type1, program, 4);
-        let text = FontText::of(&doc, &font).unwrap().unwrap();
-        let glyphs: Vec<String> = decode_glyphs(&text, b"\x01\x02\x03")
-            .unwrap()
-            .into_iter()
-            .map(|glyph| glyph.text)
-            .collect();
-        assert_eq!(glyphs, ["J", "a", ""]);
     }
 
     /// A symbolic font, or an embedded Type1 font, with no `/Encoding` has a

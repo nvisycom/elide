@@ -637,6 +637,36 @@ mod tests {
         out.read(Check).unwrap();
     }
 
+    /// A soft mask's text is read apart from the page's: a value the page
+    /// draws across the state that sets the mask stays whole.
+    #[test]
+    fn soft_mask_text_falls_outside_the_page_text() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let group = pdf.form(
+            dictionary! {
+                "BBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            },
+            b"BT /F1 12 Tf 10 50 Td (Jane Roe) Tj ET".to_vec(),
+        );
+        let state = pdf.add(dictionary! {
+            "Type" => "ExtGState",
+            "SMask" => dictionary! { "Type" => "Mask", "S" => "Luminosity", "G" => group },
+        });
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .resource("ExtGState", "GS1", state)
+                .content(b"BT /F1 12 Tf 10 100 Td (alice@) Tj /GS1 gs (example.com) Tj ET".to_vec())
+                .size(200, 200),
+        );
+        let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let text = &pdf.read(Text).unwrap()[0].text;
+        assert!(text.contains("alice@example.com"), "{text:?}");
+        assert!(text.contains("Jane Roe"), "{text:?}");
+    }
+
     /// A one-page document drawing `content`, its `/F1` Helvetica, its `/P0`
     /// a tiling pattern of `/PatternType` `kind` showing "Jane Roe", its
     /// `/Q0` a pattern of the same cell filled with `/P0`, its `/Fm` a form

@@ -6,8 +6,8 @@
 //! keyed by CID with a `/DW` default. A simple font that names one of the
 //! standard 14 fonts and embeds no program may give no `/Widths`; a reader
 //! then supplies the face's own (see [`Standard`]). A simple font that embeds
-//! its program and gives none takes the program's (see [`embedded_widths`]).
-//! This module reads each into a uniform [`WidthSource`] that answers
+//! its program and gives none is given the program's by the rebuild (see
+//! [`Program`](super::Program)). This module reads each into a uniform [`WidthSource`] that answers
 //! [`advance`](WidthSource::advance) in text-space thousandths per unit of
 //! font size (the unit `/Widths` and `/W` use, `1000` to the em). A Type3 font's `/Widths` are in its glyph space, so
 //! are scaled by its `/FontMatrix` into that unit.
@@ -25,7 +25,6 @@ use std::mem;
 use lopdf::{Dictionary, Document, Object};
 
 use super::descendant;
-use super::program::embedded_widths;
 use super::standard::Standard;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt};
 
@@ -113,7 +112,7 @@ impl WidthSource {
     /// The widths of a simple font: its `/Widths` from `/FirstChar`, with
     /// `/FontDescriptor` `/MissingWidth` as the out-of-range fallback, scaled
     /// by its `/FontMatrix` for a Type3 font; else, for a standard font, the
-    /// face's own; else those of the program it embeds.
+    /// face's own.
     fn from_simple(doc: &Document, font: &Dictionary) -> WidthSource {
         let scale = if font.is_subtype(doc, b"Type3") {
             match type3_scale(doc, font) {
@@ -126,9 +125,9 @@ impl WidthSource {
         if let Some(widths) = Self::from_widths(doc, font, scale) {
             return widths;
         }
-        supplied_widths(doc, font).map_or(WidthSource::Unknown, |widths| WidthSource::Simple {
+        Standard::of(doc, font).map_or(WidthSource::Unknown, |standard| WidthSource::Simple {
             first_char: 0,
-            widths: widths.to_vec(),
+            widths: standard.widths(doc, font).to_vec(),
             missing: 0.0,
         })
     }
@@ -178,24 +177,15 @@ impl WidthSource {
 /// The `/FirstChar` and `/Widths` the simple `font` gives, when it gives
 /// both.
 fn own_widths<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<(i64, &'a [Object])> {
-    let first_char = font.get(b"FirstChar").ok()?.as_i64().ok()?;
+    let first_char = doc.resolve(font.get(b"FirstChar").ok()?)?.as_i64().ok()?;
     let widths = doc.resolve_array(font.get(b"Widths").ok()?)?;
     Some((first_char, widths))
 }
 
-/// The width of each code of the simple `font`, in thousandths of an em,
-/// when it gives none of its own and a reader supplies them: a standard
-/// face's (see [`Standard`]), or those of the program it embeds (see
-/// [`embedded_widths`]). The rebuild writes them into the font, so these are
-/// the widths every viewer then places its glyphs by.
-pub(crate) fn supplied_widths(doc: &Document, font: &Dictionary) -> Option<[f64; 256]> {
-    if own_widths(doc, font).is_some() {
-        return None;
-    }
-    match Standard::of(doc, font) {
-        Some(standard) => Some(standard.widths(doc, font)),
-        None => embedded_widths(doc, font),
-    }
+/// Whether the simple `font` gives widths of its own: a `/FirstChar` and
+/// `/Widths`.
+pub(crate) fn has_own_widths(doc: &Document, font: &Dictionary) -> bool {
+    own_widths(doc, font).is_some()
 }
 
 /// One `c_first c_last w` entry of a `/W` array, kept as a range rather than

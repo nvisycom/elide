@@ -194,10 +194,30 @@ impl<'a> Iterator for Tokens<'a> {
                 Token::Other
             }
             b'[' => {
-                self.at = data[start..]
-                    .iter()
-                    .position(|&b| b == b']')
-                    .map_or(data.len(), |end| start + end + 1);
+                // The array's contents are tokens too, so a `]` in a comment
+                // or a string inside it does not end it. Nested arrays are
+                // counted rather than recursed into.
+                self.at += 1;
+                let mut depth = 1usize;
+                while depth > 0 {
+                    while self.at < data.len() && data[self.at].is_ascii_whitespace() {
+                        self.at += 1;
+                    }
+                    match data.get(self.at) {
+                        None => break,
+                        Some(b']') => {
+                            depth -= 1;
+                            self.at += 1;
+                        }
+                        Some(b'[') => {
+                            depth += 1;
+                            self.at += 1;
+                        }
+                        Some(_) => {
+                            self.next();
+                        }
+                    }
+                }
                 Token::Array
             }
             b'<' => {
@@ -259,6 +279,21 @@ mod tests {
         assert_eq!(space.code_len(&[0x81, 0x40]), Some(2));
         assert_eq!(space.code_len(&[0x81]), None);
         assert_eq!(space.code_len(&[0xFF, 0xFF]), None);
+    }
+
+    /// A `]` in a comment or a string inside a `bfrange` array does not end
+    /// it, so no entry after the array is read from inside it or missed.
+    #[test]
+    fn an_array_ends_at_its_own_bracket() {
+        let data = b"2 beginbfrange\n<01> <02> [<0041> % ] <00> <FFFF>\n(]) <0042>]\n\
+            <10> <1F> <0043>\nendbfrange\n";
+        assert_eq!(mapped_codes(data), 2 + 16);
+        let nested = format!(
+            "1 beginbfrange <01> <02> {}{} endbfrange",
+            "[".repeat(10_000),
+            "]".repeat(10_000)
+        );
+        assert_eq!(mapped_codes(nested.as_bytes()), 2);
     }
 
     /// A codespace past the range limit is not read in part; one at it is

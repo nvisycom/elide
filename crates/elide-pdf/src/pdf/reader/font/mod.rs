@@ -11,8 +11,9 @@ mod widths;
 use lopdf::{Dictionary, Document};
 
 pub(crate) use self::glyphs::{FontText, Glyph, decode_glyphs, readable, to_unicode};
+pub(crate) use self::program::Program;
 pub(crate) use self::standard::Standard;
-pub(crate) use self::widths::{GlyphMetrics, WidthSource, supplied_widths};
+pub(crate) use self::widths::{GlyphMetrics, WidthSource, has_own_widths};
 use super::DocumentExt;
 
 /// The descendant CIDFont of the composite `font`: the one font its

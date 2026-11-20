@@ -35,7 +35,7 @@ pub(super) struct Layers<'a> {
     memberships: RefCell<HashMap<ObjectId, bool>>,
     /// Whether each visibility expression held as an object of its own
     /// evaluates visible, as memberships may share one.
-    expressions: RefCell<HashMap<ObjectId, bool>>,
+    expressions: RefCell<HashMap<ObjectId, Evaluated>>,
 }
 
 impl<'a> Layers<'a> {
@@ -131,54 +131,99 @@ impl<'a> Layers<'a> {
     /// any other.
     fn expression_visible(&self, expression: &Object, depth: usize) -> bool {
         let mut work = MAX_EXPRESSION_WORK;
-        self.evaluate(expression, depth, &mut work).unwrap_or(true)
+        self.evaluate(expression, depth, &mut work)
+            .is_none_or(|evaluated| evaluated.visible)
     }
 
-    /// The visibility `expression` evaluates to, or `None` when it is too
-    /// deep, too costly (past the `work` left) or malformed to evaluate. A
-    /// dictionary operand is a group; any other dictionary is malformed.
-    fn evaluate(&self, expression: &Object, depth: usize, work: &mut usize) -> Option<bool> {
+    /// What `expression` evaluates to, or `None` when it is too deep, too
+    /// costly (past the `work` left) or malformed to evaluate. A dictionary
+    /// operand is a group; any other dictionary is malformed.
+    ///
+    /// An expression held as an object of its own is evaluated once; naming
+    /// it again costs what evaluating it did, and is as deep, so the limits
+    /// hold as they would without the cache.
+    fn evaluate(&self, expression: &Object, depth: usize, work: &mut usize) -> Option<Evaluated> {
         if depth > MAX_EXPRESSION_DEPTH {
             return None;
         }
+        if let Object::Reference(id) = expression
+            && let Some(&cached) = self.expressions.borrow().get(id)
+        {
+            if depth + cached.height > MAX_EXPRESSION_DEPTH {
+                return None;
+            }
+            *work = work.checked_sub(cached.visits)?;
+            return Some(cached);
+        }
+        let before = *work;
         *work = work.checked_sub(1)?;
         match expression {
             Object::Reference(id) => match self.doc.get_object(*id).ok()? {
                 Object::Array(array) => {
-                    if let Some(&visible) = self.expressions.borrow().get(id) {
-                        return Some(visible);
-                    }
-                    let visible = self.operation(array, depth, work)?;
-                    self.expressions.borrow_mut().insert(*id, visible);
-                    Some(visible)
+                    let (visible, height) = self.operation(array, depth, work)?;
+                    let evaluated = Evaluated {
+                        visible,
+                        height,
+                        visits: before - *work,
+                    };
+                    self.expressions.borrow_mut().insert(*id, evaluated);
+                    Some(evaluated)
                 }
-                Object::Dictionary(group) if group.is_type(self.doc, b"OCG") => {
-                    Some(!self.group_hidden(expression))
-                }
+                Object::Dictionary(group) if group.is_type(self.doc, b"OCG") => Some(Evaluated {
+                    visible: !self.group_hidden(expression),
+                    height: 0,
+                    visits: 1,
+                }),
                 _ => None,
             },
-            Object::Array(array) => self.operation(array, depth, work),
+            Object::Array(array) => {
+                let (visible, height) = self.operation(array, depth, work)?;
+                Some(Evaluated {
+                    visible,
+                    height,
+                    visits: before - *work,
+                })
+            }
             _ => None,
         }
     }
 
     /// The visibility the expression `expression` (an operator and its
-    /// operands) evaluates to, as [`evaluate`](Self::evaluate).
-    fn operation(&self, expression: &[Object], depth: usize, work: &mut usize) -> Option<bool> {
+    /// operands) evaluates to, and how many levels its operands nest below
+    /// it, as [`evaluate`](Self::evaluate).
+    fn operation(
+        &self,
+        expression: &[Object],
+        depth: usize,
+        work: &mut usize,
+    ) -> Option<(bool, usize)> {
         let (Object::Name(operator), operands) = expression.split_first()? else {
             return None;
         };
-        let visible = operands
+        let operands = operands
             .iter()
             .map(|o| self.evaluate(o, depth + 1, work))
-            .collect::<Option<Vec<bool>>>()?;
-        match (operator.as_slice(), visible.as_slice()) {
-            (b"And", [_, ..]) => Some(visible.iter().all(|&v| v)),
-            (b"Or", [_, ..]) => Some(visible.iter().any(|&v| v)),
-            (b"Not", [one]) => Some(!one),
-            _ => None,
-        }
+            .collect::<Option<Vec<Evaluated>>>()?;
+        let height = 1 + operands.iter().map(|o| o.height).max().unwrap_or(0);
+        let visible: Vec<bool> = operands.iter().map(|o| o.visible).collect();
+        let visible = match (operator.as_slice(), visible.as_slice()) {
+            (b"And", [_, ..]) => visible.iter().all(|&v| v),
+            (b"Or", [_, ..]) => visible.iter().any(|&v| v),
+            (b"Not", [one]) => !one,
+            _ => return None,
+        };
+        Some((visible, height))
     }
+}
+
+/// What a visibility expression evaluated to: whether it is visible, how
+/// many levels its operands nest below it, and how many operands evaluating
+/// it visited, itself included.
+#[derive(Debug, Clone, Copy)]
+struct Evaluated {
+    visible: bool,
+    height: usize,
+    visits: usize,
 }
 
 /// The layers hidden by the document's default configuration: every group
@@ -342,7 +387,8 @@ mod tests {
     fn malformed_and_costly_expressions_are_visible() {
         let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
         let plain = doc.add_object(dictionary! { "Name" => "x" });
-        let mut shared = doc.add_object(vec![Object::Name(b"Not".to_vec()), layer.into()]);
+        // Hidden were it evaluated whole: every operand is the hidden layer.
+        let mut shared = layer;
         for _ in 0..30 {
             shared = doc.add_object(vec![
                 Object::Name(b"And".to_vec()),
@@ -357,5 +403,45 @@ mod tests {
         let not_plain = vec![Object::Name(b"Not".to_vec()), plain.into()];
         assert!(!layers.is_hidden(&membership(Object::Array(not_plain))));
         assert!(!layers.is_hidden(&membership(shared.into())));
+    }
+
+    /// A membership whose `/VE` is `expression`.
+    fn membership(expression: Object) -> Object {
+        Object::Dictionary(dictionary! { "Type" => "OCMD", "VE" => expression })
+    }
+
+    /// An expression evaluated once and named again deeper is held to the
+    /// depth limit as it would be evaluated there.
+    #[test]
+    fn a_cached_expression_is_held_to_the_depth_limit() {
+        let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
+        let and = |operand: Object| Object::Array(vec![Object::Name(b"And".to_vec()), operand]);
+        let hidden = doc.add_object(and(layer.into()));
+        let mut deep = Object::Reference(hidden);
+        for _ in 0..MAX_EXPRESSION_DEPTH {
+            deep = and(deep);
+        }
+        let layers = Layers::read(&doc);
+        assert!(layers.is_hidden(&membership(hidden.into())));
+        assert!(!layers.is_hidden(&membership(deep)), "past the depth limit");
+    }
+
+    /// An expression evaluated once and named again costs what evaluating it
+    /// did, so the work limit holds as it would without the cache.
+    #[test]
+    fn a_cached_expression_is_charged_its_work() {
+        let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
+        let and = |operand: Object| Object::Array(vec![Object::Name(b"And".to_vec()), operand]);
+        let children: Vec<ObjectId> = (0..MAX_EXPRESSION_WORK / 2)
+            .map(|_| doc.add_object(and(layer.into())))
+            .collect();
+        let mut wide = vec![Object::Name(b"And".to_vec())];
+        wide.extend(children.iter().map(|&child| Object::Reference(child)));
+        let layers = Layers::read(&doc);
+        assert!(layers.is_hidden(&membership(children[0].into())));
+        assert!(
+            !layers.is_hidden(&membership(Object::Array(wide))),
+            "past the work limit"
+        );
     }
 }

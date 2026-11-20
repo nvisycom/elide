@@ -24,7 +24,7 @@ use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, ObjectId};
 
-use self::nested::{Cell, Selected};
+use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
 use self::stream::{Frame, Inherited, ScopeFont};
@@ -105,6 +105,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         active: BTreeSet::new(),
         patterns: BTreeSet::new(),
         selected: Vec::new(),
+        masks: Vec::new(),
         painted: Vec::new(),
         cell: None,
         cells: BTreeMap::new(),
@@ -125,13 +126,19 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
             inherited: None,
         },
     )?;
+    // The text tiling patterns and soft mask groups draw is read once the
+    // page's is, each apart, and what they select in turn after them.
     loop {
         let selected = mem::take(&mut walk.selected);
-        if selected.is_empty() {
+        let masks = mem::take(&mut walk.masks);
+        if selected.is_empty() && masks.is_empty() {
             break;
         }
         for pattern in selected {
             walk.walk_pattern(pattern)?;
+        }
+        for mask in masks {
+            walk.walk_soft_mask(mask)?;
         }
     }
     walk.place_tiles()?;
@@ -184,6 +191,9 @@ struct Walk<'a, 'd> {
     /// The tiling patterns selected and not yet walked: each is walked once
     /// the page's own text is, so its text never falls inside the page's.
     selected: Vec<Selected<'d>>,
+    /// The soft mask groups set and not yet walked, each walked once the
+    /// page's own text is.
+    masks: Vec<Mask<'d>>,
     /// The regions tiling patterns paint on this page, each with the
     /// pattern whose cell it was painted in, if any.
     painted: Vec<(Option<ObjectId>, Painted)>,
@@ -457,14 +467,18 @@ mod tests {
     }
 
     /// Vertical writing is not laid out, so a page drawing glyphs in a font
-    /// that writes vertically is unplaced, though its widths are known.
+    /// that writes vertically is unplaced, though its widths are known, and
+    /// its text is not read: a code that maps to no text doesn't stop the
+    /// page from being redacted from its render.
     #[test]
     fn vertical_writing_leaves_its_page_unplaced() {
-        let drawn = || shown(b"\x00\x01".to_vec());
-        let vertical = extract_block_in(drawn(), composite("Identity-V"));
-        assert_eq!(vertical.text, "J");
+        let drawn = |bytes: &[u8]| shown(bytes.to_vec());
+        let vertical = extract_block_in(drawn(b"\x00\x01"), composite("Identity-V"));
         assert!(vertical.unplaced);
-        assert!(!extract_block_in(drawn(), composite("Identity-H")).unplaced);
+        assert!(vertical.text.is_empty());
+        let unmapped = extract_block_in(drawn(b"\x00\x09"), composite("Identity-V"));
+        assert!(unmapped.unplaced);
+        assert!(!extract_block_in(drawn(b"\x00\x01"), composite("Identity-H")).unplaced);
     }
 
     /// The text rise raises a glyph's box: the glyph is drawn above its

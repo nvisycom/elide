@@ -9,8 +9,8 @@ use super::*;
 use crate::content::attachment::Tree;
 use crate::content::text::{Detection, Text, TextBlock, TextRedaction};
 use crate::fixtures::{
-    DocBuilder, FontFile, Page, Sfnt, blank, embedding, encoded, shown, type1, with_attachments,
-    with_pages,
+    DocBuilder, FontFile, Page, Sfnt, Type1, blank, embedding, encoded, shown, type1,
+    with_attachments, with_pages,
 };
 use crate::pdf::reader::DictionaryExt;
 
@@ -403,7 +403,19 @@ fn arrays_fanning_out_are_refused() {
     // Each reference and the array it refers to, at every level (1, 8,
     // 64 and 512 of them), and the 4096 numbers at the leaves.
     let values = 2 * (1 + 8 + 64 + 512) + 4096;
-    assert!(copy(values * VALUE_COST).is_ok());
+    let copied = copy(values * VALUE_COST)
+        .unwrap()
+        .expect("the array is copied");
+    let leaves = |object: &Object| -> usize {
+        fn count(object: &Object) -> usize {
+            match object {
+                Object::Array(items) => items.iter().map(count).sum(),
+                _ => 1,
+            }
+        }
+        count(object)
+    };
+    assert_eq!(leaves(&copied), 4096);
     let error = copy(values * VALUE_COST - 1).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::ResourceLimit);
 }
@@ -1248,6 +1260,73 @@ fn an_embedded_fonts_program_widths_are_pinned() {
     assert!(font.get(b"Encoding").is_err());
 }
 
+/// A Type1 font whose encoding leaves codes to its program's built-in one
+/// is rebuilt naming every code's glyph as the program does, so its text
+/// reads without the reader opening the program; a code the program maps
+/// no glyph to draws nothing.
+#[test]
+fn a_programs_built_in_encoding_is_pinned() {
+    let mut pdf = DocBuilder::new();
+    let program = Type1::new(&[(".notdef", 250), ("J", 500), ("a", 500)])
+        .encoding(&[(1, "J"), (2, "a")])
+        .build();
+    let font = embedding(pdf.doc(), "Type1", FontFile::Type1, program, 4);
+    let font = pdf.add(font);
+    pdf.page(
+        Page::new()
+            .font("F1", font)
+            .ops(shown(b"\x01\x02\x03".to_vec()))
+            .size(200, 200),
+    );
+    let (bytes, _) = saved(&pdf.finish().0);
+    let out = Pdf::open(&bytes).unwrap();
+    let Object::Dictionary(font) = resource(out.doc(), b"Font", b"F1").clone() else {
+        panic!("font");
+    };
+    assert_eq!(pinned_name(out.doc(), &font, 1), "J");
+    assert_eq!(pinned_name(out.doc(), &font, 3), ".notdef");
+    let widths = out
+        .doc()
+        .resolve_array(font.get(b"Widths").unwrap())
+        .unwrap();
+    assert_eq!(widths[1], Object::Integer(500));
+    assert_eq!(out.read(Text).unwrap()[0].text, "Ja");
+}
+
+/// A program is charged to the copy budget for each font that reads it:
+/// fonts sharing one program each decode it.
+#[test]
+fn a_shared_program_is_charged_for_each_font() {
+    let mut doc = Document::with_version("1.7");
+    let program = Sfnt::new(1000, &[(".notdef", 300), ("A", 600)])
+        .cmap(3, 1, 0x41, &[1])
+        .build();
+    let size = program.len();
+    let font = embedding(&mut doc, "TrueType", FontFile::TrueType, program, 32);
+    let shared = font.get(b"FontDescriptor").unwrap().clone();
+    let fonts: Vec<ObjectId> = (0..3)
+        .map(|_| {
+            let mut font = font.clone();
+            font.set("FontDescriptor", shared.clone());
+            doc.add_object(font)
+        })
+        .collect();
+    let used = |fonts: &[ObjectId]| {
+        let mut builder = Builder::new(&doc);
+        for &font in fonts {
+            builder
+                .copy(
+                    Kind::Font,
+                    &Object::Reference(font),
+                    At::top(&Scope::default()),
+                )
+                .unwrap();
+        }
+        MAX_COPIED_BYTES - builder.copy_budget
+    };
+    assert!(used(&fonts) - used(&fonts[..1]) >= 2 * size);
+}
+
 /// An embedded font's own `/Widths` are kept.
 #[test]
 fn an_embedded_fonts_own_widths_are_kept() {
@@ -1259,6 +1338,55 @@ fn an_embedded_fonts_own_widths_are_kept() {
         out.resolve_array(font.get(b"Widths").unwrap()).unwrap(),
         &[Object::Integer(100)]
     );
+}
+
+/// An embedded font's own `/Widths` are kept when its `/FirstChar` is held
+/// as an object of its own.
+#[test]
+fn an_indirect_first_char_keeps_the_fonts_own_widths() {
+    let mut pdf = DocBuilder::new();
+    let first = pdf.add(Object::Integer(65));
+    let program = Sfnt::new(1000, &[(".notdef", 300), ("A", 600)]).cmap(3, 1, 0x41, &[1]);
+    let mut font = embedding(
+        pdf.doc(),
+        "TrueType",
+        FontFile::TrueType,
+        program.build(),
+        32,
+    );
+    font.extend(
+        &dictionary! { "FirstChar" => first, "LastChar" => 65, "Widths" => vec![900.into()] },
+    );
+    let font = pdf.add(font);
+    pdf.page(Page::new().font("F1", font).ops(shown("A")).size(200, 200));
+    let (out, _) = rebuilt(&pdf.finish().0);
+    let Object::Dictionary(font) = resource(&out, b"Font", b"F1").clone() else {
+        panic!("font");
+    };
+    assert_eq!(
+        out.resolve_array(font.get(b"Widths").unwrap()).unwrap(),
+        &[Object::Integer(900)]
+    );
+}
+
+/// An Indexed colour space's palette given as a string is kept, as one given
+/// as a stream is.
+#[test]
+fn an_indexed_palette_string_is_kept() {
+    let palette = Object::string_literal(vec![0, 0, 0, 255, 255, 255]);
+    let space = Object::Array(vec![
+        "Indexed".into(),
+        "DeviceRGB".into(),
+        1.into(),
+        palette.clone(),
+    ]);
+    let doc = Document::with_version("1.7");
+    let mut builder = Builder::new(&doc);
+    let copy = builder
+        .copy(Kind::ColorSpace, &space, At::top(&Scope::default()))
+        .unwrap()
+        .expect("the colour space is kept");
+    assert_eq!(copy.as_array().unwrap()[3], palette);
 }
 
 /// Pinning leaves the text a font reads as: the names it writes are the
@@ -1349,6 +1477,53 @@ fn a_partly_detected_ligature_is_scrubbed() {
     assert!(
         !to_unicode.contains("00660069"),
         "the ligature's code survived"
+    );
+    assert!(to_unicode.contains("0078"));
+}
+
+/// A glyph in a form two pages draw, deleted for one page's detection, is
+/// gone from both, so its code is scrubbed though the other page's text
+/// read it too.
+#[test]
+fn a_glyph_deleted_from_a_shared_form_is_scrubbed() {
+    let mut pdf = DocBuilder::new();
+    let cmap = pdf.stream(
+        Dictionary::new(),
+        to_unicode(&["<01> <00660069>", "<02> <0078>"]),
+    );
+    let font = pdf.add(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "ToUnicode" => cmap,
+    });
+    let form = pdf.form(
+        dictionary! { "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } } },
+        b"BT /F1 12 Tf (\x01\x02) Tj ET".to_vec(),
+    );
+    for _ in 0..2 {
+        pdf.page(
+            Page::new()
+                .xobject("Fm", form)
+                .content(b"/Fm Do".to_vec())
+                .size(100, 100),
+        );
+    }
+    let (rebuilt, _) = saved(&pdf.finish().0);
+    let pdf = Pdf::open(&rebuilt).unwrap();
+    let blocks = pdf.read(Text).unwrap();
+    assert_eq!(blocks[1].text.trim(), "fix");
+
+    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 0, 2)]);
+    let to_unicode: String = redacted
+        .doc()
+        .objects
+        .values()
+        .filter_map(|object| object.as_stream().ok())
+        .filter_map(|stream| stream.decompressed_content().ok())
+        .map(|content| String::from_utf8_lossy(&content).into_owned())
+        .filter(|content| content.contains("beginbfchar"))
+        .collect();
+    assert!(
+        !to_unicode.contains("00660069"),
+        "the shared glyph's code survived"
     );
     assert!(to_unicode.contains("0078"));
 }

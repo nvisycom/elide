@@ -34,8 +34,9 @@ pub(super) enum Kind {
     CMap,
     /// A font's `/ToUnicode` CMap stream: the text a viewer copies.
     ToUnicode,
-    /// A stream of opaque data: a palette, a CID set, a CID-to-glyph map,
-    /// global JBIG2 segments.
+    /// Opaque data, a stream or (an Indexed colour space's palette) a
+    /// string: a palette, a CID set, a CID-to-glyph map, global JBIG2
+    /// segments.
     Data,
     /// An image XObject.
     Image,
@@ -91,7 +92,7 @@ pub(super) enum Kind {
 impl Kind {
     /// Whether a value of this kind may be the scalar `value`: a number or
     /// boolean only where values are, a name only where a kind can be named,
-    /// a string only where a label is. Every other kind is a dictionary,
+    /// a string only where a label or data is. Every other kind is a dictionary,
     /// stream or array.
     pub(super) fn holds(self, value: &Object) -> bool {
         match value {
@@ -110,7 +111,7 @@ impl Kind {
                     | Kind::ColorSpace
                     | Kind::Function
             ),
-            Object::String(..) => self == Kind::Label,
+            Object::String(..) => matches!(self, Kind::Label | Kind::Data),
             _ => false,
         }
     }

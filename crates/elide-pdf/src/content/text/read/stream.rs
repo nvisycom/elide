@@ -29,6 +29,18 @@ pub(super) fn operand_f64(operands: &[Object], index: usize) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Whether the text-showing `operands` draw a glyph: a string of them, or
+/// one in a `TJ` array, holds a byte.
+fn draws_glyphs(operands: &[Object]) -> bool {
+    operands.iter().any(|operand| match operand {
+        Object::String(bytes, _) => !bytes.is_empty(),
+        Object::Array(items) => items
+            .iter()
+            .any(|item| matches!(item, Object::String(bytes, _) if !bytes.is_empty())),
+        _ => false,
+    })
+}
+
 /// Read six numeric operands from `base` as a [`Matrix`] `[a b c d e f]`, or
 /// `None` when fewer than six are present.
 pub(super) fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
@@ -330,6 +342,13 @@ impl<'d> Walk<'_, 'd> {
                     } else {
                         (&op.operands, 0)
                     };
+                    // Vertical writing is not laid out, so a page drawing it is
+                    // redacted from its render, and its text, which may map to
+                    // nothing readable, is not read.
+                    if text.is_vertical() {
+                        self.unplaced |= draws_glyphs(operands);
+                        continue;
+                    }
                     let shown = self.accum.rects.len();
                     // A short-lived run so its borrow of `accum` ends before
                     // the `Do` arm needs `accum` again.
@@ -347,10 +366,8 @@ impl<'d> Walk<'_, 'd> {
                         font: selected.slot,
                     };
                     run.show(text, operands, op_idx, base)?;
-                    // Vertical writing is not laid out, so its glyphs are
-                    // placed no better than in a font without widths.
                     if self.accum.rects.len() > shown
-                        && (matches!(selected.widths, WidthSource::Unknown) || text.is_vertical())
+                        && matches!(selected.widths, WidthSource::Unknown)
                     {
                         self.unplaced = true;
                     }
@@ -422,7 +439,7 @@ impl<'d> Walk<'_, 'd> {
                             .and_then(|graphics| self.doc.resolve_dict(graphics))
                     {
                         painting.state(self.doc, graphics);
-                        self.walk_soft_mask(graphics, state.ctm, depth)?;
+                        self.select_soft_mask(graphics, state.ctm, depth);
                     }
                 }
                 "sc" | "g" | "rg" | "k" | "cs" => painting.fill = None,

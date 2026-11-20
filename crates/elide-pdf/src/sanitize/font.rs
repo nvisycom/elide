@@ -9,16 +9,17 @@ use lopdf::{Dictionary, Object, dictionary};
 use super::copy::At;
 use super::keys::{FONT, Kind};
 use super::{Builder, VALUE_COST};
-use crate::pdf::reader::font::{Standard, supplied_widths};
+use crate::pdf::reader::font::{Program, Standard, has_own_widths};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 use crate::pdf::writer::compressed;
 
 impl<'a> Builder<'a> {
     /// A font, a Type3 font's glyph procedures rebuilt as content with names
     /// resolved in its own resources, else in `at`'s scope. A simple font
-    /// without `/Widths` is given them: a standard face's (see
-    /// [`pin`](Self::pin)), or those of the program it embeds, so every viewer
-    /// places its glyphs where the reader does.
+    /// is given what the reader takes from its face or program: a standard
+    /// face's glyphs and widths ([`pin`](Self::pin)), or what the program it
+    /// embeds gives ([`pin_program`](Self::pin_program)), so every viewer
+    /// selects and places its glyphs as the reader does.
     pub(super) fn font<'s>(&mut self, dict: &'s Dictionary, at: At<'_, 's>) -> Result<Object>
     where
         'a: 's,
@@ -43,11 +44,14 @@ impl<'a> Builder<'a> {
             return Ok(Object::Dictionary(out));
         }
         if subtype != Some(b"Type3") {
-            if let Some(standard) = standard {
-                self.pin(standard, dict, &mut out, at)?;
-            }
-            if let Some(widths) = supplied_widths(source, dict) {
-                self.widths(&widths, &mut out)?;
+            match standard {
+                Some(standard) => {
+                    self.pin(standard, dict, &mut out, at)?;
+                    if !has_own_widths(source, dict) {
+                        self.widths(&standard.widths(source, dict), &mut out)?;
+                    }
+                }
+                None => self.pin_program(dict, &mut out)?,
             }
             return Ok(Object::Dictionary(out));
         }
@@ -110,21 +114,7 @@ impl<'a> Builder<'a> {
     {
         let source = self.source;
         let names = standard.names(source, font);
-        let named: usize = names.iter().map(|name| name.map_or(7, str::len)).sum();
-        self.charge((names.len() + 1) * VALUE_COST + named)?;
-
-        let differences = [Object::Integer(0)]
-            .into_iter()
-            .chain(
-                names
-                    .iter()
-                    .map(|name| Object::Name(name.unwrap_or(".notdef").as_bytes().to_vec())),
-            )
-            .collect::<Vec<_>>();
-        out.set(
-            "Encoding",
-            dictionary! { "Type" => "Encoding", "Differences" => differences },
-        );
+        self.differences(names.iter().copied(), out)?;
 
         let descriptor = match font.get(b"FontDescriptor").ok().map(|d| source.resolve(d)) {
             Some(Some(descriptor @ Object::Dictionary(_))) => {
@@ -151,6 +141,63 @@ impl<'a> Builder<'a> {
         if let Some(descriptor) = descriptor {
             out.set("FontDescriptor", self.out.add_object(descriptor));
         }
+        Ok(())
+    }
+
+    /// Pin what the program the simple `font` embeds gives, copied as `out`:
+    /// its widths, when the font gives none of its own, and, where a Type1
+    /// font's encoding leaves codes to the program's built-in one, every
+    /// code's glyph name as an explicit `/Encoding` (`.notdef` for none). The
+    /// reader then reads the font as it is written, and never the program.
+    ///
+    /// The program is decoded within the copy budget, and charged to it, for
+    /// each font that needs it: fonts sharing one program each read it.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`] if the program, or what is written, is
+    /// past the copy budget.
+    fn pin_program(&mut self, font: &Dictionary, out: &mut Dictionary) -> Result<()> {
+        let source = self.source;
+        if !Program::needed(source, font) {
+            return Ok(());
+        }
+        let Some(program) = Program::embedded(source, font, self.copy_budget)? else {
+            return Ok(());
+        };
+        self.charge(program.len())?;
+        if !has_own_widths(source, font)
+            && let Some(widths) = program.widths(source, font)
+        {
+            self.widths(&widths, out)?;
+        }
+        if let Some(names) = program.names(source, font) {
+            self.differences(names.iter().map(Option::as_deref), out)?;
+        }
+        Ok(())
+    }
+
+    /// Pin `names`, one glyph name for each code (`.notdef` for none), as
+    /// the explicit `/Encoding` of the font copied as `out`.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`] if it is past the copy budget.
+    fn differences<'n>(
+        &mut self,
+        names: impl Iterator<Item = Option<&'n str>> + Clone,
+        out: &mut Dictionary,
+    ) -> Result<()> {
+        let named: usize = names.clone().map(|name| name.map_or(7, str::len)).sum();
+        self.charge((256 + 1) * VALUE_COST + named)?;
+        let differences = [Object::Integer(0)]
+            .into_iter()
+            .chain(names.map(|name| Object::Name(name.unwrap_or(".notdef").as_bytes().to_vec())))
+            .collect::<Vec<_>>();
+        out.set(
+            "Encoding",
+            dictionary! { "Type" => "Encoding", "Differences" => differences },
+        );
         Ok(())
     }
 

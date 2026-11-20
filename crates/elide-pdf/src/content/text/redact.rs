@@ -67,40 +67,38 @@ pub(super) fn delete(
     // anywhere uses it, as fonts and their CMaps are shared and the same code
     // recurs in text that stays. Fonts without a `/ToUnicode` contribute
     // nothing (there is no code-to-Unicode table to leak).
-    let mut deleted_codes = Codes::new();
-    let mut surviving_codes = Codes::new();
     let mut to_delete = Deletions::new();
     for block in blocks {
-        let deleted: BTreeSet<GlyphBytes> = detections
-            .iter()
-            .filter(|d| d.page == block.page)
-            .flat_map(|d| block.offsets.glyph_bytes(d.start..d.end))
-            .collect();
-        // A glyph is deleted whole: one drawing a ligature some of whose
-        // characters are detected is gone, so its code survives in no text.
+        let mut stream = Streams::new(pristine, block.page_id);
+        for detection in detections.iter().filter(|d| d.page == block.page) {
+            for glyph in block.offsets.glyph_bytes(detection.start..detection.end) {
+                to_delete
+                    .entry(stream.of(&glyph)?)
+                    .or_default()
+                    .entry(glyph.address)
+                    .or_default()
+                    .push((glyph.byte_start, glyph.byte_end));
+            }
+        }
+    }
+    // A glyph is deleted whole, wherever it is drawn: one drawing a ligature
+    // some of whose characters are detected is gone, and so is one in a form
+    // another page's detection deletes from, so its code survives in no text.
+    let mut deleted_codes = Codes::new();
+    let mut surviving_codes = Codes::new();
+    for block in blocks {
+        let mut stream = Streams::new(pristine, block.page_id);
         for glyph in block.offsets.runs().iter().filter_map(|run| run.source) {
-            let codes = if deleted.contains(&glyph) {
+            let deleted = to_delete
+                .get(&stream.of(&glyph)?)
+                .and_then(|sites| sites.get(&glyph.address))
+                .is_some_and(|ranges| ranges.contains(&(glyph.byte_start, glyph.byte_end)));
+            let codes = if deleted {
                 &mut deleted_codes
             } else {
                 &mut surviving_codes
             };
             record_code(block, &glyph, codes)?;
-        }
-        let mut page_stream = None;
-        for glyph in deleted {
-            let stream = match glyph.address.stream {
-                StreamTarget::PageContent => match page_stream {
-                    Some(id) => id,
-                    None => *page_stream.insert(content_stream(pristine, block.page_id)?),
-                },
-                StreamTarget::XObject(id) => id,
-            };
-            to_delete
-                .entry(stream)
-                .or_default()
-                .entry(glyph.address)
-                .or_default()
-                .push((glyph.byte_start, glyph.byte_end));
         }
     }
 
@@ -126,6 +124,39 @@ pub(super) fn delete(
     // (sparing any code still used by surviving text), so the removed text
     // can't be recovered through the code-to-Unicode table.
     scrub(doc, &deleted_codes, &surviving_codes)
+}
+
+/// The content stream each glyph of one page is drawn in: the page's one
+/// content stream, looked up once, or a form's.
+struct Streams<'a> {
+    doc: &'a Document,
+    page: ObjectId,
+    content: Option<ObjectId>,
+}
+
+impl<'a> Streams<'a> {
+    fn new(doc: &'a Document, page: ObjectId) -> Self {
+        Self {
+            doc,
+            page,
+            content: None,
+        }
+    }
+
+    /// The stream `glyph` is drawn in.
+    ///
+    /// # Errors
+    ///
+    /// As [`content_stream`].
+    fn of(&mut self, glyph: &GlyphBytes) -> Result<ObjectId> {
+        Ok(match glyph.address.stream {
+            StreamTarget::PageContent => match self.content {
+                Some(id) => id,
+                None => *self.content.insert(content_stream(self.doc, self.page)?),
+            },
+            StreamTarget::XObject(id) => id,
+        })
+    }
 }
 
 /// The one content stream of the page `page`.

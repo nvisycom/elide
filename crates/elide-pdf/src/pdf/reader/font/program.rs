@@ -19,6 +19,7 @@
 
 use std::array;
 
+use elide_core::{ErrorKind, Result};
 use lopdf::{Dictionary, Document};
 use read_fonts::FontRef;
 use read_fonts::model::Font;
@@ -27,71 +28,27 @@ use read_fonts::ps::cff::CffFontRef;
 use read_fonts::types::{GlyphId, Tag};
 
 use super::encoding::{self, BaseEncoding, Encoding, NONSYMBOLIC, SYMBOLIC};
+use super::has_own_widths;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 
 /// The keys a font descriptor holds an embedded program under (9.9).
 const FONT_FILES: [&[u8]; 3] = [b"FontFile", b"FontFile2", b"FontFile3"];
 
-/// The advance width of each code of the simple `font`, in thousandths of an
-/// em, from the program it embeds; `None` when it embeds none, the program
-/// can't be parsed, or no code reaches a glyph in it.
-pub(crate) fn embedded_widths(doc: &Document, font: &Dictionary) -> Option<[f64; 256]> {
-    let reach: Reach = match font.name(doc, b"Subtype")? {
-        b"TrueType" => truetype_glyphs,
-        b"Type1" | b"MMType1" => type1_glyphs,
-        _ => return None,
-    };
-    let data = program_data(doc, font)?;
-    let program = Program::parse(&data)?;
-    let glyphs = reach(doc, font, &program);
-    if glyphs.iter().all(Option::is_none) {
-        return None;
-    }
-    let notdef = program.advance(GlyphId::NOTDEF).unwrap_or(0.0);
-    Some(array::from_fn(|code| {
-        glyphs[code]
-            .and_then(|glyph| program.advance(glyph))
-            .unwrap_or(notdef)
-    }))
-}
-
-/// The glyph name each code of the simple `font` selects through the
-/// built-in encoding of the program it embeds, `None` for a code it selects
-/// no glyph by; `None` when the font embeds no program read, or one with no
-/// built-in encoding (a TrueType program's codes reach glyphs by `cmap`).
-pub(crate) fn built_in_names(
-    doc: &Document,
-    font: &Dictionary,
-) -> Option<Box<[Option<String>; 256]>> {
-    let data = program_data(doc, font)?;
-    let program = Program::parse(&data)?;
-    program.built_in(0)?;
-    Some(Box::new(array::from_fn(|code| {
-        let glyph = program.built_in(code as u8).flatten()?;
-        Some(program.font.glyph_name(glyph)?.as_str().to_owned())
-    })))
-}
-
-/// The decoded program the simple `font` embeds.
-fn program_data(doc: &Document, font: &Dictionary) -> Option<Vec<u8>> {
-    let descriptor = doc.resolve_dict(font.get(b"FontDescriptor").ok()?)?;
-    let stream = FONT_FILES
-        .iter()
-        .find_map(|key| doc.resolve(descriptor.get(key).ok()?)?.as_stream().ok())?;
-    stream.decoded().ok()
+/// Whether the simple `font` is a Type1 font whose encoding names no base,
+/// so leaves the codes its `/Differences` doesn't name to its program's
+/// built-in encoding (9.6.5.2).
+fn leaves_codes(doc: &Document, font: &Dictionary) -> bool {
+    matches!(font.name(doc, b"Subtype"), Some(b"Type1" | b"MMType1"))
+        && Encoding::of(doc, font).base().is_none()
 }
 
 /// How each code of a font reaches its glyph in a program.
-type Reach = fn(&Document, &Dictionary, &Program<'_>) -> [Option<GlyphId>; 256];
+type Reach = fn(&Document, &Dictionary, &Program) -> [Option<GlyphId>; 256];
 
 /// The glyph each code of the Type1 `font` reaches in `program`: by the name
 /// its encoding gives the code, else, where the font names no base encoding,
 /// through the program's built-in one.
-fn type1_glyphs(
-    doc: &Document,
-    font: &Dictionary,
-    program: &Program<'_>,
-) -> [Option<GlyphId>; 256] {
+fn type1_glyphs(doc: &Document, font: &Dictionary, program: &Program) -> [Option<GlyphId>; 256] {
     let encoding = Encoding::of(doc, font);
     let base = encoding.base();
     let mut names = base.map_or([None; 256], BaseEncoding::names);
@@ -108,11 +65,7 @@ fn type1_glyphs(
 /// `MacRomanEncoding` or is not flagged symbolic only, else by code, each
 /// falling back to the other. A code's name is its encoding's, else the
 /// standard encoding's.
-fn truetype_glyphs(
-    doc: &Document,
-    font: &Dictionary,
-    program: &Program<'_>,
-) -> [Option<GlyphId>; 256] {
+fn truetype_glyphs(doc: &Document, font: &Dictionary, program: &Program) -> [Option<GlyphId>; 256] {
     let encoding = Encoding::of(doc, font);
     let flags = encoding::flags(doc, font);
     let symbolic = flags & SYMBOLIC != 0 && flags & NONSYMBOLIC == 0 && !encoding.is_latin();
@@ -122,20 +75,26 @@ fn truetype_glyphs(
     for (name, standard) in names.iter_mut().zip(standard) {
         *name = name.or(standard);
     }
-    let unicode =
-        program.cmap(|table| table.kind() == EncodingKind::Unicode && table.sfnt_ids().is_some());
+    let unicode = program.cmaps(|table| table.kind() == EncodingKind::Unicode);
     let mac = program.cmap(|table| table.sfnt_ids() == Some((1, 0)));
     let windows_symbol = program.cmap(|table| table.sfnt_ids() == Some((3, 0)));
 
+    // A name reaches its glyph through the first Unicode subtable that maps
+    // it (one holding only variation sequences maps none), else, with no
+    // Unicode subtable, the Mac one, else by the program's own glyph names.
     let by_name = |code: usize| {
         let name = names[code]?;
-        let mapped = match (&unicode, &mac) {
-            (Some(unicode), _) => program.glyph(*unicode, u32::from(encoding::unicode(name)?)),
-            (None, Some(mac)) => {
+        let mapped = if unicode.is_empty() {
+            mac.and_then(|mac| {
                 let code = BaseEncoding::MacOsRoman.code(name)?;
-                program.glyph(*mac, u32::from(code))
-            }
-            (None, None) => None,
+                program.glyph(mac, u32::from(code))
+            })
+        } else {
+            encoding::unicode(name).and_then(|char| {
+                unicode
+                    .iter()
+                    .find_map(|&table| program.glyph(table, u32::from(char)))
+            })
         };
         mapped.or_else(|| program.by_name(name))
     };
@@ -158,20 +117,113 @@ fn truetype_glyphs(
     })
 }
 
-/// A parsed font program: a Type 1, TrueType, OpenType or bare CFF one.
-struct Program<'a> {
+/// A font program a simple font embeds, decoded and parsed: a Type 1,
+/// TrueType, OpenType or bare CFF one.
+pub(crate) struct Program {
     font: Font,
     /// The program's bytes, for an OpenType program's CFF table.
-    data: &'a [u8],
+    data: Vec<u8>,
 }
 
-impl<'a> Program<'a> {
-    /// The program `data`, or `None` when it can't be parsed.
-    fn parse(data: &'a [u8]) -> Option<Self> {
-        Some(Self {
-            font: Font::new(data.to_vec(), 0)?,
-            data,
-        })
+impl Program {
+    /// The program the simple `font` embeds, decoded within `limit` bytes;
+    /// `None` when it embeds none, or one that can't be decoded or parsed.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
+    /// it decodes past `limit`.
+    pub(crate) fn embedded(
+        doc: &Document,
+        font: &Dictionary,
+        limit: usize,
+    ) -> Result<Option<Self>> {
+        let Some(stream) = font
+            .get(b"FontDescriptor")
+            .ok()
+            .and_then(|descriptor| doc.resolve_dict(descriptor))
+            .and_then(|descriptor| {
+                FONT_FILES
+                    .iter()
+                    .find_map(|key| doc.resolve(descriptor.get(key).ok()?)?.as_stream().ok())
+            })
+        else {
+            return Ok(None);
+        };
+        let data = match stream.decoded_within(limit) {
+            Ok(data) => data,
+            Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        Ok(Font::new(data.clone(), 0).map(|font| Self { font, data }))
+    }
+
+    /// How many bytes the program decodes to.
+    pub(crate) fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// The advance width of each code of the simple `font` that embeds the
+    /// program, in thousandths of an em; `None` when no code reaches a glyph
+    /// in it.
+    pub(crate) fn widths(&self, doc: &Document, font: &Dictionary) -> Option<[f64; 256]> {
+        let reach: Reach = match font.name(doc, b"Subtype")? {
+            b"TrueType" => truetype_glyphs,
+            b"Type1" | b"MMType1" => type1_glyphs,
+            _ => return None,
+        };
+        let glyphs = reach(doc, font, self);
+        if glyphs.iter().all(Option::is_none) {
+            return None;
+        }
+        let notdef = self.advance(GlyphId::NOTDEF).unwrap_or(0.0);
+        Some(array::from_fn(|code| {
+            glyphs[code]
+                .and_then(|glyph| self.advance(glyph))
+                .unwrap_or(notdef)
+        }))
+    }
+
+    /// Whether the simple `font` needs what its program gives: widths, as
+    /// it gives none of its own, or glyph names, as it is a Type1 font whose
+    /// encoding names no base and so leaves codes to the program's built-in
+    /// one.
+    pub(crate) fn needed(doc: &Document, font: &Dictionary) -> bool {
+        !has_own_widths(doc, font) || leaves_codes(doc, font)
+    }
+
+    /// The glyph name each code of the Type1 `font` that embeds the program
+    /// selects, `None` for none: its encoding's, the codes it leaves taking
+    /// the program's built-in encoding's; `None` when it leaves the program
+    /// none, or the program has no built-in encoding.
+    pub(crate) fn names(
+        &self,
+        doc: &Document,
+        font: &Dictionary,
+    ) -> Option<Box<[Option<String>; 256]>> {
+        if !leaves_codes(doc, font) {
+            return None;
+        }
+        let built_in = self.built_in_names()?;
+        let mut names = [None; 256];
+        Encoding::of(doc, font).apply(doc, &mut names);
+        Some(Box::new(array::from_fn(|code| {
+            names[code]
+                .map(str::to_owned)
+                .or_else(|| built_in[code].clone())
+        })))
+    }
+
+    /// The glyph name each code selects through the program's built-in
+    /// encoding, `None` for a code it selects no glyph by; `None` when it
+    /// has no built-in encoding (a TrueType program's codes reach glyphs by
+    /// `cmap`).
+    fn built_in_names(&self) -> Option<Box<[Option<String>; 256]>> {
+        self.built_in(0)?;
+        Some(Box::new(array::from_fn(|code| {
+            let glyph = self.built_in(code as u8).flatten()?;
+            Some(self.font.glyph_name(glyph)?.as_str().to_owned())
+        })))
     }
 
     /// The glyph named `name`, from an sfnt's `post` or CFF table, a CFF
@@ -194,7 +246,7 @@ impl<'a> Program<'a> {
         {
             return Some(charmap.map_code(native, u32::from(code)));
         }
-        let table = FontRef::new(self.data)
+        let table = FontRef::new(&self.data)
             .ok()?
             .table_data(Tag::new(b"CFF "))?;
         let encoding = CffFontRef::new(table.as_bytes(), 0, None)
@@ -205,10 +257,16 @@ impl<'a> Program<'a> {
 
     /// The first `cmap` subtable of an sfnt that `select` picks.
     fn cmap(&self, select: impl Fn(&CmapEncoding) -> bool) -> Option<CmapEncoding> {
+        self.cmaps(select).into_iter().next()
+    }
+
+    /// Every `cmap` subtable of an sfnt that `select` picks, in order.
+    fn cmaps(&self, select: impl Fn(&CmapEncoding) -> bool) -> Vec<CmapEncoding> {
         self.font
             .charmap()
             .encodings()
-            .find(|table| table.sfnt_ids().is_some() && select(table))
+            .filter(|table| table.sfnt_ids().is_some() && select(table))
+            .collect()
     }
 
     /// The glyph `code` reaches through the subtable `table`, `None` for
@@ -236,6 +294,14 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{Cff, FontFile, Sfnt, Type1, embedding};
+    use crate::pdf::reader::MAX_CONTENT_BYTES;
+
+    /// The widths the program `font` embeds gives it.
+    fn embedded_widths(doc: &Document, font: &Dictionary) -> Option<[f64; 256]> {
+        Program::embedded(doc, font, MAX_CONTENT_BYTES)
+            .unwrap()?
+            .widths(doc, font)
+    }
 
     /// The `.notdef`, `A`, `B` and `g.alt` glyphs of an sfnt of 2000 units
     /// to the em, 300, 600, 700 and 800 thousandths of an em wide.
@@ -305,6 +371,20 @@ mod tests {
         let widths = truetype(&program, 32, dictionary! { "Encoding" => encoding }).unwrap();
         assert_eq!(widths[0x41], 700.0);
         assert_eq!(widths[0x42], 800.0, "by its post name");
+    }
+
+    /// A name with no single character, as a ligature's, reaches its glyph
+    /// by the program's own glyph names; a Unicode subtable that maps none of
+    /// a name's character gives way to the next that does.
+    #[test]
+    fn names_fall_back_past_what_a_subtable_maps() {
+        let program = Sfnt::new(1000, &[(".notdef", 300), ("A", 600), ("f_i", 900)])
+            .cmap(0, 3, 0x100, &[1])
+            .cmap(3, 1, 0x41, &[1]);
+        let encoding = dictionary! { "Differences" => vec![0x42.into(), "f_i".into()] };
+        let widths = truetype(&program, 32, dictionary! { "Encoding" => encoding }).unwrap();
+        assert_eq!(widths[0x41], 600.0, "A, by the second Unicode subtable");
+        assert_eq!(widths[0x42], 900.0, "f_i, by its post name");
     }
 
     /// Without a Unicode `cmap`, a name reaches its glyph through the Mac OS

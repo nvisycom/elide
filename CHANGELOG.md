@@ -154,10 +154,12 @@ and this project adheres to
   width from Adobe's metrics for its face, so every viewer selects and places
   its glyphs as they were read; where a simple font's `/ToUnicode` maps no
   code, its text reads from the glyph name its encoding gives it (by the
-  Adobe Glyph List), or from the built-in encoding of the program it embeds,
-  and a code whose text can't be known is refused; a font that embeds a
-  Type 1, TrueType, OpenType or CFF program and gives no `/Widths` is written
-  with every code's width from that program; content is charged as
+  Adobe Glyph List), and a code whose text can't be known is refused; a font
+  that embeds a Type 1, TrueType, OpenType or CFF program is written with
+  what the program gives, when it can be read: every code's width, when the
+  font gives no `/Widths`, and every code's glyph name, for a Type1 font whose
+  encoding leaves codes to the program's own (a font whose program gives
+  neither is redacted from its render, or refused under `RasterMode::Never`); content is charged as
   it is decoded, however many times a stream is drawn; a page whose content
   cannot be read, text drawn before a font is selected, content nested too
   deep, and an encode naming a part the document never surfaced are refused
