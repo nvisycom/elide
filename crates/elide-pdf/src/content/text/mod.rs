@@ -104,6 +104,12 @@ pub(crate) struct TextBlock {
     /// be scrubbed from the right CMap even when a font name recurs across
     /// resource scopes.
     pub(crate) fonts: Vec<FontEntry>,
+    /// Whether the page draws text in a font whose advances can't be known
+    /// (one with no widths that names no standard face, or a Type3 font whose
+    /// matrix can't be used): where its glyphs land, and so what they read as
+    /// and where a deletion leaves a gap, is up to each viewer. Such a page is
+    /// redacted from its render instead.
+    pub(crate) unplaced: bool,
 }
 
 impl TextBlock {

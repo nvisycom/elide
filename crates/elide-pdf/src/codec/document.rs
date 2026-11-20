@@ -61,8 +61,9 @@ impl Native for PdfDocument {
         #[cfg(feature = "render")]
         {
             plan.scan_scale = self.body.state.scan_scale();
-            plan.scanned
-                .extend(self.pages.iter().filter_map(PageStream::scanned));
+            for page in &self.pages {
+                plan.scanned.extend(page.scanned()?);
+            }
         }
         for part in blobs {
             let surfaced = self.surfaced.get(part.id.as_str());

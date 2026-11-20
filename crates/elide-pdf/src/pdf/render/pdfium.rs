@@ -17,8 +17,6 @@ use pdfium_render::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::pdf::Pdf;
-use crate::pdf::reader::font::readable;
-use crate::pdf::reader::{DeviceRect, GlyphRect};
 
 /// Most pages a document may have to be read or rendered: a page is rendered
 /// to a full bitmap, so an unbounded count is a memory denial of service.
@@ -87,50 +85,6 @@ fn bind() -> Result<Pdfium> {
     Ok(Pdfium::new(bindings))
 }
 
-/// Every page's text and glyph boxes, in page order. A page whose text layer
-/// PDFium cannot read has no text, so it is treated as scanned.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
-/// document cannot be loaded, or a glyph's box cannot be read: a character
-/// with no box could be detected but never painted over.
-pub(super) fn observe(pdf: &Pdf) -> Result<Vec<(String, Vec<GlyphRect>)>> {
-    with_document(pdf, |document| {
-        let mut pages = Vec::new();
-        for (number, page) in (1u32..).zip(document.pages().iter()) {
-            let mut text = String::new();
-            let mut glyphs = Vec::new();
-            if let Ok(page_text) = page.text() {
-                let mut next = 0;
-                for ch in page_text.chars().iter() {
-                    let Some(c) = ch.unicode_char() else {
-                        continue;
-                    };
-                    let read = readable(c.encode_utf8(&mut [0; 4]));
-                    let start = next;
-                    next += read.chars().count();
-                    text.push_str(&read);
-                    let b = ch.loose_bounds().map_err(|e| {
-                        Error::malformed(format!("page {number} glyph {start} has no box: {e}"))
-                    })?;
-                    glyphs.push(GlyphRect {
-                        chars: start..next,
-                        rect: DeviceRect {
-                            min_x: f64::from(b.left().value),
-                            min_y: f64::from(b.bottom().value),
-                            max_x: f64::from(b.right().value),
-                            max_y: f64::from(b.top().value),
-                        },
-                    });
-                }
-            }
-            pages.push((text, glyphs));
-        }
-        Ok(pages)
-    })
-}
-
 /// The 1-based pages `numbers` rendered at `scale` to PNG images.
 ///
 /// # Errors
@@ -142,7 +96,7 @@ pub(super) fn render_pages(
     scale: f32,
 ) -> Result<BTreeMap<u32, Bytes>> {
     let mut out = BTreeMap::new();
-    each_page(pdf, numbers, scale, |number, image, _| {
+    each_page(pdf, numbers, scale, |number, image| {
         out.insert(number, image.encode()?);
         Ok(())
     })?;
@@ -150,8 +104,7 @@ pub(super) fn render_pages(
 }
 
 /// Render each of the 1-based pages `numbers` at `scale` and hand it to
-/// `visit` as an image encoding to PNG, on the PDFium thread, with the pixel
-/// a point of the page in default user space lands on.
+/// `visit` as an image encoding to PNG, on the PDFium thread.
 ///
 /// # Errors
 ///
@@ -163,8 +116,7 @@ pub(crate) fn each_page(
     pdf: &Pdf,
     numbers: &BTreeSet<u32>,
     scale: f32,
-    mut visit: impl FnMut(u32, RasterImage, &dyn Fn(f64, f64) -> Result<(i32, i32)>) -> Result<()>
-    + Send,
+    mut visit: impl FnMut(u32, RasterImage) -> Result<()> + Send,
 ) -> Result<()> {
     with_document(pdf, |document| {
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
@@ -195,13 +147,7 @@ pub(crate) fn each_page(
             let size = Dimensions::new(image.width(), image.height());
             let image = RasterImage::from_rgb(size, image.into_raw(), ImageFormat::Png)
                 .ok_or_else(|| Error::malformed(format!("page {number} rendered short")))?;
-            let place = |x: f64, y: f64| {
-                let (x, y) = (PdfPoints::new(x as f32), PdfPoints::new(y as f32));
-                page.points_to_pixels(x, y, &config).map_err(|e| {
-                    Error::redaction(format!("a point on page {number} cannot be placed: {e}"))
-                })
-            };
-            visit(number, image, &place)?;
+            visit(number, image)?;
             rendered += 1;
         }
         if rendered == numbers.len() {

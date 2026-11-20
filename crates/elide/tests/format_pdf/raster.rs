@@ -1,32 +1,34 @@
 //! End-to-end PDF **raster** redaction (feature `codec-pdf-render`): decode →
-//! analyze → anonymize → encode, where every page is rendered with the
-//! detected text painted over and replaced by that image.
+//! analyze → anonymize → encode, where every page is rendered, detected on
+//! what it shows by the image pipeline, and replaced by that render with the
+//! detected regions painted over.
 //!
 //! Requires the native PDFium library at runtime, so the test is `#[ignore]`d
 //! by default; run it where PDFium is installed:
 //!
 //! ```sh
-//! cargo test -p elide --features codec-pdf-render,mocks,serde \
-//!     --test e2e_pdf_raster -- --ignored
+//! cargo test -p elide --features codec-pdf-render,image,mocks,engine,serde \
+//!     --test format_pdf raster -- --ignored
 //! ```
 //!
-//! Unlike glyph deletion, raster redaction does not depend on the font
-//! encoding: it paints over pixels. The proof is that the redacted output has
-//! **no extractable text at all**, it is images, and none of the original PII
+//! Unlike glyph deletion, raster redaction never reads the text layer: it
+//! paints over pixels. The proof is that the redacted output has **no
+//! extractable text at all**, it is images, and none of the original PII
 //! survives.
 
 use bytes::Bytes;
-use elide::Result;
 use elide::codec::pdf::{Dpi, RasterMode, pdf_format_with};
 use elide::codec::{ContentData, Document, FormatRegistry, LocalId};
 use elide::modality::text::Text;
 use elide::modality::{ChunkReader, DataWriter};
 use elide::redaction::{HiddenContentPolicy, Redactions};
+use elide::{ErrorKind, Orchestrator, RegistryDocumentExt, Result};
 use elide_image::modality::{Image, ImageReplacement};
 use elide_image::primitive::Color;
 use elide_pdf::fixtures;
 
 use crate::support::fixture::Fixture;
+use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -58,37 +60,77 @@ async fn flattened(pdf: Bytes, dpi: u16) -> Result<Document> {
         .await
 }
 
+/// Read every page stream of `doc`, as detection reads it: a page replaced
+/// by its render that nothing read is refused on encode.
+fn read_pages(doc: &mut Document) -> Result<()> {
+    for number in 1.. {
+        let Some(page) = doc.stream_mut::<Image>(&format!("page-{number}")) else {
+            return Ok(());
+        };
+        page.chunks()?;
+    }
+    Ok(())
+}
+
+/// The fixture redacted under `RasterMode::Always` by `orchestrator`, as bytes.
+async fn redacted_always(orchestrator: &Orchestrator) -> Result<Bytes> {
+    let registry =
+        FormatRegistry::with_builtin().with_replaced_format(pdf_format_with(RasterMode::always()));
+    let mut document = registry
+        .document("doc.pdf", FIXTURE.source, HiddenContentPolicy::default())
+        .await?;
+    let report = orchestrator.analyze(&mut document).await?.report;
+    orchestrator.anonymize_with(&mut document, report).await?;
+    Ok(Bytes::copy_from_slice(
+        document.document.encode()?.as_bytes(),
+    ))
+}
+
 /// The total stream size of every image in `pdf`.
 fn image_bytes(pdf: &[u8]) -> usize {
     fixtures::images(pdf).iter().map(Bytes::len).sum()
 }
 
+/// Without an image pipeline nothing detects on the renders that replace
+/// every page, so the redaction is refused rather than ship them unredacted.
+#[tokio::test]
+#[ignore = "requires the native PDFium library at runtime"]
+async fn always_without_an_image_pipeline_is_refused() -> Result<()> {
+    let orchestrator = TestOrchestrator::bare()
+        .with_text(default_text_analyzer()?, build_anonymizer::<Text>())
+        .build();
+    let Err(error) = redacted_always(&orchestrator).await else {
+        panic!("rendered pages nothing read must be refused");
+    };
+    assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+    Ok(())
+}
+
+/// With an image pipeline every page is detected on its render and replaced
+/// by it: nothing is read from the text layer, and none survives.
+#[cfg(feature = "image")]
 #[tokio::test]
 #[ignore = "requires the native PDFium library at runtime"]
 async fn raster_redaction_flattens_every_page() -> Result<()> {
-    // Swap the built-in (glyph-delete) PDF handler for the raster one, which
-    // replaces every page by a redacted image of it.
-    let registry =
-        FormatRegistry::with_builtin().with_replaced_format(pdf_format_with(RasterMode::always()));
-    let outcome = FIXTURE.run_with(registry).await?;
+    use elide::detection::Analyzer;
+    use elide::redaction::Anonymizer;
 
-    // The born-digital text layer detected the PII (the analysis ran over the
-    // observation text before redaction).
-    assert!(
-        !outcome.entities.is_empty(),
-        "the born-digital text should detect entities",
-    );
+    let orchestrator = TestOrchestrator::bare()
+        .with_text(default_text_analyzer()?, build_anonymizer::<Text>())
+        .with_image(Analyzer::new(), Anonymizer::new())
+        .build();
+    let redacted = redacted_always(&orchestrator).await?;
 
     // The redacted output is image-only: re-decoding recovers no text at all,
     // so no original PII can survive as text.
-    let text = extracted_text(&outcome.redacted).await?;
+    let text = extracted_text(&redacted).await?;
     assert!(
         text.trim().is_empty(),
         "raster output must carry no text layer, got: {text:?}",
     );
 
     // And specifically none of the fixture's PII appears as bytes anywhere.
-    let raw = String::from_utf8_lossy(&outcome.redacted);
+    let raw = String::from_utf8_lossy(&redacted);
     for pii in [
         "alice.johnson@example.com",
         "555-0142",
@@ -106,7 +148,8 @@ async fn raster_redaction_flattens_every_page() -> Result<()> {
 #[tokio::test]
 #[ignore = "requires the native PDFium library at runtime"]
 async fn every_page_is_flattened_with_nothing_detected() -> Result<()> {
-    let doc = flattened(Bytes::from_static(FIXTURE.source), 72).await?;
+    let mut doc = flattened(Bytes::from_static(FIXTURE.source), 72).await?;
+    read_pages(&mut doc)?;
     let out = doc.encode()?;
     let text = extracted_text(out.as_bytes()).await?;
     assert!(text.trim().is_empty(), "a text layer survived: {text:?}");
@@ -117,12 +160,12 @@ async fn every_page_is_flattened_with_nothing_detected() -> Result<()> {
 #[tokio::test]
 #[ignore = "requires the native PDFium library at runtime"]
 async fn pages_render_at_the_configured_dpi() -> Result<()> {
-    let low = flattened(Bytes::from_static(FIXTURE.source), 36)
-        .await?
-        .encode()?;
-    let high = flattened(Bytes::from_static(FIXTURE.source), 144)
-        .await?
-        .encode()?;
+    let encoded = async |dpi| -> Result<ContentData> {
+        let mut doc = flattened(Bytes::from_static(FIXTURE.source), dpi).await?;
+        read_pages(&mut doc)?;
+        doc.encode()
+    };
+    let (low, high) = (encoded(36).await?, encoded(144).await?);
     assert!(
         image_bytes(high.as_bytes()) > image_bytes(low.as_bytes()),
         "a higher DPI did not render more pixels"
@@ -150,6 +193,7 @@ async fn images_and_attachments_are_surfaced() -> Result<()> {
         .map(|blob| blob.id.clone())
         .expect("the attachment is surfaced");
     doc.replace_blob(&id, Bytes::from_static(b"[NAME]"))?;
+    read_pages(&mut doc)?;
     let out = doc.encode()?;
     assert_eq!(
         fixtures::attachments(out.as_bytes()),

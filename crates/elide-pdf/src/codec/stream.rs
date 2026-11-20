@@ -176,14 +176,9 @@ mod tests {
     use elide_core::modality::text::TextReplacement;
 
     use super::*;
-    use crate::codec::state::Pages;
     use crate::content::text::Text;
     use crate::fixtures::{DocBuilder, Page, shown, type1};
     use crate::pdf::Pdf;
-    #[cfg(feature = "render")]
-    use crate::pdf::reader::{DeviceRect, GlyphRect, PageFrame};
-    #[cfg(feature = "render")]
-    use crate::pdf::render::PageObservation;
 
     /// The body stream of a one-page document showing `Jane Roe`.
     fn body() -> PdfStream {
@@ -193,7 +188,7 @@ mod tests {
         let bytes = pdf.bytes();
         let blocks = Pdf::open(&bytes).unwrap().read(Text).unwrap();
         PdfStream {
-            state: PdfState::new(Pages::Glyph(blocks)),
+            state: PdfState::new(blocks),
         }
     }
 
@@ -235,47 +230,5 @@ mod tests {
             .await
             .unwrap();
         assert!(body.state.detections().is_empty());
-    }
-
-    /// A reviewer's mark on a flattened page resolves through PDFium's glyph
-    /// boxes, placed by the page's frame.
-    #[cfg(feature = "render")]
-    #[test]
-    fn a_mark_resolves_on_a_flattened_page() {
-        // "ab cd" on a Letter page: each glyph 10pt wide on a baseline at
-        // y = 700, the space between the words drawing nothing.
-        let glyph = |chars: Range<usize>, x: f64| GlyphRect {
-            chars,
-            rect: DeviceRect {
-                min_x: x,
-                min_y: 700.0,
-                max_x: x + 10.0,
-                max_y: 710.0,
-            },
-        };
-        let page = PageObservation {
-            page: 1,
-            text: "ab cd".to_owned(),
-            glyphs: vec![
-                glyph(0..1, 100.0),
-                glyph(1..2, 110.0),
-                glyph(3..4, 300.0),
-                glyph(4..5, 310.0),
-            ],
-            frame: PageFrame::LETTER,
-        };
-        let body = PdfStream {
-            state: PdfState::new(Pages::Flatten {
-                pages: vec![page],
-                scale: 1.0,
-            }),
-        };
-        // A box over "cd": x 300..320 of 612, y 82..92 from the top of 792.
-        let mark = TextLocation::marked_rendered(
-            1,
-            UnitBoundingBox::new(295.0 / 612.0, 80.0 / 792.0, 30.0 / 612.0, 14.0 / 792.0),
-        );
-        let resolved = body.resolve(mark).unwrap();
-        assert_eq!(resolved.range(), Some(&(3..5)));
     }
 }

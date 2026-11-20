@@ -1,20 +1,13 @@
 //! [`Plan`]: everything an encode writes into a decoded document,
 //! applied in one pass over one copy of it and saved once.
 
-#[cfg(feature = "render")]
-use std::collections::BTreeSet;
-
 use elide_core::Result;
 
 use crate::content::attachment::{AttachmentId, AttachmentRedaction, AttachmentReplacement};
 use crate::content::image::{ImageId, ImageRedaction, ImageReplacement};
 #[cfg(feature = "render")]
-use crate::content::page::{
-    Flatten, PageRedaction, PageReplacement, Repaint, ScannedPage, glyph_boxes,
-};
+use crate::content::page::{PageRedaction, Repaint, ScannedPage};
 use crate::content::text::{Detection, TextBlock, TextRedaction};
-#[cfg(feature = "render")]
-use crate::pdf::render::PageObservation;
 use crate::pdf::{Edit, Pdf};
 
 /// Everything an encode writes into a document.
@@ -26,11 +19,11 @@ pub(super) struct Plan {
     pub(super) images: Vec<ImageReplacement>,
     /// Embedded images no codec could read, removed.
     pub(super) removed_images: Vec<ImageId>,
-    /// Scanned pages the image pipeline redacted, each replaced by its render
-    /// with the redacted regions painted over.
+    /// Pages redacted from their render, each replaced by it with the
+    /// regions the image pipeline redacted painted over.
     #[cfg(feature = "render")]
     pub(super) scanned: Vec<ScannedPage>,
-    /// The scale the scanned pages were rendered at.
+    /// The scale the rendered pages were rendered at.
     #[cfg(feature = "render")]
     pub(super) scan_scale: f32,
     /// Attachments replaced with their redacted bytes.
@@ -56,7 +49,7 @@ impl Plan {
 
     /// `pdf` with the redaction applied: the glyphs of the detected text
     /// deleted (located through `blocks`, its [`Text`](crate::content::text::Text)),
-    /// the redacted images and scanned pages written back, the unreadable
+    /// the redacted images and rendered pages written back, the unreadable
     /// images removed, and the attachments replaced or dropped.
     ///
     /// # Errors
@@ -90,57 +83,6 @@ impl Plan {
             };
             edit.redact(PageRedaction { pages: &pages })?;
         }
-        self.redact_attachments(&mut edit)?;
-        edit.finish()
-    }
-
-    /// `pdf` with every page replaced by a redacted image of it: a scanned
-    /// page by its render with its redacted regions painted over, every other
-    /// page rendered at `scale` with the glyphs the detected text covers on
-    /// `pages` painted over. The embedded images are redacted first, so the render
-    /// shows them redacted, and the attachments are replaced or dropped.
-    ///
-    /// # Errors
-    ///
-    /// As [`glyph_boxes`], [`Flatten`], [`Repaint`], and
-    /// [`apply`](Plan::apply).
-    #[cfg(feature = "render")]
-    pub(super) fn flatten(&self, pdf: &Pdf, pages: &[PageObservation], scale: f32) -> Result<Pdf> {
-        let redraws = self.redraws_images();
-        let redacted;
-        let drawn = if redraws {
-            let mut edit = pdf.edit();
-            self.redact_images(&mut edit)?;
-            redacted = edit.finish()?;
-            &redacted
-        } else {
-            pdf
-        };
-
-        let scanned: BTreeSet<u32> = self.scanned.iter().map(|page| page.number).collect();
-        let rendered: BTreeSet<u32> = pages
-            .iter()
-            .map(|page| page.page)
-            .filter(|number| !scanned.contains(number))
-            .collect();
-        let boxes = glyph_boxes(pages, &self.text)?;
-        let mut flat: Vec<PageReplacement> = drawn.read(Flatten {
-            pages: rendered,
-            scale,
-            boxes: &boxes,
-        })?;
-        if redraws {
-            flat.extend(drawn.read(Repaint {
-                scanned: &self.scanned,
-                scale,
-            })?);
-        } else {
-            for page in &self.scanned {
-                flat.push(page.replacement()?);
-            }
-        }
-        let mut edit = drawn.edit();
-        edit.redact(PageRedaction { pages: &flat })?;
         self.redact_attachments(&mut edit)?;
         edit.finish()
     }

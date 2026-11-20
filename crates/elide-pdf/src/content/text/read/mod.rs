@@ -104,6 +104,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         cells: BTreeMap::new(),
         page,
         walks_remaining: MAX_XOBJECT_WALKS,
+        unplaced: false,
     };
 
     let scope = Scope::page(doc, page_id);
@@ -126,6 +127,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         }
     }
     walk.place_tiles()?;
+    let unplaced = walk.unplaced;
 
     // The page's visible rectangle and rotation, for normalizing glyph device
     // boxes to page fractions. A page missing its boxes falls back to a unit
@@ -140,6 +142,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         rects,
         frame,
         fonts,
+        unplaced,
     })
 }
 
@@ -189,6 +192,8 @@ struct Walk<'a, 'd> {
     /// stream decodes without ever recursing cyclically. This bounds the total,
     /// independent of nesting depth.
     walks_remaining: u32,
+    /// Whether a glyph was drawn in a font whose advances can't be known.
+    unplaced: bool,
 }
 
 #[cfg(test)]
@@ -372,6 +377,21 @@ mod tests {
             Operation::new("ET", vec![]),
         ];
         assert_eq!(extract_block_in(run, type1("Unknown")).text, "a@b.io");
+    }
+
+    /// A page that draws glyphs in a font whose advances can't be known is
+    /// unplaced; one whose fonts all give them, or that selects such a font
+    /// and draws nothing in it, is not.
+    #[test]
+    fn a_glyph_in_a_font_without_widths_leaves_its_page_unplaced() {
+        assert!(extract_block_in(shown("Jane"), type1("Custom")).unplaced);
+        assert!(!extract_block_in(shown("Jane"), type1("Helvetica")).unplaced);
+        let selected = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("ET", vec![]),
+        ];
+        assert!(!extract_block_in(selected, type1("Custom")).unplaced);
     }
 
     /// Glyphs drawn contiguously (one `Tj`) are not split by spurious spaces.

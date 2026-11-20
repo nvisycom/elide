@@ -1,4 +1,7 @@
-//! [`PageStream`]: a scanned page's render, an image stream of the document.
+//! [`PageStream`]: a page's render, an image stream of the document: a
+//! scanned page's, or one redacted from its render rather than its text.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytes::Bytes;
 use elide_codec::{FormatId, LocalId, Stream};
@@ -12,9 +15,9 @@ use elide_image::primitive::BoundingBox;
 use super::FORMAT_ID;
 use crate::content::page::ScannedPage;
 
-/// A scanned page's render: the image pipeline reads it for OCR and redacts
-/// it in place, and each region it redacts is kept so encode can paint it
-/// over the page as the document then draws it.
+/// A page's render: the image pipeline reads it for OCR and redacts it in
+/// place, and each region it redacts is kept so encode can paint it over the
+/// page as the document then draws it.
 ///
 /// The render is held as its PNG and decoded only to be read or redacted, so
 /// a long scan does not hold every page's pixels at once.
@@ -25,16 +28,31 @@ pub(super) struct PageStream {
     render: Bytes,
     /// Each region of the render redacted, with how.
     redactions: Vec<(BoundingBox<u32>, ImageReplacement)>,
+    /// Whether the page is replaced by its render even with nothing redacted
+    /// on it: one redacted from its render, whose text layer must not ship.
+    replaced: bool,
+    /// Whether the whole render was read, as detection reads it: a read of
+    /// one region of it does not count.
+    read: AtomicBool,
 }
 
 impl PageStream {
-    /// Page `number`'s stream over its PNG `render`.
+    /// Page `number`'s stream over its PNG `render`, the page kept as it is
+    /// unless something on it is redacted.
     pub(super) fn new(number: u32, render: Bytes) -> Self {
         Self {
             number,
             render,
             redactions: Vec::new(),
+            replaced: false,
+            read: AtomicBool::new(false),
         }
+    }
+
+    /// The stream, its page replaced by its render whatever is redacted.
+    pub(super) fn replaced(mut self) -> Self {
+        self.replaced = true;
+        self
     }
 
     /// The stream's document-local id, `page-N`.
@@ -42,13 +60,28 @@ impl PageStream {
         LocalId::new(format!("page-{}", self.number))
     }
 
-    /// The page as redacted, or `None` when nothing was.
-    pub(super) fn scanned(&self) -> Option<ScannedPage> {
-        (!self.redactions.is_empty()).then(|| ScannedPage {
-            number: self.number,
-            painted: self.render.clone(),
-            redactions: self.redactions.clone(),
-        })
+    /// The page as redacted, or `None` when it is kept as it is.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
+    /// for a page replaced by its render that nothing read: its text layer is
+    /// gone, and with no image pipeline to detect on the render, whatever the
+    /// page shows would ship unredacted.
+    pub(super) fn scanned(&self) -> Result<Option<ScannedPage>> {
+        if self.replaced && !self.read.load(Ordering::Relaxed) {
+            return Err(Error::capability_unavailable(format!(
+                "page {} is redacted from its render, but no image pipeline read it",
+                self.number
+            )));
+        }
+        Ok(
+            (self.replaced || !self.redactions.is_empty()).then(|| ScannedPage {
+                number: self.number,
+                painted: self.render.clone(),
+                redactions: self.redactions.clone(),
+            }),
+        )
     }
 
     /// The render, decoded.
@@ -81,11 +114,13 @@ impl Stream<Image> for PageStream {
 
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
         let render = self.open()?;
-        Ok(vec![Chunk {
+        let chunk = Chunk {
             location: render.frame().with_page(self.number),
             data: render.data()?,
             hints: Vec::new(),
-        }])
+        };
+        self.read.store(true, Ordering::Relaxed);
+        Ok(vec![chunk])
     }
 }
 

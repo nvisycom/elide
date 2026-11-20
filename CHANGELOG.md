@@ -39,10 +39,15 @@ and this project adheres to
   document nothing was redacted in keeps its original bytes, and an embedded
   file no codec can read is removed
 - Optional PDF page rendering via the native PDFium library (`pdf-render`
-  feature): scanned pages are rendered for OCR, each replaced by a render of
-  it with its redacted embedded images and every region redacted on it painted
-  over, and `RasterMode::Always` replaces every page by an image with the
-  detected text painted over, rendered at its configured DPI
+  feature), which redacts a page from its render: the page is rendered, the
+  image pipeline detects on what it shows (OCR) and redacts it, and the page
+  is replaced by that render with its redacted embedded images. Scanned pages
+  are redacted this way, and so are pages that draw text in a font whose glyph
+  widths can't be known (without the feature, or under `RasterMode::Never`,
+  such a page is refused); `RasterMode::Always` redacts every page this way at
+  its configured DPI, never reading the text layer. A page replaced by its
+  render that no image pipeline read is refused rather than shipped
+  unredacted
 
 #### Detection
 

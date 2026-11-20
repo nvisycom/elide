@@ -6,59 +6,49 @@ use std::ops::Range;
 use bytes::Bytes;
 use elide_core::{Error, Result};
 
-#[cfg(feature = "render")]
-use super::SCAN_DPI;
 use super::plan::Plan;
 use crate::content::text::{Detection, TextBlock};
 use crate::pdf::Pdf;
 use crate::pdf::reader::PageGeometry;
-#[cfg(feature = "render")]
-use crate::pdf::render::PageObservation;
 
-/// A decoded PDF's pages, as the redaction mode reads them.
-#[derive(Debug)]
-pub(super) enum Pages {
-    /// Glyph deletion: each page's text with the map back to the glyphs that
-    /// drew it.
-    Glyph(Vec<TextBlock>),
-    /// Flatten (feature `render`): every page's text as PDFium reads it, with
-    /// each glyph's box; encode renders the pages at `scale`.
-    #[cfg(feature = "render")]
-    Flatten {
-        pages: Vec<PageObservation>,
-        scale: f32,
-    },
-}
-
-/// A decoded PDF's pages and the redactions recorded on them.
+/// A decoded PDF's text pages and the redactions recorded on them.
 #[derive(Debug)]
 pub(super) struct PdfState {
-    pages: Pages,
+    /// Each page redacted by deleting its glyphs: its text with the map back
+    /// to the glyphs that drew it. A page redacted from its render instead
+    /// has none.
+    blocks: Vec<TextBlock>,
+    /// The scale the rendered pages were rendered at.
+    #[cfg(feature = "render")]
+    scale: f32,
     /// Recorded detections (page + character span), applied at encode.
     detections: Vec<Detection>,
 }
 
 impl PdfState {
-    /// The state of `pages`, with nothing recorded.
-    pub(super) fn new(pages: Pages) -> Self {
+    /// The state of the text pages `blocks`, with nothing recorded.
+    pub(super) fn new(blocks: Vec<TextBlock>) -> Self {
         Self {
-            pages,
+            blocks,
+            #[cfg(feature = "render")]
+            scale: super::SCAN_DPI.scale_factor(),
             detections: Vec::new(),
         }
+    }
+
+    /// The state with its rendered pages rendered at `scale`.
+    #[cfg(feature = "render")]
+    pub(super) fn rendered_at(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self
     }
 
     /// Each page's number and text, in page order, leaving out a page with no
     /// text (a scanned page, surfaced as an image instead).
     pub(super) fn texts(&self) -> Vec<(u32, &str)> {
-        let texts: Vec<(u32, &str)> = match &self.pages {
-            Pages::Glyph(blocks) => blocks.iter().map(|b| (b.page, b.text.as_str())).collect(),
-            #[cfg(feature = "render")]
-            Pages::Flatten { pages, .. } => {
-                pages.iter().map(|p| (p.page, p.text.as_str())).collect()
-            }
-        };
-        texts
-            .into_iter()
+        self.blocks
+            .iter()
+            .map(|block| (block.page, block.text.as_str()))
             .filter(|(_, text)| !text.trim().is_empty())
             .collect()
     }
@@ -79,26 +69,16 @@ impl PdfState {
 
     /// The glyph boxes and frame of the page numbered `number`.
     pub(super) fn geometry(&self, number: u32) -> Option<PageGeometry<'_>> {
-        match &self.pages {
-            Pages::Glyph(blocks) => blocks
-                .iter()
-                .find(|b| b.page == number)
-                .map(TextBlock::geometry),
-            #[cfg(feature = "render")]
-            Pages::Flatten { pages, .. } => pages
-                .iter()
-                .find(|p| p.page == number)
-                .map(PageObservation::geometry),
-        }
+        self.blocks
+            .iter()
+            .find(|block| block.page == number)
+            .map(TextBlock::geometry)
     }
 
-    /// The scale a scanned page was rendered at.
+    /// The scale the rendered pages were rendered at.
     #[cfg(feature = "render")]
     pub(super) fn scan_scale(&self) -> f32 {
-        match &self.pages {
-            Pages::Glyph(_) => SCAN_DPI.scale_factor(),
-            Pages::Flatten { scale, .. } => *scale,
-        }
+        self.scale
     }
 
     /// The detections recorded so far.
@@ -150,19 +130,12 @@ impl PdfState {
     ///
     /// # Errors
     ///
-    /// As [`Plan::apply`], and on the flatten path as
-    /// `Plan::flatten`.
+    /// As [`Plan::apply`].
     pub(super) fn redact(&self, pdf: &Pdf, mut plan: Plan) -> Result<Bytes> {
         plan.text.clone_from(&self.detections);
-        match &self.pages {
-            Pages::Glyph(blocks) => {
-                if plan.is_empty() {
-                    return Ok(pdf.bytes());
-                }
-                Ok(plan.apply(pdf, blocks)?.bytes())
-            }
-            #[cfg(feature = "render")]
-            Pages::Flatten { pages, scale } => Ok(plan.flatten(pdf, pages, *scale)?.bytes()),
+        if plan.is_empty() {
+            return Ok(pdf.bytes());
         }
+        Ok(plan.apply(pdf, &self.blocks)?.bytes())
     }
 }
