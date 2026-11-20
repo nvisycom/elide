@@ -3,9 +3,13 @@
 //! Reconstructing where a glyph lands needs its advance width — how far the pen
 //! moves after drawing it. A simple font carries a `/Widths` array indexed by
 //! byte code from `/FirstChar`; a composite (Type0) font carries a `/W` array
-//! keyed by CID with a `/DW` default. This module reads both into a uniform
-//! [`WidthSource`] that answers [`advance`](WidthSource::advance) in glyph-space
-//! thousandths (the unit `/Widths` and `/W` use, `1000` to the em).
+//! keyed by CID with a `/DW` default. A simple font that names one of the
+//! standard 14 fonts and embeds no program may give no `/Widths`; a reader
+//! then supplies the face's own (see [`Standard`]). This module reads each into
+//! a uniform [`WidthSource`] that answers [`advance`](WidthSource::advance) in
+//! text-space thousandths per unit of font size (the unit `/Widths` and `/W`
+//! use, `1000` to the em). A Type3 font's `/Widths` are in its glyph space, so
+//! are scaled by its `/FontMatrix` into that unit.
 //!
 //! Widths place glyphs: they decide where a word space is read, and the boxes a
 //! detection's rectangles and a reviewer's mark are resolved against. Deletion
@@ -18,6 +22,7 @@ use std::collections::BTreeMap;
 
 use lopdf::{Dictionary, Document, Object};
 
+use super::standard::Standard;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt};
 
 /// The default glyph width (glyph-space thousandths) when a font declares none:
@@ -49,6 +54,9 @@ pub(crate) enum WidthSource {
         w: BTreeMap<u32, f64>,
         ranges: Vec<CidRange>,
     },
+    /// A standard font with no `/Widths`: each code's width in the face, `None`
+    /// for a code whose glyph the face gives no width.
+    Standard(Box<[Option<f64>; 256]>),
     /// No usable width table: the caller treats positional moves as word
     /// boundaries instead of computing an exact advance.
     Unknown,
@@ -97,40 +105,56 @@ impl WidthSource {
                     .map(|r| r.width);
                 Some(in_range.unwrap_or(*dw))
             }
+            WidthSource::Standard(widths) => usize::try_from(code)
+                .ok()
+                .and_then(|code| *widths.get(code)?),
             WidthSource::Unknown => None,
         }
     }
 
-    /// `/Widths` + `/FirstChar` of a simple font, with `/FontDescriptor`
-    /// `/MissingWidth` as the out-of-range fallback.
+    /// The widths of a simple font: its `/Widths` from `/FirstChar`, with
+    /// `/FontDescriptor` `/MissingWidth` as the out-of-range fallback, scaled
+    /// by its `/FontMatrix` for a Type3 font; else, for a standard font, the
+    /// face's own.
     fn from_simple(doc: &Document, font: &Dictionary) -> WidthSource {
-        let Some(first_char) = font.get(b"FirstChar").ok().and_then(|o| o.as_i64().ok()) else {
-            return WidthSource::Unknown;
+        let scale = if font.is_subtype(doc, b"Type3") {
+            match type3_scale(doc, font) {
+                Some(scale) => scale.0 * 1000.0,
+                None => return WidthSource::Unknown,
+            }
+        } else {
+            1.0
         };
-        let Some(widths) = font
-            .get(b"Widths")
-            .ok()
-            .and_then(|o| doc.resolve_array(o))
-            .map(|arr| {
-                arr.iter()
-                    .map(|o| o.as_number().unwrap_or(0.0))
-                    .collect::<Vec<_>>()
+        if let Some(widths) = Self::from_widths(doc, font, scale) {
+            return widths;
+        }
+        Standard::of(doc, font)
+            .and_then(|standard| standard.widths(doc, font))
+            .map_or(WidthSource::Unknown, |widths| {
+                WidthSource::Standard(Box::new(widths))
             })
-        else {
-            return WidthSource::Unknown;
-        };
+    }
+
+    /// `/Widths` + `/FirstChar` of a simple font, each width times `scale`.
+    fn from_widths(doc: &Document, font: &Dictionary, scale: f64) -> Option<WidthSource> {
+        let first_char = font.get(b"FirstChar").ok()?.as_i64().ok()?;
+        let widths = doc
+            .resolve_array(font.get(b"Widths").ok()?)?
+            .iter()
+            .map(|o| o.as_number().unwrap_or(0.0) * scale)
+            .collect();
         let missing = font
             .get(b"FontDescriptor")
             .ok()
             .and_then(|o| doc.resolve_dict(o))
             .and_then(|fd| fd.get(b"MissingWidth").ok())
-            .map(|o| o.as_number().unwrap_or(0.0))
+            .map(|o| o.as_number().unwrap_or(0.0) * scale)
             .unwrap_or(0.0);
-        WidthSource::Simple {
+        Some(WidthSource::Simple {
             first_char,
             widths,
             missing,
-        }
+        })
     }
 
     /// `/W` + `/DW` of a Type0 font's descendant CIDFont.
@@ -179,8 +203,11 @@ pub(crate) struct CidRange {
 /// glyphs, which matches a viewer's tight text box better than the full
 /// `/Ascent` (which reserves room above capitals the text does not use); it
 /// falls back to `/Ascent` when a font declares no cap height. The bottom is the
-/// `/Descent`. A missing descriptor falls back to a default em box rather than
-/// failing — metrics feed only the box height, never redaction.
+/// `/Descent`. A standard font without them takes its face's (a cap height
+/// from either ahead of an ascent from either), and anything
+/// still missing falls back to a default em box rather than failing: metrics
+/// feed only the box height, never redaction. A Type3 font's are in its glyph
+/// space, so are scaled by its `/FontMatrix`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GlyphMetrics {
     /// Top of the box above the baseline, as an em fraction (typically ~0.66
@@ -206,30 +233,58 @@ impl GlyphMetrics {
     /// any missing piece). A `/Type0` font's descriptor is on its descendant
     /// CIDFont.
     pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> GlyphMetrics {
-        let descriptor = font_descriptor(doc, font);
-        let Some(fd) = descriptor else {
-            return GlyphMetrics::default();
-        };
         let default = GlyphMetrics::default();
+        let unit = if font.is_subtype(doc, b"Type3") {
+            match type3_scale(doc, font) {
+                Some((_, vertical)) => vertical,
+                None => return default,
+            }
+        } else {
+            0.001
+        };
+        let descriptor = font_descriptor(doc, font);
+        let standard = Standard::of(doc, font);
+        // Each value with the scale into an em fraction: the descriptor's in
+        // glyph space, the standard face's in thousandths.
         let em = |key: &[u8]| {
-            fd.get(key)
+            descriptor?
+                .get(key)
                 .ok()
                 .map(|o| o.as_number().unwrap_or(0.0))
                 .filter(|v| *v != 0.0)
-                .map(|v| v / 1000.0)
+                .map(|v| (v, unit))
         };
-        // Top: cap height (tight to the drawn glyphs) if present, else ascent.
+        let face = |value: fn(Standard) -> Option<f64>| value(standard?).map(|v| (v, 0.001));
+        // A Type3 matrix with a negative vertical scale draws glyphs upside
+        // down, so the default box is flipped with them.
+        let flip = unit.signum();
+        // Top: a cap height (tight to the drawn glyphs) if either gives one,
+        // else an ascent.
         let top = em(b"CapHeight")
+            .or_else(|| face(Standard::cap_height))
             .or_else(|| em(b"Ascent"))
-            .unwrap_or(default.top);
-        // Bottom sits *below* the baseline, so it must be negative. The spec says
-        // `/Descent` is typically negative, but some producers (e.g. Skia) store
-        // it as a positive magnitude; normalize to `-|value|` so either
-        // convention yields a below-baseline extent (otherwise the glyph box is
-        // placed entirely above the baseline and comes out too short).
-        let bottom = em(b"Descent").map(|d| -d.abs()).unwrap_or(default.bottom);
+            .or_else(|| face(Standard::ascender))
+            .map_or(default.top * flip, |(v, scale)| v * scale);
+        // Bottom sits *below* the baseline in glyph space, so it must be
+        // negative there. The spec says `/Descent` is typically negative, but
+        // some producers (e.g. Skia) store it as a positive magnitude;
+        // normalize to `-|value|` before scaling so either convention yields a
+        // below-baseline extent.
+        let bottom = em(b"Descent")
+            .or_else(|| face(Standard::descender))
+            .map_or(default.bottom * flip, |(v, scale)| -v.abs() * scale);
+        // Under a flipped matrix the two ends swap sides of the baseline.
+        let (top, bottom) = (top.max(bottom), top.min(bottom));
         GlyphMetrics { top, bottom }
     }
+}
+
+/// The horizontal and vertical scale of the Type3 `font`'s `/FontMatrix`,
+/// from glyph space to text space; `None` when it has none readable, or one
+/// that turns a glyph's advance off the baseline.
+fn type3_scale(doc: &Document, font: &Dictionary) -> Option<(f64, f64)> {
+    let [a, b, _, d, _, _] = doc.resolve_numbers::<6>(font.get(b"FontMatrix").ok()?)?;
+    (b == 0.0 && a.is_finite() && d.is_finite()).then_some((a, d))
 }
 
 /// Resolve a font's `/FontDescriptor`, following a `/Type0` font to its
@@ -298,7 +353,78 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
 
 #[cfg(test)]
 mod tests {
+    use lopdf::dictionary;
+
     use super::*;
+
+    fn type3(matrix: [f64; 6]) -> Dictionary {
+        dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type3",
+            "FontMatrix" => matrix.iter().map(|&v| Object::Real(v as f32)).collect::<Vec<_>>(),
+            "FirstChar" => 65,
+            "Widths" => vec![50.into(), 80.into()],
+            "FontDescriptor" => dictionary! { "CapHeight" => 70, "Descent" => -20 },
+        }
+    }
+
+    /// A Type3 font's widths and metrics are in its glyph space, scaled into
+    /// text space by its `/FontMatrix`.
+    #[test]
+    fn type3_widths_follow_the_font_matrix() {
+        let doc = Document::with_version("1.4");
+        let font = type3([0.01, 0.0, 0.0, 0.01, 0.0, 0.0]);
+        let widths = WidthSource::from_font(&doc, &font);
+        assert_eq!(widths.advance(65).map(f64::round), Some(500.0));
+        assert_eq!(widths.advance(66).map(f64::round), Some(800.0));
+        let metrics = GlyphMetrics::from_font(&doc, &font);
+        assert!((metrics.top - 0.7).abs() < 1e-6, "{metrics:?}");
+        assert!((metrics.bottom + 0.2).abs() < 1e-6, "{metrics:?}");
+    }
+
+    /// A Type3 font whose matrix flips glyphs vertically keeps its full box,
+    /// above the baseline as well as below.
+    #[test]
+    fn a_flipped_type3_font_keeps_its_box() {
+        let doc = Document::with_version("1.4");
+        let font = type3([0.01, 0.0, 0.0, -0.01, 0.0, 0.0]);
+        let metrics = GlyphMetrics::from_font(&doc, &font);
+        assert!((metrics.top - 0.2).abs() < 1e-6, "{metrics:?}");
+        assert!((metrics.bottom + 0.7).abs() < 1e-6, "{metrics:?}");
+    }
+
+    /// A Type3 font whose matrix turns its advance off the baseline, or that
+    /// has none, has no widths a reader can place glyphs by.
+    #[test]
+    fn a_type3_font_without_a_usable_matrix_has_unknown_widths() {
+        let doc = Document::with_version("1.4");
+        let rotated = type3([0.0, 0.01, -0.01, 0.0, 0.0, 0.0]);
+        assert!(WidthSource::from_font(&doc, &rotated).advance(65).is_none());
+        let mut missing = type3([0.01, 0.0, 0.0, 0.01, 0.0, 0.0]);
+        missing.remove(b"FontMatrix");
+        assert!(WidthSource::from_font(&doc, &missing).advance(65).is_none());
+    }
+
+    /// A standard font's own `/Widths` win over its face's; without them it
+    /// takes the face's widths and vertical extent.
+    #[test]
+    fn a_standard_font_falls_back_to_its_face() {
+        let doc = Document::with_version("1.4");
+        let mut font = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Times-Roman",
+        };
+        let face = WidthSource::from_font(&doc, &font);
+        assert_eq!(face.advance(u32::from(b'A')), Some(722.0));
+        assert_eq!(face.advance(256), None);
+        let metrics = GlyphMetrics::from_font(&doc, &font);
+        assert!((metrics.top - 0.662).abs() < 1e-6, "{metrics:?}");
+        assert!((metrics.bottom + 0.217).abs() < 1e-6, "{metrics:?}");
+
+        font.set("FirstChar", 65);
+        font.set("Widths", vec![Object::Integer(100)]);
+        let own = WidthSource::from_font(&doc, &font);
+        assert_eq!(own.advance(u32::from(b'A')), Some(100.0));
+    }
 
     fn int(n: i64) -> Object {
         Object::Integer(n)

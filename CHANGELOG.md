@@ -139,7 +139,11 @@ and this project adheres to
   font maps to a presentation form (a Kangxi radical, a ligature, an Arabic
   presentation form, a CJK compatibility ideograph) is read as the text it
   writes, and the output's `/ToUnicode` CMaps map it the same way, so copy
-  and search in a viewer give that text; a page whose content cannot be read,
+  and search in a viewer give that text; glyphs are placed by their font's
+  widths, a standard 14 font without `/Widths` (or one named by an alias,
+  such as `Arial`) by Adobe's metrics for its face wherever PDFium and pdf.js
+  select and size its glyphs alike, and a Type3 font's scaled by its
+  `/FontMatrix`; a page whose content cannot be read,
   text drawn before a font is selected, content nested too deep, and an
   encode naming a part the document never surfaced are refused rather than
   passed through. The output is untagged (its structure tree carried

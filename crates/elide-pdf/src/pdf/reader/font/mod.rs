@@ -3,6 +3,7 @@
 
 mod codespace;
 mod glyphs;
+mod standard;
 mod widths;
 
 pub(crate) use self::glyphs::{FontText, decode_glyphs, readable, to_unicode};

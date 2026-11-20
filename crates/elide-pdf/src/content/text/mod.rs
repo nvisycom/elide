@@ -422,10 +422,18 @@ mod tests {
     }
 
     /// Pattern text shows on a tile only where it is painted: a fill of the
-    /// tile's far edge shows none of the text at its near edge.
+    /// tile's top edge shows none of the text on its baseline, and one of
+    /// its right edge only the glyphs that reach it.
     #[test]
     fn a_tile_shows_only_where_it_is_painted() {
-        assert!(tiled_rects(b"/Pattern cs /P0 scn 40 0 10 20 re f").is_empty());
+        assert!(tiled_rects(b"/Pattern cs /P0 scn 0 15 50 5 re f").is_empty());
+        let right = tiled_rects(b"/Pattern cs /P0 scn 40 0 10 20 re f");
+        let all = tiled_rects(b"/Pattern cs /P0 scn 0 0 50 20 re f");
+        assert!(!right.is_empty() && right.len() < all.len(), "{right:?}");
+        assert!(
+            right.iter().all(|glyph| glyph.rect.max_x > 40.0),
+            "{right:?}"
+        );
     }
 
     /// Text paints with a pattern as its rendering mode draws it: filled,
