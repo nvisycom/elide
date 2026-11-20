@@ -5,14 +5,17 @@
 //! editor, the timestamps, the company and manager, free text (the title,
 //! description, keywords, template path), the names of the document's parts,
 //! and custom properties. This says what each field is, reads the fields out of
-//! a part's bytes, edits them back, and strips the rest when metadata is
-//! treated as content, matching by element **local name** so it works whether
-//! the property uses the `cp:`/`dc:`/`ap:` prefix or the default namespace, and
-//! tolerating a leading byte-order mark.
+//! a part's bytes, and edits them back, matching by element **local name** so
+//! it works whether the property uses the `cp:`/`dc:`/`ap:` prefix or the
+//! default namespace, and tolerating a leading byte-order mark. When metadata
+//! is treated as content, [`UnsurfacedProperties`] strips everything else by
+//! the same walk, so the part keeps exactly what [`fields`] reads.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use bytes::Bytes;
+use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::redaction::HiddenContent;
 use quick_xml::escape::unescape;
@@ -20,25 +23,8 @@ use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 use quick_xml::{Reader, XmlVersion};
 
-use crate::opc::ns::{CORE_PROPERTIES, CUSTOM_PROPERTIES, DC, DCTERMS, EXTENDED_PROPERTIES};
-use crate::opc::schema;
-use crate::opc::xml_edit::{Action, Attribute, Name, Rules, bom_len};
-
-/// The OOXML namespaces whose elements are property fields: core properties,
-/// the Dublin Core and DC terms elements core properties use, extended (app)
-/// properties, and custom properties. A strict namespace is read as its
-/// transitional twin.
-const PROPERTY_NAMESPACES: [&str; 5] = [
-    CORE_PROPERTIES,
-    DC,
-    DCTERMS,
-    EXTENDED_PROPERTIES,
-    CUSTOM_PROPERTIES,
-];
-
-/// The root elements of the property parts, which hold the fields rather than
-/// being one.
-const PROPERTY_ROOTS: [&str; 2] = ["coreProperties", "Properties"];
+use crate::opc::malformed_xml;
+use crate::opc::xml_edit::{Edit, Edited, SpannedReader, attribute_source, bom_len, splice};
 
 /// The core and extended property elements surfaced as fields, each holding
 /// its value as text.
@@ -113,39 +99,204 @@ pub struct Field {
     pub label: LabelRef,
 }
 
-/// Element rules that strip every property no [`fields`] surfaces from a
-/// property part, keeping the part's root and its surfaced fields. Applied
-/// when metadata is treated as content, so what stays is exactly what
+/// The edit that strips from a property part everything no [`fields`] reads,
+/// applied when metadata is treated as content, so what stays is exactly what
 /// detection sees.
+///
+/// It walks the part as [`fields`] does, by local name in any namespace, and
+/// keeps the root, each surfaced field with everything inside it, and the
+/// list containers, vectors, and variants on the path to a kept list entry.
+/// Every other element goes with its subtree, as do text, CDATA, and entity
+/// references outside a field, an entity reference no field resolves, and
+/// every processing instruction; whitespace between elements stays. A vector
+/// that loses entries has its `size` set to the entries it keeps.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct UnsurfacedProperties;
 
-impl Rules for UnsurfacedProperties {
+impl Edit for UnsurfacedProperties {
     fn content(&self) -> Option<HiddenContent> {
         Some(HiddenContent::Properties)
     }
 
-    fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
-        let namespace = name.namespace.map(schema::transitional);
-        let property = namespace.is_some_and(|namespace| PROPERTY_NAMESPACES.contains(&namespace));
-        // A custom property is a field only by its name, as [`fields`] reads
-        // it: one without a readable name is never surfaced.
-        let named = || {
-            attributes.iter().any(|attribute| {
-                attribute.name.namespace.is_none()
-                    && attribute.name.local == "name"
-                    && unescape(attribute.value).is_ok()
-            })
-        };
-        let surfaced = ELEMENT_FIELDS.contains(&name.local)
-            || LISTS.contains(&name.local)
-            || (name.local == CUSTOM_PROPERTY && namespace == Some(CUSTOM_PROPERTIES) && named());
-        if property && !PROPERTY_ROOTS.contains(&name.local) && !surfaced {
-            Action::Remove
-        } else {
-            Action::Keep
+    fn apply(&self, raw: &str) -> Result<Option<Edited>> {
+        let mut reader = SpannedReader::new(raw);
+        let mut walk = Walk::default();
+        let mut cuts = Cuts::default();
+        // The kept elements that are not fields: the root, and the list
+        // containers, vectors, and variants, kept only when an entry is.
+        let mut frames: Vec<Frame> = Vec::new();
+        // The depth of the surfaced field being read, everything inside kept.
+        let mut reading: Option<usize> = None;
+        // The depth and start of the element being removed.
+        let mut removing: Option<(usize, usize)> = None;
+
+        loop {
+            let (event, span) = reader.read_event().map_err(malformed_xml)?;
+            match event {
+                Event::Eof => break,
+                Event::DocType(_) => return Err(malformed_xml("a document type declaration")),
+                Event::Start(ref e) | Event::Empty(ref e) => {
+                    let is_start = matches!(event, Event::Start(_));
+                    let depth = walk.depth();
+                    let field = walk.enter(e);
+                    if !is_start {
+                        walk.leave();
+                    }
+                    if removing.is_some() || reading.is_some() {
+                        continue;
+                    }
+                    if depth == 0 {
+                        if is_start {
+                            frames.push(Frame::new(depth, span.start, &cuts, None));
+                        }
+                    } else if let Some(field) = field {
+                        // A custom property's name is read only when it holds
+                        // a value, so an empty one is never surfaced.
+                        if is_start || field.place != Place::Custom {
+                            keep_child(&mut frames);
+                            if is_start {
+                                reading = Some(depth);
+                            }
+                        } else {
+                            cuts.remove(span);
+                        }
+                    } else if is_start && walk.is_list_path() {
+                        frames.push(Frame::new(depth, span.start, &cuts, size(raw, e)?));
+                    } else if is_start {
+                        removing = Some((depth, span.start));
+                    } else {
+                        cuts.remove(span);
+                    }
+                }
+                Event::End(_) => {
+                    walk.leave();
+                    let depth = walk.depth();
+                    if let Some((removed, start)) = removing {
+                        if removed == depth {
+                            cuts.remove(start..span.end);
+                            removing = None;
+                        }
+                    } else if reading == Some(depth) {
+                        reading = None;
+                    } else if reading.is_none()
+                        && let Some(frame) = frames.pop_if(|frame| frame.depth == depth)
+                    {
+                        if frame.children == 0 && depth > 0 {
+                            cuts.truncate(frame.cuts);
+                            cuts.remove(frame.start..span.end);
+                        } else {
+                            if let Some((value, written)) = frame.size
+                                && written != frame.children.to_string()
+                            {
+                                cuts.replace(value, frame.children.to_string());
+                            }
+                            keep_child(&mut frames);
+                        }
+                    }
+                }
+                _ if removing.is_some() => {}
+                Event::Text(ref text) if reading.is_none() && !is_blank(text) => cuts.remove(span),
+                Event::CData(_) if reading.is_none() => cuts.remove(span),
+                Event::GeneralRef(ref r) if reading.is_none() || resolve_ref(r).is_empty() => {
+                    cuts.remove(span);
+                }
+                Event::PI(_) => cuts.remove(span),
+                _ => {}
+            }
+        }
+        Ok(cuts.into_edited(raw))
+    }
+}
+
+/// The cuts of an [`UnsurfacedProperties`] edit, in document order: each
+/// range removed (counted) or a vector's `size` rewritten (not counted).
+#[derive(Default)]
+struct Cuts(Vec<(Range<usize>, String, bool)>);
+
+impl Cuts {
+    /// Remove `range`.
+    fn remove(&mut self, range: Range<usize>) {
+        self.0.push((range, String::new(), true));
+    }
+
+    /// Write `with` in place of `range`.
+    fn replace(&mut self, range: Range<usize>, with: String) {
+        self.0.push((range, with, false));
+    }
+
+    /// Forget every cut after the first `len`, for an element removed whole.
+    fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+
+    /// `raw` with these cuts, or `None` when there are none.
+    fn into_edited(self, raw: &str) -> Option<Edited> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let count = self.0.iter().filter(|(_, _, counted)| *counted).count();
+        let cuts = self
+            .0
+            .into_iter()
+            .map(|(range, with, _)| (range, with))
+            .collect();
+        Some(Edited {
+            text: splice(raw, cuts),
+            count,
+        })
+    }
+}
+
+/// An open element an [`UnsurfacedProperties`] edit keeps only if it keeps
+/// something inside it: the root (kept regardless), or a list container,
+/// vector, or variant.
+struct Frame {
+    /// How many elements are open around it.
+    depth: usize,
+    /// Where its start tag begins.
+    start: usize,
+    /// How many cuts were made before it opened.
+    cuts: usize,
+    /// For a vector, its `size` value's range and text.
+    size: Option<(Range<usize>, String)>,
+    /// How many of its children are kept.
+    children: usize,
+}
+
+impl Frame {
+    fn new(depth: usize, start: usize, cuts: &Cuts, size: Option<(Range<usize>, String)>) -> Self {
+        Self {
+            depth,
+            start,
+            cuts: cuts.0.len(),
+            size,
+            children: 0,
         }
     }
+}
+
+/// Count a kept child of the innermost open frame.
+fn keep_child(frames: &mut [Frame]) {
+    if let Some(frame) = frames.last_mut() {
+        frame.children += 1;
+    }
+}
+
+/// The range and text of `e`'s unqualified `size` attribute, if it has one.
+fn size(raw: &str, e: &BytesStart<'_>) -> Result<Option<(Range<usize>, String)>> {
+    for attribute in e.attributes() {
+        let attribute = attribute.map_err(malformed_xml)?;
+        if attribute.key.as_ref() == "size" {
+            let (_, value) = attribute_source(raw, &attribute)?;
+            return Ok(Some((value.clone(), raw[value].to_owned())));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether `text` is only whitespace.
+fn is_blank(text: &BytesText<'_>) -> bool {
+    text.as_ref().chars().all(|c| c.is_ascii_whitespace())
 }
 
 /// A field an element holds: its key in the part, where its value sits, what
@@ -249,6 +400,18 @@ impl Walk {
     /// How many elements are open.
     fn depth(&self) -> usize {
         self.open.len()
+    }
+
+    /// Whether the innermost open element is a list container, its vector,
+    /// or a variant of that vector: the path to a list entry.
+    fn is_list_path(&self) -> bool {
+        let is_list = || LISTS.contains(&self.open[1].as_str());
+        match self.open.len() {
+            2 => is_list(),
+            3 => is_list() && self.open[2] == "vector",
+            4 => is_list() && self.open[2] == "vector" && self.open[3] == "variant",
+            _ => false,
+        }
     }
 }
 
@@ -566,7 +729,7 @@ fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::xml_edit::{edit, expect_edit};
+    use crate::opc::xml_edit::expect_edit;
 
     /// The `(key, value)` of each field `xml` surfaces.
     fn pairs(xml: &[u8]) -> Vec<(String, String)> {
@@ -605,14 +768,20 @@ mod tests {
 
         let app = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>C:\Users\jroe\Normal.dotm</Template><Company>Acme</Company><HyperlinkBase>https://intranet</HyperlinkBase><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Secret sheet</vt:lpstr></vt:vector></TitlesOfParts><Application>Microsoft Excel</Application></Properties>"#;
         let edited = expect_edit(app, &UnsurfacedProperties);
-        assert_eq!(edited.count, 1);
+        // The application, and the heading's count, which no field reads.
+        assert_eq!(edited.count, 2);
         for kept in ["jroe", "Acme", "intranet", "Worksheets", "Secret sheet"] {
             assert!(edited.text.contains(kept), "{kept} was stripped");
         }
-        assert!(!edited.text.contains("Excel"));
+        assert!(!edited.text.contains("Excel") && !edited.text.contains("vt:i4"));
+        assert!(
+            edited
+                .text
+                .contains(r#"<vt:vector size="1" baseType="variant">"#)
+        );
 
         let custom = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
-        assert!(edit(custom, &UnsurfacedProperties).unwrap().is_none());
+        assert!(UnsurfacedProperties.apply(custom).unwrap().is_none());
 
         // A custom property with no name cannot be surfaced, so it goes.
         let unnamed = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
@@ -635,6 +804,134 @@ mod tests {
         assert_eq!(edited.count, 1);
         assert!(edited.text.contains("Jane Roe"));
         assert!(!edited.text.contains("Unnamed"));
+    }
+
+    /// Every piece of text `xml` carries that no field of it reads: text,
+    /// CDATA, an entity reference, or a processing instruction outside a
+    /// surfaced field, or anything a field holds that its value leaves out.
+    fn unread(xml: &str) -> Vec<String> {
+        let read: Vec<String> = fields(xml.as_bytes())
+            .into_iter()
+            .map(|field| field.value)
+            .collect();
+        let mut reader = Reader::from_str(xml);
+        let mut unread = Vec::new();
+        loop {
+            let text = match reader.read_event().unwrap() {
+                Event::Eof => break,
+                Event::Text(t) => unescape(t.as_ref()).unwrap().into_owned(),
+                Event::CData(t) => t.as_ref().to_owned(),
+                Event::GeneralRef(r) => match resolve_ref(&r) {
+                    resolved if resolved.is_empty() => format!("&{};", r.as_ref() as &str),
+                    resolved => resolved,
+                },
+                Event::PI(pi) => pi.as_ref().to_owned(),
+                _ => continue,
+            };
+            let text = text.trim();
+            if !text.is_empty() && !read.iter().any(|value| value.contains(text)) {
+                unread.push(text.to_owned());
+            }
+        }
+        unread
+    }
+
+    /// `raw` with its unsurfaced properties removed, asserting that what is
+    /// left is all read and that removing again changes nothing.
+    fn surfaced_only(raw: &str) -> String {
+        let text = UnsurfacedProperties
+            .apply(raw)
+            .unwrap()
+            .map_or_else(|| raw.to_owned(), |edited| edited.text);
+        assert_eq!(unread(&text), Vec::<String>::new(), "{text}");
+        assert!(
+            UnsurfacedProperties.apply(&text).unwrap().is_none(),
+            "a second removal changes {text}"
+        );
+        text
+    }
+
+    const EXTENDED: &str = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">"#;
+
+    #[test]
+    fn a_list_entry_outside_a_vector_is_removed() {
+        let app = format!(
+            "{EXTENDED}<TitlesOfParts><vt:lpstr>Jane Roe salary</vt:lpstr></TitlesOfParts><Company>Acme</Company></Properties>"
+        );
+        let text = surfaced_only(&app);
+        assert!(
+            !text.contains("Jane Roe") && !text.contains("TitlesOfParts"),
+            "{text}"
+        );
+        assert!(text.contains("Acme"), "{text}");
+    }
+
+    #[test]
+    fn a_heading_entry_of_no_text_type_is_removed() {
+        let app = format!(
+            r#"{EXTENDED}<HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>Jane Roe</vt:i4></vt:variant></vt:vector></HeadingPairs></Properties>"#
+        );
+        let text = surfaced_only(&app);
+        assert!(!text.contains("Jane Roe"), "{text}");
+        assert!(
+            text.contains("Worksheets") && text.contains(r#"size="1""#),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_field_named_element_inside_a_list_is_removed() {
+        let app = format!(
+            "{EXTENDED}<TitlesOfParts><Company>Secret</Company></TitlesOfParts></Properties>"
+        );
+        let text = surfaced_only(&app);
+        assert!(!text.contains("Secret"), "{text}");
+    }
+
+    #[test]
+    fn a_variant_in_core_properties_is_removed() {
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><dc:creator>Ada</dc:creator><vt:lpwstr>Jane Roe</vt:lpwstr></cp:coreProperties>"#;
+        let text = surfaced_only(core);
+        assert!(!text.contains("Jane Roe") && text.contains("Ada"), "{text}");
+    }
+
+    #[test]
+    fn text_outside_every_field_is_removed() {
+        let app = format!(
+            r#"{EXTENDED}Jane<?note Roe?>
+  <Company>Acme</Company><TitlesOfParts>Doe<![CDATA[Smith]]>&#74;<vt:vector size="1" baseType="lpstr"><vt:lpstr>Payroll</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#
+        );
+        let text = surfaced_only(&app);
+        for gone in ["Jane", "Roe", "Doe", "Smith", "&#74;"] {
+            assert!(!text.contains(gone), "{gone} kept: {text}");
+        }
+        assert!(text.contains("Acme") && text.contains("Payroll"), "{text}");
+        // The whitespace between fields stays.
+        assert!(text.contains("\n  <Company>"), "{text}");
+    }
+
+    #[test]
+    fn an_entity_no_field_resolves_is_removed() {
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Ada &JaneRoe; &amp; co</dc:creator></cp:coreProperties>"#;
+        let text = surfaced_only(core);
+        assert!(!text.contains("JaneRoe") && text.contains("Ada"), "{text}");
+    }
+
+    #[test]
+    fn a_custom_property_keeps_its_value_and_loses_an_empty_one() {
+        let custom = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Carol Doe"/><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="4" name="Count"><vt:i4>42</vt:i4></property></Properties>"#;
+        let text = surfaced_only(custom);
+        assert!(text.contains("<vt:lpwstr>Jane Roe</vt:lpwstr>"), "{text}");
+        assert!(text.contains("<vt:i4>42</vt:i4>"), "{text}");
+        assert!(!text.contains("Carol Doe"), "{text}");
+    }
+
+    #[test]
+    fn empty_list_entries_keep_their_vector() {
+        let app = format!(
+            r#"{EXTENDED}<TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr/><vt:lpstr>Payroll</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#
+        );
+        assert!(UnsurfacedProperties.apply(&app).unwrap().is_none());
     }
 
     const APP: &[u8] = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>Normal.dotm</Template><TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Payroll</vt:lpstr><vt:lpstr/><vt:lpstr>Jane Roe</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#;

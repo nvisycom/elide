@@ -328,6 +328,37 @@ mod tests {
         assert!(error.to_string().contains("R207b36bfad034c28"), "{error}");
     }
 
+    /// Under `ScanAsContent` a property part keeps only what its fields read:
+    /// an entry out of place, a heading of no text type, a field name inside
+    /// a list, a variant in the core properties, and stray text all go, the
+    /// result passes the check, and sanitizing it again changes nothing.
+    #[test]
+    fn a_property_part_keeps_only_what_its_fields_read() {
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+        let document = replacing(SAMPLE_DOCX, "docProps/app.xml", |_| {
+            r#"<?xml version="1.0"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">Stray Roe<Company>Acme</Company><TitlesOfParts><vt:lpstr>Jane Roe salary</vt:lpstr><Company>Secret</Company></TitlesOfParts><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Pages</vt:lpstr></vt:variant><vt:variant><vt:i4>Jane Roe</vt:i4></vt:variant></vt:vector></HeadingPairs></Properties>"#.to_owned()
+        });
+        let document = replacing(&document, "docProps/core.xml", |core| {
+            core.replace(
+                "</coreProperties>",
+                r#"<vt:lpwstr xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">Jane Roe</vt:lpwstr></coreProperties>"#,
+            )
+        });
+        let (sanitized, _) = sanitize(&document, policy, &WordFormat).unwrap();
+        let sanitized = sanitized.unwrap();
+        for part in ["docProps/app.xml", "docProps/core.xml"] {
+            let text = String::from_utf8(read_part(&sanitized, part).unwrap()).unwrap();
+            for gone in ["Jane Roe", "Stray", "Secret"] {
+                assert!(!text.contains(gone), "{part} kept {gone}: {text}");
+            }
+        }
+        let app = String::from_utf8(read_part(&sanitized, "docProps/app.xml").unwrap()).unwrap();
+        assert!(app.contains("Acme") && app.contains("Pages"), "{app}");
+        check(&sanitized, policy, &WordFormat).unwrap();
+        let (again, _) = sanitize(&sanitized, policy, &WordFormat).unwrap();
+        assert!(again.is_none_or(|again| again == sanitized));
+    }
+
     /// A strict extended-properties part keeps only the surfaced fields when
     /// metadata is scanned, and then passes the check.
     #[test]
