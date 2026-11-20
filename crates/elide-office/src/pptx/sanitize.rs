@@ -75,7 +75,7 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, part_names, read_text_part};
+    use crate::fixtures::{pack_typed, part_names, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::ns::P;
     use crate::opc::sanitize::sanitize;
@@ -86,7 +86,6 @@ mod tests {
     fn modern_comments_go_under_every_policy() {
         const P188: &str = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
         const PC: &str = "http://schemas.microsoft.com/office/powerpoint/2013/main/command";
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/comments/modernComment1.xml" ContentType="application/vnd.ms-powerpoint.comments+xml"/><Override PartName="/ppt/authors.xml" ContentType="application/vnd.ms-powerpoint.authors+xml"/></Types>"#;
         let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{P}"/>"#);
         let comments = format!(
             r#"<?xml version="1.0"?><p188:cmLst xmlns:p188="{P188}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pc="{PC}"><p188:cm id="{{C}}" authorId="{{A}}" created="2024-01-02T03:04:05.123" startDate="2024-01-03T00:00:00" title="For Jane Roe"><pc:sldMkLst><pc:docMk/><pc:sldMk cId="1" sldId="256"/></pc:sldMkLst><p188:replyLst><p188:reply id="{{R}}" authorId="{{A}}" created="2024-01-04T00:00:00"><p188:txBody><a:bodyPr/><a:p><a:r><a:t>done</a:t></a:r></a:p></p188:txBody></p188:reply></p188:replyLst><p188:txBody><a:bodyPr/><a:p><a:r><a:t>check</a:t></a:r></a:p></p188:txBody></p188:cm></p188:cmLst>"#
@@ -94,11 +93,22 @@ mod tests {
         let authors = format!(
             r#"<?xml version="1.0"?><p188:authorLst xmlns:p188="{P188}"><p188:author id="{{A}}" name="Jane Roe" initials="JR" userId="jane@example.com" providerId="AD"/></p188:authorLst>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("ppt/presentation.xml", presentation.as_bytes()),
-            ("ppt/comments/modernComment1.xml", comments.as_bytes()),
-            ("ppt/authors.xml", authors.as_bytes()),
+        let package = pack_typed(&[
+            (
+                "ppt/presentation.xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+                presentation.as_bytes(),
+            ),
+            (
+                "ppt/comments/modernComment1.xml",
+                "application/vnd.ms-powerpoint.comments+xml",
+                comments.as_bytes(),
+            ),
+            (
+                "ppt/authors.xml",
+                "application/vnd.ms-powerpoint.authors+xml",
+                authors.as_bytes(),
+            ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, stripped) = sanitize(&package, policy, &SlideFormat).unwrap();
@@ -123,7 +133,6 @@ mod tests {
 
     #[test]
     fn comment_authors_are_surfaced_and_dates_dropped() {
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/commentAuthors.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml"/><Override PartName="/ppt/comments/comment1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.comments+xml"/></Types>"#;
         let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{P}"/>"#);
         let authors = format!(
             r#"<?xml version="1.0"?><p:cmAuthorLst xmlns:p="{P}"><p:cmAuthor id="0" name="Jane Roe" initials="JR" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>"#
@@ -131,11 +140,22 @@ mod tests {
         let comments = format!(
             r#"<?xml version="1.0"?><p:cmLst xmlns:p="{P}"><p:cm authorId="0" dt="2024-01-02T03:04:05.000" idx="1"><p:text>check</p:text></p:cm></p:cmLst>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("ppt/presentation.xml", presentation.as_bytes()),
-            ("ppt/commentAuthors.xml", authors.as_bytes()),
-            ("ppt/comments/comment1.xml", comments.as_bytes()),
+        let package = pack_typed(&[
+            (
+                "ppt/presentation.xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+                presentation.as_bytes(),
+            ),
+            (
+                "ppt/commentAuthors.xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml",
+                authors.as_bytes(),
+            ),
+            (
+                "ppt/comments/comment1.xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.comments+xml",
+                comments.as_bytes(),
+            ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();

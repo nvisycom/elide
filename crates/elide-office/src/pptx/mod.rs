@@ -44,7 +44,7 @@ impl OoxmlFormat for SlideFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures::{pack_parts, read_text_part};
+    use crate::fixtures::{pack_typed, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
 
@@ -58,12 +58,12 @@ mod tests {
     #[test]
     fn open_requires_a_presentation_part() {
         // A well-formed package holding a slide but no presentation part.
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>"#;
         let slide = r#"<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>"#;
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("ppt/slides/slide1.xml", slide.as_bytes()),
-        ]);
+        let package = pack_typed(&[(
+            "ppt/slides/slide1.xml",
+            "application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
+            slide.as_bytes(),
+        )]);
         let error = Pptx::open(&package).unwrap_err();
         assert!(
             error.to_string().contains("missing presentation part"),

@@ -46,9 +46,6 @@ mod tests {
 
     const BODY_PART: &str = "word/document.xml";
 
-    /// A content-types manifest typing the fixture's relationships and body.
-    const CONTENT_TYPES: &[u8] = br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
-
     /// The body part XML carrying `body_text`, as written, in one `w:t` run.
     fn body_xml(body_text: &str) -> String {
         format!(
@@ -59,10 +56,17 @@ mod tests {
     /// A minimal one-part `.docx` whose body carries `body_text` in a `w:t` run.
     fn docx_with_body(body_text: &str) -> ContentData {
         let body = body_xml(body_text);
-        let package = fixtures::pack_parts(&[
-            ("[Content_Types].xml", CONTENT_TYPES),
-            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#),
-            (BODY_PART, body.as_bytes()),
+        let package = fixtures::pack_typed(&[
+            (
+                "_rels/.rels",
+                "",
+                br#"<?xml version="1.0"?><Relationships/>"#,
+            ),
+            (
+                BODY_PART,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+                body.as_bytes(),
+            ),
         ]);
         ContentData::new(package.into())
     }

@@ -268,14 +268,13 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, part_names, read_text_part};
+    use crate::fixtures::{pack_typed, part_names, read_text_part};
     use crate::opc::sanitize::sanitize;
     use crate::opc::xml_edit::expect_edit;
 
     /// A workbook with a revision log and a legacy drawing holding one comment
     /// note and one button.
     fn workbook() -> Vec<u8> {
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/revisions/revisionHeaders.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.revisionHeaders+xml"/></Types>"#;
         let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
         let revisions = format!(
             r#"<?xml version="1.0"?><headers xmlns="{X}"><header userName="Jane Roe"/></headers>"#
@@ -290,11 +289,22 @@ mod tests {
             shape("Note"),
             shape("Button")
         );
-        pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("xl/workbook.xml", workbook.as_bytes()),
-            ("xl/revisions/revisionHeaders.xml", revisions.as_bytes()),
-            ("xl/drawings/vmlDrawing1.vml", vml.as_bytes()),
+        pack_typed(&[
+            (
+                "xl/workbook.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                workbook.as_bytes(),
+            ),
+            (
+                "xl/revisions/revisionHeaders.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.revisionHeaders+xml",
+                revisions.as_bytes(),
+            ),
+            (
+                "xl/drawings/vmlDrawing1.vml",
+                "application/vnd.openxmlformats-officedocument.vmlDrawing",
+                vml.as_bytes(),
+            ),
         ])
     }
 
@@ -308,7 +318,6 @@ mod tests {
 
     #[test]
     fn threaded_comments_go_under_every_policy() {
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/threadedComments/threadedComment1.xml" ContentType="application/vnd.ms-excel.threadedcomments+xml"/><Override PartName="/xl/persons/person.xml" ContentType="application/vnd.ms-excel.person+xml"/></Types>"#;
         let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
         let comments = format!(
             r#"<?xml version="1.0"?><ThreadedComments xmlns="{THREADED}"><threadedComment ref="A1" dT="2024-01-02T03:04:05.00" personId="{{P}}" id="{{C}}"><text>@Jane Roe please check</text><mentions><mention mentionpersonId="{{P}}" mentionId="{{M}}" startIndex="0" length="9"/></mentions></threadedComment></ThreadedComments>"#
@@ -316,14 +325,22 @@ mod tests {
         let persons = format!(
             r#"<?xml version="1.0"?><personList xmlns="{THREADED}"><person displayName="Jane Roe" id="{{P}}" userId="jane@example.com" providerId="PeoplePicker"/></personList>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("xl/workbook.xml", workbook.as_bytes()),
+        let package = pack_typed(&[
+            (
+                "xl/workbook.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                workbook.as_bytes(),
+            ),
             (
                 "xl/threadedComments/threadedComment1.xml",
+                "application/vnd.ms-excel.threadedcomments+xml",
                 comments.as_bytes(),
             ),
-            ("xl/persons/person.xml", persons.as_bytes()),
+            (
+                "xl/persons/person.xml",
+                "application/vnd.ms-excel.person+xml",
+                persons.as_bytes(),
+            ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, stripped) = sanitize(&package, policy, &SheetClassifier).unwrap();

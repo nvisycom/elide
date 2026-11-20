@@ -262,13 +262,18 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::fixtures::{pack_parts, read_text_part};
+    use crate::fixtures::{pack_typed, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
     use crate::opc::check::check;
     use crate::opc::sanitize::sanitize;
 
-    const TYPES: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>"#;
+    /// The content type of a Word document's body.
+    const DOCUMENT: &str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+    /// The content type of a Word document's comments.
+    const COMMENTS: &str =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
 
     /// A Word document whose body carries a picture's description, a
     /// hyperlink's tooltip, a content control's title and tag, a table caption,
@@ -280,11 +285,10 @@ mod tests {
         let comments = format!(
             r#"<?xml version="1.0"?><w:comments xmlns:w="{W}"><w:comment w:id="0" w:author="John Doe" w:initials="JD" w:date="2024-01-02T03:04:05Z"><w:p><w:r><w:t>check this</w:t></w:r></w:p></w:comment></w:comments>"#
         );
-        pack_parts(&[
-            ("[Content_Types].xml", TYPES.as_bytes()),
-            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
-            ("word/document.xml", body.as_bytes()),
-            ("word/comments.xml", comments.as_bytes()),
+        pack_typed(&[
+            ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/comments.xml", COMMENTS, comments.as_bytes()),
         ])
     }
 
@@ -295,15 +299,13 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document xmlns:w="{W}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:v="urn:schemas-microsoft-com:vml"><w:body><w:p><w:r><w:drawing><wp:inline><wp:extent cx="1" cy="1"/><wp:docPr id="1" name="Picture 1"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="logo.svg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r><w:r><w:pict><v:shape id="s" style="width:9pt"><v:imagedata r:id="rId1"/></v:shape></w:pict></w:r></w:p></w:body></w:document>"#
         );
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="svg" ContentType="image/svg+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
         let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.svg"/></Relationships>"#;
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><text>Jane Roe</text></svg>"#;
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
-            ("word/document.xml", body.as_bytes()),
-            ("word/_rels/document.xml.rels", rels.as_bytes()),
-            ("word/media/logo.svg", svg.as_bytes()),
+        let package = pack_typed(&[
+            ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/_rels/document.xml.rels", "", rels.as_bytes()),
+            ("word/media/logo.svg", "image/svg+xml", svg.as_bytes()),
         ]);
         let (out, stripped) =
             sanitize(&package, HiddenContentPolicy::default(), &WordFormat).unwrap();
@@ -332,11 +334,7 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document xmlns:w="{W}"><w:body><w:p><w:bookmarkStart w:id="0" w:name="JaneRoe"/><w:r><w:t>x</w:t></w:r><w:bookmarkEnd w:id="0"/><w:hyperlink w:anchor="JaneRoe"><w:r><w:t>see</w:t></w:r></w:hyperlink></w:p></w:body></w:document>"#
         );
-        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
-        let package = pack_parts(&[
-            ("[Content_Types].xml", types.as_bytes()),
-            ("word/document.xml", body.as_bytes()),
-        ]);
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
         let package = OoxmlPackage::<WordFormat>::open(&package).unwrap();
         let bookmark = body.find(r#"w:name="JaneRoe""#).unwrap() + r#"w:name=""#.len();
         let block = package
@@ -420,10 +418,7 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}"><w:body><w:p><w:r><w:t>kept</w:t></w:r><w:del w:id="1" w:author="Jane Roe" w:date="2024-01-02T03:04:05Z"><w:r><w:delText>deleted</w:delText></w:r></w:del><w:ins w:id="2" w:author="Jane Roe"><w:r><w:t>added</w:t></w:r></w:ins><w:commentRangeStart w:id="0"/></w:p></w:body></w:document>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", TYPES.as_bytes()),
-            ("word/document.xml", body.as_bytes()),
-        ]);
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
         let policy = HiddenContentPolicy::default();
         let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
         let out = out.unwrap();
@@ -443,10 +438,9 @@ mod tests {
             r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}" xmlns:r="http://purl.oclc.org/ooxml/officeDocument/relationships"><w:body><w:p><w:hyperlink r:id="rId1"><w:r><w:t>visit</w:t></w:r></w:hyperlink></w:p></w:body></w:document>"#
         );
         let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>"#;
-        let package = pack_parts(&[
-            ("[Content_Types].xml", TYPES.as_bytes()),
-            ("word/document.xml", body.as_bytes()),
-            ("word/_rels/document.xml.rels", rels.as_bytes()),
+        let package = pack_typed(&[
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/_rels/document.xml.rels", "", rels.as_bytes()),
         ]);
         let policy = HiddenContentPolicy::default();
         let (out, stripped) = sanitize(&package, policy, &WordFormat).unwrap();
@@ -474,10 +468,9 @@ mod tests {
         let comments = format!(
             r#"<?xml version="1.0"?><w:comments xmlns:w="{W}"><w:comment w:id="0" w:author="John Doe" w:initials="JD"><w:p><w:r><w:t>check this</w:t></w:r></w:p></w:comment></w:comments>"#
         );
-        let package = pack_parts(&[
-            ("[Content_Types].xml", TYPES.as_bytes()),
-            ("word/document.xml", body.as_bytes()),
-            ("word/comments.xml", comments.as_bytes()),
+        let package = pack_typed(&[
+            ("word/document.xml", DOCUMENT, body.as_bytes()),
+            ("word/comments.xml", COMMENTS, comments.as_bytes()),
         ]);
         let package = OoxmlPackage::<WordFormat>::open(&package).unwrap();
         let flags: Vec<(String, Option<String>)> = package

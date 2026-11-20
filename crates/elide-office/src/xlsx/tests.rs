@@ -1,7 +1,7 @@
 use elide_core::redaction::HiddenContentPolicy;
 
 use super::*;
-use crate::fixtures::{pack_parts, read_text_part};
+use crate::fixtures::{pack_parts, pack_typed, read_text_part};
 use crate::opc::ns::X;
 
 /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
@@ -21,7 +21,6 @@ const SHARED: &[u8] = include_bytes!("../../testdata/xlsx/shared_across_sheets.x
 /// first sheet, and a phonetic reading in the shared-string table, beside
 /// one shared-string cell and one inline cell.
 fn markup_workbook() -> Vec<u8> {
-    let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>"#;
     let workbook = format!(
         r#"<?xml version="1.0"?><workbook xmlns="{X}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Jane Roe" sheetId="1" r:id="rId1"/><sheet name="John Doe" sheetId="2" r:id="rId2"/></sheets><definedNames><definedName name="Owner">"Jane Roe"</definedName></definedNames></workbook>"#
     );
@@ -35,14 +34,13 @@ fn markup_workbook() -> Vec<u8> {
     let strings = format!(
         r#"<?xml version="1.0"?><sst xmlns="{X}" count="1" uniqueCount="1"><si><t>Roe</t><rPh sb="0" eb="3"><t>ロウ ジェーン</t></rPh></si></sst>"#
     );
-    pack_parts(&[
-        ("[Content_Types].xml", types.as_bytes()),
-        ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
-        ("xl/workbook.xml", workbook.as_bytes()),
-        ("xl/_rels/workbook.xml.rels", rels.as_bytes()),
-        ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
-        ("xl/worksheets/sheet2.xml", linked.as_bytes()),
-        ("xl/sharedStrings.xml", strings.as_bytes()),
+    pack_typed(&[
+        ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+        ("xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml", workbook.as_bytes()),
+        ("xl/_rels/workbook.xml.rels", "", rels.as_bytes()),
+        ("xl/worksheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", sheet.as_bytes()),
+        ("xl/worksheets/sheet2.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", linked.as_bytes()),
+        ("xl/sharedStrings.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml", strings.as_bytes()),
     ])
 }
 

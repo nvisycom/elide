@@ -38,6 +38,34 @@ pub fn pack_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {
     zip.finish().expect("finish fixture package").into_inner()
 }
 
+/// The content type of a relationships part.
+const RELATIONSHIPS_TYPE: &str = "application/vnd.openxmlformats-package.relationships+xml";
+
+/// Pack `(part name, content type, bytes)` triples into an OPC package with
+/// its content-types manifest: each part typed by an `Override` naming it, a
+/// relationships part (`.rels`) by the manifest's `Default` for its extension
+/// when its content type is empty.
+///
+/// # Panics
+///
+/// As [`pack_parts`].
+pub fn pack_typed(parts: &[(&str, &str, &[u8])]) -> Vec<u8> {
+    let mut manifest = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="{RELATIONSHIPS_TYPE}"/>"#
+    );
+    for (name, content_type, _) in parts {
+        if !content_type.is_empty() {
+            manifest.push_str(&format!(
+                r#"<Override PartName="/{name}" ContentType="{content_type}"/>"#
+            ));
+        }
+    }
+    manifest.push_str("</Types>");
+    let mut packed: Vec<(&str, &[u8])> = vec![("[Content_Types].xml", manifest.as_bytes())];
+    packed.extend(parts.iter().map(|&(name, _, bytes)| (name, bytes)));
+    pack_parts(&packed)
+}
+
 /// Read one part out of an OPC package by its full name, decompressed.
 ///
 /// The name is the full part name (e.g. `word/document.xml`). Returns `None` if
@@ -149,5 +177,33 @@ mod tests {
         let names = part_names(&package);
         assert!(names.contains(&"[Content_Types].xml".to_owned()));
         assert!(names.contains(&"word/document.xml".to_owned()));
+    }
+
+    #[test]
+    fn pack_typed_writes_the_manifest() {
+        let package = pack_typed(&[
+            ("_rels/.rels", "", b"<Relationships/>"),
+            (
+                "word/document.xml",
+                "application/main+xml",
+                b"<w:document/>",
+            ),
+        ]);
+        let manifest = read_text_part(&package, "[Content_Types].xml");
+        assert!(
+            manifest.contains(r#"<Default Extension="rels""#),
+            "{manifest}"
+        );
+        assert!(
+            manifest.contains(
+                r#"<Override PartName="/word/document.xml" ContentType="application/main+xml"/>"#
+            ),
+            "{manifest}"
+        );
+        assert!(!manifest.contains("/_rels/.rels"), "{manifest}");
+        assert_eq!(
+            read_part(&package, "word/document.xml").as_deref(),
+            Some(&b"<w:document/>"[..])
+        );
     }
 }

@@ -380,12 +380,8 @@ impl Package {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Write};
-
-    use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
-
     use super::*;
+    use crate::fixtures::pack_typed;
 
     #[test]
     fn an_attribute_value_reads_as_xml_normalizes_it() {
@@ -420,20 +416,19 @@ mod tests {
     /// A package of a main text part, a style part, and an image, with its
     /// content-types manifest.
     fn package() -> Vec<u8> {
-        let manifest = br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="png" ContentType="image/png"/><Override PartName="/doc/text.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>"#;
-        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        let entries: [(&str, &[u8]); 4] = [
-            ("[Content_Types].xml", manifest),
-            ("doc/text.xml", b"<t>hi</t>"),
-            ("styles.xml", b"<styles/>"),
-            ("media/image1.png", b"\x89PNG original"),
-        ];
-        for (name, bytes) in entries {
-            zip.start_file(name, opts).unwrap();
-            zip.write_all(bytes).unwrap();
-        }
-        zip.finish().unwrap().into_inner()
+        pack_typed(&[
+            (
+                "doc/text.xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+                b"<t>hi</t>",
+            ),
+            (
+                "styles.xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+                b"<styles/>",
+            ),
+            ("media/image1.png", "image/png", b"\x89PNG original"),
+        ])
     }
 
     #[test]
