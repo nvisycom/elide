@@ -306,13 +306,9 @@ fn retarget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::attributes::Ns;
-    use crate::opc::xml_edit::Local;
 
-    const SHEET: TextAttribute =
-        TextAttribute::new((Ns::Any, Local::Exact("sheet")), (Ns::None, "name"));
-    const LOCATION: TextAttribute =
-        TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "location"));
+    const SHEET: TextAttribute = TextAttribute::unqualified("sheet", "name");
+    const LOCATION: TextAttribute = TextAttribute::unqualified("hyperlink", "location");
 
     static NAMES: Names = Names {
         rules: &[NameRule {

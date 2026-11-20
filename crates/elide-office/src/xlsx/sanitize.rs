@@ -198,35 +198,17 @@ pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
     TABLE_DISPLAY_NAME,
     TABLE_COLUMN_NAME,
     HYPERLINK_LOCATION,
-    TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "display")),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "promptTitle"),
-    ),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "prompt"),
-    ),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "errorTitle"),
-    ),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("dataValidation")),
-        (Ns::None, "error"),
-    ),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "comment")),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "user"))
-        .of(Collaboration::Author),
-    TextAttribute::new(
-        (Ns::Any, Local::Exact("customWorkbookView")),
-        (Ns::None, "name"),
-    ),
-    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "displayName"))
-        .of(Collaboration::Author),
-    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "userId"))
-        .of(Collaboration::Author),
+    TextAttribute::unqualified("hyperlink", "display"),
+    TextAttribute::unqualified("dataValidation", "promptTitle"),
+    TextAttribute::unqualified("dataValidation", "prompt"),
+    TextAttribute::unqualified("dataValidation", "errorTitle"),
+    TextAttribute::unqualified("dataValidation", "error"),
+    TextAttribute::unqualified("scenario", "name"),
+    TextAttribute::unqualified("scenario", "comment"),
+    TextAttribute::unqualified("scenario", "user").of(Collaboration::Author),
+    TextAttribute::unqualified("customWorkbookView", "name"),
+    TextAttribute::unqualified("person", "displayName").of(Collaboration::Author),
+    TextAttribute::unqualified("person", "userId").of(Collaboration::Author),
 ];
 
 impl Sanitizer for SheetClassifier {

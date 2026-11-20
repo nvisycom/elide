@@ -58,6 +58,12 @@ impl TextAttribute {
         }
     }
 
+    /// The unqualified attribute `attribute` on the element `element` in any
+    /// namespace.
+    pub(crate) const fn unqualified(element: &'static str, attribute: &'static str) -> Self {
+        Self::new((Ns::Any, Local::Exact(element)), (Ns::None, attribute))
+    }
+
     /// This attribute, its value the collaboration item `collaboration`.
     pub(crate) const fn of(mut self, collaboration: Collaboration) -> Self {
         self.collaboration = Some(collaboration);
@@ -174,10 +180,10 @@ pub(crate) const NEUTRAL_DATE: &str = "1970-01-01T00:00:00Z";
 pub(crate) const ALTERNATIVE_TEXT: HiddenAttributes = HiddenAttributes::strip(
     HiddenContent::AlternativeText,
     &[
-        TextAttribute::new((Ns::Any, Local::Exact("docPr")), (Ns::None, "descr")),
-        TextAttribute::new((Ns::Any, Local::Exact("docPr")), (Ns::None, "title")),
-        TextAttribute::new((Ns::Any, Local::Exact("cNvPr")), (Ns::None, "descr")),
-        TextAttribute::new((Ns::Any, Local::Exact("cNvPr")), (Ns::None, "title")),
+        TextAttribute::unqualified("docPr", "descr"),
+        TextAttribute::unqualified("docPr", "title"),
+        TextAttribute::unqualified("cNvPr", "descr"),
+        TextAttribute::unqualified("cNvPr", "title"),
         TextAttribute::new((Ns::In(VML), Local::Any), (Ns::None, "alt")),
         TextAttribute::new((Ns::In(VML), Local::Any), (Ns::None, "title")),
         TextAttribute::new(
@@ -192,8 +198,8 @@ pub(crate) const TOOLTIPS: HiddenAttributes = HiddenAttributes::strip(
     HiddenContent::AlternativeText,
     &[
         TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::Any, "tooltip")),
-        TextAttribute::new((Ns::Any, Local::Exact("hlinkClick")), (Ns::None, "tooltip")),
-        TextAttribute::new((Ns::Any, Local::Exact("hlinkHover")), (Ns::None, "tooltip")),
+        TextAttribute::unqualified("hlinkClick", "tooltip"),
+        TextAttribute::unqualified("hlinkHover", "tooltip"),
     ],
 );
 
@@ -202,10 +208,7 @@ mod tests {
     use super::*;
     use crate::opc::xml_edit::{edit, expect_edit};
 
-    const DESCRIPTION: &[TextAttribute] = &[TextAttribute::new(
-        (Ns::Any, Local::Exact("cNvPr")),
-        (Ns::None, "descr"),
-    )];
+    const DESCRIPTION: &[TextAttribute] = &[TextAttribute::unqualified("cNvPr", "descr")];
 
     #[test]
     fn strips_a_named_attribute_from_any_namespace() {
@@ -222,10 +225,7 @@ mod tests {
 
     #[test]
     fn a_neutralized_attribute_edits_once() {
-        const CREATED: &[TextAttribute] = &[TextAttribute::new(
-            (Ns::Any, Local::Exact("cm")),
-            (Ns::None, "created"),
-        )];
+        const CREATED: &[TextAttribute] = &[TextAttribute::unqualified("cm", "created")];
         let rules = HiddenAttributes::neutralize(HiddenContent::Comment, CREATED, NEUTRAL_DATE);
         let raw = r#"<cm id="1" created="2024-05-06T07:08:09.123"/>"#;
         let edited = expect_edit(raw, &rules);

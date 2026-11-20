@@ -13,8 +13,8 @@ use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::SlideFormat;
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Local};
-use crate::opc::{Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns, PartKind, TextAttribute};
+use crate::opc::xml_edit::Declared;
+use crate::opc::{Collaboration, HiddenAttributes, NEUTRAL_DATE, PartKind, TextAttribute};
 
 /// The PowerPoint 2010 extension namespace (slide creation ids).
 const P14: &str = "http://schemas.microsoft.com/office/powerpoint/2010/main";
@@ -28,9 +28,9 @@ const EDITING_SESSION_IDS: Declared =
 const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
     HiddenContent::Comment,
     &[
-        TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "dt")),
-        TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "startDate")),
-        TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "dueDate")),
+        TextAttribute::unqualified("cm", "dt"),
+        TextAttribute::unqualified("cm", "startDate"),
+        TextAttribute::unqualified("cm", "dueDate"),
     ],
 );
 
@@ -38,8 +38,8 @@ const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
 const CREATION_DATES: HiddenAttributes = HiddenAttributes::neutralize(
     HiddenContent::Comment,
     &[
-        TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "created")),
-        TextAttribute::new((Ns::Any, Local::Exact("reply")), (Ns::None, "created")),
+        TextAttribute::unqualified("cm", "created"),
+        TextAttribute::unqualified("reply", "created"),
     ],
     NEUTRAL_DATE,
 );
@@ -48,19 +48,14 @@ const CREATION_DATES: HiddenAttributes = HiddenAttributes::neutralize(
 /// custom-show names, a comment's title, and the names, initials, and accounts
 /// of its comment authors.
 pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
-    TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "title")).of(Collaboration::Text),
-    TextAttribute::new((Ns::Any, Local::Exact("section")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("custShow")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("cmAuthor")), (Ns::None, "name"))
-        .of(Collaboration::Author),
-    TextAttribute::new((Ns::Any, Local::Exact("cmAuthor")), (Ns::None, "initials"))
-        .of(Collaboration::Author),
-    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "name"))
-        .of(Collaboration::Author),
-    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "initials"))
-        .of(Collaboration::Author),
-    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "userId"))
-        .of(Collaboration::Author),
+    TextAttribute::unqualified("cm", "title").of(Collaboration::Text),
+    TextAttribute::unqualified("section", "name"),
+    TextAttribute::unqualified("custShow", "name"),
+    TextAttribute::unqualified("cmAuthor", "name").of(Collaboration::Author),
+    TextAttribute::unqualified("cmAuthor", "initials").of(Collaboration::Author),
+    TextAttribute::unqualified("author", "name").of(Collaboration::Author),
+    TextAttribute::unqualified("author", "initials").of(Collaboration::Author),
+    TextAttribute::unqualified("author", "userId").of(Collaboration::Author),
 ];
 
 impl Sanitizer for SlideFormat {

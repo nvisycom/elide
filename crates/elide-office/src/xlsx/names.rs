@@ -13,33 +13,29 @@
 //! a renamed name. A formula naming one does not.
 
 use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
-use crate::opc::xml_edit::Local;
-use crate::opc::{Names, Ns, TextAttribute};
+use crate::opc::{Names, TextAttribute};
 
 /// A sheet's name, shown on its tab.
-pub(super) const SHEET_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("sheet")), (Ns::None, "name"));
+pub(super) const SHEET_NAME: TextAttribute = TextAttribute::unqualified("sheet", "name");
 
 /// A defined name.
-pub(super) const DEFINED_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("definedName")), (Ns::None, "name"));
+pub(super) const DEFINED_NAME: TextAttribute = TextAttribute::unqualified("definedName", "name");
 
 /// A table's name.
-pub(super) const TABLE_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("table")), (Ns::None, "name"));
+pub(super) const TABLE_NAME: TextAttribute = TextAttribute::unqualified("table", "name");
 
 /// A table's display name, the one formulas use.
 pub(super) const TABLE_DISPLAY_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("table")), (Ns::None, "displayName"));
+    TextAttribute::unqualified("table", "displayName");
 
 /// A table column's name, its header.
 pub(super) const TABLE_COLUMN_NAME: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("tableColumn")), (Ns::None, "name"));
+    TextAttribute::unqualified("tableColumn", "name");
 
 /// Where a hyperlink inside the workbook goes: a defined name or a
 /// sheet-qualified cell.
 pub(super) const HYPERLINK_LOCATION: TextAttribute =
-    TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::None, "location"));
+    TextAttribute::unqualified("hyperlink", "location");
 
 /// The longest sheet name Excel accepts, in characters.
 const MAX_SHEET_NAME: usize = 31;
