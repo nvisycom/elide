@@ -16,7 +16,6 @@ use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use quick_xml::escape::unescape;
 use quick_xml::events::attributes::Attribute as XmlAttribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
@@ -649,43 +648,6 @@ pub(crate) fn attribute_source(
     };
     let value = raw.substr_range(value).ok_or_else(outside)?;
     Ok((Range::from(key), Range::from(value)))
-}
-
-/// `xml` without each empty element `local` whose attribute `attribute`,
-/// unescaped, `drops` accepts, byte-for-byte otherwise.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput), as
-/// `what` malformed, if `xml` is not well-formed.
-pub(crate) fn without_elements(
-    xml: &str,
-    what: &str,
-    local: &str,
-    attribute: &str,
-    drops: impl Fn(&str) -> bool,
-) -> Result<String> {
-    let mut reader = SpannedReader::new(xml);
-    let mut cuts = Vec::new();
-    loop {
-        let (event, span) = reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("{what} malformed: {e}")))?;
-        let element = match event {
-            Event::Eof => break,
-            Event::Empty(e) if e.local_name().as_ref() == local => e,
-            _ => continue,
-        };
-        let value = element
-            .attributes()
-            .flatten()
-            .find(|attr| attr.key.local_name().as_ref() == attribute)
-            .and_then(|attr| unescape(&attr.value).ok().map(Cow::into_owned));
-        if value.is_some_and(|value| drops(&value)) {
-            cuts.push((span, ""));
-        }
-    }
-    Ok(splice(xml, cuts))
 }
 
 #[cfg(test)]

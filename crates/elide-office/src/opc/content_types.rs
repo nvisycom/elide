@@ -11,9 +11,8 @@ use std::collections::{HashMap, HashSet};
 
 use elide_core::Result;
 
-use crate::opc::package_xml::{CONTENT_TYPES, entries};
+use crate::opc::package_xml::{CONTENT_TYPES, entries, without_entries};
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::without_elements;
 
 /// The manifest's own part path.
 pub(crate) const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -88,9 +87,13 @@ pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<St
         .iter()
         .map(|part| part.as_str().to_ascii_lowercase())
         .collect();
-    without_elements(xml, CONTENT_TYPES_PART, "Override", "PartName", |name| {
-        removed.contains(name.to_ascii_lowercase().trim_start_matches('/'))
-    })
+    without_entries(
+        xml,
+        &CONTENT_TYPES,
+        CONTENT_TYPES_PART,
+        "PartName",
+        |name| removed.contains(name.to_ascii_lowercase().trim_start_matches('/')),
+    )
 }
 
 #[cfg(test)]

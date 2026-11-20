@@ -14,9 +14,8 @@ use std::collections::HashSet;
 
 use elide_core::Result;
 
-use crate::opc::package_xml::{RELATIONSHIPS, entries};
+use crate::opc::package_xml::{RELATIONSHIPS, entries, without_entries};
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::without_elements;
 
 /// The relationship type of an external hyperlink, the one external target that
 /// is visible content (a link a reader follows) rather than a hidden reference.
@@ -77,7 +76,7 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
-    without_elements(xml, "relationships part", "Relationship", "Id", |id| {
+    without_entries(xml, &RELATIONSHIPS, "relationships part", "Id", |id| {
         removed.contains(id)
     })
 }
@@ -137,6 +136,30 @@ mod tests {
     use super::*;
 
     const RELS: &str = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t/styles" Target="styles.xml"/><Relationship Id="rId2" Type="t/attachedTemplate" Target="file:///C:/Users/jsmith/Normal.dotm" TargetMode="External"/><Relationship Id="rId3" Type="t/image" Target="../media/image1.png"/></Relationships>"#;
+
+    /// A qualified `Id` is not the relationship's id, in either order: the
+    /// unqualified one decides whether the entry goes.
+    #[test]
+    fn a_qualified_id_does_not_shadow_the_id() {
+        let entry = |attributes: &str| {
+            format!(
+                r#"<Relationship xmlns:v="urn:vendor" {attributes} Type="t/template" Target="https://example.com/private" TargetMode="External"/>"#
+            )
+        };
+        let rels = |entry: &str| {
+            format!(
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{entry}<Relationship Id="rId1" Type="t/styles" Target="styles.xml"/></Relationships>"#
+            )
+        };
+        let removed: HashSet<String> = ["drop".to_owned()].into();
+        for attributes in [r#"v:Id="keep" Id="drop""#, r#"Id="drop" v:Id="keep""#] {
+            let raw = rels(&entry(attributes));
+            assert_eq!(without(&raw, &removed).unwrap(), rels(""), "{attributes}");
+        }
+        // A kept id stays whatever its qualified shadow names.
+        let raw = rels(&entry(r#"v:Id="drop" Id="keep""#));
+        assert_eq!(without(&raw, &removed).unwrap(), raw);
+    }
 
     #[test]
     fn parses_ids_types_targets_and_modes() {

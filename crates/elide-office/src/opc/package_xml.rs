@@ -76,12 +76,59 @@ pub(crate) type Entry = (&'static str, Vec<(&'static str, String)>);
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// `xml` is not well-formed, naming the part as `what`.
 pub(crate) fn entries(xml: &str, vocabulary: &Vocabulary, what: &str) -> Result<Vec<Entry>> {
+    Ok(spanned_entries(xml, vocabulary, what)?
+        .into_iter()
+        .map(|(entry, _)| entry)
+        .collect())
+}
+
+/// The package part `xml` without each entry whose `attribute`, read as
+/// [`entries`] reads it, `drops`; byte for byte otherwise.
+///
+/// # Errors
+///
+/// As [`entries`].
+pub(crate) fn without_entries(
+    xml: &str,
+    vocabulary: &Vocabulary,
+    what: &str,
+    attribute: &str,
+    drops: impl Fn(&str) -> bool,
+) -> Result<String> {
+    let cuts = spanned_entries(xml, vocabulary, what)?
+        .into_iter()
+        .filter(|((_, attributes), _)| {
+            attributes
+                .iter()
+                .any(|(key, value)| *key == attribute && drops(value))
+        })
+        .map(|(_, span)| (span, ""))
+        .collect();
+    Ok(splice(xml, cuts))
+}
+
+/// [`entries`], each with the span of its whole element.
+fn spanned_entries(
+    xml: &str,
+    vocabulary: &Vocabulary,
+    what: &str,
+) -> Result<Vec<(Entry, Range<usize>)>> {
     let malformed = |e: &dyn std::fmt::Display| Error::malformed(format!("{what} malformed: {e}"));
     let mut reader = SpannedReader::new_ns(xml);
     let mut entries = Vec::new();
+    // An entry whose element is still open, read to its end tag.
+    let mut open: Option<(Entry, Skipped)> = None;
     let mut depth = 0usize;
     loop {
-        let (namespace, event, _) = reader.read_resolved_event().map_err(|e| malformed(&e))?;
+        let (namespace, event, span) = reader.read_resolved_event().map_err(|e| malformed(&e))?;
+        if let Some((_, skipped)) = &mut open {
+            if let Some(whole) = skipped.read(&event, span.end)? {
+                let (entry, _) = open.take().expect("an open entry");
+                entries.push((entry, whole));
+                depth -= 1;
+            }
+            continue;
+        }
         let (e, is_start) = match &event {
             Event::Eof => break,
             Event::Start(e) => (e, true),
@@ -114,7 +161,14 @@ pub(crate) fn entries(xml: &str, vocabulary: &Vocabulary, what: &str) -> Result<
                 let value = unescape(&attr.value).map_err(|e| malformed(&e))?;
                 attributes.push((*key, value.into_owned()));
             }
-            entries.push((*name, attributes));
+            let entry = (*name, attributes);
+            if is_start {
+                open = Some((entry, Skipped::new(span.start)));
+                depth += 1;
+            } else {
+                entries.push((entry, span));
+            }
+            continue;
         }
         if is_start {
             depth += 1;
