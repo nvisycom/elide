@@ -57,7 +57,7 @@ pub(crate) struct Attribute<'a> {
     /// The attribute's byte range in the part, its leading whitespace included.
     range: Range<usize>,
     /// The byte range of its value, inside the quotes.
-    value_range: Range<usize>,
+    pub(crate) value_range: Range<usize>,
 }
 
 /// What an edit does with an element.
@@ -348,9 +348,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                     namespace: namespace.as_deref().map(transitional),
                     local: local.into_inner(),
                 };
-                let owned = attributes(&reader.reader, raw, e)?;
-                let attributes: Vec<Attribute<'_>> =
-                    owned.iter().map(OwnedAttribute::view).collect();
+                let attributes = attributes(&reader.reader, raw, e)?;
                 match rules.element(name, &attributes) {
                     Action::Remove => {
                         removing = Skipped::begin(span, is_start, &mut cuts);
@@ -397,30 +395,6 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     Ok(Edited::from_cuts(raw, cuts, count))
 }
 
-/// An attribute with its namespace resolved into an owned string, so it
-/// outlives the reader borrow the resolution took.
-struct OwnedAttribute<'a> {
-    namespace: Option<String>,
-    local: &'a str,
-    value: &'a str,
-    range: Range<usize>,
-    value_range: Range<usize>,
-}
-
-impl OwnedAttribute<'_> {
-    fn view(&self) -> Attribute<'_> {
-        Attribute {
-            name: Name {
-                namespace: self.namespace.as_deref().map(transitional),
-                local: self.local,
-            },
-            value: self.value,
-            range: self.range.clone(),
-            value_range: self.value_range.clone(),
-        }
-    }
-}
-
 /// The namespace URI a resolved name is bound to, if any.
 pub(crate) fn bound(resolved: &ResolveResult<'_>) -> Option<String> {
     match resolved {
@@ -429,20 +403,31 @@ pub(crate) fn bound(resolved: &ResolveResult<'_>) -> Option<String> {
     }
 }
 
-/// Every attribute of `e`, resolved and located in `raw`.
+/// The namespace URI a resolved name is bound to, if any, borrowed from the
+/// resolver.
+pub(crate) fn namespace_of<'r>(resolved: &ResolveResult<'r>) -> Option<&'r str> {
+    match resolved {
+        ResolveResult::Bound(Namespace(uri)) => Some(uri),
+        _ => None,
+    }
+}
+
+/// Every attribute of `e`, resolved by `reader` and located in `raw`.
 fn attributes<'a>(
-    reader: &NsReader<&[u8]>,
+    reader: &'a NsReader<&[u8]>,
     raw: &'a str,
     e: &'a BytesStart<'_>,
-) -> Result<Vec<OwnedAttribute<'a>>> {
+) -> Result<Vec<Attribute<'a>>> {
     let mut out = Vec::new();
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
         let (range, value) = attribute_extent(raw, &attr)?;
         let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-        out.push(OwnedAttribute {
-            namespace: bound(&resolved),
-            local: local.into_inner(),
+        out.push(Attribute {
+            name: Name {
+                namespace: namespace_of(&resolved).map(transitional),
+                local: local.into_inner(),
+            },
             value: &raw[value.clone()],
             range,
             value_range: value,

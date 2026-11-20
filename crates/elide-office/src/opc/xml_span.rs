@@ -16,14 +16,14 @@
 //! relationships part.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::ops::Range;
 
 use elide_codec::extract::{OffsetMap, Passage};
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
-use quick_xml::NsReader;
 use quick_xml::escape::{escape, partial_escape, unescape};
-use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 
 use crate::opc::attribute_value;
@@ -31,7 +31,7 @@ use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
 use crate::opc::ns::{W, X, transitional};
 use crate::opc::relationships::{self, HYPERLINK};
-use crate::opc::xml_edit::{Name, SpannedReader, attribute_source, bound};
+use crate::opc::xml_edit::{Action, Attribute, Name, Rules, SpannedReader, edit};
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -273,24 +273,16 @@ pub(crate) fn attribute_spans(
     raw: &str,
     attributes: &[TextAttribute],
 ) -> std::result::Result<Vec<Span>, ()> {
-    if attributes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut spans = Vec::new();
-    visit_attributes(raw, |element, attribute, attr| {
-        let named = attributes
-            .iter()
-            .find(|text| text.matches(element, attribute));
-        if let Some(named) = named
-            && !attr.value.is_empty()
-        {
+    let mut spans: Vec<Span> = Vec::new();
+    for (named, range) in named_values(raw, attributes)? {
+        // The first entry naming an attribute says what it is.
+        if spans.last().is_none_or(|span| span.range != range) {
             spans.push(Span {
-                collaboration: named.collaboration,
-                ..Span::new(value_source(raw, attr)?, BlockKind::Attribute)
+                collaboration: attributes[named].collaboration,
+                ..Span::new(range, BlockKind::Attribute)
             });
         }
-        Ok(())
-    })?;
+    }
     Ok(spans)
 }
 
@@ -303,59 +295,57 @@ pub(crate) fn attribute_ranges(
     attributes: &[TextAttribute],
 ) -> std::result::Result<Vec<Vec<Range<usize>>>, ()> {
     let mut ranges = vec![Vec::new(); attributes.len()];
-    if attributes.is_empty() {
-        return Ok(ranges);
+    for (named, range) in named_values(raw, attributes)? {
+        ranges[named].push(range);
     }
-    visit_attributes(raw, |element, attribute, attr| {
-        let mut named = attributes
-            .iter()
-            .zip(&mut ranges)
-            .filter(|(text, _)| text.matches(element, attribute))
-            .peekable();
-        if named.peek().is_none() || attr.value.is_empty() {
-            return Ok(());
-        }
-        let value = value_source(raw, attr)?;
-        for (_, ranges) in named {
-            ranges.push(value.clone());
-        }
-        Ok(())
-    })?;
     Ok(ranges)
 }
 
-/// Call `visit` with every attribute of `raw`: the element it sits on, its own
-/// name, both resolved, and the attribute as read. Errs on malformed XML, or
-/// when `visit` does.
-fn visit_attributes(
+/// Each non-empty value of an attribute of `raw` that `attributes` names, as
+/// the index of the entry naming it and the value's range, in document order
+/// and, for one attribute, in the order of `attributes`. The part is read as
+/// every edit reads it ([`edit`]), names resolved and a strict namespace
+/// mapped. Errs on malformed XML.
+fn named_values(
     raw: &str,
-    mut visit: impl FnMut(Name<'_>, Name<'_>, &Attribute<'_>) -> std::result::Result<(), ()>,
-) -> std::result::Result<(), ()> {
-    let mut reader = NsReader::from_str(raw);
-    loop {
-        let (resolved, event) = reader.read_resolved_event().map_err(|_| ())?;
-        let element_ns = bound(&resolved);
-        let elem = match event {
-            Event::Eof => break,
-            Event::Start(e) | Event::Empty(e) => e,
-            _ => continue,
-        };
-        let element = Name {
-            namespace: element_ns.as_deref().map(transitional),
-            local: elem.local_name().into_inner(),
-        };
-        for attr in elem.attributes() {
-            let attr = attr.map_err(|_| ())?;
-            let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-            let attribute_ns = bound(&resolved);
-            let attribute = Name {
-                namespace: attribute_ns.as_deref().map(transitional),
-                local: local.into_inner(),
-            };
-            visit(element, attribute, &attr)?;
-        }
+    attributes: &[TextAttribute],
+) -> std::result::Result<Vec<(usize, Range<usize>)>, ()> {
+    if attributes.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(())
+    let named = Named {
+        attributes,
+        found: RefCell::new(Vec::new()),
+    };
+    edit(raw, &named).map_err(|_| ())?;
+    Ok(named.found.into_inner())
+}
+
+/// Rules that change nothing and collect the values [`named_values`] reads.
+struct Named<'t> {
+    attributes: &'t [TextAttribute],
+    found: RefCell<Vec<(usize, Range<usize>)>>,
+}
+
+impl Rules for Named<'_> {
+    fn content(&self) -> Option<HiddenContent> {
+        None
+    }
+
+    fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
+        let mut found = self.found.borrow_mut();
+        for attribute in attributes
+            .iter()
+            .filter(|attribute| !attribute.value.is_empty())
+        {
+            for (index, text) in self.attributes.iter().enumerate() {
+                if text.matches(name, attribute.name) {
+                    found.push((index, attribute.value_range.clone()));
+                }
+            }
+        }
+        Action::Keep
+    }
 }
 
 /// The external-hyperlink `Target` attribute *value* spans of a relationships
@@ -377,16 +367,6 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
         .filter_map(|(_, target)| target)
         .map(|range| Span::new(range, BlockKind::Attribute))
         .collect())
-}
-
-/// The byte range of the value of `attr` within `raw`, which quick-xml
-/// borrowed out of it (its attribute values are the raw source text, entity
-/// spellings intact). Errs, fail-closed, if it was not, so a caller surfaces
-/// the part as an issue rather than dropping a redaction.
-fn value_source(raw: &str, attr: &Attribute<'_>) -> std::result::Result<Range<usize>, ()> {
-    attribute_source(raw, attr)
-        .map(|(_, value)| value)
-        .map_err(|_| ())
 }
 
 /// Emit the pending text run as a `Text` span in its passage, then clear it. A

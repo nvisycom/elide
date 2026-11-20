@@ -61,7 +61,9 @@ use crate::opc::ns::{
     A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
     W16CEX, W16CID, X, XDR, transitional,
 };
-use crate::opc::xml_edit::{Name, Skipped, SpannedReader, attribute_extent, bound, splice_with};
+use crate::opc::xml_edit::{
+    Name, Skipped, SpannedReader, attribute_extent, namespace_of, splice_with,
+};
 use crate::opc::{attribute_value, malformed_xml};
 
 /// An element type of the schema.
@@ -556,10 +558,10 @@ impl<'a> Rebuild<'a> {
                 continue;
             }
             let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-            let namespace = bound(&resolved);
             let local = local.into_inner();
             let declared = ty.is_some_and(|ty| {
-                namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local))
+                namespace_index(namespace_of(&resolved))
+                    .is_some_and(|index| ty.declares(index, local))
             });
             if !declared {
                 let (extent, _) = attribute_extent(self.raw, &attr)?;
