@@ -427,22 +427,18 @@ pub(crate) fn bound(resolved: &ResolveResult<'_>) -> Option<String> {
 fn attributes<'a>(
     reader: &NsReader<&[u8]>,
     raw: &'a str,
-    e: &BytesStart<'a>,
+    e: &'a BytesStart<'_>,
 ) -> Result<Vec<OwnedAttribute<'a>>> {
     let mut out = Vec::new();
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
-        let (key, value) = attribute_source(raw, &attr)?;
+        let (range, value) = attribute_extent(raw, &attr)?;
         let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-        let start = raw[..key.start]
-            .trim_end_matches(|c: char| c.is_ascii_whitespace())
-            .len();
         out.push(OwnedAttribute {
             namespace: bound(&resolved),
-            local: &raw[key.end - local.into_inner().len()..key.end],
+            local: local.into_inner(),
             value: &raw[value.clone()],
-            // Past the closing quote.
-            range: start..value.end + 1,
+            range,
             value_range: value,
         });
     }
@@ -652,6 +648,24 @@ pub(crate) fn attribute_source(
     };
     let value = raw.substr_range(value).ok_or_else(outside)?;
     Ok((Range::from(key), Range::from(value)))
+}
+
+/// Where the attribute `attr`, read from `raw`, is written in it: from the
+/// whitespace before its name to past its closing quote, and its value inside
+/// the quotes.
+///
+/// # Errors
+///
+/// As [`attribute_source`].
+pub(crate) fn attribute_extent(
+    raw: &str,
+    attr: &XmlAttribute<'_>,
+) -> Result<(Range<usize>, Range<usize>)> {
+    let (key, value) = attribute_source(raw, attr)?;
+    let start = raw[..key.start]
+        .trim_end_matches(|c: char| c.is_ascii_whitespace())
+        .len();
+    Ok((start..value.end + 1, value))
 }
 
 #[cfg(test)]

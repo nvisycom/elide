@@ -51,7 +51,6 @@ use std::sync::OnceLock;
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use quick_xml::escape::partial_escape;
-use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{NsReader, XmlVersion};
 
@@ -61,9 +60,9 @@ use crate::opc::ct::{self, DML, PML, SML, WML};
 use crate::opc::malformed_xml;
 use crate::opc::ns::{
     A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
-    W16CEX, W16CID, X, XDR, XMLNS, transitional,
+    W16CEX, W16CID, X, XDR, transitional,
 };
-use crate::opc::xml_edit::{Name, Skipped, SpannedReader, attribute_source, bound, splice_with};
+use crate::opc::xml_edit::{Name, Skipped, SpannedReader, attribute_extent, bound, splice_with};
 
 /// An element type of the schema.
 #[derive(Debug)]
@@ -669,15 +668,11 @@ fn attributes(
     let ty = ty.map(|ty| &TYPES[usize::from(ty)]);
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
-        let key = attr.key.into_inner();
-        if key == "xmlns" || key.starts_with("xmlns:") {
+        if attr.key.as_namespace_binding().is_some() {
             continue;
         }
         let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
         let namespace = bound(&resolved);
-        if namespace.as_deref() == Some(XMLNS) {
-            continue;
-        }
         let local = local.into_inner();
         let declared = ty.is_some_and(|ty| {
             namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local))
@@ -685,12 +680,8 @@ fn attributes(
         if declared {
             continue;
         }
-        // The attribute from the whitespace before it.
-        let source = source(raw, &attr)?;
-        let start = raw[..source.start]
-            .trim_end_matches(|c: char| c.is_ascii_whitespace())
-            .len();
-        cuts.push((start..source.end, String::new()));
+        let (extent, _) = attribute_extent(raw, &attr)?;
+        cuts.push((extent, String::new()));
         record(HiddenContent::ApplicationData);
     }
     Ok(())
@@ -701,20 +692,15 @@ fn declarations<'a>(raw: &'a str, e: &BytesStart<'_>) -> Result<Vec<(&'a str, &'
     let mut declarations = Vec::new();
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
-        let key = attr.key.into_inner();
-        if key == "xmlns" || key.starts_with("xmlns:") {
-            let (key, value) = attribute_source(raw, &attr)?;
-            declarations.push((&raw[key.clone()], &raw[key.start..value.end + 1]));
+        if attr.key.as_namespace_binding().is_some() {
+            let (extent, _) = attribute_extent(raw, &attr)?;
+            // From the name, past the whitespace before it.
+            let source = raw[extent].trim_start();
+            let key = source.split('=').next().unwrap_or(source).trim_end();
+            declarations.push((key, source));
         }
     }
     Ok(declarations)
-}
-
-/// Where the attribute `attr` is written in `raw`: from its name to past its
-/// closing quote.
-fn source(raw: &str, attr: &Attribute<'_>) -> Result<Range<usize>> {
-    let (key, value) = attribute_source(raw, attr)?;
-    Ok(key.start..value.end + 1)
 }
 
 #[cfg(test)]

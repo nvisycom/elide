@@ -18,7 +18,7 @@ use quick_xml::events::{BytesStart, Event};
 
 use crate::opc::content_types::CONTENT_TYPES_PART;
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::{Edit, Edited, Skipped, SpannedReader, attribute_source, splice};
+use crate::opc::xml_edit::{Edit, Edited, Skipped, SpannedReader, attribute_extent, splice};
 use crate::opc::{malformed_xml, ns};
 
 /// The vocabulary of a package part: its root, and each entry the root may
@@ -321,11 +321,8 @@ fn cut_attributes(
         if kept {
             continue;
         }
-        let (key, value) = attribute_source(raw, &attr)?;
-        let start = raw[..key.start]
-            .trim_end_matches(|c: char| c.is_ascii_whitespace())
-            .len();
-        cuts.push((start..value.end + 1, ""));
+        let (extent, _) = attribute_extent(raw, &attr)?;
+        cuts.push((extent, ""));
     }
     Ok(())
 }
