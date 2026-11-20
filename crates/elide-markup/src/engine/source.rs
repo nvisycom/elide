@@ -188,17 +188,9 @@ impl MarkupSink {
         self.items[index].flag = Some(flag);
     }
 
-    /// Attach hints to items, each pair naming an item index and its hints.
-    /// Empty hint lists are ignored.
-    pub(crate) fn apply_hints(
-        &mut self,
-        hints: impl IntoIterator<Item = (usize, Vec<ResolvedHint<Text>>)>,
-    ) {
-        for (index, hints) in hints {
-            if !hints.is_empty() {
-                self.items[index].hints = hints;
-            }
-        }
+    /// Append `hint` to the hints of the item at `index`.
+    pub(crate) fn hint(&mut self, index: usize, hint: ResolvedHint<Text>) {
+        self.items[index].hints.push(hint);
     }
 
     /// The finished item stream.

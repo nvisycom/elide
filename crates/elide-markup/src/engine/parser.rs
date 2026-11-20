@@ -55,13 +55,10 @@ struct MarkupParser<'a> {
     config: MarkupConfig<'a>,
     /// The growing item stream (offset kept in step by `MarkupSink::push`).
     items: MarkupSink,
-    /// Text-node records, kept with their engine-space span so a second pass
-    /// can attach sibling hints once every text node's span is known.
+    /// Text-node records, kept with their engine-space span so a block
+    /// element can hint its text with its siblings when it closes; none
+    /// without block elements.
     text_items: Vec<TextRecord>,
-    /// Context hints for non-text items, an attribute value keyed by its
-    /// attribute name, a CDATA body by its enclosing element name, applied
-    /// alongside the text-node hints at the end.
-    extra_hints: Vec<(usize, Vec<ResolvedHint<Text>>)>,
     /// The open-element stack: each frame names the element and where its text
     /// children begin, so a block element can group them for sibling hints.
     stack: Vec<Frame>,
@@ -89,7 +86,6 @@ impl<'a> MarkupParser<'a> {
             config,
             items: MarkupSink::new(),
             text_items: Vec::new(),
-            extra_hints: Vec::new(),
             stack: Vec::new(),
             skip: None,
             run: None,
@@ -103,82 +99,74 @@ impl<'a> MarkupParser<'a> {
         let mut reader = Reader::from_str(self.source.raw());
         configure(reader.config_mut(), self.config.dialect);
         let mut spans = EventSpans::new(self.source.raw());
-
         loop {
             let event = reader.read_event().map_err(malformed_markup)?;
             let span = spans.next(reader.buffer_position());
+            if let Event::Eof = event {
+                return Ok(self.finish());
+            }
+            self.event(&event, span)?;
+        }
+    }
 
-            if self.skipping(&event)? {
-                if matches!(event, Event::Eof) {
-                    break;
+    /// Read the `event` at `span`.
+    fn event(&mut self, event: &Event<'_>, span: Range<usize>) -> Result<()> {
+        if self.skipping(event)? {
+            return Ok(());
+        }
+        // quick-xml splits a text run at each character reference; the run is
+        // read whole once any other event ends it.
+        if let Event::Text(_) | Event::GeneralRef(_) = event {
+            self.run = Some(
+                self.run
+                    .take()
+                    .map_or(span.clone(), |run| run.start..span.end),
+            );
+            return Ok(());
+        }
+        if let Some(run) = self.run.take() {
+            self.text(run);
+        }
+        match event {
+            Event::Start(e) | Event::Empty(e) => {
+                let mut tag = self.source.start_tag(e, self.config.dialect)?;
+                self.flag_meta(&mut tag);
+                self.open_passage_element(&tag.name, span.clone());
+                for attr in tag.attributes {
+                    self.push_or_defer(Deferred::Attribute(attr));
                 }
-                continue;
-            }
-            // quick-xml splits a text run at each character reference; the
-            // run is read whole once any other event ends it.
-            if let Event::Text(_) | Event::GeneralRef(_) = event {
-                self.run = Some(
-                    self.run
-                        .take()
-                        .map_or(span.clone(), |run| run.start..span.end),
-                );
-                continue;
-            }
-            if let Some(run) = self.run.take() {
-                self.text(run);
-            }
-            match event {
-                Event::Eof => break,
-                Event::Start(ref e) => {
-                    let mut tag = self.source.start_tag(e, self.config.dialect)?;
-                    self.flag_meta(&mut tag);
-                    self.open_passage_element(&tag.name, span.clone());
-                    self.attributes(tag.attributes);
+                if let Event::Start(_) = event {
                     self.open_element(tag.name, &tag.written, span);
                 }
-                Event::Empty(ref e) => {
-                    let mut tag = self.source.start_tag(e, self.config.dialect)?;
-                    self.flag_meta(&mut tag);
-                    self.open_passage_element(&tag.name, span);
-                    self.attributes(tag.attributes);
-                }
-                Event::End(ref e) => {
-                    let name = tag_name(e, self.source.raw(), self.config.dialect)?;
-                    if self.config.bounds_passage(&name) {
-                        self.end_passage();
-                    }
-                    self.close_element(&name);
-                }
-                Event::Comment(_) => {
-                    if let Some(inner) = strip(span, "<!--", "-->") {
-                        if self.in_passage {
-                            self.deferred.push(Deferred::Comment(inner));
-                        } else {
-                            self.comment(inner);
-                        }
-                    }
-                }
-                Event::CData(_) => self.cdata(span),
-                _ => {}
             }
+            Event::End(e) => {
+                let name = tag_name(e, self.source.raw(), self.config.dialect)?;
+                if self.config.bounds_passage(&name) {
+                    self.end_passage();
+                }
+                self.close_element(&name);
+            }
+            Event::Comment(_) => {
+                if let Some(inner) = strip(span, "<!--", "-->") {
+                    self.push_or_defer(Deferred::Comment(inner));
+                }
+            }
+            Event::CData(_) => self.cdata(span),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Read what the end of the document leaves pending: the last text run,
+    /// the open passage, and the elements left open (lenient HTML with
+    /// unclosed blocks), whose gathered text is hinted too.
+    fn finish(mut self) -> Vec<XmlItem> {
+        if let Some(run) = self.run.take() {
+            self.text(run);
         }
         self.end_passage();
-
-        // Any block frames still open at EOF (lenient HTML with unclosed
-        // blocks): hint their gathered text too.
-        while let Some(frame) = self.stack.pop() {
-            if self.config.is_block(&frame.name) {
-                attach_sibling_hints(&mut self.text_items[frame.text_start..]);
-            }
-        }
-
-        self.items.apply_hints(
-            self.text_items
-                .into_iter()
-                .map(|r| (r.item_index, r.pending_hints))
-                .chain(self.extra_hints),
-        );
-        Ok(self.items.into_items())
+        self.unwind_to(0);
+        self.items.into_items()
     }
 
     /// While inside a skipped subtree, track only that element's own open/close
@@ -220,22 +208,24 @@ impl<'a> MarkupParser<'a> {
     fn end_passage(&mut self) {
         self.in_passage = false;
         for deferred in std::mem::take(&mut self.deferred) {
-            match deferred {
-                Deferred::Attribute(attr) => self.attribute(attr),
-                Deferred::Comment(inner) => self.comment(inner),
-            }
+            self.push_deferred(deferred);
         }
     }
 
-    /// Push each redactable attribute value, or defer it while a passage is
-    /// open.
-    fn attributes(&mut self, attributes: Vec<AttributeSpan>) {
-        for attr in attributes {
-            if self.in_passage {
-                self.deferred.push(Deferred::Attribute(attr));
-            } else {
-                self.attribute(attr);
-            }
+    /// Push `item`, or defer it while a passage is open.
+    fn push_or_defer(&mut self, item: Deferred) {
+        if self.in_passage {
+            self.deferred.push(item);
+        } else {
+            self.push_deferred(item);
+        }
+    }
+
+    /// Push an `item` that may be deferred.
+    fn push_deferred(&mut self, item: Deferred) {
+        match item {
+            Deferred::Attribute(attr) => self.attribute(attr),
+            Deferred::Comment(inner) => self.comment(inner),
         }
     }
 
@@ -282,11 +272,8 @@ impl<'a> MarkupParser<'a> {
         if let Some(name) = attr.name {
             let raw = self.source.slice(name.clone());
             let local = raw.rsplit(':').next().unwrap_or(raw);
-            // The attribute name is a raw *source* span, not a decoded one, so
-            // it is a source-only location; a consumer must resolve it against
-            // the source bytes, never the extracted value.
-            let location = TextLocation::marked_source(SourceRef::new(name));
-            self.hint_item(idx, location, local.context_words());
+            self.items
+                .hint(idx, source_hint(name, local.context_words()));
         }
     }
 
@@ -325,10 +312,16 @@ impl<'a> MarkupParser<'a> {
         };
         // Unwind every frame from the top down to (and including) the match,
         // an intervening unclosed inline element is closed implicitly here.
+        self.unwind_to(depth);
+    }
+
+    /// Pop every frame above `depth`, hinting the text each block element
+    /// gathered with its siblings.
+    fn unwind_to(&mut self, depth: usize) {
         while self.stack.len() > depth {
             let frame = self.stack.pop().expect("frame above the matched depth");
             if self.config.is_block(&frame.name) {
-                attach_sibling_hints(&mut self.text_items[frame.text_start..]);
+                attach_sibling_hints(&self.text_items[frame.text_start..], &mut self.items);
             }
         }
     }
@@ -356,16 +349,20 @@ impl<'a> MarkupParser<'a> {
         };
         self.in_passage = self.config.inline_passages();
         let engine = self.items.offset()..self.items.offset() + value.len();
-        let text = value.trim().to_owned();
+        // Only a block element groups text for sibling hints.
+        let text = (!self.config.block_elements.is_empty()).then(|| value.trim().to_owned());
         let item_index = self.items.push((value, address), passage);
-        let name_hint = self.enclosing_hint();
-        self.text_items.push(TextRecord {
-            item_index,
-            engine,
-            passage: self.passages,
-            text,
-            pending_hints: name_hint.into_iter().collect(),
-        });
+        if let Some(hint) = self.enclosing_hint() {
+            self.items.hint(item_index, hint);
+        }
+        if let Some(text) = text {
+            self.text_items.push(TextRecord {
+                item_index,
+                engine,
+                passage: self.passages,
+                text,
+            });
+        }
     }
 
     /// The decoded value of the escaped `kind` text at `range`, and its
@@ -383,7 +380,7 @@ impl<'a> MarkupParser<'a> {
                 .items
                 .push(XmlSpan::verbatim(self.source.raw(), inner), Passage::Start);
             if let Some(hint) = self.enclosing_hint() {
-                self.extra_hints.push((idx, vec![hint]));
+                self.items.hint(idx, hint);
             }
         }
     }
@@ -393,32 +390,29 @@ impl<'a> MarkupParser<'a> {
     /// words (`paymentCard` → `payment Card`) so a keyword matches on a word
     /// boundary.
     fn enclosing_hint(&self) -> Option<ResolvedHint<Text>> {
-        self.stack.last().map(|frame| {
-            // The start-tag span is a raw *source* range, so the hint is a
-            // source-only location, resolved against the source, not the value.
-            let location = TextLocation::marked_source(SourceRef::new(frame.tag_span.clone()));
-            ResolvedHint::new(location, TextData::new(frame.hint.clone()))
-        })
-    }
-
-    /// Record a located context hint on the item at `idx`, carrying `text` (the
-    /// context words of the labelling name) at `location`.
-    fn hint_item(&mut self, idx: usize, location: TextLocation, text: String) {
-        self.extra_hints
-            .push((idx, vec![ResolvedHint::new(location, TextData::new(text))]));
+        let frame = self.stack.last()?;
+        Some(source_hint(frame.tag_span.clone(), frame.hint.clone()))
     }
 }
 
+/// A context hint carrying `text` (the context words of a labelling name),
+/// located at `range` of the source. The range is a raw *source* range, not a
+/// decoded one, so the hint is a source-only location: a consumer resolves it
+/// against the source bytes, never the extracted value.
+fn source_hint(range: Range<usize>, text: String) -> ResolvedHint<Text> {
+    let location = TextLocation::marked_source(SourceRef::new(range));
+    ResolvedHint::new(location, TextData::new(text))
+}
+
 /// A text node's place in the item stream, its engine-space span, and its
-/// trimmed text, the raw material for the sibling-hint pass. `pending_hints` is
-/// filled when its block group closes and moved onto the item at the end.
+/// trimmed text, the raw material for the sibling hints its block group gives
+/// it when the group closes.
 struct TextRecord {
     item_index: usize,
     engine: Range<usize>,
     /// The number of the passage the text is in.
     passage: usize,
     text: String,
-    pending_hints: Vec<ResolvedHint<Text>>,
 }
 
 /// An item met inside an open passage, pushed once the passage ends.
@@ -469,28 +463,19 @@ const MAX_SIBLING_HINT_GROUP: usize = 64;
 /// boost points back at when a label and its value sit in separate passages of
 /// one block (`<td>Card number<p>4111…</p></td>`). A sibling in the record's own
 /// passage is already in its chunk, so it adds no hint.
-fn attach_sibling_hints(group: &mut [TextRecord]) {
-    let siblings: Vec<(Range<usize>, usize, String)> = group
-        .iter()
-        .filter(|r| !r.text.is_empty())
-        .map(|r| (r.engine.clone(), r.passage, r.text.clone()))
-        .collect();
-    if siblings.len() < 2 || siblings.len() > MAX_SIBLING_HINT_GROUP {
+///
+/// The hints are appended to the item's, after its enclosing element-name
+/// hint.
+fn attach_sibling_hints(group: &[TextRecord], items: &mut MarkupSink) {
+    if group.len() < 2 || group.len() > MAX_SIBLING_HINT_GROUP {
         return;
     }
-    for record in group.iter_mut() {
-        let hints = siblings
-            .iter()
-            .filter(|(_, passage, _)| *passage != record.passage)
-            .map(|(engine, _, text)| {
-                ResolvedHint::new(
-                    TextLocation::inline(engine.clone()),
-                    TextData::new(text.clone()),
-                )
-            });
-        // Append, don't replace: a text node already carries its enclosing
-        // element-name hint, and the sibling prose hints add to it.
-        record.pending_hints.extend(hints);
+    for record in group {
+        for sibling in group.iter().filter(|s| s.passage != record.passage) {
+            let location = TextLocation::inline(sibling.engine.clone());
+            let hint = ResolvedHint::new(location, TextData::new(sibling.text.clone()));
+            items.hint(record.item_index, hint);
+        }
     }
 }
 
