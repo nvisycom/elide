@@ -5,11 +5,12 @@ use std::mem;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Dictionary, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Object, ObjectId, Stream, dictionary};
 
 use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
 use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST, record};
 use crate::content::image;
+use crate::pdf::reader::font::Standard;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 use crate::pdf::writer::{UnicodeMap, compressed};
 
@@ -548,6 +549,7 @@ impl<'a> Builder<'a> {
             return Ok(Object::Dictionary(out));
         }
         if subtype != Some(b"Type3") {
+            self.pin(dict, &mut out);
             return Ok(Object::Dictionary(out));
         }
         let inner = at.scope.inner(source, dict);
@@ -584,6 +586,65 @@ impl<'a> Builder<'a> {
         out.set("CharProcs", procs);
         out.set("Resources", resources);
         Ok(Object::Dictionary(out))
+    }
+
+    /// Pin the glyphs and widths of `font`, copied as `out`, when it names a
+    /// standard face and embeds no program: an explicit `/Encoding` naming
+    /// every code's glyph (`.notdef` for none), `/Widths` for every code when
+    /// it has none of its own, and descriptor flags under which every reader
+    /// takes that encoding as it is. Every viewer then selects and places the
+    /// glyphs the reader does, where without them each supplies its own.
+    fn pin(&mut self, font: &Dictionary, out: &mut Dictionary) {
+        let Some(standard) = Standard::of(self.source, font) else {
+            return;
+        };
+        let names = standard.names(self.source, font);
+        let differences = [Object::Integer(0)]
+            .into_iter()
+            .chain(
+                names
+                    .iter()
+                    .map(|name| Object::Name(name.unwrap_or(".notdef").as_bytes().to_vec())),
+            )
+            .collect::<Vec<_>>();
+        out.set(
+            "Encoding",
+            dictionary! { "Type" => "Encoding", "Differences" => differences },
+        );
+        let own_widths = font
+            .get(b"FirstChar")
+            .is_ok_and(|first| first.as_i64().is_ok())
+            && font
+                .get(b"Widths")
+                .is_ok_and(|widths| self.source.resolve_array(widths).is_some());
+        if !own_widths {
+            let widths = standard.widths(self.source, font).map(number);
+            out.set("FirstChar", 0);
+            out.set("LastChar", 255);
+            out.set("Widths", widths.to_vec());
+        }
+        let descriptor = match out.get(b"FontDescriptor") {
+            Ok(Object::Reference(id)) => self.out.get_dictionary_mut(*id).ok(),
+            Ok(Object::Dictionary(_)) => out
+                .get_mut(b"FontDescriptor")
+                .and_then(Object::as_dict_mut)
+                .ok(),
+            _ => None,
+        };
+        if let Some(descriptor) = descriptor {
+            let flags = descriptor
+                .get(b"Flags")
+                .and_then(Object::as_i64)
+                .unwrap_or(0);
+            descriptor.set("Flags", standard.flags(flags));
+        } else if font.is_subtype(self.source, b"TrueType") {
+            // A TrueType font with no descriptor reads as symbolic, which
+            // ignores an `/Encoding` dictionary (9.6.5.4); give it one whose
+            // flags make the encoding count.
+            let name = font.name(self.source, b"BaseFont").unwrap_or(b"Font");
+            let descriptor = standard.descriptor(name, standard.flags(0));
+            out.set("FontDescriptor", self.out.add_object(descriptor));
+        }
     }
 
     /// A form XObject or tiling pattern `stream` keeping `fields`, its content
@@ -741,4 +802,13 @@ impl<'a> Builder<'a> {
 fn image_xobject(dict: &mut Dictionary) {
     dict.set("Type", Object::Name(b"XObject".to_vec()));
     dict.set("Subtype", Object::Name(b"Image".to_vec()));
+}
+
+/// `value` as a PDF number: an integer when it is whole.
+fn number(value: f64) -> Object {
+    if value.fract() == 0.0 && value.abs() < f64::from(i32::MAX) {
+        Object::Integer(value as i64)
+    } else {
+        Object::Real(value as f32)
+    }
 }

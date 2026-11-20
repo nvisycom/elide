@@ -46,8 +46,9 @@ See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
 ## License
 
 Apache 2.0 License, see [LICENSE](../../LICENSE). It bundles Adobe's CMap
-resources through `hayro-cmap`, and Adobe's Core14 AFM files in
-[`assets/afm`](assets/afm); their notices are in
+resources through `hayro-cmap`, Adobe's Core14 AFM files in
+[`assets/afm`](assets/afm), and the Adobe Glyph List in
+[`assets/agl`](assets/agl); their notices are in
 [THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md).
 
 ## Support

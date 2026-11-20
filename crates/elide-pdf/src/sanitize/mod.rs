@@ -1363,6 +1363,133 @@ mod tests {
             .set("Font", fonts);
     }
 
+    /// The font `/F1` of a rebuild of a page drawing `bytes` in `font`, with
+    /// the rebuilt document.
+    fn pinned(font: Dictionary, bytes: &[u8]) -> (Document, Dictionary) {
+        let (out, _) = rebuilt(&drawing_in(font, bytes));
+        let Object::Dictionary(font) = resource(&out, b"Font", b"F1").clone() else {
+            panic!("font");
+        };
+        (out, font)
+    }
+
+    /// A one-page document drawing `bytes` in `font`, named `/F1`.
+    fn drawing_in(font: Dictionary, bytes: &[u8]) -> Document {
+        let mut pdf = DocBuilder::new();
+        let font = pdf.add(font);
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .ops(shown(bytes))
+                .size(200, 200),
+        );
+        pdf.finish().0
+    }
+
+    /// The glyph name a pinned `font`'s `/Differences` gives `code`.
+    fn pinned_name(doc: &Document, font: &Dictionary, code: usize) -> String {
+        let encoding = doc.resolve_dict(font.get(b"Encoding").unwrap()).unwrap();
+        let differences = doc
+            .resolve_array(encoding.get(b"Differences").unwrap())
+            .unwrap();
+        assert_eq!(differences[0], Object::Integer(0));
+        String::from_utf8_lossy(differences[code + 1].as_name().unwrap()).into_owned()
+    }
+
+    /// A standard font without `/Widths` is rebuilt with every code's glyph
+    /// and width written out, and flags under which every reader takes them.
+    #[test]
+    fn a_standard_font_is_pinned() {
+        let (out, font) = pinned(
+            dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+                "FontDescriptor" => dictionary! { "Type" => "FontDescriptor", "Flags" => 4 },
+            },
+            b"Hi",
+        );
+        assert_eq!(font.get(b"FirstChar").unwrap(), &Object::Integer(0));
+        assert_eq!(font.get(b"LastChar").unwrap(), &Object::Integer(255));
+        let widths = out.resolve_array(font.get(b"Widths").unwrap()).unwrap();
+        assert_eq!(widths.len(), 256);
+        assert_eq!(widths[0x41], Object::Integer(667));
+        assert_eq!(widths[0x80], Object::Integer(0), "no glyph");
+        assert_eq!(pinned_name(&out, &font, 0x27), "quoteright");
+        assert_eq!(pinned_name(&out, &font, 0x80), ".notdef");
+        let descriptor = out
+            .resolve_dict(font.get(b"FontDescriptor").unwrap())
+            .unwrap();
+        assert_eq!(descriptor.get(b"Flags").unwrap(), &Object::Integer(32));
+    }
+
+    /// A standard font's own `/Widths` are kept, its encoding still pinned.
+    #[test]
+    fn a_standard_fonts_own_widths_are_kept() {
+        let (out, font) = pinned(
+            dictionary! {
+                "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "Arial",
+                "FirstChar" => 65, "LastChar" => 65, "Widths" => vec![100.into()],
+            },
+            b"A",
+        );
+        assert_eq!(font.get(b"FirstChar").unwrap(), &Object::Integer(65));
+        assert_eq!(
+            out.resolve_array(font.get(b"Widths").unwrap()).unwrap(),
+            &[Object::Integer(100)]
+        );
+        assert_eq!(
+            pinned_name(&out, &font, 0x27),
+            "quotesingle",
+            "WinAnsi, a TrueType font's default"
+        );
+    }
+
+    /// A TrueType font with no descriptor is given one, flagged nonsymbolic,
+    /// as a TrueType font without one reads as symbolic and ignores its
+    /// `/Encoding` dictionary.
+    #[test]
+    fn a_truetype_font_without_a_descriptor_is_given_one() {
+        let (out, font) = pinned(
+            dictionary! { "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "Arial" },
+            b"A",
+        );
+        let descriptor = out
+            .resolve_dict(font.get(b"FontDescriptor").unwrap())
+            .unwrap();
+        assert_eq!(descriptor.get(b"Flags").unwrap(), &Object::Integer(32));
+        assert_eq!(
+            descriptor.get(b"FontName").unwrap(),
+            &Object::Name(b"Arial".to_vec())
+        );
+        assert_eq!(descriptor.get(b"CapHeight").unwrap(), &Object::Real(718.0));
+    }
+
+    /// A font that embeds its program, or names no standard face, is copied
+    /// as it is.
+    #[test]
+    fn other_fonts_are_not_pinned() {
+        let (_, custom) = pinned(
+            dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Custom" },
+            b"A",
+        );
+        assert!(custom.get(b"Encoding").is_err() && custom.get(b"Widths").is_err());
+    }
+
+    /// Pinning leaves the text a font reads as: the names it writes are the
+    /// glyphs the font's encoding already selected.
+    #[test]
+    fn a_pinned_font_reads_as_before() {
+        let mut font = type1("Helvetica");
+        font.set("Encoding", "WinAnsiEncoding");
+        let doc = drawing_in(font, b"it's caf\xe9");
+        let mut source = Vec::new();
+        doc.clone().save_to(&mut source).unwrap();
+        let before = Pdf::open(&source).unwrap().read(Text).unwrap();
+        let (rebuilt, _) = saved(&doc);
+        let after = Pdf::open(&rebuilt).unwrap().read(Text).unwrap();
+        assert_eq!(after[0].text, before[0].text);
+        assert_eq!(after[0].text.trim(), "it's café");
+    }
+
     /// A simple font's text reads through its `/ToUnicode`, as a viewer reads
     /// it, ahead of the glyph names its encoding gives (9.10.2), so it is
     /// detected and deleted.

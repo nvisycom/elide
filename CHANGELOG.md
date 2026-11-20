@@ -140,10 +140,11 @@ and this project adheres to
   presentation form, a CJK compatibility ideograph) is read as the text it
   writes, and the output's `/ToUnicode` CMaps map it the same way, so copy
   and search in a viewer give that text; glyphs are placed by their font's
-  widths, a standard 14 font without `/Widths` (or one named by an alias,
-  such as `Arial`) by Adobe's metrics for its face wherever PDFium and pdf.js
-  select and size its glyphs alike, and a Type3 font's scaled by its
-  `/FontMatrix`; a page whose content cannot be read,
+  widths, a Type3 font's scaled by its `/FontMatrix`; a standard 14 font that
+  embeds no program (or one named by an alias, such as `Arial`) is written
+  with every code's glyph and width (Adobe's metrics for its face), so every
+  viewer selects and places its glyphs as they were read, and its text reads
+  from those glyphs' names; a page whose content cannot be read,
   text drawn before a font is selected, content nested too deep, and an
   encode naming a part the document never surfaced are refused rather than
   passed through. The output is untagged (its structure tree carried
