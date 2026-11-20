@@ -1,6 +1,8 @@
 //! [`PageStream`]: a page's render, an image stream of the document: a
 //! scanned page's, or one redacted from its render rather than its text.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use bytes::Bytes;
 use elide_codec::{FormatId, LocalId, Stream};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -29,6 +31,8 @@ pub(super) struct PageStream {
     /// Whether the page is replaced by its render even with nothing redacted
     /// on it: one redacted from its render, whose text layer must not ship.
     replaced: bool,
+    /// Whether the render was read, as detection reads it.
+    read: AtomicBool,
 }
 
 impl PageStream {
@@ -40,6 +44,7 @@ impl PageStream {
             render,
             redactions: Vec::new(),
             replaced: false,
+            read: AtomicBool::new(false),
         }
     }
 
@@ -55,12 +60,27 @@ impl PageStream {
     }
 
     /// The page as redacted, or `None` when it is kept as it is.
-    pub(super) fn scanned(&self) -> Option<ScannedPage> {
-        (self.replaced || !self.redactions.is_empty()).then(|| ScannedPage {
-            number: self.number,
-            painted: self.render.clone(),
-            redactions: self.redactions.clone(),
-        })
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
+    /// for a page replaced by its render that nothing read: its text layer is
+    /// gone, and with no image pipeline to detect on the render, whatever the
+    /// page shows would ship unredacted.
+    pub(super) fn scanned(&self) -> Result<Option<ScannedPage>> {
+        if self.replaced && !self.read.load(Ordering::Relaxed) {
+            return Err(Error::capability_unavailable(format!(
+                "page {} is redacted from its render, but no image pipeline read it",
+                self.number
+            )));
+        }
+        Ok(
+            (self.replaced || !self.redactions.is_empty()).then(|| ScannedPage {
+                number: self.number,
+                painted: self.render.clone(),
+                redactions: self.redactions.clone(),
+            }),
+        )
     }
 
     /// The render, decoded.
@@ -92,6 +112,7 @@ impl Stream<Image> for PageStream {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
+        self.read.store(true, Ordering::Relaxed);
         let render = self.open()?;
         Ok(vec![Chunk {
             location: render.frame().with_page(self.number),
@@ -105,6 +126,7 @@ impl Stream<Image> for PageStream {
 impl DataReader<Image> for PageStream {
     async fn read_at(&self, location: &ImageLocation) -> Result<ImageData> {
         self.on_this_page(location)?;
+        self.read.store(true, Ordering::Relaxed);
         self.open()?.read_at(location)
     }
 }

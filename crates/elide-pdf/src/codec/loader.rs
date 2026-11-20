@@ -94,11 +94,10 @@ impl DocumentLoader for PdfDocumentLoader {
             bytes: attachment.bytes,
         }));
 
-        let blocks = pdf.read(Text)?;
         #[cfg(feature = "render")]
-        let (state, rendered) = self.pages(&pdf, blocks)?;
+        let (state, rendered) = self.pages(&pdf)?;
         #[cfg(not(feature = "render"))]
-        let state = PdfState::new(placed(blocks)?);
+        let state = PdfState::new(placed(pdf.read(Text)?)?);
         #[cfg(feature = "render")]
         let document = Self::document(pdf, state, rendered, blobs);
         #[cfg(not(feature = "render"))]
@@ -109,12 +108,12 @@ impl DocumentLoader for PdfDocumentLoader {
 
 #[cfg(feature = "render")]
 impl PdfDocumentLoader {
-    /// The state of the pages of `pdf`, its text `blocks`, redacted by
-    /// deleting glyphs, and the render of each page redacted from it, for
-    /// OCR.
+    /// The state of the pages of `pdf` redacted by deleting glyphs, and the
+    /// render of each page redacted from it, for OCR.
     ///
     /// Under [`RasterMode::Always`] every page is redacted from its render
-    /// at its resolution: detected on what it shows, and replaced by it.
+    /// at its resolution: detected on what it shows, and replaced by it; its
+    /// text layer is not read, so one that can't be decoded doesn't stop it.
     /// Under [`RasterMode::Auto`] a page that draws text in a font whose
     /// advances can't be known is too, at [`SCAN_DPI`], and a scanned page is
     /// rendered for OCR and replaced only where something on it is redacted.
@@ -123,17 +122,22 @@ impl PdfDocumentLoader {
     ///
     /// # Errors
     ///
-    /// As [`placed`] under [`RasterMode::Never`], and as [`Renders`].
-    fn pages(&self, pdf: &Pdf, blocks: Vec<TextBlock>) -> Result<(PdfState, Vec<PageStream>)> {
+    /// As [`Text`] outside [`RasterMode::Always`], as [`placed`] under
+    /// [`RasterMode::Never`], and as [`Renders`].
+    fn pages(&self, pdf: &Pdf) -> Result<(PdfState, Vec<PageStream>)> {
         let (state, scanned, replaced, dpi) = match self.raster {
-            RasterMode::Never => return Ok((PdfState::new(placed(blocks)?), Vec::new())),
+            RasterMode::Never => {
+                return Ok((PdfState::new(placed(pdf.read(Text)?)?), Vec::new()));
+            }
             RasterMode::Always { dpi } => {
-                let every: BTreeSet<u32> = blocks.iter().map(|block| block.page).collect();
+                let every: BTreeSet<u32> = pdf.doc().get_pages().into_keys().collect();
                 (PdfState::new(Vec::new()), BTreeSet::new(), every, dpi)
             }
             RasterMode::Auto => {
-                let (unplaced, placed): (Vec<TextBlock>, Vec<TextBlock>) =
-                    blocks.into_iter().partition(|block| block.unplaced);
+                let (unplaced, placed): (Vec<TextBlock>, Vec<TextBlock>) = pdf
+                    .read(Text)?
+                    .into_iter()
+                    .partition(|block| block.unplaced);
                 // A page is scanned when it shows no text: text located but
                 // placed nowhere (a pattern's it never paints) is no text a
                 // reader sees on the page.
@@ -289,17 +293,39 @@ mod tests {
             .collect()
     }
 
+    /// Read every page stream of `doc`, as detection reads it.
+    fn read_pages(doc: &mut Document) {
+        for number in 1.. {
+            let Some(page) = doc.stream_mut::<Image>(&format!("page-{number}")) else {
+                break;
+            };
+            page.chunks().unwrap();
+        }
+    }
+
     /// A page redacted from its render is replaced by it with nothing on it
     /// redacted, so its text layer never ships.
     #[test]
     fn a_rendered_page_is_replaced_with_nothing_redacted() {
         let render = png(100, 100, [255, 255, 255]);
         let page = PageStream::new(1, Bytes::from(render)).replaced();
-        let doc = rendered_document(&scanned_doc(), page, vec![]);
+        let mut doc = rendered_document(&scanned_doc(), page, vec![]);
+        read_pages(&mut doc);
         assert!(!holds_marker(doc.encode().unwrap().as_bytes()));
 
         let kept = scanned_document(&scanned_doc(), &png(100, 100, [255, 255, 255]), vec![]);
         assert!(holds_marker(kept.encode().unwrap().as_bytes()));
+    }
+
+    /// A page replaced by its render that nothing read is refused: with no
+    /// image pipeline to detect on it, what it shows would ship unredacted.
+    #[test]
+    fn an_unread_rendered_page_is_refused() {
+        let render = png(100, 100, [255, 255, 255]);
+        let page = PageStream::new(1, Bytes::from(render)).replaced();
+        let doc = rendered_document(&scanned_doc(), page, vec![]);
+        let error = doc.encode().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
     }
 
     /// With rendering off, a page drawing text in a font whose advances
@@ -319,8 +345,8 @@ mod tests {
     #[ignore = "requires the native PDFium library at runtime"]
     async fn auto_renders_a_page_in_a_font_without_widths() {
         let mut doc = decoded(unplaced_doc(), RasterMode::Auto).await.unwrap();
-        assert!(doc.stream_mut::<Image>("page-1").is_some());
         assert!(body_text(&mut doc).trim().is_empty());
+        read_pages(&mut doc);
         let out = doc.encode().unwrap();
         let mut again = decoded(Bytes::copy_from_slice(out.as_bytes()), RasterMode::Never)
             .await
@@ -332,12 +358,16 @@ mod tests {
     }
 
     /// Under `Always` every page is redacted from its render, its text layer
-    /// never read, whatever its fonts.
+    /// never read, whatever its fonts: even one whose codes can't be decoded,
+    /// which glyph deletion refuses.
     #[tokio::test]
     #[ignore = "requires the native PDFium library at runtime"]
     async fn always_renders_every_page_without_reading_its_text() {
         let mut pdf = DocBuilder::new();
         let font = pdf.add(type1("Helvetica"));
+        let mut undecodable = type1("Custom");
+        undecodable.set("Encoding", "Identity-H");
+        let undecodable = pdf.add(undecodable);
         pdf.page(
             Page::new()
                 .font("F1", font)
@@ -346,13 +376,13 @@ mod tests {
         );
         pdf.page(
             Page::new()
-                .font("F1", font)
+                .font("F1", undecodable)
                 .ops(shown("John Doe"))
                 .size(100, 100),
         );
-        let mut doc = decoded(Bytes::from(pdf.bytes()), RasterMode::always())
-            .await
-            .unwrap();
+        let bytes = Bytes::from(pdf.bytes());
+        assert!(decoded(bytes.clone(), RasterMode::Never).await.is_err());
+        let mut doc = decoded(bytes, RasterMode::always()).await.unwrap();
         assert!(body_text(&mut doc).trim().is_empty());
         assert!(doc.stream_mut::<Image>("page-1").is_some());
         assert!(doc.stream_mut::<Image>("page-2").is_some());

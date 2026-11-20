@@ -45,7 +45,9 @@ and this project adheres to
   are redacted this way, and so are pages that draw text in a font whose glyph
   widths can't be known (without the feature, or under `RasterMode::Never`,
   such a page is refused); `RasterMode::Always` redacts every page this way at
-  its configured DPI, never reading the text layer
+  its configured DPI, never reading the text layer. A page replaced by its
+  render that no image pipeline read is refused rather than shipped
+  unredacted
 
 #### Detection
 

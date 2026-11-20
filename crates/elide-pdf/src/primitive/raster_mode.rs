@@ -36,14 +36,18 @@ pub enum RasterMode {
     /// without one at [`Dpi::OCR`] for OCR, replacing it by its redacted
     /// image where something on it is redacted. A page that draws text in a
     /// font whose glyph widths can't be known is rendered too, and always
-    /// replaced, as where its glyphs land is up to each viewer. The default.
+    /// replaced, as where its glyphs land is up to each viewer; like every
+    /// page of [`Always`](Self::Always), it needs an image pipeline to read it.
+    /// The default.
     #[default]
     Auto,
     /// Render every page at the given [`Dpi`], detect on what it shows (OCR),
     /// and replace it by its render with the detected regions painted over,
     /// keeping no text layer: the strongest redaction, for documents whose
     /// text layer is garbled or untrusted. The text layer is never read, so
-    /// one that differs from what the page shows can't hide a value.
+    /// one that differs from what the page shows can't hide a value. It needs
+    /// an image pipeline to detect on the renders: a page nothing read is
+    /// refused on encode rather than shipped unredacted.
     Always {
         /// Resolution to render pages at; [`Dpi::OCR`] (300) is typical.
         dpi: Dpi,
