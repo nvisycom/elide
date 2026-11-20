@@ -11,11 +11,12 @@
 //! vocabulary, so it reads the same before and after.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
 use elide_core::{Error, Result};
 
 use crate::opc::ns::transitional_type;
-use crate::opc::package_xml::{RELATIONSHIPS, entries, without_entries};
+use crate::opc::package_xml::{RELATIONSHIPS, SpannedEntry, spanned_entries, without_entries};
 use crate::opc::part::PartPath;
 
 /// The relationship type of an external hyperlink, the one external target that
@@ -46,37 +47,56 @@ impl Relationship {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+/// part is not well-formed, or a relationship has no `Id`.
 pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
-    entries(xml, &RELATIONSHIPS, "relationships part")?
+    Ok(parse_spanned(xml)?
         .into_iter()
-        .map(|(_, attributes)| {
-            let mut relationship = Relationship {
-                id: String::new(),
-                kind: String::new(),
-                target: String::new(),
-                external: false,
-            };
-            let mut has_id = false;
-            for (key, value) in attributes {
+        .map(|(relationship, _)| relationship)
+        .collect())
+}
+
+/// Parse the relationships part `xml`, each relationship with the range of
+/// its `Target` value inside the quotes, if it has one.
+///
+/// # Errors
+///
+/// As [`parse`].
+pub(crate) fn parse_spanned(xml: &str) -> Result<Vec<(Relationship, Option<Range<usize>>)>> {
+    spanned_entries(xml, &RELATIONSHIPS, "relationships part")?
+        .into_iter()
+        .map(|SpannedEntry { entry, values, .. }| {
+            let mut id = None;
+            let mut kind = String::new();
+            let mut target = String::new();
+            let mut target_range = None;
+            let mut external = false;
+            for ((key, value), range) in entry.1.into_iter().zip(values) {
                 match key {
-                    "Id" => {
-                        relationship.id = value;
-                        has_id = true;
+                    "Id" => id = Some(value),
+                    "Type" => kind = transitional_type(&value).into_owned(),
+                    "Target" => {
+                        target = value;
+                        target_range = Some(range);
                     }
-                    "Type" => relationship.kind = transitional_type(&value).into_owned(),
-                    "Target" => relationship.target = value,
-                    _ => relationship.external = value == "External",
+                    "TargetMode" => external = value == "External",
+                    _ => {}
                 }
             }
             // A relationship is removed by its id, so one without could not
             // be.
-            if !has_id {
+            let Some(id) = id else {
                 return Err(Error::malformed(
                     "relationships part malformed: a relationship without an `Id`",
                 ));
-            }
-            Ok(relationship)
+            };
+            let relationship = Relationship {
+                id,
+                kind,
+                target,
+                external,
+            };
+            Ok((relationship, target_range))
         })
         .collect()
 }

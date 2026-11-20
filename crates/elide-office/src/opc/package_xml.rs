@@ -18,7 +18,7 @@ use quick_xml::events::{BytesStart, Event};
 use crate::opc::content_types::CONTENT_TYPES_PART;
 use crate::opc::part::PartPath;
 use crate::opc::xml_edit::{
-    Edit, Edited, Skipped, SpannedReader, attribute_extent, cut_events, splice,
+    Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, cut_events, splice,
 };
 use crate::opc::{attribute_value, malformed_xml, ns};
 
@@ -79,8 +79,19 @@ pub(crate) type Entry = (&'static str, Vec<(&'static str, String)>);
 pub(crate) fn entries(xml: &str, vocabulary: &Vocabulary, what: &str) -> Result<Vec<Entry>> {
     Ok(spanned_entries(xml, vocabulary, what)?
         .into_iter()
-        .map(|(entry, _)| entry)
+        .map(|spanned| spanned.entry)
         .collect())
+}
+
+/// An entry as [`entries`] reads it, with where it is written.
+#[derive(Debug)]
+pub(crate) struct SpannedEntry {
+    pub(crate) entry: Entry,
+    /// The span of its whole element.
+    pub(crate) span: Range<usize>,
+    /// The range of each of its attributes' values inside the quotes, in the
+    /// order of the entry's attributes.
+    pub(crate) values: Vec<Range<usize>>,
 }
 
 /// The package part `xml` without each entry whose `attribute`, read as
@@ -98,34 +109,44 @@ pub(crate) fn without_entries(
 ) -> Result<String> {
     let cuts = spanned_entries(xml, vocabulary, what)?
         .into_iter()
-        .filter(|((_, attributes), _)| {
-            attributes
+        .filter(|spanned| {
+            spanned
+                .entry
+                .1
                 .iter()
                 .any(|(key, value)| *key == attribute && drops(value))
         })
-        .map(|(_, span)| (span, ""))
+        .map(|spanned| (spanned.span, ""))
         .collect();
     Ok(splice(xml, cuts))
 }
 
-/// [`entries`], each with the span of its whole element.
-fn spanned_entries(
+/// [`entries`], each with where it is written.
+///
+/// # Errors
+///
+/// As [`entries`].
+pub(crate) fn spanned_entries(
     xml: &str,
     vocabulary: &Vocabulary,
     what: &str,
-) -> Result<Vec<(Entry, Range<usize>)>> {
+) -> Result<Vec<SpannedEntry>> {
     let malformed = |e: &dyn std::fmt::Display| Error::malformed(format!("{what} malformed: {e}"));
     let mut reader = SpannedReader::new_ns(xml);
     let mut entries = Vec::new();
     // An entry whose element is still open, read to its end tag.
-    let mut open: Option<(Entry, Skipped)> = None;
+    let mut open: Option<(Entry, Vec<Range<usize>>, Skipped)> = None;
     let mut depth = 0usize;
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(|e| malformed(&e))?;
-        if let Some((_, skipped)) = &mut open {
+        if let Some((.., skipped)) = &mut open {
             if let Some(whole) = skipped.read(&event, span.end)? {
-                let (entry, _) = open.take().expect("an open entry");
-                entries.push((entry, whole));
+                let (entry, values, _) = open.take().expect("an open entry");
+                entries.push(SpannedEntry {
+                    entry,
+                    span: whole,
+                    values,
+                });
                 depth -= 1;
             }
             continue;
@@ -148,6 +169,7 @@ fn spanned_entries(
             && vocabulary.owns(namespace.as_deref())
         {
             let mut attributes = Vec::new();
+            let mut values = Vec::new();
             for attr in e.attributes() {
                 let attr = attr.map_err(|e| malformed(&e))?;
                 if attr.key.prefix().is_some() {
@@ -160,14 +182,20 @@ fn spanned_entries(
                     continue;
                 };
                 let value = attribute_value(&attr.value).map_err(|e| malformed(&e))?;
+                let (_, range) = attribute_source(xml, &attr)?;
                 attributes.push((*key, value.into_owned()));
+                values.push(range);
             }
             let entry = (*name, attributes);
             if is_start {
-                open = Some((entry, Skipped::new(span.start)));
+                open = Some((entry, values, Skipped::new(span.start)));
                 depth += 1;
             } else {
-                entries.push((entry, span));
+                entries.push(SpannedEntry {
+                    entry,
+                    span,
+                    values,
+                });
             }
             continue;
         }

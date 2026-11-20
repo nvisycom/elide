@@ -21,16 +21,16 @@ use std::ops::Range;
 use elide_codec::extract::{OffsetMap, Passage};
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
+use quick_xml::NsReader;
 use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::{NsReader, Reader};
 
 use crate::opc::attribute_value;
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
-use crate::opc::ns::{W, X, transitional, transitional_type};
-use crate::opc::relationships::HYPERLINK;
+use crate::opc::ns::{W, X, transitional};
+use crate::opc::relationships::{self, HYPERLINK};
 use crate::opc::xml_edit::{Name, SpannedReader, attribute_source, bound};
 
 /// The XML construct a redactable span lives inside, which determines how a
@@ -366,51 +366,17 @@ fn visit_attributes(
 /// `TargetMode` is `External` are surfaced: those are the user-authored URLs
 /// (`mailto:`, `https://…`) that carry the same PII as the body. Internal
 /// relationships (styles, headers, fonts, …) target other package parts and
-/// hold no user data, so they are left untouched.
+/// hold no user data, so they are left untouched. The part is read by
+/// [`relationships::parse_spanned`], so what is surfaced is what the package
+/// reads.
 pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
-    let mut reader = Reader::from_str(raw);
-    let mut spans = Vec::new();
-
-    loop {
-        let elem = match reader.read_event().map_err(|_| ())? {
-            Event::Eof => break,
-            Event::Empty(e) | Event::Start(e) => e,
-            _ => continue,
-        };
-        if elem.local_name().as_ref() != "Relationship" {
-            continue;
-        }
-
-        // Scan the element's attributes once for the hyperlink type, the external
-        // mode, and the `Target` value's source range, the latter derived from
-        // the value bytes quick-xml borrowed straight out of `raw`. A span is
-        // emitted only when the relationship is an external hyperlink.
-        let mut is_hyperlink = false;
-        let mut is_external = false;
-        let mut target: Option<Range<usize>> = None;
-        for attr in elem.attributes() {
-            let attr = attr.map_err(|_| ())?;
-            // As the relationships are read: unqualified attributes only, each
-            // value as XML reads it, its references decoded.
-            if attr.key.prefix().is_some() {
-                continue;
-            }
-            let value = || attribute_value(&attr.value).map_err(|_| ());
-            match attr.key.local_name().as_ref() {
-                "Type" => is_hyperlink = transitional_type(&value()?) == HYPERLINK,
-                "TargetMode" => is_external = value()? == "External",
-                "Target" => target = Some(value_source(raw, &attr)?),
-                _ => {}
-            }
-        }
-        if is_hyperlink
-            && is_external
-            && let Some(range) = target
-        {
-            spans.push(Span::new(range, BlockKind::Attribute));
-        }
-    }
-    Ok(spans)
+    Ok(relationships::parse_spanned(raw)
+        .map_err(|_| ())?
+        .into_iter()
+        .filter(|(relationship, _)| relationship.external && relationship.kind == HYPERLINK)
+        .filter_map(|(_, target)| target)
+        .map(|range| Span::new(range, BlockKind::Attribute))
+        .collect())
 }
 
 /// The byte range of the value of `attr` within `raw`, which quick-xml
@@ -929,6 +895,16 @@ mod tests {
                 "{attributes}"
             );
         }
+    }
+
+    /// What is surfaced is what the package reads: a relationship nested
+    /// below the root's entries, or in another namespace, is not one.
+    #[test]
+    fn a_relationship_the_package_does_not_read_is_not_surfaced() {
+        let raw = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:v="urn:vendor"><v:x><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:a@example.com" TargetMode="External"/></v:x><v:Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:b@example.com" TargetMode="External"/></Relationships>"#;
+        assert!(relationship_spans(raw).unwrap().is_empty());
+        let unnamed = r#"<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:a@example.com" TargetMode="External"/></Relationships>"#;
+        assert!(relationship_spans(unnamed).is_err());
     }
 
     #[test]
