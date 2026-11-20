@@ -649,6 +649,21 @@ fn an_implied_close_through_a_removed_element_ends_it() {
     );
 }
 
+/// A browser reads a carriage return as a line feed, so one ends an unquoted
+/// value and starts another attribute.
+#[test]
+fn a_carriage_return_separates_attributes() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        "<a title=x\ronclick=alert(1)>a</a>",
+        "<a title=\"x\"\ronclick=alert(1)>a</a>",
+        "<a\ronclick=alert(1)>a</a>",
+    ] {
+        let out = sanitize(html(policy), raw);
+        assert!(!out.contains("onclick"), "{raw:?} -> {out:?}");
+    }
+}
+
 #[test]
 fn mglyph_and_malignmark_stay_mathml() {
     let policy = HiddenContentPolicy::default();

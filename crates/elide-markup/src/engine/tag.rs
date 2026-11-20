@@ -88,9 +88,10 @@ fn place(raw: &str, tag: &str) -> Result<Range<usize>> {
         .ok_or_else(|| Error::malformed("an HTML tag was not read from its document"))
 }
 
-/// Whether `byte` is HTML whitespace between the parts of a tag.
+/// Whether `byte` is HTML whitespace between the parts of a tag. A browser
+/// reads a carriage return as a line feed before it reads any tag.
 fn is_space(byte: u8) -> bool {
-    matches!(byte, b'\t' | b'\n' | b'\x0C' | b' ')
+    matches!(byte, b'\t' | b'\n' | b'\x0C' | b'\r' | b' ')
 }
 
 /// Where the tag name at the start of `text` ends: at whitespace, `/`, or the
@@ -391,7 +392,7 @@ mod tests {
         // The pieces a tag's name and attributes are built from: names, the
         // characters that separate or quote them, and mixed case.
         const PIECES: &[&str] = &[
-            "a", "B", "x", "on", "=", "\"", "'", "`", "/", " ", "\t", "\n", "\x0C",
+            "a", "B", "x", "on", "=", "\"", "'", "`", "/", " ", "\t", "\n", "\x0C", "\r",
         ];
         // A fixed xorshift sequence, so a failure reproduces.
         let mut state: u64 = 0x5EED_1234_ABCD_9876;
@@ -410,10 +411,16 @@ mod tests {
             raw.push_str(">t");
             // Only a tag quick-xml reads whole and this reader does not refuse
             // is compared.
-            let Some(ours) = ours(&raw) else {
+            let Some((name, attributes)) = ours(&raw) else {
                 continue;
             };
-            assert_eq!(ours, reference(&raw), "{raw:?}");
+            // A browser reads a carriage return as a line feed, in a value
+            // too; this reader keeps values as written.
+            let attributes = attributes
+                .into_iter()
+                .map(|(key, value)| (key, value.replace("\r\n", "\n").replace('\r', "\n")))
+                .collect::<Vec<_>>();
+            assert_eq!((name, attributes), reference(&raw), "{raw:?}");
             compared += 1;
         }
         assert!(compared > 5_000, "only {compared} generated tags compared");
