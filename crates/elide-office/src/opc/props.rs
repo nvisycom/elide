@@ -19,13 +19,17 @@ use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::redaction::HiddenContent;
-use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, BytesText, Event};
+use quick_xml::name::QName;
 use quick_xml::writer::Writer;
+use quick_xml::{NsReader, Reader};
 
+use crate::opc::ns::{DCTERMS, XSI, transitional};
+use crate::opc::vocabulary::is_known;
 use crate::opc::xml_edit::{
-    Edit, Edited, Skipped, SpannedReader, attribute_source, bom_len, local_name,
+    Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, bom_len, local_name,
+    namespace_of,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
@@ -111,8 +115,10 @@ pub struct Field {
 /// list containers, vectors, and variants on the path to a kept list entry.
 /// Every other element goes with its subtree, as do text, CDATA, and entity
 /// references outside a field, an entity reference no field resolves, and
-/// every processing instruction; whitespace between elements stays. A vector
-/// that loses entries has its `size` set to the entries it keeps.
+/// every processing instruction, and an array inside a field, whose bounds
+/// nothing reads; whitespace between elements stays. A vector that loses
+/// entries has its `size` set to the entries it keeps. A kept element keeps
+/// only the attributes [`cut_attributes`] allows, none of them free text.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct UnsurfacedProperties;
 
@@ -122,19 +128,25 @@ impl Edit for UnsurfacedProperties {
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        let mut reader = SpannedReader::new(raw);
+        let mut reader = SpannedReader::new_ns(raw);
         let mut walk = Walk::default();
         let mut cuts: Vec<(Range<usize>, Cut)> = Vec::new();
         // The kept elements that are not fields: the root, and the list
         // containers, vectors, and variants, kept only when an entry is.
         let mut frames: Vec<Frame> = Vec::new();
-        // The depth of the surfaced field being read, everything inside kept.
+        // The vectors open inside the field being read, each keeping its
+        // `size` to the entries it holds.
+        let mut vectors: Vec<Frame> = Vec::new();
+        // The depth of the surfaced field being read, everything inside kept
+        // but an array.
         let mut reading: Option<usize> = None;
         // An element being removed, left out of the walk.
         let mut removing: Option<Skipped> = None;
+        // How many custom properties are kept, which numbers each.
+        let mut properties = 0usize;
 
         loop {
-            let (event, span) = reader.read_event().map_err(malformed_xml)?;
+            let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
             if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
                 continue;
             }
@@ -144,7 +156,12 @@ impl Edit for UnsurfacedProperties {
                     let is_start = matches!(event, Event::Start(_));
                     let depth = walk.depth();
                     let field = walk.enter(e);
-                    let kept = if reading.is_some() || depth == 0 {
+                    let local = e.local_name().into_inner();
+                    let mut pid = None;
+                    let kept = if reading.is_some() {
+                        // An array's bounds are numbers nothing reads.
+                        local != "array"
+                    } else if depth == 0 {
                         true
                     } else if let Some(field) = field {
                         // A custom property's name is read only when it
@@ -152,6 +169,10 @@ impl Edit for UnsurfacedProperties {
                         let read = is_start || field.place != Place::Custom;
                         if read {
                             keep_child(&mut frames);
+                            if field.place == Place::Custom {
+                                properties += 1;
+                                pid = Some(properties + 1);
+                            }
                             if is_start {
                                 reading = Some(depth);
                             }
@@ -165,30 +186,45 @@ impl Edit for UnsurfacedProperties {
                         removing = Skipped::begin(span, is_start, &mut cuts);
                         continue;
                     }
+                    if let Some(vector) = vectors.last_mut()
+                        && vector.depth + 1 == depth
+                    {
+                        vector.children += 1;
+                    }
+                    let sized = local == "vector";
                     if !is_start {
                         walk.leave();
+                    } else if reading.is_some_and(|field| field < depth) {
+                        if sized {
+                            vectors.push(Frame::new(depth, span.start, cuts.len(), size(raw, e)?));
+                        }
                     } else if reading.is_none() {
-                        let size = if depth == 0 { None } else { size(raw, e)? };
+                        let size = if sized { size(raw, e)? } else { None };
                         frames.push(Frame::new(depth, span.start, cuts.len(), size));
                     }
+                    let element = Element {
+                        namespace: namespace.as_deref().map(transitional),
+                        local,
+                        sized: sized && is_start,
+                        pid,
+                    };
+                    cut_attributes(&reader.reader, raw, e, &element, &mut cuts)?;
                 }
                 Event::End(_) => {
                     walk.leave();
                     let depth = walk.depth();
                     if reading == Some(depth) {
                         reading = None;
-                    } else if reading.is_none()
-                        && let Some(frame) = frames.pop_if(|frame| frame.depth == depth)
-                    {
+                    } else if reading.is_some() {
+                        if let Some(vector) = vectors.pop_if(|vector| vector.depth == depth) {
+                            vector.resize(&mut cuts);
+                        }
+                    } else if let Some(frame) = frames.pop_if(|frame| frame.depth == depth) {
                         if frame.children == 0 && depth > 0 {
                             cuts.truncate(frame.cuts);
                             cuts.push((frame.start..span.end, Cut::Removed));
                         } else {
-                            if let Some((value, written)) = frame.size
-                                && written != frame.children.to_string()
-                            {
-                                cuts.push((value, Cut::Written(frame.children.to_string())));
-                            }
+                            frame.resize(&mut cuts);
                             keep_child(&mut frames);
                         }
                     }
@@ -204,28 +240,149 @@ impl Edit for UnsurfacedProperties {
                 _ => {}
             }
         }
-        let count = cuts
-            .iter()
-            .filter(|(_, cut)| matches!(cut, Cut::Removed))
-            .count();
+        let count = cuts.iter().filter(|(_, cut)| cut.counted()).count();
         Ok(Edited::from_cuts(raw, cuts, count))
     }
 }
 
+/// A kept element of a property part, as its attributes are decided.
+struct Element<'a> {
+    /// Its namespace, a strict one as its transitional twin.
+    namespace: Option<&'a str>,
+    local: &'a str,
+    /// Whether it is a vector whose `size` is kept to its entries.
+    sized: bool,
+    /// For a kept custom property, the number it is given.
+    pid: Option<usize>,
+}
+
+/// The format id every custom property a person adds carries
+/// (`FMTID_UserDefinedProperties`).
+const USER_DEFINED: &str = "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}";
+
+/// The variant types a vector or an array may be of.
+const BASE_TYPES: &[&str] = &[
+    "variant", "i1", "i2", "i4", "i8", "int", "ui1", "ui2", "ui4", "ui8", "uint", "r4", "r8",
+    "decimal", "lpstr", "lpwstr", "bstr", "date", "filetime", "bool", "cy", "error", "clsid",
+];
+
+/// What a property part keeps of an attribute.
+enum Kept {
+    /// The attribute as it is.
+    As,
+    /// The attribute with this value, in place of one that could carry text.
+    With(String),
+    /// Nothing.
+    No,
+}
+
+/// Cut from the kept `element` (its start tag `e`) each attribute no reader
+/// reads and its structure does not need, and give a structural number or
+/// id its own value, so no attribute value carries text:
+///
+/// - a namespace declaration of a reviewed vocabulary, or an empty one;
+/// - `xsi:type` on a DC terms element, only as `W3CDTF` in DC terms;
+/// - a custom property's `name` (read as a field), its `pid` (renumbered by
+///   position), and its `fmtid` (the user-defined format id);
+/// - a vector's `size` (kept to its entries) and its `baseType` when it is a
+///   variant type.
+fn cut_attributes(
+    reader: &NsReader<&[u8]>,
+    raw: &str,
+    e: &BytesStart<'_>,
+    element: &Element<'_>,
+    cuts: &mut Vec<(Range<usize>, Cut)>,
+) -> Result<()> {
+    for attr in e.attributes() {
+        let attr = attr.map_err(malformed_xml)?;
+        let (extent, value_range) = attribute_extent(raw, &attr)?;
+        let written = &raw[value_range.clone()];
+        let value = attribute_value(written).ok();
+        let value = value.as_deref();
+        let kept = if attr.key.as_namespace_binding().is_some() {
+            let reviewed = value.is_some_and(|uri| uri.is_empty() || is_known(transitional(uri)));
+            if reviewed { Kept::As } else { Kept::No }
+        } else {
+            let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
+            let qualified = namespace_of(&resolved);
+            match (element.local, qualified, local.into_inner()) {
+                (_, Some(XSI), "type")
+                    if element.namespace == Some(DCTERMS) && is_w3cdtf(reader, value) =>
+                {
+                    Kept::As
+                }
+                (_, None, "name") if element.pid.is_some() => Kept::As,
+                (_, None, "pid") => match element.pid {
+                    Some(pid) if written == pid.to_string() => Kept::As,
+                    Some(pid) => Kept::With(pid.to_string()),
+                    None => Kept::No,
+                },
+                (_, None, "fmtid") if element.pid.is_some() => {
+                    if written == USER_DEFINED {
+                        Kept::As
+                    } else {
+                        Kept::With(USER_DEFINED.to_owned())
+                    }
+                }
+                // Kept to the vector's entries when it closes.
+                (_, None, "size") if element.sized => Kept::As,
+                ("vector", None, "baseType") if value.is_some_and(|t| BASE_TYPES.contains(&t)) => {
+                    Kept::As
+                }
+                _ => Kept::No,
+            }
+        };
+        match kept {
+            Kept::As => {}
+            Kept::With(value) => cuts.push((value_range, Cut::Replaced(value))),
+            Kept::No => cuts.push((extent, Cut::Removed)),
+        }
+    }
+    Ok(())
+}
+
+/// Whether `value`, an `xsi:type`, names DC terms' `W3CDTF` by a prefix bound
+/// where it is written.
+fn is_w3cdtf(reader: &NsReader<&[u8]>, value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+    if local != "W3CDTF" {
+        return false;
+    }
+    let name = if prefix.is_empty() {
+        "x".to_owned()
+    } else {
+        format!("{prefix}:x")
+    };
+    let (resolved, _) = reader.resolver().resolve_element(QName(&name));
+    namespace_of(&resolved) == Some(DCTERMS)
+}
+
 /// What an [`UnsurfacedProperties`] edit writes in place of a range: nothing
-/// for what it removes (counted), or a vector's new `size` (not counted).
+/// for what it removes, a value in place of one that could carry text (both
+/// counted), or a vector's new `size` (not counted).
 #[derive(Default)]
 enum Cut {
     #[default]
     Removed,
+    Replaced(String),
     Written(String),
+}
+
+impl Cut {
+    /// Whether this cut removes content.
+    fn counted(&self) -> bool {
+        !matches!(self, Self::Written(_))
+    }
 }
 
 impl AsRef<str> for Cut {
     fn as_ref(&self) -> &str {
         match self {
             Self::Removed => "",
-            Self::Written(text) => text,
+            Self::Replaced(text) | Self::Written(text) => text,
         }
     }
 }
@@ -254,6 +411,17 @@ impl Frame {
             cuts,
             size,
             children: 0,
+        }
+    }
+}
+
+impl Frame {
+    /// Set the `size` this vector was written with to the children it keeps.
+    fn resize(self, cuts: &mut Vec<(Range<usize>, Cut)>) {
+        if let Some((value, written)) = self.size
+            && written != self.children.to_string()
+        {
+            cuts.push((value, Cut::Written(self.children.to_string())));
         }
     }
 }
@@ -894,6 +1062,65 @@ mod tests {
         assert!(text.contains("<vt:lpwstr>Jane Roe</vt:lpwstr>"), "{text}");
         assert!(text.contains("<vt:i4>42</vt:i4>"), "{text}");
         assert!(!text.contains("Carol Doe"), "{text}");
+    }
+
+    const CUSTOM_ROOT: &str = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes""#;
+
+    #[test]
+    fn an_attribute_nothing_reads_is_removed() {
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:v="urn:Jane-Roe" owner="Jane Roe"><dc:creator note="Jane Roe" xml:lang="en-US" xml:space="preserve">Ada</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">2024-01-01T00:00:00Z</dcterms:created><dcterms:modified xsi:type="Jane:Roe">2024-01-01T00:00:00Z</dcterms:modified><dc:title xsi:type="dcterms:W3CDTF">Plan</dc:title></cp:coreProperties>"#;
+        let text = surfaced_only(core);
+        for gone in ["Jane", "Roe", "note=", "xml:lang", "xml:space", "owner"] {
+            assert!(!text.contains(gone), "{gone} kept: {text}");
+        }
+        assert!(
+            text.contains(r#"<dcterms:created xsi:type="dcterms:W3CDTF">"#),
+            "{text}"
+        );
+        assert!(text.contains("<dc:title>Plan</dc:title>"), "{text}");
+        assert!(text.contains("<dcterms:modified>"), "{text}");
+    }
+
+    #[test]
+    fn a_custom_property_keeps_only_its_structural_attributes() {
+        let custom = format!(
+            r#"{CUSTOM_ROOT}><property fmtid="{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}" pid="2" name="Client" linkTarget="Jane Roe"><vt:lpwstr>Ada</vt:lpwstr></property><property fmtid="{{4A414E45-524F-4500-0000-000000000000}}" pid="555123456" name="Team"><vt:vector size="987654321" baseType="lpwstr" extra="Roe"><vt:lpwstr>a</vt:lpwstr><vt:lpwstr>b</vt:lpwstr></vt:vector></property><property fmtid="{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}" pid="4" name="Grid"><vt:array lBounds="0" uBounds="555123456" baseType="i4"><vt:i4>1</vt:i4></vt:array></property></Properties>"#
+        );
+        let text = surfaced_only(&custom);
+        for gone in [
+            "Jane",
+            "Roe",
+            "4A414E45",
+            "555123456",
+            "987654321",
+            "vt:array",
+        ] {
+            assert!(!text.contains(gone), "{gone} kept: {text}");
+        }
+        assert_eq!(
+            text.matches(r#"fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}""#)
+                .count(),
+            3,
+            "{text}"
+        );
+        for kept in [
+            r#"pid="2" name="Client">"#,
+            r#"pid="3" name="Team">"#,
+            r#"pid="4" name="Grid">"#,
+            r#"<vt:vector size="2" baseType="lpwstr">"#,
+        ] {
+            assert!(text.contains(kept), "{kept} missing: {text}");
+        }
+    }
+
+    #[test]
+    fn a_list_vector_keeps_a_known_base_type_only() {
+        let app = format!(
+            r#"{EXTENDED}<TitlesOfParts note="Jane Roe"><vt:vector size="1" baseType="Jane"><vt:lpstr>Payroll</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#
+        );
+        let text = surfaced_only(&app);
+        assert!(!text.contains("Jane"), "{text}");
+        assert!(text.contains(r#"<vt:vector size="1">"#), "{text}");
     }
 
     #[test]

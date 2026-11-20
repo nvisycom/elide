@@ -37,7 +37,7 @@ const VOCABULARIES: &[&str] = &[
 
 /// Whether `namespace`, a strict one already mapped by
 /// [`edit`](crate::opc::xml_edit::edit), is a reviewed vocabulary.
-fn is_known(namespace: &str) -> bool {
+pub(crate) fn is_known(namespace: &str) -> bool {
     VOCABULARIES.contains(&namespace)
 }
 

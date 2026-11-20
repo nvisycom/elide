@@ -349,6 +349,29 @@ mod tests {
         assert!(again.is_none_or(|again| again == sanitized));
     }
 
+    /// Under `ScanAsContent` a property part keeps only the attributes its
+    /// structure needs, the result passes the check, and sanitizing it again
+    /// changes nothing.
+    #[test]
+    fn a_property_part_keeps_only_the_attributes_it_needs() {
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+        let document = replacing(SAMPLE_DOCX, "docProps/core.xml", |core| {
+            core.replace("<lastModifiedBy>", r#"<lastModifiedBy note="Jane Roe">"#)
+                .replace(
+                    "<coreProperties ",
+                    r#"<coreProperties xmlns:v="urn:Jane-Roe" "#,
+                )
+        });
+        let (sanitized, _) = sanitize(&document, policy, &WordFormat).unwrap();
+        let sanitized = sanitized.unwrap();
+        let core = String::from_utf8(read_part(&sanitized, "docProps/core.xml").unwrap()).unwrap();
+        assert!(!core.contains("Jane") && !core.contains("Roe"), "{core}");
+        assert!(core.contains(r#"xsi:type="dcterms:W3CDTF""#), "{core}");
+        check(&sanitized, policy, &WordFormat).unwrap();
+        let (again, _) = sanitize(&sanitized, policy, &WordFormat).unwrap();
+        assert!(again.is_none_or(|again| again == sanitized));
+    }
+
     /// A strict extended-properties part keeps only the surfaced fields when
     /// metadata is scanned, and then passes the check.
     #[test]
