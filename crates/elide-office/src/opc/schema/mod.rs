@@ -324,81 +324,52 @@ impl Frame {
 /// `raw` is not well-formed XML, or its root is not a whole `root`.
 pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     let mut reader = SpannedReader::new_ns(raw);
-    // Each span of the source the rebuild replaces, with what replaces it:
-    // nothing for what it leaves out.
-    let mut cuts: Vec<(Range<usize>, String)> = Vec::new();
-    let mut removed: BTreeMap<HiddenContent, usize> = BTreeMap::new();
-    let mut record = |content| *removed.entry(content).or_insert(0) += 1;
-    // Each open frame, with where its carried declarations begin and where
-    // its own do.
-    let mut open: Vec<(Frame, usize, usize)> = Vec::new();
-    // The namespace declarations the unwrapped tags of the open frames
-    // carried, as (attribute name, source), innermost last: one stack, so a
-    // nested unwrapped frame shares those around it rather than copying them.
-    // The children of an unwrapped frame declare its carried ones again.
-    let mut carried: Vec<(&str, &str)> = Vec::new();
-    // An element being left out.
-    let mut removing: Option<Skipped> = None;
+    let mut rebuild = Rebuild::new(raw);
     let mut seen_root = false;
-    // The bytes the rebuild adds, which must keep the part within the size a
-    // package read allows.
-    let mut added = 0usize;
 
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
-        if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
+        if Skipped::skip(&mut rebuild.removing, &event, span.end, &mut rebuild.cuts)? {
             continue;
         }
 
-        let scope = open
+        let scope = rebuild
+            .open
             .last()
-            .map_or(Scope::Document, |(frame, ..)| frame.scope());
+            .map_or(Scope::Document, |open| open.frame.scope());
         match event {
             // The part is its root element, whole.
             Event::Eof if !seen_root => return Err(malformed_xml("a part without a root element")),
-            Event::Eof if !open.is_empty() => return Err(malformed_xml("unclosed element")),
+            Event::Eof if !rebuild.open.is_empty() => {
+                return Err(malformed_xml("unclosed element"));
+            }
             Event::Eof => break,
             Event::Decl(_) => {}
             // Refused by the skip above.
             Event::DocType(_) => {}
             // Comments are cut by their own edit.
             Event::Comment(_) => {}
-            Event::PI(_) => {
-                cuts.push((span, String::new()));
-                record(HiddenContent::ApplicationData);
-            }
+            Event::PI(_) => rebuild.cut(span, HiddenContent::ApplicationData),
             // CDATA is text written another way: where text shows, it is
             // written as the text it stands for, which extraction reads.
             Event::CData(ref text) if holds_text(scope) => {
                 let text: &str = text.as_ref();
-                cuts.push((span, partial_escape(text).into_owned()));
+                rebuild.cuts.push((span, partial_escape(text).into_owned()));
             }
-            Event::CData(_) => {
-                cuts.push((span, String::new()));
-                record(HiddenContent::Undisplayed);
-            }
+            Event::CData(_) => rebuild.cut(span, HiddenContent::Undisplayed),
             Event::Text(ref text) => {
                 let text: &str = text.as_ref();
                 let blank = text.bytes().all(|byte| byte.is_ascii_whitespace());
                 if !blank && !holds_text(scope) {
-                    cuts.push((span, String::new()));
-                    record(HiddenContent::Undisplayed);
+                    rebuild.cut(span, HiddenContent::Undisplayed);
                 }
             }
             Event::GeneralRef(_) => {
                 if !holds_text(scope) {
-                    cuts.push((span, String::new()));
-                    record(HiddenContent::Undisplayed);
+                    rebuild.cut(span, HiddenContent::Undisplayed);
                 }
             }
-            Event::End(_) => {
-                if let Some((frame, _, own)) = open.pop() {
-                    carried.truncate(own);
-                    if frame.unwrapped() {
-                        cuts.push((span, String::new()));
-                    }
-                }
-            }
+            Event::End(_) => rebuild.close(span),
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let is_start = matches!(event, Event::Start(_));
                 let local = e.local_name().into_inner();
@@ -406,18 +377,8 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                     seen_root = true;
                     root_frame(root, namespace.as_deref(), local)?
                 } else {
-                    decide(
-                        scope,
-                        namespace.as_deref(),
-                        local,
-                        open.last().map(|&(frame, ..)| frame),
-                    )
-                };
-                // Where what the unwrapped frame around this element carried
-                // begins, its later bindings shadowing the earlier.
-                let around = match open.last() {
-                    Some(&(frame, base, _)) if frame.unwrapped() => base,
-                    _ => carried.len(),
+                    let parent = rebuild.open.last().map(|open| open.frame);
+                    decide(scope, namespace.as_deref(), local, parent)
                 };
                 let decision = match decision {
                     Decision::Keep(Frame::Typed(ty))
@@ -430,77 +391,236 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                 };
                 match decision {
                     Decision::Keep(frame) => {
-                        let own = carried.len();
-                        let mut base = own;
-                        if let Frame::Typed(ty) | Frame::Graphic(ty, _) = frame {
-                            attributes(&reader.reader, raw, e, Some(ty), &mut cuts, &mut record)?;
-                            let mut missing = String::new();
-                            if around < carried.len() {
-                                let mut bound: HashSet<&str> = declarations(raw, e)?
-                                    .into_iter()
-                                    .map(|(key, _)| key)
-                                    .collect();
-                                let unbound: Vec<&str> = carried[around..]
-                                    .iter()
-                                    .rev()
-                                    .filter(|(key, _)| bound.insert(key))
-                                    .map(|(_, source)| *source)
-                                    .collect();
-                                for source in unbound.into_iter().rev() {
-                                    missing.push(' ');
-                                    missing.push_str(source);
-                                }
-                            }
-                            if !missing.is_empty() {
-                                added += missing.len();
-                                if (raw.len() + added) as u64 > MAX_PART_BYTES {
-                                    return Err(malformed_xml(
-                                        "declaring the namespaces of markup compatibility again \
-                                         outgrows the part size limit",
-                                    ));
-                                }
-                                let at = span.start + 1 + e.name().into_inner().len();
-                                cuts.push((at..at, missing));
-                            }
-                        } else if let Frame::Vml = frame {
-                            attributes(&reader.reader, raw, e, None, &mut cuts, &mut record)?;
-                        } else if frame.unwrapped() {
-                            // The unwrapped tag goes whole, its declarations
-                            // carried to the children it held.
-                            cuts.push((span.clone(), String::new()));
-                            if is_start {
-                                base = around;
-                                carried.extend(declarations(raw, e)?);
-                            }
-                        }
-                        if is_start {
-                            open.push((frame, base, own));
-                        }
+                        rebuild.keep(&reader.reader, e, span, is_start, frame)?
                     }
-                    Decision::Drop(content) => {
-                        record(content);
-                        removing = Skipped::begin(span, is_start, &mut cuts);
-                    }
+                    Decision::Drop(content) => rebuild.drop(span, is_start, content),
                 }
             }
         }
     }
+    rebuild.into_rebuilt()
+}
 
-    if cuts.is_empty() {
-        return Ok(None);
+/// An open element of a [`rebuild`], and where in [`Rebuild::carried`] the
+/// declarations it sees begin.
+#[derive(Debug, Clone, Copy)]
+struct Open {
+    frame: Frame,
+    /// Where the declarations its children declare again begin: those the
+    /// unwrapped frames around it carried, for an unwrapped frame.
+    carried_from: usize,
+    /// Where the declarations it carries itself begin, dropped when it
+    /// closes.
+    own_from: usize,
+}
+
+/// A [`rebuild`] in progress.
+struct Rebuild<'a> {
+    raw: &'a str,
+    /// Each span of the source the rebuild replaces, with what replaces it:
+    /// nothing for what it leaves out.
+    cuts: Vec<(Range<usize>, String)>,
+    /// What was left out, by kind.
+    removed: BTreeMap<HiddenContent, usize>,
+    /// The open frames, innermost last.
+    open: Vec<Open>,
+    /// The namespace declarations the unwrapped tags of the open frames
+    /// carried, as (attribute name, source), innermost last: one stack, so a
+    /// nested unwrapped frame shares those around it rather than copying
+    /// them. The children of an unwrapped frame declare its carried ones
+    /// again.
+    carried: Vec<(&'a str, &'a str)>,
+    /// An element being left out.
+    removing: Option<Skipped>,
+    /// The bytes the rebuild adds, which must keep the part within the size a
+    /// package read allows.
+    added: usize,
+}
+
+impl<'a> Rebuild<'a> {
+    fn new(raw: &'a str) -> Self {
+        Self {
+            raw,
+            cuts: Vec::new(),
+            removed: BTreeMap::new(),
+            open: Vec::new(),
+            carried: Vec::new(),
+            removing: None,
+            added: 0,
+        }
     }
-    // An insertion sorts ahead of a cut starting where it does. An attribute
-    // cut never overlaps another: an element left out whole is cut before its
-    // attributes are read.
-    let text = splice_with(raw, cuts, push_joined);
-    // Escaped CDATA and carried declarations can grow the part past what a
-    // package may hold.
-    if text.len() as u64 > MAX_PART_BYTES {
-        return Err(malformed_xml(
-            "the rebuilt part outgrows the part size limit",
-        ));
+
+    /// Record one removal of `content`.
+    fn record(&mut self, content: HiddenContent) {
+        *self.removed.entry(content).or_insert(0) += 1;
     }
-    Ok(Some(Rebuilt { text, removed }))
+
+    /// Cut `span`, a removal of `content`.
+    fn cut(&mut self, span: Range<usize>, content: HiddenContent) {
+        self.cuts.push((span, String::new()));
+        self.record(content);
+    }
+
+    /// Leave out the element whose tag spans `span`, as `content`.
+    fn drop(&mut self, span: Range<usize>, is_start: bool, content: HiddenContent) {
+        self.record(content);
+        self.removing = Skipped::begin(span, is_start, &mut self.cuts);
+    }
+
+    /// Keep the element `e`, whose tag spans `span`, reading its content in
+    /// `frame`: cut the attributes its type does not declare and declare again
+    /// what an unwrapped frame around it carried, or, for an unwrapped frame,
+    /// cut its tag and carry its declarations to its children.
+    fn keep(
+        &mut self,
+        reader: &NsReader<&[u8]>,
+        e: &BytesStart<'_>,
+        span: Range<usize>,
+        is_start: bool,
+        frame: Frame,
+    ) -> Result<()> {
+        let raw = self.raw;
+        // Where what the unwrapped frame around this element carried begins,
+        // its later bindings shadowing the earlier.
+        let around = match self.open.last() {
+            Some(open) if open.frame.unwrapped() => open.carried_from,
+            _ => self.carried.len(),
+        };
+        let own_from = self.carried.len();
+        let mut carried_from = own_from;
+        match frame {
+            Frame::Typed(ty) | Frame::Graphic(ty, _) => {
+                self.cut_attributes(reader, e, Some(ty))?;
+                let missing = redeclared(&self.carried, around, raw, e)?;
+                if !missing.is_empty() {
+                    let at = span.start + 1 + e.name().into_inner().len();
+                    self.insert(at, missing)?;
+                }
+            }
+            Frame::Vml => self.cut_attributes(reader, e, None)?,
+            // The unwrapped tag goes whole, its declarations carried to the
+            // children it held.
+            Frame::Alternate(_) | Frame::Fallback(_) => {
+                self.cuts.push((span, String::new()));
+                if is_start {
+                    carried_from = around;
+                    self.carried.extend(declarations(raw, e)?);
+                }
+            }
+        }
+        if is_start {
+            self.open.push(Open {
+                frame,
+                carried_from,
+                own_from,
+            });
+        }
+        Ok(())
+    }
+
+    /// Close the innermost open frame at its end tag `span`.
+    fn close(&mut self, span: Range<usize>) {
+        if let Some(open) = self.open.pop() {
+            self.carried.truncate(open.own_from);
+            if open.frame.unwrapped() {
+                self.cuts.push((span, String::new()));
+            }
+        }
+    }
+
+    /// Insert `text` at `at`, keeping the part within the size limit.
+    fn insert(&mut self, at: usize, text: String) -> Result<()> {
+        self.added += text.len();
+        if (self.raw.len() + self.added) as u64 > MAX_PART_BYTES {
+            return Err(malformed_xml(
+                "declaring the namespaces of markup compatibility again outgrows the part size \
+                 limit",
+            ));
+        }
+        self.cuts.push((at..at, text));
+        Ok(())
+    }
+
+    /// Cut each attribute of `e` its type `ty` does not declare (every one
+    /// but the namespace declarations when it has no type), recording it.
+    fn cut_attributes(
+        &mut self,
+        reader: &NsReader<&[u8]>,
+        e: &BytesStart<'_>,
+        ty: Option<u16>,
+    ) -> Result<()> {
+        let ty = ty.map(|ty| &TYPES[usize::from(ty)]);
+        for attr in e.attributes() {
+            let attr = attr.map_err(malformed_xml)?;
+            if attr.key.as_namespace_binding().is_some() {
+                continue;
+            }
+            let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
+            let namespace = bound(&resolved);
+            let local = local.into_inner();
+            let declared = ty.is_some_and(|ty| {
+                namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local))
+            });
+            if !declared {
+                let (extent, _) = attribute_extent(self.raw, &attr)?;
+                self.cut(extent, HiddenContent::ApplicationData);
+            }
+        }
+        Ok(())
+    }
+
+    /// The rebuilt part, or `None` when nothing was cut.
+    fn into_rebuilt(self) -> Result<Option<Rebuilt>> {
+        if self.cuts.is_empty() {
+            return Ok(None);
+        }
+        // An insertion sorts ahead of a cut starting where it does. An
+        // attribute cut never overlaps another: an element left out whole is
+        // cut before its attributes are read.
+        let text = splice_with(self.raw, self.cuts, push_joined);
+        // Escaped CDATA and carried declarations can grow the part past what
+        // a package may hold.
+        if text.len() as u64 > MAX_PART_BYTES {
+            return Err(malformed_xml(
+                "the rebuilt part outgrows the part size limit",
+            ));
+        }
+        Ok(Some(Rebuilt {
+            text,
+            removed: self.removed,
+        }))
+    }
+}
+
+/// The declarations in `carried` from `around` on that the element `e` does
+/// not make itself, each written with a space before it, the innermost
+/// binding of each name kept: what a child of an unwrapped frame must declare
+/// again.
+fn redeclared(
+    carried: &[(&str, &str)],
+    around: usize,
+    raw: &str,
+    e: &BytesStart<'_>,
+) -> Result<String> {
+    let mut missing = String::new();
+    if around >= carried.len() {
+        return Ok(missing);
+    }
+    let mut bound: HashSet<&str> = declarations(raw, e)?
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    let unbound: Vec<&str> = carried[around..]
+        .iter()
+        .rev()
+        .filter(|(key, _)| bound.insert(key))
+        .map(|(_, source)| *source)
+        .collect();
+    for source in unbound.into_iter().rev() {
+        missing.push(' ');
+        missing.push_str(source);
+    }
+    Ok(missing)
 }
 
 /// Append the source span `kept` to `text`. A `]]>` is not allowed in text,
@@ -641,38 +761,6 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
         Some(ty) if !TYPES[usize::from(ty)].only_wildcard() => Decision::Keep(Frame::Typed(ty)),
         _ => Decision::Drop(HiddenContent::ApplicationData),
     }
-}
-
-/// Cut each attribute of `e` its type `ty` does not declare (every one but
-/// the namespace declarations when it has no type), recording it.
-fn attributes(
-    reader: &NsReader<&[u8]>,
-    raw: &str,
-    e: &BytesStart<'_>,
-    ty: Option<u16>,
-    cuts: &mut Vec<(Range<usize>, String)>,
-    record: &mut impl FnMut(HiddenContent),
-) -> Result<()> {
-    let ty = ty.map(|ty| &TYPES[usize::from(ty)]);
-    for attr in e.attributes() {
-        let attr = attr.map_err(malformed_xml)?;
-        if attr.key.as_namespace_binding().is_some() {
-            continue;
-        }
-        let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
-        let namespace = bound(&resolved);
-        let local = local.into_inner();
-        let declared = ty.is_some_and(|ty| {
-            namespace_index(namespace.as_deref()).is_some_and(|index| ty.declares(index, local))
-        });
-        if declared {
-            continue;
-        }
-        let (extent, _) = attribute_extent(raw, &attr)?;
-        cuts.push((extent, String::new()));
-        record(HiddenContent::ApplicationData);
-    }
-    Ok(())
 }
 
 /// The namespace declarations of `e`, as (attribute name, source).
