@@ -113,6 +113,18 @@ fn a_root_its_content_type_does_not_name_is_refused() {
     assert!(rebuild(r#"<doc/>"#, DOCUMENT).is_err());
 }
 
+/// A part with no root element, or one left open, is refused; a root
+/// written as an empty element is whole.
+#[test]
+fn a_part_without_a_whole_root_is_refused() {
+    let open = format!(r#"<w:document xmlns:w="{W}"><w:body>"#);
+    for raw in ["", " \n", r#"<?xml version="1.0"?>"#, "<!-- -->", &open] {
+        assert!(rebuild(raw, DOCUMENT).is_err(), "{raw:?}");
+    }
+    let empty = format!(r#"<w:document xmlns:w="{W}"/>"#);
+    assert!(rebuild(&empty, DOCUMENT).unwrap().is_none());
+}
+
 #[test]
 fn a_strict_part_reads_against_the_transitional_schema() {
     let raw = r#"<w:document xmlns:w="http://purl.oclc.org/ooxml/wordprocessingml/main"><w:body><w:p><w:r><w:t>x</w:t></w:r><w:junk/></w:p></w:body></w:document>"#;
@@ -165,6 +177,27 @@ fn a_fallback_hands_its_namespaces_to_its_children() {
         format!(
             r#"<w:document xmlns:w="{W}" xmlns:mc="{MC}"><w:body><w:p><x:r xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="{W}"><x:t>Roe</x:t></x:r><x:r xmlns:x="{W}" xmlns:v="urn:other"/></w:p></w:body></w:document>"#
         )
+    );
+}
+
+/// Nested unwrapped frames carry what those around them declared, an inner
+/// declaration shadowing an outer one of the same name until its frame
+/// closes.
+#[test]
+fn nested_fallbacks_carry_the_innermost_declarations() {
+    let fallback = |inner: &str| {
+        format!(
+            r#"<mc:AlternateContent xmlns:v="urn:a"><mc:Fallback xmlns:x="{W}">{inner}<x:r/></mc:Fallback></mc:AlternateContent>"#
+        )
+    };
+    let inner = r#"<mc:AlternateContent xmlns:v="urn:b"><mc:Fallback><x:r/></mc:Fallback></mc:AlternateContent>"#;
+    let raw = word(&format!("<w:p>{}</w:p>", fallback(inner)));
+    let (text, _) = rebuilt(&raw, DOCUMENT);
+    assert_eq!(
+        text,
+        word(&format!(
+            r#"<w:p><x:r xmlns:x="{W}" xmlns:v="urn:b"/><x:r xmlns:v="urn:a" xmlns:x="{W}"/></w:p>"#
+        ))
     );
 }
 

@@ -13,8 +13,9 @@ use crate::opc::schema;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
 
 /// Element rules over the relationship-naming attributes (`r:id`, `r:embed`,
-/// `r:link`, …): drop every element naming a removed relationship, or record
-/// the first name that resolves to no relationship.
+/// `r:link`, …): drop every element naming a removed relationship by an
+/// attribute the schemas declare, and any other such attribute alone, or
+/// record the first name that resolves to no relationship.
 pub(crate) struct References<'a> {
     /// Under `drop`: the ids to remove. Under `check`: the ids that exist.
     ids: Ids<'a>,
@@ -61,31 +62,43 @@ impl Rules for References<'_> {
     }
 
     fn element(&self, _name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
-        // A strict part names its relationships in the strict twin of `r:`.
-        let named = attributes.iter().filter(|attribute| {
-            attribute
-                .name
-                .namespace
-                .is_some_and(|namespace| schema::transitional(namespace) == R)
-        });
-        for attribute in named {
-            // The id compares as the value XML reads, its references decoded.
-            // One that does not decode names no relationship: it goes under
-            // `drop`, and dangles under `check`.
-            let id = unescape(attribute.value).ok();
-            match (&self.ids, id.as_deref()) {
-                (Ids::Drop(_), None) => return Action::Remove,
-                (Ids::Drop(ids), Some(id)) if ids.contains(id) => return Action::Remove,
-                (Ids::Present(ids), id) if !id.is_some_and(|id| ids.contains(id)) => {
-                    self.dangling
-                        .borrow_mut()
-                        .get_or_insert_with(|| id.unwrap_or(attribute.value).to_owned());
+        for attribute in attributes.iter().filter(|attribute| naming(attribute)) {
+            match &self.ids {
+                // Only an attribute the schemas declare takes its element
+                // along; the rebuild cuts any other, so it goes alone.
+                Ids::Drop(ids) => {
+                    if schema::names_relationship(attribute.name.local) && dropped(ids, attribute) {
+                        return Action::Remove;
+                    }
                 }
-                _ => {}
+                Ids::Present(ids) => {
+                    let id = unescape(attribute.value).ok();
+                    if !id.as_deref().is_some_and(|id| ids.contains(id)) {
+                        self.dangling.borrow_mut().get_or_insert_with(|| {
+                            id.map_or_else(|| attribute.value.to_owned(), |id| id.into_owned())
+                        });
+                    }
+                }
             }
         }
         Action::Keep
     }
+
+    fn removes_attribute(&self, _element: Name<'_>, attribute: &Attribute<'_>) -> bool {
+        matches!(&self.ids, Ids::Drop(ids) if naming(attribute) && dropped(ids, attribute))
+    }
+}
+
+/// Whether `attribute` is in the relationships namespace.
+fn naming(attribute: &Attribute<'_>) -> bool {
+    attribute.name.namespace == Some(R)
+}
+
+/// Whether `attribute` names one of the dropped `ids`. The id compares as the
+/// value XML reads, its references decoded; one that does not decode names no
+/// relationship, so it goes under `drop` and dangles under `check`.
+fn dropped(ids: &HashSet<String>, attribute: &Attribute<'_>) -> bool {
+    unescape(attribute.value).map_or(true, |id| ids.contains(id.as_ref()))
 }
 
 #[cfg(test)]
@@ -124,6 +137,23 @@ mod tests {
         let edited = expect_edit(raw, &References::dropping(&dropped));
         assert!(!edited.text.contains("rId&#50;"));
         assert!(edited.text.contains(r#"r:id="rId1""#));
+    }
+
+    /// An attribute no schema declares in the relationships namespace goes
+    /// alone when it names a dropped relationship, its element kept.
+    #[test]
+    fn an_undeclared_reference_goes_without_its_element() {
+        let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:unused="rId2"><w:r><w:t>kept</w:t></w:r></w:p>"#;
+        let dropped: HashSet<String> = ["rId2".to_owned()].into_iter().collect();
+        let edited = expect_edit(raw, &References::dropping(&dropped));
+        assert!(edited.text.contains("kept"), "{}", edited.text);
+        assert!(!edited.text.contains("rId2"), "{}", edited.text);
+
+        // It still dangles under `check`.
+        let present = HashSet::new();
+        let references = References::checking(&present);
+        edit(raw, &references).unwrap();
+        assert_eq!(references.dangling().as_deref(), Some("rId2"));
     }
 
     #[test]

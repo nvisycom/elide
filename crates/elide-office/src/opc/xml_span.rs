@@ -29,7 +29,7 @@ use quick_xml::{NsReader, Reader};
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
 use crate::opc::ns::{W, X};
-use crate::opc::relationships::HYPERLINK;
+use crate::opc::relationships::{HYPERLINK, transitional_type};
 use crate::opc::schema;
 use crate::opc::xml_edit::{Name, SpannedReader, attribute_source, bound};
 
@@ -331,7 +331,7 @@ fn visit_attributes(
             _ => continue,
         };
         let element = Name {
-            namespace: element_ns.as_deref(),
+            namespace: element_ns.as_deref().map(schema::transitional),
             local: elem.local_name().into_inner(),
         };
         for attr in elem.attributes() {
@@ -339,7 +339,7 @@ fn visit_attributes(
             let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
             let attribute_ns = bound(&resolved);
             let attribute = Name {
-                namespace: attribute_ns.as_deref(),
+                namespace: attribute_ns.as_deref().map(schema::transitional),
                 local: local.into_inner(),
             };
             visit(element, attribute, &attr)?;
@@ -381,7 +381,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
         for attr in elem.attributes() {
             let attr = attr.map_err(|_| ())?;
             match attr.key.local_name().as_ref() {
-                "Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK,
+                "Type" => is_hyperlink = transitional_type(&attr.value) == HYPERLINK,
                 "TargetMode" => is_external = attr.value.as_ref() == "External",
                 "Target" => target = Some(value_source(raw, &attr)?),
                 _ => {}
@@ -869,6 +869,19 @@ mod tests {
         let spans = relationship_spans(raw).unwrap();
         assert_eq!(spans.len(), 1);
         assert_eq!(&raw[spans[0].range.clone()], "mailto:real@example.com");
+    }
+
+    /// A strict external hyperlink's target is surfaced as a transitional
+    /// one's.
+    #[test]
+    fn a_strict_hyperlink_target_is_surfaced() {
+        let raw = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink" Target="mailto:jane@example.com" TargetMode="External"/></Relationships>"#;
+        let start = raw.find("mailto:").unwrap();
+        let end = start + "mailto:jane@example.com".len();
+        assert_eq!(
+            pairs(&relationship_spans(raw).unwrap()),
+            vec![(start..end, BlockKind::Attribute)]
+        );
     }
 
     #[test]

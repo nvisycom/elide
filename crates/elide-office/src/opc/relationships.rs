@@ -10,6 +10,7 @@
 //! is read as [`package_xml`](super::package_xml) cuts it down to its OPC
 //! vocabulary, so it reads the same before and after.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use elide_core::{Error, Result};
@@ -22,8 +23,23 @@ use crate::opc::part::PartPath;
 pub(crate) const HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
-/// One relationship: its id, its type URI, its raw target, and whether the
-/// target lies outside the package.
+/// Where the transitional relationship types are named.
+const TRANSITIONAL_TYPES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+/// Where their strict twins are, each under the same name.
+const STRICT_TYPES: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/";
+
+/// The transitional twin of the strict relationship type `kind`, or `kind`
+/// itself when it is not a strict one.
+pub(crate) fn transitional_type(kind: &str) -> Cow<'_, str> {
+    match kind.strip_prefix(STRICT_TYPES) {
+        Some(name) => Cow::Owned(format!("{TRANSITIONAL_TYPES}{name}")),
+        None => Cow::Borrowed(kind),
+    }
+}
+
+/// One relationship: its id, its type URI (a strict one as its transitional
+/// twin), its raw target, and whether the target lies outside the package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Relationship {
     pub(crate) id: String,
@@ -63,7 +79,7 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
                         relationship.id = value;
                         has_id = true;
                     }
-                    "Type" => relationship.kind = value,
+                    "Type" => relationship.kind = transitional_type(&value).into_owned(),
                     "Target" => relationship.target = value,
                     _ => relationship.external = value == "External",
                 }

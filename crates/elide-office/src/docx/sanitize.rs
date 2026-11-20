@@ -410,6 +410,62 @@ mod tests {
         check(&out, policy, &WordFormat).unwrap();
     }
 
+    /// The strict wordprocessing namespace.
+    const STRICT_W: &str = "http://purl.oclc.org/ooxml/wordprocessingml/main";
+
+    /// A strict document's tracked revisions and comment anchors are resolved
+    /// as a transitional one's.
+    #[test]
+    fn strict_revisions_are_resolved() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}"><w:body><w:p><w:r><w:t>kept</w:t></w:r><w:del w:id="1" w:author="Jane Roe" w:date="2024-01-02T03:04:05Z"><w:r><w:delText>deleted</w:delText></w:r></w:del><w:ins w:id="2" w:author="Jane Roe"><w:r><w:t>added</w:t></w:r></w:ins><w:commentRangeStart w:id="0"/></w:p></w:body></w:document>"#
+        );
+        let package = pack_parts(&[
+            ("[Content_Types].xml", TYPES.as_bytes()),
+            ("word/document.xml", body.as_bytes()),
+        ]);
+        let policy = HiddenContentPolicy::default();
+        let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap();
+        let body = read_text_part(&out, "word/document.xml");
+        for hidden in ["deleted", "w:del ", "w:ins ", "commentRangeStart", "w:date"] {
+            assert!(!body.contains(hidden), "{hidden} in {body}");
+        }
+        assert!(body.contains("added"), "{body}");
+        assert!(body.contains(STRICT_W), "{body}");
+        check(&out, policy, &WordFormat).unwrap();
+    }
+
+    /// A strict external hyperlink is visible content, kept with its text.
+    #[test]
+    fn a_strict_external_hyperlink_is_kept() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}" xmlns:r="http://purl.oclc.org/ooxml/officeDocument/relationships"><w:body><w:p><w:hyperlink r:id="rId1"><w:r><w:t>visit</w:t></w:r></w:hyperlink></w:p></w:body></w:document>"#
+        );
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>"#;
+        let package = pack_parts(&[
+            ("[Content_Types].xml", TYPES.as_bytes()),
+            ("word/document.xml", body.as_bytes()),
+            ("word/_rels/document.xml.rels", rels.as_bytes()),
+        ]);
+        let policy = HiddenContentPolicy::default();
+        let (out, stripped) = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap_or(package);
+        let body = read_text_part(&out, "word/document.xml");
+        assert!(body.contains(r#"<w:hyperlink r:id="rId1">"#), "{body}");
+        assert!(
+            read_text_part(&out, "word/_rels/document.xml.rels").contains("example.com"),
+            "the hyperlink's relationship is kept"
+        );
+        assert!(
+            stripped
+                .iter()
+                .all(|entry| entry.content != HiddenContent::Link),
+            "{stripped:?}"
+        );
+        check(&out, policy, &WordFormat).unwrap();
+    }
+
     #[test]
     fn collaboration_blocks_are_flagged_by_what_they_are() {
         let body = format!(

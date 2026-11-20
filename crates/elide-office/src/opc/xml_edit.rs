@@ -8,7 +8,8 @@
 //! re-serialized, so formatting, namespace declarations, and every untouched
 //! element round-trip exactly. Element and attribute names are matched by
 //! namespace URI, never by prefix, so a part that binds `w:` to an unusual
-//! prefix is still recognized.
+//! prefix is still recognized, and a strict namespace is matched as its
+//! transitional twin, so a strict part is edited as a transitional one.
 
 use std::borrow::Cow;
 use std::fmt::Display;
@@ -22,11 +23,13 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Reader};
 
 use crate::opc::malformed_xml;
+use crate::opc::schema::transitional;
 
 /// A namespace-qualified element or attribute name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Name<'a> {
-    /// The bound namespace URI, or `None` when the name is in no namespace.
+    /// The bound namespace URI, a strict one as its transitional twin, or
+    /// `None` when the name is in no namespace.
     pub(crate) namespace: Option<&'a str>,
     /// The local name.
     pub(crate) local: &'a str,
@@ -329,7 +332,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                 }
                 let local = e.local_name();
                 let name = Name {
-                    namespace: namespace.as_deref(),
+                    namespace: namespace.as_deref().map(transitional),
                     local: local.into_inner(),
                 };
                 let owned = attributes(&reader.reader, raw, e)?;
@@ -401,7 +404,7 @@ impl OwnedAttribute<'_> {
     fn view(&self) -> Attribute<'_> {
         Attribute {
             name: Name {
-                namespace: self.namespace.as_deref(),
+                namespace: self.namespace.as_deref().map(transitional),
                 local: self.local,
             },
             value: self.value,

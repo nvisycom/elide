@@ -44,8 +44,9 @@
 #[rustfmt::skip]
 mod table;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
+use std::sync::OnceLock;
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
@@ -174,6 +175,23 @@ fn namespace_index(namespace: Option<&str>) -> Option<u8> {
         .binary_search(&namespace)
         .ok()
         .and_then(|at| u8::try_from(at + 1).ok())
+}
+
+/// Whether some type of the schemas declares the attribute `local` in the
+/// relationships namespace: an attribute that names a relationship.
+pub(crate) fn names_relationship(local: &str) -> bool {
+    static NAMES: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            let r = namespace_index(Some(R));
+            TYPES
+                .iter()
+                .flat_map(|ty| ty.attributes)
+                .filter(|(namespace, _)| Some(*namespace) == r)
+                .map(|(_, local)| *local)
+                .collect()
+        })
+        .contains(local)
 }
 
 /// The root element a part must have.
@@ -338,7 +356,7 @@ impl Frame {
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
-/// `raw` is not well-formed XML, or its root is not `root`.
+/// `raw` is not well-formed XML, or its root is not a whole `root`.
 pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     let mut reader = SpannedReader::new_ns(raw);
     // Each span of the source the rebuild replaces, with what replaces it:
@@ -346,11 +364,14 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     let mut cuts: Vec<(Range<usize>, String)> = Vec::new();
     let mut removed: BTreeMap<HiddenContent, usize> = BTreeMap::new();
     let mut record = |content| *removed.entry(content).or_insert(0) += 1;
-    let mut open: Vec<Frame> = Vec::new();
-    // For each open frame, the namespace declarations its unwrapped tags and
-    // those around it carried, as (attribute name, source): the children of an
-    // unwrapped frame declare them again.
-    let mut carried: Vec<Vec<(String, String)>> = Vec::new();
+    // Each open frame, with where its carried declarations begin and where
+    // its own do.
+    let mut open: Vec<(Frame, usize, usize)> = Vec::new();
+    // The namespace declarations the unwrapped tags of the open frames
+    // carried, as (attribute name, source), innermost last: one stack, so a
+    // nested unwrapped frame shares those around it rather than copying them.
+    // The children of an unwrapped frame declare its carried ones again.
+    let mut carried: Vec<(&str, &str)> = Vec::new();
     // An element being left out.
     let mut removing: Option<Skipped> = None;
     let mut seen_root = false;
@@ -369,8 +390,13 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
             continue;
         }
 
-        let scope = open.last().map_or(Scope::Document, |frame| frame.scope());
+        let scope = open
+            .last()
+            .map_or(Scope::Document, |(frame, ..)| frame.scope());
         match event {
+            // The part is its root element, whole.
+            Event::Eof if !seen_root => return Err(malformed_xml("a part without a root element")),
+            Event::Eof if !open.is_empty() => return Err(malformed_xml("unclosed element")),
             Event::Eof => break,
             Event::Decl(_) => {}
             Event::DocType(_) => {
@@ -407,9 +433,11 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                 }
             }
             Event::End(_) => {
-                carried.pop();
-                if open.pop().is_some_and(Frame::unwrapped) {
-                    cuts.push((span, String::new()));
+                if let Some((frame, _, own)) = open.pop() {
+                    carried.truncate(own);
+                    if frame.unwrapped() {
+                        cuts.push((span, String::new()));
+                    }
                 }
             }
             Event::Start(ref e) | Event::Empty(ref e) => {
@@ -419,12 +447,18 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                     seen_root = true;
                     root_frame(root, namespace.as_deref(), local)?
                 } else {
-                    decide(scope, namespace.as_deref(), local, &open)
+                    decide(
+                        scope,
+                        namespace.as_deref(),
+                        local,
+                        open.last().map(|&(frame, ..)| frame),
+                    )
                 };
-                // What the unwrapped frame around this element declared.
+                // Where what the unwrapped frame around this element carried
+                // begins, its later bindings shadowing the earlier.
                 let around = match open.last() {
-                    Some(frame) if frame.unwrapped() => carried.last().cloned().unwrap_or_default(),
-                    _ => Vec::new(),
+                    Some(&(frame, base, _)) if frame.unwrapped() => base,
+                    _ => carried.len(),
                 };
                 let decision = match decision {
                     Decision::Keep(Frame::Typed(ty))
@@ -437,15 +471,27 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                 };
                 match decision {
                     Decision::Keep(frame) => {
-                        let mut declares = Vec::new();
+                        let own = carried.len();
+                        let mut base = own;
                         if let Frame::Typed(ty) | Frame::Graphic(ty, _) = frame {
                             attributes(&reader.reader, raw, e, Some(ty), &mut cuts, &mut record)?;
-                            let own = declarations(raw, e)?;
-                            let missing: String = around
-                                .iter()
-                                .filter(|(key, _)| own.iter().all(|(own, _)| own != key))
-                                .map(|(_, source)| format!(" {source}"))
-                                .collect();
+                            let mut missing = String::new();
+                            if around < carried.len() {
+                                let mut bound: HashSet<&str> = declarations(raw, e)?
+                                    .into_iter()
+                                    .map(|(key, _)| key)
+                                    .collect();
+                                let unbound: Vec<&str> = carried[around..]
+                                    .iter()
+                                    .rev()
+                                    .filter(|(key, _)| bound.insert(key))
+                                    .map(|(_, source)| *source)
+                                    .collect();
+                                for source in unbound.into_iter().rev() {
+                                    missing.push(' ');
+                                    missing.push_str(source);
+                                }
+                            }
                             if !missing.is_empty() {
                                 added += missing.len();
                                 if (raw.len() + added) as u64 > MAX_PART_BYTES {
@@ -463,15 +509,13 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                             // The unwrapped tag goes whole, its declarations
                             // carried to the children it held.
                             cuts.push((span.clone(), String::new()));
-                            declares = around;
-                            for (key, source) in declarations(raw, e)? {
-                                declares.retain(|(other, _)| *other != key);
-                                declares.push((key, source));
+                            if is_start {
+                                base = around;
+                                carried.extend(declarations(raw, e)?);
                             }
                         }
                         if is_start {
-                            open.push(frame);
-                            carried.push(declares);
+                            open.push((frame, base, own));
                         }
                     }
                     Decision::Drop(content) => {
@@ -608,9 +652,8 @@ fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decisi
 }
 
 /// What the rebuild does with the element `local` in `namespace` met in
-/// `scope`, inside the `open` frames.
-fn decide(scope: Scope, namespace: Option<&str>, local: &str, open: &[Frame]) -> Decision {
-    let parent = open.last().copied();
+/// `scope`, inside the `parent` frame.
+fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Frame>) -> Decision {
     if namespace == Some(MC) {
         return match (local, parent) {
             ("AlternateContent", _) => Decision::Keep(Frame::Alternate(scope)),
@@ -688,13 +731,14 @@ fn attributes(
 }
 
 /// The namespace declarations of `e`, as (attribute name, source).
-fn declarations(raw: &str, e: &BytesStart<'_>) -> Result<Vec<(String, String)>> {
+fn declarations<'a>(raw: &'a str, e: &BytesStart<'_>) -> Result<Vec<(&'a str, &'a str)>> {
     let mut declarations = Vec::new();
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
         let key = attr.key.into_inner();
         if key == "xmlns" || key.starts_with("xmlns:") {
-            declarations.push((key.to_owned(), raw[source(raw, &attr)?].to_owned()));
+            let (key, value) = attribute_source(raw, &attr)?;
+            declarations.push((&raw[key.clone()], &raw[key.start..value.end + 1]));
         }
     }
     Ok(declarations)
