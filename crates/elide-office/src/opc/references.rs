@@ -1,6 +1,7 @@
 //! [`References`]: element rules over the attributes (`r:id`, `r:embed`,
-//! `r:link`, …) by which an XML part names one of its relationships, in the
-//! transitional relationships namespace or its strict twin.
+//! `r:link`, …, and VML's `o:relid`) by which an XML part names one of its
+//! relationships, in the transitional relationships namespace or its strict
+//! twin.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -8,7 +9,7 @@ use std::collections::HashSet;
 use elide_core::redaction::HiddenContent;
 use quick_xml::escape::unescape;
 
-use crate::opc::ns::R;
+use crate::opc::ns::{R, VML_OFFICE};
 use crate::opc::schema;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
 
@@ -67,7 +68,7 @@ impl Rules for References<'_> {
                 // Only an attribute the schemas declare takes its element
                 // along; the rebuild cuts any other, so it goes alone.
                 Ids::Drop(ids) => {
-                    if schema::names_relationship(attribute.name.local) && dropped(ids, attribute) {
+                    if declared(attribute) && dropped(ids, attribute) {
                         return Action::Remove;
                     }
                 }
@@ -89,9 +90,22 @@ impl Rules for References<'_> {
     }
 }
 
-/// Whether `attribute` is in the relationships namespace.
+/// Whether `attribute` names a relationship: any in the relationships
+/// namespace, and VML's `o:relid`.
 fn naming(attribute: &Attribute<'_>) -> bool {
-    attribute.name.namespace == Some(R)
+    attribute.name.namespace == Some(R) || is_relid(attribute)
+}
+
+/// Whether `attribute` is one the schemas declare as naming a relationship.
+fn declared(attribute: &Attribute<'_>) -> bool {
+    is_relid(attribute)
+        || (attribute.name.namespace == Some(R) && schema::names_relationship(attribute.name.local))
+}
+
+/// Whether `attribute` is VML's `o:relid`, by which a VML shape's fill,
+/// stroke or image names its relationship.
+fn is_relid(attribute: &Attribute<'_>) -> bool {
+    attribute.name.namespace == Some(VML_OFFICE) && attribute.name.local == "relid"
 }
 
 /// Whether `attribute` names one of the dropped `ids`. The id compares as the
@@ -107,6 +121,26 @@ mod tests {
     use crate::opc::xml_edit::{edit, expect_edit};
 
     const STRICT: &str = r#"<w:document xmlns:w="http://purl.oclc.org/ooxml/wordprocessingml/main" xmlns:r="http://purl.oclc.org/ooxml/officeDocument/relationships"><w:body><w:p><w:hyperlink r:id="rId1"/><w:hyperlink r:id="rId2"/></w:p></w:body></w:document>"#;
+
+    const VML_RELID: &str = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><v:shape><v:imagedata o:relid="rId1" o:title="kept"/><v:fill o:relid="rId2"/></v:shape></xml>"#;
+
+    /// VML's `o:relid` names a relationship as `r:id` does.
+    #[test]
+    fn a_vml_relid_names_a_relationship() {
+        let dropped: HashSet<String> = ["rId1".to_owned()].into_iter().collect();
+        let edited = expect_edit(VML_RELID, &References::dropping(&dropped));
+        assert!(!edited.text.contains("imagedata"), "{}", edited.text);
+        assert!(
+            edited.text.contains(r#"<v:fill o:relid="rId2"/>"#),
+            "{}",
+            edited.text
+        );
+
+        let present: HashSet<&str> = ["rId2"].into_iter().collect();
+        let references = References::checking(&present);
+        edit(VML_RELID, &references).unwrap();
+        assert_eq!(references.dangling().as_deref(), Some("rId1"));
+    }
 
     #[test]
     fn a_strict_reference_to_a_missing_relationship_dangles() {
