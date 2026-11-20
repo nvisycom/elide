@@ -56,7 +56,7 @@ or obligation to support the use of the AFM files.
 
 ## Adobe Glyph List
 
-`elide-pdf` reads the text a glyph name stands for from the Adobe Glyph List and its ZapfDingbats list, shipped unmodified in `crates/elide-pdf/assets/agl`. Any binary built with `elide-pdf` contains them.
+`elide-pdf` reads the text a glyph name stands for from the Adobe Glyph List and its ZapfDingbats list, shipped unmodified in `crates/elide-pdf/assets/agl`. It reads embedded Type 1 programs with `read-fonts`, which bundles the same two lists. Any binary built with `elide-pdf` contains them.
 
 ```text
 Copyright 2002-2019 Adobe (http://www.adobe.com/).

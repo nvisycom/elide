@@ -21,7 +21,7 @@ pub(crate) use self::builder::{DocBuilder, Page};
 #[cfg(test)]
 pub(crate) use self::builder::{blank, encoded, shown, text, tm, type1};
 #[cfg(test)]
-pub(crate) use self::font::{Cff, FontFile, Sfnt, embedding};
+pub(crate) use self::font::{Cff, FontFile, Sfnt, Type1, embedding};
 use crate::pdf::reader::DictionaryExt;
 
 /// A one-page PDF drawing one 8x8 JPEG image (`DCTDecode`).

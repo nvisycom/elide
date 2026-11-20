@@ -214,6 +214,88 @@ impl Cff {
     }
 }
 
+/// A Type 1 program: named glyphs with advances, glyph 0 being `.notdef`,
+/// and a built-in encoding giving each code its glyph's name.
+pub(crate) struct Type1 {
+    glyphs: Vec<(&'static str, i32)>,
+    codes: Vec<(u8, &'static str)>,
+}
+
+impl Type1 {
+    /// A program with `glyphs`, each a name and an advance in thousandths of
+    /// an em; the first is `.notdef`.
+    pub(crate) fn new(glyphs: &[(&'static str, i32)]) -> Self {
+        Self {
+            glyphs: glyphs.to_vec(),
+            codes: Vec::new(),
+        }
+    }
+
+    /// The built-in encoding: each code with the name of its glyph.
+    pub(crate) fn encoding(mut self, codes: &[(u8, &'static str)]) -> Self {
+        self.codes = codes.to_vec();
+        self
+    }
+
+    /// The program's bytes: its font dictionary in the clear, its private
+    /// dictionary eexec-encrypted as hex, and its charstrings unencrypted.
+    pub(crate) fn build(&self) -> Vec<u8> {
+        let mut base = String::from(
+            "%!PS-AdobeFont-1.0: Test\n/FontName /Test def \
+             /FontMatrix [0.001 0 0 0.001 0 0] readonly def\n\
+             /Encoding 256 array 0 1 255 {1 index exch /.notdef put} for\n",
+        );
+        for (code, name) in &self.codes {
+            base.push_str(&format!("dup {code} /{name} put\n"));
+        }
+        base.push_str("readonly def\ncurrentfile eexec\n");
+
+        let mut private = format!(
+            "/lenIV -1 def /CharStrings {} dict dup begin\n",
+            self.glyphs.len()
+        )
+        .into_bytes();
+        for (name, advance) in &self.glyphs {
+            // `0 advance hsbw endchar`.
+            let mut charstring = type1_number(0);
+            charstring.extend(type1_number(*advance));
+            charstring.extend([13, 14]);
+            private.extend(format!("/{name} {} RD ", charstring.len()).as_bytes());
+            private.extend(charstring);
+            private.extend(b" ND\n");
+        }
+        private.extend(b"end");
+
+        let mut out = base.into_bytes();
+        let mut key: u32 = 55665;
+        for plain in [0u8; 4].iter().chain(&private) {
+            let cipher = (u32::from(*plain) ^ (key >> 8)) as u8;
+            key = (u32::from(cipher).wrapping_add(key))
+                .wrapping_mul(52845)
+                .wrapping_add(22719)
+                & 0xFFFF;
+            out.extend(format!("{cipher:02x}").as_bytes());
+        }
+        out
+    }
+}
+
+/// A Type 1 charstring number.
+fn type1_number(value: i32) -> Vec<u8> {
+    match value {
+        -107..=107 => vec![(value + 139) as u8],
+        108..=1131 => {
+            let value = value - 108;
+            vec![(value / 256 + 247) as u8, (value % 256) as u8]
+        }
+        -1131..=-108 => {
+            let value = -value - 108;
+            vec![(value / 256 + 251) as u8, (value % 256) as u8]
+        }
+        _ => [&[255], value.to_be_bytes().as_slice()].concat(),
+    }
+}
+
 /// The standard string id of the glyph `name`, for the few names tests use;
 /// a reader looks a standard name up by it.
 fn standard_sid(name: &str) -> Option<u16> {
