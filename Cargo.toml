@@ -173,7 +173,7 @@ symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm
 mp3lame-encoder = { version = "0.3", features = [] }
 
 # AI & LLM frameworks
-rig = { version = "0.44", default-features = false, features = ["agent"] }
+rig = { version = "0.46", default-features = false, features = ["agent"] }
 rig-reqwest = { version = "0.44", default-features = false }
 
 # Templating & schema
