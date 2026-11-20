@@ -117,7 +117,10 @@ pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
 /// The privacy-relevant fields of a document-property part, with their values.
 ///
 /// The part is `docProps/core.xml`, `app.xml`, or `custom.xml`; each field
-/// comes back as a `(local_name, value)` pair with a non-empty value.
+/// comes back as a `(key, value)` pair with a non-empty value, keyed as
+/// the property reader keys it: an element's local name (`creator`, a repeat
+/// `creator#2`), a list entry by position (`TitlesOfParts/0`), or a custom
+/// property by position (`property/0`, its name `property/0/name`).
 #[must_use]
 pub fn property_fields(xml: &[u8]) -> Vec<(String, String)> {
     props::fields(xml)

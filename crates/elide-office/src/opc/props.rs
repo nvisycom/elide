@@ -724,15 +724,8 @@ fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::property_fields as pairs;
     use crate::opc::xml_edit::expect_edit;
-
-    /// The `(key, value)` of each field `xml` surfaces.
-    fn pairs(xml: &[u8]) -> Vec<(String, String)> {
-        fields(xml)
-            .into_iter()
-            .map(|field| (field.key, field.value))
-            .collect()
-    }
 
     const CORE: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
 <coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">

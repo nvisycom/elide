@@ -6,7 +6,8 @@
 //! kind:
 //!
 //! - **Metadata**: the document properties are stripped unless the policy
-//!   redacts them; custom XML is not surfaced for detection, so it is stripped
+//!   redacts them, and then keep only what their fields read
+//!   ([`UnsurfacedProperties`]); custom XML is not surfaced for detection, so it is stripped
 //!   under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too.
 //! - **Collaboration** (comments and their authors) is stripped unless the
 //!   policy redacts it, and a format's tracked revisions and comment anchors
