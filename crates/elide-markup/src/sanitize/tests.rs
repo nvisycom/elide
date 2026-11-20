@@ -19,6 +19,29 @@ fn sanitize(sanitizer: MarkupSanitizer, raw: &str) -> String {
     out
 }
 
+/// `raw` rebuilt under the default policy, checked to be a fixed point.
+fn rebuilt(raw: &str) -> String {
+    sanitize(html(HiddenContentPolicy::default()), raw)
+}
+
+/// Assert that `raw` rebuilds to the paragraph `Visible` alone.
+fn only_visible(raw: &str) {
+    assert_eq!(rebuilt(raw), "<p>Visible</p>", "{raw}");
+}
+
+/// Whether `sanitizer` refuses `raw`.
+fn refused(sanitizer: MarkupSanitizer, raw: &str) -> bool {
+    sanitizer.sanitize(raw.to_owned()).is_err()
+}
+
+/// What `stripped` records, as `(content, count)` in order.
+fn removals(stripped: &StrippedContent) -> Vec<(HiddenContent, usize)> {
+    stripped
+        .iter()
+        .map(|entry| (entry.content, entry.count))
+        .collect()
+}
+
 fn keep_comments() -> HiddenContentPolicy {
     HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent)
 }
@@ -26,7 +49,7 @@ fn keep_comments() -> HiddenContentPolicy {
 #[test]
 fn removes_scripts_plugins_and_event_handlers() {
     let raw = r#"<p onclick="track('jane')">Hi</p><script>var u = {"email":"jane@example.com"};</script><embed src="x.swf"><object data="y"><param name="a">fallback</object><a href=" JavaScript:steal()">x</a><a href="/ok">y</a>"#;
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert_eq!(out, r#"<p>Hi</p><a>x</a><a href="/ok">y</a>"#);
 }
 
@@ -35,11 +58,11 @@ fn a_handler_after_a_slash_or_unquoted_is_removed() {
     // A browser reads a `/` between attributes like whitespace, so each of
     // these is an `a` with an `onclick` handler.
     let raw = r#"<a/onclick=steal()>x</a><a title="t"/onclick=steal()>y</a><a href=javascript:steal()>z</a>"#;
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert_eq!(out, r#"<a>x</a><a title="t">y</a><a>z</a>"#);
     // Attributes are written apart, so two around a removed one never join.
     let raw = r#"<img src="https://x.test/p.png"alt="Jane">"#;
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert_eq!(out, r#"<img alt="Jane">"#);
 }
 
@@ -50,7 +73,7 @@ fn a_script_url_spelled_with_html_references_is_removed() {
     // A browser decodes HTML's named references and numeric ones without
     // a `;` before it reads the scheme.
     let raw = r#"<a href="javascript&colon;steal()">x</a><a href="jav&Tab;ascript:steal()">y</a><a href="javascript&#58steal()">z</a>"#;
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert_eq!(out, "<a>x</a><a>y</a><a>z</a>");
 }
 
@@ -91,27 +114,21 @@ fn what_html_reads_as_a_comment_goes() {
 
 #[test]
 fn an_unclosed_script_runs_to_the_end() {
-    let out = sanitize(
-        html(HiddenContentPolicy::default()),
-        "<p>a</p><script>var x = 1;",
-    );
+    let out = rebuilt("<p>a</p><script>var x = 1;");
     assert_eq!(out, "<p>a</p>");
 }
 
 #[test]
 fn comments_follow_the_collaboration_action() {
     let raw = "<p>a<!-- ask Jane --></p>";
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<p>a</p>"
-    );
+    assert_eq!(rebuilt(raw), "<p>a</p>");
     assert_eq!(sanitize(html(keep_comments()), raw), raw);
 }
 
 #[test]
 fn meta_fields_follow_the_metadata_disposition_but_render_tags_stay() {
     let raw = r#"<head><meta charset="utf-8"><meta name="viewport" content="w"><meta name="author" content="Jane Roe"><meta http-equiv="content-type" content="text/html"></head>"#;
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert_eq!(
         out,
         r#"<head><meta charset="utf-8"><meta name="viewport" content="w"><meta http-equiv="content-type" content="text/html"></head>"#
@@ -147,7 +164,7 @@ fn a_rendering_attribute_does_not_keep_a_field() {
         r#"<head><meta charset="utf-8" name="author" content="Jane Roe"></head>"#,
         r#"<head><meta http-equiv="content-type" name="author" content="Jane Roe"></head>"#,
     ] {
-        let out = sanitize(html(HiddenContentPolicy::default()), raw);
+        let out = rebuilt(raw);
         assert_eq!(out, "<head></head>");
     }
 }
@@ -157,7 +174,6 @@ fn a_rendering_attribute_does_not_keep_a_field() {
 /// does too.
 #[test]
 fn an_encoded_or_split_script_url_is_still_caught() {
-    let policy = HiddenContentPolicy::default();
     for href in [
         "&#106;avascript:alert(1)",
         "java&#x09;script:alert(1)",
@@ -167,17 +183,14 @@ fn an_encoded_or_split_script_url_is_still_caught() {
         "data:text/html,<script>alert(1)</script>",
     ] {
         let raw = format!(r#"<a href="{href}">x</a>"#);
-        assert_eq!(sanitize(html(policy), &raw), "<a>x</a>", "{href}");
+        assert_eq!(rebuilt(&raw), "<a>x</a>", "{href}");
     }
 }
 
 #[test]
 fn frames_go_with_their_inline_or_remote_page() {
     let raw = r#"<p>a</p><iframe srcdoc="<script>s()</script>"></iframe><iframe src="https://x"/><frameset><frame src="b.html"></frameset>"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<p>a</p>"
-    );
+    assert_eq!(rebuilt(raw), "<p>a</p>");
 }
 
 /// What the page loads from a server when opened goes; a hyperlink a
@@ -186,7 +199,7 @@ fn frames_go_with_their_inline_or_remote_page() {
 fn remote_loads_go_and_hyperlinks_stay() {
     let raw = r#"<img src="https://t/pixel.gif" alt="logo"><img src="logo.png"><img srcset="a.png 1x, https://t/b.png 2x"><a href="https://site" ping="https://t/ping">site</a><link rel="stylesheet" href="//cdn/x.css"><link rel="stylesheet" href="local.css"><base href="https://t/"><div style="background:url('https://t/bg')">d</div><style>@import "https://t/x.css";</style><style>p{color:red}</style>"#;
     assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
+        rebuilt(raw),
         r#"<img alt="logo"><img src="logo.png"><img><a href="https://site">site</a><link rel="stylesheet" href="local.css"><div>d</div><style>p{color:red}</style>"#
     );
 }
@@ -195,7 +208,7 @@ fn remote_loads_go_and_hyperlinks_stay() {
 fn undisplayed_elements_go_and_findable_ones_stay() {
     let raw = r#"<template><p>Jane</p></template><div hidden><p>Roe</p></div><img hidden src="a.png"><p hidden="until-found">found</p><input type="hidden" value="4111"><dialog><p>closed</p></dialog><dialog open>shown</dialog>"#;
     assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
+        rebuilt(raw),
         r#"<p hidden="until-found">found</p><dialog open>shown</dialog>"#
     );
 }
@@ -217,11 +230,7 @@ fn what_the_allowlist_does_not_name_goes() {
         .sanitize(raw.to_owned())
         .expect("sanitize");
     assert_eq!(out, r#"<p class="c">a</p><p>b</p>"#);
-    let entries: Vec<(HiddenContent, usize)> = stripped
-        .iter()
-        .map(|entry| (entry.content, entry.count))
-        .collect();
-    assert_eq!(entries, [(HiddenContent::ApplicationData, 4)]);
+    assert_eq!(removals(&stripped), [(HiddenContent::ApplicationData, 4)]);
 }
 
 #[test]
@@ -234,23 +243,20 @@ fn a_meta_tag_repeating_an_attribute_goes_under_every_policy() {
 #[test]
 fn a_repeated_attribute_is_written_once() {
     let raw = r#"<p title="a" TITLE="Jane Roe">x</p>"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        r#"<p title="a">x</p>"#
-    );
+    assert_eq!(rebuilt(raw), r#"<p title="a">x</p>"#);
 }
 
 #[test]
 fn accessible_names_stay() {
     let raw = r#"<button aria-label="Close" role="button">x</button>"#;
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 #[test]
 fn svg_draws_and_its_active_parts_go() {
     let raw = r##"<svg viewBox="0 0 10 10" data-x="1"><script>s()</script><a href="https://site"><text x="1">Jane</text></a><set attributeName="href" to="javascript:s()"/><use href="#i"/><image href="https://t/p.png"/><foreignObject><p>Roe</p></foreignObject><g display="none"><text>hidden</text></g><metadata>by Jane</metadata></svg>"##;
     assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
+        rebuilt(raw),
         r##"<svg viewBox="0 0 10 10"><a href="https://site"><text x="1">Jane</text></a><use href="#i"/><image/></svg>"##
     );
 }
@@ -261,17 +267,14 @@ fn svg_draws_and_its_active_parts_go() {
 #[test]
 fn an_html_element_ends_svg() {
     let raw = r#"<svg><p onclick="x()">a</p><circle r="1"/></svg>b"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<svg><p>a</p>"
-    );
+    assert_eq!(rebuilt(raw), "<svg><p>a</p>");
 }
 
 #[test]
 fn mathml_renders_and_annotations_go() {
     let raw = r#"<math><semantics><mi>x</mi><annotation encoding="TeX">Jane</annotation></semantics><mphantom><mi>y</mi></mphantom></math>"#;
     assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
+        rebuilt(raw),
         "<math><semantics><mi>x</mi></semantics></math>"
     );
 }
@@ -280,7 +283,7 @@ fn mathml_renders_and_annotations_go() {
 fn a_self_closing_flag_survives_an_unquoted_value() {
     // In `title=x/>` the `/` is the value's, so the tag is not self-closing.
     let raw = "<svg><rect width=2 /><rect width=3/></svg>";
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert_eq!(out, raw);
 }
 
@@ -294,26 +297,18 @@ fn xml_drops_instructions_doctype_and_includes() {
         out,
         r#"<?xml version="1.0"?><doc xmlns:xi="http://www.w3.org/2001/XInclude"><p>a</p></doc>"#
     );
-    let entries: Vec<(HiddenContent, usize)> = stripped
-        .iter()
-        .map(|entry| (entry.content, entry.count))
-        .collect();
     assert_eq!(
-        entries,
+        removals(&stripped),
         [
             (HiddenContent::Link, 2),
             (HiddenContent::ApplicationData, 2)
         ]
     );
     let external = r#"<!DOCTYPE doc SYSTEM "https://t/doc.dtd"><doc/>"#;
-    assert!(
-        xml(HiddenContentPolicy::default())
-            .sanitize(external.to_owned())
-            .is_err()
-    );
+    assert!(refused(xml(HiddenContentPolicy::default()), external));
     // HTML's document type is never fetched, so it stays.
     let xhtml = r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><p>a</p>"#;
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), xhtml), xhtml);
+    assert_eq!(rebuilt(xhtml), xhtml);
 }
 
 #[test]
@@ -322,12 +317,8 @@ fn the_record_names_each_removal_by_what_it_is() {
     let (_, stripped) = html(HiddenContentPolicy::default())
         .sanitize(raw.to_owned())
         .expect("sanitize");
-    let counts: Vec<(HiddenContent, usize)> = stripped
-        .iter()
-        .map(|entry| (entry.content, entry.count))
-        .collect();
     assert_eq!(
-        counts,
+        removals(&stripped),
         [
             (HiddenContent::Properties, 1),
             (HiddenContent::Comment, 1),
@@ -349,11 +340,7 @@ fn xml_keeps_its_elements_as_parsed() {
 #[test]
 fn a_document_type_declaring_entities_is_refused() {
     let raw = r#"<!DOCTYPE d [<!ENTITY who "Jane Roe">]><d>&who;</d>"#;
-    assert!(
-        xml(HiddenContentPolicy::default())
-            .sanitize(raw.to_owned())
-            .is_err()
-    );
+    assert!(refused(xml(HiddenContentPolicy::default()), raw));
 }
 
 #[test]
@@ -367,7 +354,7 @@ fn check_refuses_what_a_rebuild_would_change() {
 #[test]
 fn a_rebuild_keeps_text_and_references_as_written() {
     let raw = "\u{feff}<p title=\"a&amp;b\">Jane&nbsp;Roe &lt; x</p><br><br/><img alt=x>";
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// An enumerated keyword is compared untrimmed: `" hidden "` is no input type
@@ -376,19 +363,13 @@ fn a_rebuild_keeps_text_and_references_as_written() {
 #[test]
 fn keywords_are_compared_as_written() {
     let raw = r#"<input type=" hidden " value="Draft"><input type="HIDDEN" value="x"><p hidden=" until-found ">Jane</p>"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        r#"<input type=" hidden " value="Draft">"#
-    );
+    assert_eq!(rebuilt(raw), r#"<input type=" hidden " value="Draft">"#);
 }
 
 #[test]
 fn an_undisplayed_svg_root_goes() {
     let raw = r#"<svg display=" none "><text>Jane</text></svg><p>Roe</p>"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<p>Roe</p>"
-    );
+    assert_eq!(rebuilt(raw), "<p>Roe</p>");
 }
 
 /// A reference standing for the comma between candidates still separates them.
@@ -397,7 +378,7 @@ fn a_remote_srcset_candidate_behind_a_reference_goes() {
     let raw =
         r#"<img srcset="a.png&#44;https://t/p.png 2x" alt="x"><img srcset="a.png 1x, b.png 2x">"#;
     assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
+        rebuilt(raw),
         r#"<img alt="x"><img srcset="a.png 1x, b.png 2x">"#
     );
 }
@@ -410,7 +391,7 @@ fn markup_inside_a_textarea_or_title_is_refused() {
         "<title>a<b>b</b></title>",
         "<textarea/><i>Draft</i></textarea>",
     ] {
-        assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw}");
+        assert!(refused(sanitizer, raw), "{raw}");
     }
     let raw = "<title>Jane &amp; Roe</title><textarea>notes</textarea>";
     assert_eq!(sanitize(sanitizer, raw), raw);
@@ -438,32 +419,24 @@ fn an_xinclude_namespace_spelled_with_references_is_still_caught() {
 #[test]
 fn an_xinclude_root_is_refused() {
     let raw = r#"<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="secret.xml"/>"#;
-    assert!(
-        xml(HiddenContentPolicy::default())
-            .sanitize(raw.to_owned())
-            .is_err()
-    );
+    assert!(refused(xml(HiddenContentPolicy::default()), raw));
 }
 
 /// A hidden element ends where a browser ends it, not only at its end tag;
 /// and a self-closing flag does not end a non-void one.
 #[test]
 fn a_hidden_element_ends_where_a_browser_ends_it() {
-    let policy = HiddenContentPolicy::default();
     assert_eq!(
-        sanitize(html(policy), "<p hidden>Draft<p>Published</p>"),
+        rebuilt("<p hidden>Draft<p>Published</p>"),
         "<p>Published</p>"
     );
     assert_eq!(
-        sanitize(html(policy), "<ul><li hidden>Jane<li>Roe</ul>"),
+        rebuilt("<ul><li hidden>Jane<li>Roe</ul>"),
         "<ul><li>Roe</ul>"
     );
-    assert_eq!(sanitize(html(policy), "<div hidden/>Jane</div>Roe"), "Roe");
+    assert_eq!(rebuilt("<div hidden/>Jane</div>Roe"), "Roe");
     assert_eq!(
-        sanitize(
-            html(policy),
-            r#"<svg><g display="none"><text>Jane</text><p>Roe</p>"#
-        ),
+        rebuilt(r#"<svg><g display="none"><text>Jane</text><p>Roe</p>"#),
         "<svg><p>Roe</p>"
     );
 }
@@ -474,7 +447,7 @@ fn a_hidden_element_ends_where_a_browser_ends_it() {
 fn leaving_svg_through_a_removed_element_is_kept() {
     let raw = r#"<svg><p hidden></p><a title="Label">x</a></svg>"#;
     assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
+        rebuilt(raw),
         r#"<svg><span></span><a title="Label">x</a></svg>"#
     );
 }
@@ -483,17 +456,14 @@ fn leaving_svg_through_a_removed_element_is_kept() {
 #[test]
 fn a_breakout_closes_an_svg_style_sheet() {
     let raw = "<svg><style>@import url(https://t/a.css);<p>Roe</p>";
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<svg><p>Roe</p>"
-    );
+    assert_eq!(rebuilt(raw), "<svg><p>Roe</p>");
 }
 
 /// HTML inside an SVG `desc` stays in SVG, which resumes after it.
 #[test]
 fn html_inside_an_integration_point_stays_in_svg() {
     let raw = r#"<svg><desc><span>Note</span></desc><circle r="5"/></svg><math><mi><b>x</b></mi><mn>1</mn></math>"#;
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// A browser reads the first of a repeated attribute, so a removed first one
@@ -501,47 +471,41 @@ fn html_inside_an_integration_point_stays_in_svg() {
 #[test]
 fn a_removed_first_attribute_is_not_replaced_by_a_repeat() {
     let raw = r#"<img src="https://t/p.png" src="/local.png" alt="x">"#;
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        r#"<img alt="x">"#
-    );
+    assert_eq!(rebuilt(raw), r#"<img alt="x">"#);
 }
 
 /// A reference in an SVG style sheet is decoded before the remote-load check,
 /// as a browser decodes it; one in an HTML style sheet is read as written.
 #[test]
 fn a_remote_import_spelled_with_references_in_svg_goes() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         "<svg><style>@import url(https&#58;//t/a.css);</style></svg>",
         r#"<svg><style>@import "https&#x3a;//t/a.css";</style></svg>"#,
     ] {
-        assert_eq!(sanitize(html(policy), raw), "<svg></svg>", "{raw}");
+        assert_eq!(rebuilt(raw), "<svg></svg>", "{raw}");
     }
     for raw in [
         "<style>p { content: 'https&#58;//t' }</style>",
         r#"<style>p { background: url("https&#58;//local.png") }</style>"#,
     ] {
-        assert_eq!(sanitize(html(policy), raw), raw, "{raw}");
-    } // A comment or a tag in an HTML style sheet is text the CSS reads.
+        assert_eq!(rebuilt(raw), raw, "{raw}");
+    }
+    // A comment or a tag in an HTML style sheet is text the CSS reads.
     for raw in [
         "<style><!-- @import url(https://t/a.css); --></style><p>a</p>",
         "<style><b>@import url(https://t/a.css);</b></style><p>a</p>",
     ] {
-        assert_eq!(sanitize(html(policy), raw), "<p>a</p>", "{raw}");
+        assert_eq!(rebuilt(raw), "<p>a</p>", "{raw}");
     }
     let raw = "<style><!-- p { color: red } --></style>";
-    assert_eq!(sanitize(html(policy), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// The root of SVG or MathML honours its self-closing flag, even removed.
 #[test]
 fn a_removed_self_closing_svg_root_holds_nothing() {
     let raw = "<svg hidden/><math hidden/><p>Visible</p>";
-    assert_eq!(
-        sanitize(html(HiddenContentPolicy::default()), raw),
-        "<p>Visible</p>"
-    );
+    only_visible(raw);
     // The `/` belongs to the unquoted value, so the root holds what follows,
     // up to its end tag or an HTML element that breaks out of it.
     for raw in [
@@ -550,19 +514,12 @@ fn a_removed_self_closing_svg_root_holds_nothing() {
         // The `/` belongs to `id`, so `desc` stays open and holds the `p`.
         r#"<svg hidden><desc id=x/><p>Secret</p></desc></svg><p>Visible</p>"#,
     ] {
-        assert_eq!(
-            sanitize(html(HiddenContentPolicy::default()), raw),
-            "<p>Visible</p>",
-            "{raw}"
-        );
+        only_visible(raw);
     }
     // An SVG `mi` is not a MathML integration point, so the `p` breaks out;
     // a browser ignores the `</svg>` left after it.
     assert_eq!(
-        sanitize(
-            html(HiddenContentPolicy::default()),
-            "<svg hidden><mi>Secret<p>Visible</p></svg>"
-        ),
+        rebuilt("<svg hidden><mi>Secret<p>Visible</p></svg>"),
         "<p>Visible</p></svg>"
     );
 }
@@ -571,13 +528,12 @@ fn a_removed_self_closing_svg_root_holds_nothing() {
 /// own end tag, so an end tag in that text does not end the removal.
 #[test]
 fn a_text_element_in_a_removed_element_holds_its_end_tags() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         "<svg hidden><desc><textarea></svg>Secret</textarea></desc></svg><p>Visible</p>",
         "<p hidden><script></p>Secret</script></p><p>Visible</p>",
         "<script></p>Secret</script><p>Visible</p>",
     ] {
-        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+        only_visible(raw);
     }
 }
 
@@ -586,7 +542,6 @@ fn a_text_element_in_a_removed_element_holds_its_end_tags() {
 /// text, while a `title` in an HTML `div` inside `desc` is HTML text.
 #[test]
 fn a_removed_region_reads_each_element_in_its_own_vocabulary() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         "<svg hidden><desc><svg><title></svg></desc></svg><p>Visible</p>",
         "<svg hidden><desc><div><title></svg></title></div></desc></svg><p>Visible</p>",
@@ -594,17 +549,14 @@ fn a_removed_region_reads_each_element_in_its_own_vocabulary() {
         // The breakout `p` closes the SVG, then the hidden paragraph.
         "<p hidden>Secret<svg><p>Visible</p>",
     ] {
-        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+        only_visible(raw);
     }
 }
 
-/// An `mglyph` or `malignmark` in a MathML token element stays MathML, so a
-/// `title` in it is not HTML text and `</math>` still ends the math.
 /// End tags naming nothing open are turned away without a scan of what is
 /// open, so many of them under many open elements stay linear.
 #[test]
 fn unmatched_end_tags_under_deep_nesting_stay_linear() {
-    let policy = HiddenContentPolicy::default();
     let n = 50_000;
     let raw = format!(
         "<math><mi>{}{}</mi></math><div hidden>{}{}</div><p>Visible</p>",
@@ -614,7 +566,7 @@ fn unmatched_end_tags_under_deep_nesting_stay_linear() {
         "</b>".repeat(n),
     );
     let started = std::time::Instant::now();
-    let out = sanitize(html(policy), &raw);
+    let out = rebuilt(&raw);
     assert!(
         out.ends_with("<p>Visible</p>"),
         "{}",
@@ -627,13 +579,12 @@ fn unmatched_end_tags_under_deep_nesting_stay_linear() {
 /// implies the end of, self-closed or not.
 #[test]
 fn a_void_element_in_a_removed_region_opens_nothing() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         "<math hidden><mi><p>x<hr><mglyph><title></math><p>Visible</p>",
         "<math hidden><mi><p>x<hr/><mglyph><title></math><p>Visible</p>",
         "<div hidden><br>Secret</div><p>Visible</p>",
     ] {
-        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+        only_visible(raw);
     }
 }
 
@@ -641,9 +592,8 @@ fn a_void_element_in_a_removed_region_opens_nothing() {
 /// removed element itself, ends the removal.
 #[test]
 fn an_implied_close_through_a_removed_element_ends_it() {
-    let policy = HiddenContentPolicy::default();
     let raw = r#"<select><optgroup hidden><option>Secret<optgroup label="Public"><option>Visible</select><p>After</p>"#;
-    let out = sanitize(html(policy), raw);
+    let out = rebuilt(raw);
     assert!(!out.contains("Secret"), "{out}");
     assert!(
         out.contains("Visible") && out.ends_with("<p>After</p>"),
@@ -655,58 +605,55 @@ fn an_implied_close_through_a_removed_element_ends_it() {
 /// value and starts another attribute.
 #[test]
 fn a_carriage_return_separates_attributes() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         "<a title=x\ronclick=alert(1)>a</a>",
         "<a title=\"x\"\ronclick=alert(1)>a</a>",
         "<a\ronclick=alert(1)>a</a>",
     ] {
-        let out = sanitize(html(policy), raw);
+        let out = rebuilt(raw);
         assert!(!out.contains("onclick"), "{raw:?} -> {out:?}");
     }
 }
 
+/// An `mglyph` or `malignmark` in a MathML token element stays MathML, so a
+/// `title` in it is not HTML text and `</math>` still ends the math.
 #[test]
 fn mglyph_and_malignmark_stay_mathml() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         "<math hidden><mi><mglyph><title></math><p>Visible</p>",
         "<math hidden><mi><malignmark><title></math><p>Visible</p>",
     ] {
-        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+        only_visible(raw);
     }
     // Other children of `mi` are still HTML: a `title` there is text.
     let raw = "<math hidden><mi><b><title></math></title></b></mi></math><p>Visible</p>";
-    assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>");
+    only_visible(raw);
     // Under an HTML element in `mi`, an `mglyph` is HTML: its self-closing
     // flag is ignored and it holds what follows.
     let raw = "<math><mi><span><mglyph hidden/>Secret</mglyph></span></mi></math>";
-    let out = sanitize(html(policy), raw);
+    let out = rebuilt(raw);
     assert!(!out.contains("Secret"), "{out}");
     // A second `<p>` closes the first, so after its end the `mglyph` is
     // right in `mi` again and its self-closing flag holds.
     let raw = "<math><mi><p>a<p>b</p><mglyph/>Visible</mi></math><p>After</p>";
-    let out = sanitize(html(policy), raw);
+    let out = rebuilt(raw);
     assert!(
         out.contains("Visible") && out.ends_with("<p>After</p>"),
         "{out}"
     );
     // While the `span` is open, the `p` it holds does not end it.
     let raw = "<math><mi><span><p>a<p>b</p><mglyph hidden/>Secret</mglyph></span></mi></math>";
-    let out = sanitize(html(policy), raw);
+    let out = rebuilt(raw);
     assert!(!out.contains("Secret"), "{out}");
     // A kept `mi` holding a self-closed `mglyph` does not hold what follows.
-    let out = sanitize(
-        html(policy),
-        "<math><mi><mglyph/>x</mi></math><p>Visible</p>",
-    );
+    let out = rebuilt("<math><mi><mglyph/>x</mi></math><p>Visible</p>");
     assert!(out.ends_with("<p>Visible</p>"), "{out}");
 }
 
 /// `raw` rebuilt well within a few seconds, ending in `Visible`.
 fn rebuilds_quickly(raw: &str) {
     let started = std::time::Instant::now();
-    let out = sanitize(html(HiddenContentPolicy::default()), raw);
+    let out = rebuilt(raw);
     assert!(out.contains("Visible"), "{}", &out[..80.min(out.len())]);
     assert!(started.elapsed() < std::time::Duration::from_secs(3));
 }
@@ -724,11 +671,7 @@ fn a_meta_tag_of_many_attributes_stays_linear() {
         "<meta{}><p>Visible</p>",
         distinct_attributes(50_000)
     ));
-    let out = sanitize(
-        html(HiddenContentPolicy::default()),
-        r#"<meta name="a" NAME="b" content="c"><p>Visible</p>"#,
-    );
-    assert_eq!(out, "<p>Visible</p>");
+    only_visible(r#"<meta name="a" NAME="b" content="c"><p>Visible</p>"#);
 }
 
 /// A tag of many distinct attributes is read in linear time, and a removed
@@ -739,10 +682,7 @@ fn a_tag_of_many_attributes_stays_linear() {
         "<div{}>Visible</div>",
         distinct_attributes(50_000)
     ));
-    let out = sanitize(
-        html(HiddenContentPolicy::default()),
-        r#"<a onclick="x()" ONCLICK="y()">a</a>"#,
-    );
+    let out = rebuilt(r#"<a onclick="x()" ONCLICK="y()">a</a>"#);
     assert_eq!(out, "<a>a</a>");
 }
 
@@ -750,7 +690,6 @@ fn a_tag_of_many_attributes_stays_linear() {
 /// server; a reference into the document stays.
 #[test]
 fn svg_paint_that_loads_from_a_server_is_removed() {
-    let policy = HiddenContentPolicy::default();
     for key in [
         "fill",
         "stroke",
@@ -764,13 +703,13 @@ fn svg_paint_that_loads_from_a_server_is_removed() {
         let raw = format!(
             r#"<svg><rect width="1" height="1" {key}="url(https://example.test/p.svg#g)"/></svg>"#
         );
-        let out = sanitize(html(policy), &raw);
+        let out = rebuilt(&raw);
         assert!(!out.contains("example.test"), "{out}");
         let raw = format!(r#"<svg><rect {key}="URL( '&#x2f;/example.test/p')"/></svg>"#);
-        let out = sanitize(html(policy), &raw);
+        let out = rebuilt(&raw);
         assert!(!out.contains("example.test"), "{out}");
         let raw = format!(r##"<svg><rect {key}="url(#g)"/></svg>"##);
-        assert_eq!(sanitize(html(policy), &raw), raw);
+        assert_eq!(rebuilt(&raw), raw);
     }
 }
 
@@ -787,12 +726,12 @@ fn a_style_end_hidden_in_a_construct_is_refused() {
         r#"<style><x a="</style><img src=x onerror=alert(1)>"></style>"#,
         "<style><!DOCTYPE </style/><img src=x onerror=alert(1)>></style>",
     ] {
-        assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw}");
+        assert!(refused(sanitizer, raw), "{raw}");
         assert!(sanitizer.check(raw).is_err(), "{raw}");
     }
     // An ordinary comment in a style sheet stays.
     let raw = "<style><!-- p { color: red } --></style><p>a</p>";
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// A style sheet nested in an SVG one leaves the outer one still checked.
@@ -803,16 +742,16 @@ fn a_nested_svg_style_sheet_is_refused() {
         r#"<svg><style>@import "https://example.test/a.css";<style></style></style></svg>"#,
         r#"<svg><style><style></style>@import "https://example.test/a.css";</style></svg>"#,
     ] {
-        let rebuilt = sanitizer.sanitize(raw.to_owned());
+        let result = sanitizer.sanitize(raw.to_owned());
         assert!(
-            rebuilt
+            result
                 .as_ref()
                 .is_err_and(|_| sanitizer.check(raw).is_err()),
-            "{rebuilt:?}"
+            "{result:?}"
         );
     }
     let raw = "<svg><style>rect { fill: red }</style></svg>";
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// With script on, a browser reads a `<noscript>` body as text up to the
@@ -825,11 +764,11 @@ fn a_noscript_end_hidden_in_a_construct_is_refused() {
         "<noscript><!--</NOSCRIPT><img src=x onerror=alert(1)>--></noscript>",
     ] {
         for sanitizer in [html(HiddenContentPolicy::default()), html(keep_comments())] {
-            assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw}");
+            assert!(refused(sanitizer, raw), "{raw}");
         }
     }
     let raw = r#"<noscript><p title="a">Enable script</p></noscript><p>b</p>"#;
-    assert_eq!(sanitize(html(HiddenContentPolicy::default()), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// CSS reads its escapes and comments before its tokens, so a remote load
@@ -837,7 +776,6 @@ fn a_noscript_end_hidden_in_a_construct_is_refused() {
 /// and an SVG presentation attribute.
 #[test]
 fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
-    let policy = HiddenContentPolicy::default();
     for css in [
         r"background: url(htt\70s://example.test/a.png)",
         r"background: url(htt\000070 s://example.test/a.png)",
@@ -855,10 +793,10 @@ fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
         r"background: ur/**/l(https://example.test/a.png)",
     ] {
         let raw = format!(r#"<p style="{css}">a</p>"#);
-        let out = sanitize(html(policy), &raw);
+        let out = rebuilt(&raw);
         assert_eq!(out, "<p>a</p>", "{raw}");
         let raw = format!("<style>p {{ {css} }}</style><p>a</p>");
-        assert_eq!(sanitize(html(policy), &raw), "<p>a</p>", "{raw}");
+        assert_eq!(rebuilt(&raw), "<p>a</p>", "{raw}");
     }
     for css in [
         r#"@im\70ort "https://example.test/a.css";"#,
@@ -869,24 +807,23 @@ fn a_remote_css_load_spelled_with_escapes_or_comments_goes() {
         r#"@font-face { src: src("https://example.test/f.woff") }"#,
     ] {
         let raw = format!("<style>{css}</style><p>a</p>");
-        assert_eq!(sanitize(html(policy), &raw), "<p>a</p>", "{raw}");
+        assert_eq!(rebuilt(&raw), "<p>a</p>", "{raw}");
     }
     let raw = r#"<svg><rect fill="url(htt\70s://example.test/p#g)"/></svg>"#;
-    assert!(!sanitize(html(policy), raw).contains("example.test"));
+    assert!(!rebuilt(raw).contains("example.test"));
     // A local reference and an escape that loads nothing stay.
     let raw = r#"<p style="background: url(\2f a.png); content: '\201C'">a</p>"#;
-    assert_eq!(sanitize(html(policy), raw), raw);
+    assert_eq!(rebuilt(raw), raw);
 }
 
 /// An SVG attribute read as text keeps a value that only names a URL.
 #[test]
 fn svg_text_attributes_naming_a_url_stay() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         r#"<svg aria-label="Example: url(https://example.test/a.png)"></svg>"#,
         r#"<svg><rect aria-describedby="x" class="url(https://example.test/a.png)"/></svg>"#,
     ] {
-        assert_eq!(sanitize(html(policy), raw), raw);
+        assert_eq!(rebuilt(raw), raw);
     }
 }
 
@@ -894,7 +831,6 @@ fn svg_text_attributes_naming_a_url_stay() {
 /// break is not dropped as a URL parser would drop it before reading CSS.
 #[test]
 fn a_css_line_continuation_does_not_hide_a_remote_load() {
-    let policy = HiddenContentPolicy::default();
     let escaped = "url('\\20\\\n\\68ttps://example.test/p.svg#g')";
     for raw in [
         format!(r#"<svg><rect fill="{escaped}"/></svg>"#),
@@ -903,7 +839,7 @@ fn a_css_line_continuation_does_not_hide_a_remote_load() {
         format!("<style>p {{ background: {escaped} }}</style><p>a</p>"),
         format!("<svg><style>rect {{ fill: {escaped} }}</style></svg>"),
     ] {
-        let out = sanitize(html(policy), &raw);
+        let out = rebuilt(&raw);
         assert!(!out.contains("example.test"), "{raw}: {out}");
     }
 }
@@ -912,20 +848,19 @@ fn a_css_line_continuation_does_not_hide_a_remote_load() {
 /// `<noscript>`, as a browser reads it.
 #[test]
 fn a_longer_end_tag_name_does_not_end_a_text_body() {
-    let policy = HiddenContentPolicy::default();
     for raw in [
         r#"<style>p::after{content:"</stylesheet>"}</style><p>a</p>"#,
         r#"<noscript><p title="</noscripts>">a</p></noscript>"#,
     ] {
-        assert_eq!(sanitize(html(policy), raw), raw);
+        assert_eq!(rebuilt(raw), raw);
     }
-    let sanitizer = html(policy);
+    let sanitizer = html(HiddenContentPolicy::default());
     for raw in [
         "<style><!--</style\t><img src=x onerror=alert(1)>--></style>",
         "<style><!--</style/><img src=x onerror=alert(1)>--></style>",
         "<style><!--</style\n--></style>",
         r#"<noscript><p title="</noscript/x"></p></noscript>"#,
     ] {
-        assert!(sanitizer.sanitize(raw.to_owned()).is_err(), "{raw:?}");
+        assert!(refused(sanitizer, raw), "{raw:?}");
     }
 }
