@@ -17,13 +17,11 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use crate::opc::index::{Index, text};
-use crate::opc::package_xml::{self, PackageMarkup, PackageText};
 use crate::opc::part::PartPath;
 use crate::opc::references::References;
 use crate::opc::sanitize::{Sanitizer, rebuilt, sanitize};
 use crate::opc::vocabulary::Vocabulary;
-use crate::opc::xml_edit::{Edit, XmlComments};
-use crate::opc::{PartKind, PartRole, malformed_xml, xml_edit};
+use crate::opc::{PartKind, PartRole, malformed_xml, package_xml, xml_edit};
 
 /// Check that the package `document` carries no hidden content `policy` and
 /// `sanitizer` would remove, that every reference in it resolves, that its
@@ -70,18 +68,10 @@ pub(crate) fn check(
         }
     }
     for (path, bytes) in &index.parts {
-        // The manifest and the relationships parts hold only their OPC
-        // vocabulary: entries, their own attributes, namespace declarations.
-        if let Some(vocabulary) = package_xml::vocabulary_of(path) {
-            let raw = text(path, bytes)?;
-            let edits: [&dyn Edit; 3] = [&XmlComments, &PackageMarkup(vocabulary), &PackageText];
-            for edit in edits {
-                if edit.apply(raw)?.is_some() {
-                    return Err(Error::sanitization(format!(
-                        "`{path}` carries markup or text outside the package vocabulary"
-                    )));
-                }
-            }
+        // The manifest and the relationships parts: the sanitize above cuts
+        // them to their OPC vocabulary and records every cut, so what it left
+        // is all there is.
+        if package_xml::vocabulary_of(path).is_some() {
             continue;
         }
         if !index.is_xml(path) {
