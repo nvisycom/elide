@@ -7,6 +7,8 @@
 //! parser, so a format that reads XML another way (an OOXML part) decodes its
 //! text here too.
 
+use std::ops::Range;
+
 use elide_codec::extract::{OffsetMap, OffsetRun};
 #[cfg(feature = "html")]
 use quick_xml::escape::resolve_html5_entity;
@@ -88,32 +90,24 @@ pub fn decode_references(
 ) -> (String, OffsetMap) {
     let mut decoded = String::with_capacity(raw.len());
     let mut runs = Vec::new();
-    // `copied` is the raw offset past the last reference; `at` scans for the
-    // next one.
+    // `copied` is the raw offset past the last reference.
     let mut copied = 0;
-    let mut at = 0;
-    while let Some(amp) = raw[at..].find('&').map(|i| at + i) {
-        at = amp + 1;
-        let Some((text, len)) = rules.decode(&raw[at..]) else {
-            continue;
-        };
-        let end = at + len;
-        if copied < amp {
+    for (reference, text) in references(raw, rules) {
+        if copied < reference.start {
             let start = decoded.len();
-            decoded.push_str(&raw[copied..amp]);
+            decoded.push_str(&raw[copied..reference.start]);
             runs.push(OffsetRun::identity(
                 start..decoded.len(),
-                base + copied..base + amp,
+                base + copied..base + reference.start,
             ));
         }
         let start = decoded.len();
         decoded.push_str(&text);
         runs.push(OffsetRun::entity(
             start..decoded.len(),
-            base + amp..base + end,
+            base + reference.start..base + reference.end,
         ));
-        copied = end;
-        at = copied;
+        copied = reference.end;
     }
     if copied < raw.len() {
         let start = decoded.len();
@@ -124,6 +118,40 @@ pub fn decode_references(
         ));
     }
     (decoded, OffsetMap::new(runs))
+}
+
+/// The escaped text `raw` decoded by `rules`, as [`decode_references`]
+/// decodes it, without the map back to its source.
+#[cfg(feature = "xml")]
+pub(crate) fn decoded(raw: &str, rules: CharacterReferences) -> String {
+    let mut decoded = String::with_capacity(raw.len());
+    let mut copied = 0;
+    for (reference, text) in references(raw, rules) {
+        decoded.push_str(&raw[copied..reference.start]);
+        decoded.push_str(&text);
+        copied = reference.end;
+    }
+    decoded.push_str(&raw[copied..]);
+    decoded
+}
+
+/// Each character reference of `raw` that decodes by `rules`, in order: the
+/// range it spans in `raw`, from its `&`, and the text it stands for.
+fn references(
+    raw: &str,
+    rules: CharacterReferences,
+) -> impl Iterator<Item = (Range<usize>, String)> + '_ {
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        while let Some(amp) = raw[at..].find('&').map(|i| at + i) {
+            at = amp + 1;
+            if let Some((text, len)) = rules.decode(&raw[at..]) {
+                at += len;
+                return Some((amp..at, text));
+            }
+        }
+        None
+    })
 }
 
 /// The length of the longest HTML5 character reference name,
@@ -227,6 +255,23 @@ mod tests {
         let raw = format!("&{};", "a".repeat(LONGEST_NAME + 1));
         let (decoded, _) = decode_references(&raw, 0, CharacterReferences::Xml);
         assert_eq!(decoded, raw);
+    }
+
+    #[cfg(feature = "xml")]
+    #[test]
+    fn decoded_reads_as_decode_references_does() {
+        for raw in [
+            "Alice &amp; Bob",
+            "A&#46;B&#x40;C",
+            "a & b",
+            "&#58x",
+            "&amp;&lt;",
+            "",
+        ] {
+            for rules in [CharacterReferences::Xml, CharacterReferences::Html] {
+                assert_eq!(decoded(raw, rules), decode_references(raw, 0, rules).0);
+            }
+        }
     }
 
     #[cfg(feature = "html")]

@@ -67,7 +67,7 @@ use self::url::css_loads_remote;
 use crate::engine::config::Dialect;
 use crate::engine::reader::{EventSpans, configure, malformed_markup};
 use crate::engine::tag::{HtmlAttribute, HtmlTagExt, tag_name};
-use crate::references::{CharacterReferences, decode_references};
+use crate::references::{CharacterReferences, decoded};
 
 /// The XInclude namespace, whose `include` element pulls in another document.
 const XINCLUDE: &str = "http://www.w3.org/2001/XInclude";
@@ -302,9 +302,9 @@ impl<'a> Rebuild<'a> {
                     // A style sheet in SVG or MathML is markup, whose
                     // references a browser decodes before reading the CSS.
                     if let Some(sheet) = self.style.as_mut() {
-                        let (decoded, _) =
-                            decode_references(&raw[span.clone()], 0, CharacterReferences::Html);
-                        sheet.css.push_str(&decoded);
+                        sheet
+                            .css
+                            .push_str(&decoded(&raw[span.clone()], CharacterReferences::Html));
                     }
                     self.copy(span);
                 }

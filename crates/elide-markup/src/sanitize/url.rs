@@ -1,7 +1,7 @@
 //! How a browser reads a URL attribute, and whether it runs script or loads
 //! from a server.
 
-use crate::references::{CharacterReferences, decode_references};
+use crate::references::{CharacterReferences, decoded};
 
 /// URL schemes that run script when the URL is followed.
 pub(super) const SCRIPT_SCHEMES: [&str; 3] = ["javascript:", "vbscript:", "data:text/html"];
@@ -18,8 +18,7 @@ const REMOTE_SCHEMES: [&str; 5] = ["http:", "https:", "ftp:", "//", "\\\\"];
 /// one from a URL.
 pub(super) fn loads_remote(value: &str, key: &str) -> bool {
     if key == "srcset" {
-        let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
-        decoded
+        decoded(value, CharacterReferences::Html)
             .split(|c: char| c == ',' || c.is_ascii_whitespace())
             .any(reaches_server)
     } else {
@@ -29,8 +28,7 @@ pub(super) fn loads_remote(value: &str, key: &str) -> bool {
 
 /// Whether the URL attribute `value` reaches a server.
 pub(super) fn is_remote(value: &str) -> bool {
-    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
-    reaches_server(&decoded)
+    reaches_server(&decoded(value, CharacterReferences::Html))
 }
 
 /// Whether the URL `decoded`, its character references already decoded,
@@ -146,8 +144,7 @@ fn css_uncommented(css: &str) -> String {
 /// references decoded, the tab and line breaks a URL parser drops removed, and
 /// leading spaces and control characters trimmed, lowercased.
 pub(super) fn normalized_url(value: &str) -> String {
-    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
-    scheme_of(&decoded)
+    scheme_of(&decoded(value, CharacterReferences::Html))
 }
 
 /// A decoded URL as a browser reads its scheme: the tab and line breaks a URL

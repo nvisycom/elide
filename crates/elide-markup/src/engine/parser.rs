@@ -31,17 +31,16 @@ use elide_core::redaction::HiddenContentKind;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use super::address::{SpanKind, XmlItem, XmlSpan};
+use super::address::{MarkupItem, MarkupSpan, SpanKind};
 use super::config::MarkupConfig;
-use super::meta::MetaTag;
 use super::reader::{EventSpans, configure, malformed_markup};
-use super::source::{AttributeSpan, MarkupSink, MarkupSource, StartTag};
-use super::tag::tag_name;
+use super::sink::MarkupSink;
+use super::tag::{AttributeSpan, start_tag, tag_name};
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
 /// the HTML loader (lenient config) and for container formats that run the
 /// engine over a part.
-pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<XmlItem>> {
+pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<MarkupItem>> {
     MarkupParser::new(raw, config).run()
 }
 
@@ -51,7 +50,8 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
 /// handlers are methods sharing `self` rather than a function threading a
 /// half-dozen `&mut` locals.
 struct MarkupParser<'a> {
-    source: MarkupSource<'a>,
+    /// The document read.
+    raw: &'a str,
     config: MarkupConfig<'a>,
     /// The growing item stream (offset kept in step by `MarkupSink::push`).
     items: MarkupSink,
@@ -82,7 +82,7 @@ struct MarkupParser<'a> {
 impl<'a> MarkupParser<'a> {
     fn new(raw: &'a str, config: MarkupConfig<'a>) -> Self {
         Self {
-            source: MarkupSource::new(raw),
+            raw,
             config,
             items: MarkupSink::new(),
             text_items: Vec::new(),
@@ -95,10 +95,10 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    fn run(mut self) -> Result<Vec<XmlItem>> {
-        let mut reader = Reader::from_str(self.source.raw());
+    fn run(mut self) -> Result<Vec<MarkupItem>> {
+        let mut reader = Reader::from_str(self.raw);
         configure(reader.config_mut(), self.config.dialect);
-        let mut spans = EventSpans::new(self.source.raw());
+        let mut spans = EventSpans::new(self.raw);
         loop {
             let event = reader.read_event().map_err(malformed_markup)?;
             let span = spans.next(reader.buffer_position());
@@ -129,8 +129,7 @@ impl<'a> MarkupParser<'a> {
         }
         match event {
             Event::Start(e) | Event::Empty(e) => {
-                let mut tag = self.source.start_tag(e, self.config.dialect)?;
-                self.flag_meta(&mut tag);
+                let tag = start_tag(self.raw, e, self.config.dialect)?;
                 self.open_passage_element(&tag.name, span.clone());
                 for attr in tag.attributes {
                     self.push_or_defer(Deferred::Attribute(attr));
@@ -140,7 +139,7 @@ impl<'a> MarkupParser<'a> {
                 }
             }
             Event::End(e) => {
-                let name = tag_name(e, self.source.raw(), self.config.dialect)?;
+                let name = tag_name(e, self.raw, self.config.dialect)?;
                 if self.config.bounds_passage(&name) {
                     self.end_passage();
                 }
@@ -160,7 +159,7 @@ impl<'a> MarkupParser<'a> {
     /// Read what the end of the document leaves pending: the last text run,
     /// the open passage, and the elements left open (lenient HTML with
     /// unclosed blocks), whose gathered text is hinted too.
-    fn finish(mut self) -> Vec<XmlItem> {
+    fn finish(mut self) -> Vec<MarkupItem> {
         if let Some(run) = self.run.take() {
             self.text(run);
         }
@@ -173,7 +172,7 @@ impl<'a> MarkupParser<'a> {
     /// depth and swallow everything else. Returns whether `event` was consumed
     /// by the skip (the caller should `continue`).
     fn skipping(&mut self, event: &Event<'_>) -> Result<bool> {
-        let (raw, dialect) = (self.source.raw(), self.config.dialect);
+        let (raw, dialect) = (self.raw, self.config.dialect);
         let Some(region) = &mut self.skip else {
             return Ok(false);
         };
@@ -197,7 +196,7 @@ impl<'a> MarkupParser<'a> {
         if self.config.is_line_break(name) {
             if self.in_passage {
                 self.items
-                    .push(XmlSpan::separator(span, "\n"), Passage::Separator);
+                    .push(MarkupSpan::separator(span, "\n"), Passage::Separator);
             }
         } else if self.config.bounds_passage(name) {
             self.end_passage();
@@ -233,7 +232,7 @@ impl<'a> MarkupParser<'a> {
     fn comment(&mut self, inner: Range<usize>) {
         let index = self
             .items
-            .push(XmlSpan::verbatim(self.source.raw(), inner), Passage::Start);
+            .push(MarkupSpan::verbatim(self.raw, inner), Passage::Start);
         let flag = ItemFlag::new(
             builtins::COMMUNICATIONS_CONTENT.to_ref(),
             HiddenContentKind::Collaboration,
@@ -241,27 +240,11 @@ impl<'a> MarkupParser<'a> {
         self.items.flag(index, flag);
     }
 
-    /// Flag every `content` of an HTML `<meta>` field as the metadata it is.
-    fn flag_meta(&self, tag: &mut StartTag) {
-        let Some(label) = tag.meta.as_ref().and_then(MetaTag::label) else {
-            return;
-        };
-        for attr in &mut tag.attributes {
-            let is_content = attr
-                .name
-                .clone()
-                .is_some_and(|name| self.source.slice(name).eq_ignore_ascii_case("content"));
-            if is_content {
-                attr.flag = Some(ItemFlag::new(label.clone(), HiddenContentKind::Metadata));
-            }
-        }
-    }
-
     /// Push a redactable attribute value as an item hinted by its attribute
     /// name (`ssn="123-45-6789"` → the value is boosted by `ssn`).
     fn attribute(&mut self, attr: AttributeSpan) {
-        let value = self.escaped(attr.value, SpanKind::Attribute);
-        let idx = self.items.push(value, Passage::Start);
+        let span = self.escaped(attr.value, SpanKind::Attribute);
+        let idx = self.items.push(span, Passage::Start);
         if let Some(flag) = attr.flag {
             self.items.flag(idx, flag);
         }
@@ -270,7 +253,7 @@ impl<'a> MarkupParser<'a> {
         // context that boosts it). Strip any namespace prefix (`ns:attr`)
         // so the hint keys on the local name, as the element path does.
         if let Some(name) = attr.name {
-            let raw = self.source.slice(name.clone());
+            let raw = &self.raw[name.clone()];
             let local = raw.rsplit(':').next().unwrap_or(raw);
             self.items
                 .hint(idx, source_hint(name, local.context_words()));
@@ -334,10 +317,11 @@ impl<'a> MarkupParser<'a> {
     /// (the space between two inline elements); whitespace-only text opens no
     /// passage.
     fn text(&mut self, span: Range<usize>) {
-        let (value, address) = self.escaped(span, SpanKind::Text);
-        if value.trim().is_empty() {
+        let span = self.escaped(span, SpanKind::Text);
+        let value = span.read.trim();
+        if value.is_empty() {
             if self.in_passage {
-                self.items.push((value, address), Passage::Continue);
+                self.items.push(span, Passage::Continue);
             }
             return;
         }
@@ -348,10 +332,10 @@ impl<'a> MarkupParser<'a> {
             Passage::Start
         };
         self.in_passage = self.config.inline_passages();
-        let engine = self.items.offset()..self.items.offset() + value.len();
+        let engine = self.items.offset()..self.items.offset() + span.read.len();
         // Only a block element groups text for sibling hints.
-        let text = (!self.config.block_elements.is_empty()).then(|| value.trim().to_owned());
-        let item_index = self.items.push((value, address), passage);
+        let text = (!self.config.block_elements.is_empty()).then(|| value.to_owned());
+        let item_index = self.items.push(span, passage);
         if let Some(hint) = self.enclosing_hint() {
             self.items.hint(item_index, hint);
         }
@@ -365,10 +349,9 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    /// The decoded value of the escaped `kind` text at `range`, and its
-    /// address.
-    fn escaped(&self, range: Range<usize>, kind: SpanKind) -> (String, XmlSpan) {
-        XmlSpan::escaped(self.source.raw(), range, kind, self.config.references())
+    /// The span of the escaped `kind` text at `range`, its references decoded.
+    fn escaped(&self, range: Range<usize>, kind: SpanKind) -> MarkupSpan {
+        MarkupSpan::escaped(self.raw, range, kind, self.config.references())
     }
 
     /// Record a CDATA body, hinted by its enclosing element name, CDATA is
@@ -378,7 +361,7 @@ impl<'a> MarkupParser<'a> {
         if let Some(inner) = strip(span, "<![CDATA[", "]]>") {
             let idx = self
                 .items
-                .push(XmlSpan::verbatim(self.source.raw(), inner), Passage::Start);
+                .push(MarkupSpan::verbatim(self.raw, inner), Passage::Start);
             if let Some(hint) = self.enclosing_hint() {
                 self.items.hint(idx, hint);
             }
@@ -487,21 +470,21 @@ mod tests {
     use elide_core::modality::Chunk;
 
     use super::*;
-    use crate::engine::address::{MarkupAddresser, XmlSpan};
+    use crate::engine::address::{MarkupAddresser, MarkupSpan};
     use crate::xml::FORMAT_ID;
 
     /// Build a body stream over `raw` with an explicit config so a test can read
     /// out what the parser extracted (values and hints).
-    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<XmlSpan> {
+    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<MarkupSpan> {
         let items = build_items(raw, config).expect("markup decode succeeds");
         ExtractStream::new(FORMAT_ID, items, MarkupAddresser)
     }
 
-    fn xml(raw: &str) -> ExtractStream<XmlSpan> {
+    fn xml(raw: &str) -> ExtractStream<MarkupSpan> {
         handler_with(raw, MarkupConfig::xml())
     }
 
-    fn values(h: &ExtractStream<XmlSpan>) -> Vec<String> {
+    fn values(h: &ExtractStream<MarkupSpan>) -> Vec<String> {
         h.chunks()
             .unwrap()
             .into_iter()
@@ -510,7 +493,7 @@ mod tests {
     }
 
     /// The first chunk a stream yields.
-    fn first_chunk(h: &ExtractStream<XmlSpan>) -> Chunk<Text> {
+    fn first_chunk(h: &ExtractStream<MarkupSpan>) -> Chunk<Text> {
         h.chunks().unwrap().into_iter().next().expect("one chunk")
     }
 

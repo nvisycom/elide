@@ -11,8 +11,8 @@ use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
 use crate::engine::meta::MetaTag;
-use crate::engine::tag::HtmlAttribute;
-use crate::references::{CharacterReferences, decode_references};
+use crate::engine::tag::{HtmlAttribute, keyword};
+use crate::references::{CharacterReferences, decoded};
 
 /// The vocabulary an element is read in: HTML, or the SVG or MathML a
 /// document embeds with an `<svg>` or `<math>` element.
@@ -912,11 +912,7 @@ fn meta_removal(
     attributes: &[HtmlAttribute<'_>],
     policy: HiddenContentPolicy,
 ) -> Option<HiddenContent> {
-    let tag = MetaTag::new(
-        attributes
-            .iter()
-            .map(|attr| (attr.name, attr.value.unwrap_or_default())),
-    );
+    let tag = MetaTag::from_html(attributes);
     if tag
         .directive()
         .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive))
@@ -974,7 +970,7 @@ pub(super) fn attribute(
         || (LOADING_ATTRIBUTES.contains(&local) && loads_remote(value, local))
         || (local == "href" && !hyperlink && is_remote(value))
         || ((local == "style" || (space == Space::Svg && SVG_CSS_ATTRIBUTES.contains(&local)))
-            && css_loads_remote(&decode_references(value, 0, CharacterReferences::Html).0))
+            && css_loads_remote(&decoded(value, CharacterReferences::Html)))
     {
         return Some(HiddenContent::Link);
     }
@@ -991,14 +987,6 @@ pub(super) fn attribute(
     // Accessible names and descriptions are read to the reader by assistive
     // technology, and extracted like any other attribute value.
     (!allowed && !key.starts_with("aria-")).then_some(HiddenContent::ApplicationData)
-}
-
-/// An attribute value as a browser compares an enumerated keyword: character
-/// references decoded and lowercased, but not trimmed, so `" hidden "` is no
-/// keyword at all.
-fn keyword(value: &str) -> String {
-    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
-    decoded.to_ascii_lowercase()
 }
 
 /// The HTML elements whose body a browser reads as text with references

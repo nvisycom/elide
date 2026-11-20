@@ -3,7 +3,7 @@
 
 use elide_core::entity::{LabelRef, builtins};
 
-use crate::references::{CharacterReferences, decode_references};
+use super::tag::{HtmlAttribute, keyword};
 
 /// The `http-equiv` directives that only affect how the page renders.
 const RENDER_DIRECTIVES: [&str; 5] = [
@@ -17,21 +17,14 @@ const RENDER_DIRECTIVES: [&str; 5] = [
 /// The attributes that name a `<meta>` field, in the order they are read.
 const FIELD_NAMES: [&str; 3] = ["name", "property", "itemprop"];
 
-/// The attributes that decide what a `<meta>` tag is.
-const CLASSIFYING: [&str; 6] = [
-    "name",
-    "property",
-    "itemprop",
-    "http-equiv",
-    "charset",
-    "content",
-];
+/// The attributes besides the [`FIELD_NAMES`] that decide what a `<meta>` tag
+/// is.
+const CLASSIFYING: [&str; 3] = ["http-equiv", "charset", "content"];
 
 /// A `<meta>` attribute's raw `value` as a browser compares it: character
 /// references decoded, trimmed, lowercased.
 fn normalized(value: &str) -> String {
-    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
-    decoded.trim().to_ascii_lowercase()
+    keyword(value).trim().to_owned()
 }
 
 /// An HTML `<meta>` tag as a browser reads it: every attribute in source order,
@@ -51,6 +44,15 @@ impl MetaTag {
         Self { attributes }
     }
 
+    /// The tag with the HTML `attributes` as written.
+    pub(crate) fn from_html(attributes: &[HtmlAttribute<'_>]) -> Self {
+        Self::new(
+            attributes
+                .iter()
+                .map(|attr| (attr.name, attr.value.unwrap_or_default())),
+        )
+    }
+
     /// The value a browser reads for `key`.
     fn attribute(&self, key: &str) -> Option<&str> {
         self.attributes
@@ -66,8 +68,8 @@ impl MetaTag {
 
     /// Whether a classifying attribute is written twice. A browser ignores the
     /// later copy, but its value is still in the document.
-    fn repeats(&self) -> bool {
-        CLASSIFYING.iter().any(|key| {
+    fn repeats_classifying(&self) -> bool {
+        FIELD_NAMES.iter().chain(&CLASSIFYING).any(|key| {
             let copies = self.attributes.iter().filter(|(name, _)| name == key);
             copies.count() > 1
         })
@@ -88,7 +90,7 @@ impl MetaTag {
     /// character set beside a `content` is no reason to keep that content. A tag
     /// repeating a classifying attribute never renders, whichever copy is read.
     pub(crate) fn renders(&self) -> bool {
-        if self.repeats() {
+        if self.repeats_classifying() {
             return false;
         }
         let names = self.field_names();

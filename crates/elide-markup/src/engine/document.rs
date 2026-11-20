@@ -18,7 +18,7 @@ use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
-use super::address::{MarkupAddresser, XmlItem, XmlSpan};
+use super::address::{MarkupAddresser, MarkupItem, MarkupSpan};
 use super::config::MarkupConfig;
 use super::parser::build_items;
 use crate::sanitize::MarkupSanitizer;
@@ -31,7 +31,7 @@ const BODY_ID: &str = "body";
 /// checked against the sanitizer the decode applied.
 pub(crate) struct MarkupDocument {
     /// The body items.
-    body: ExtractStream<XmlSpan>,
+    body: ExtractStream<MarkupSpan>,
     /// The retained (sanitized) raw document.
     raw: String,
     /// The sanitizer the decode applied, which the output must pass.
@@ -85,7 +85,7 @@ pub(crate) fn decode(
 /// they never overlap. Applying them right-to-left means each splice's
 /// length delta can't shift the spans of items earlier in the document. A
 /// separator stands for its markup and is never written back.
-pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
+fn splice(raw: &str, items: &[MarkupItem]) -> Result<String> {
     let mut edits: Vec<(Range<usize>, String)> = items
         .iter()
         .filter(|item| item.passage != Passage::Separator)
@@ -97,18 +97,13 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
     for (Range { start, end }, text) in edits {
         // Spans index into `out`, which starts as `raw` and only ever
         // grows/shrinks to the right of the current splice, so they stay
-        // in-bounds and on char boundaries by construction. The guards are
+        // in-bounds and on char boundaries by construction. The guard is
         // defensive: a malformed loader would surface here rather than
         // panic in `replace_range`.
-        if end > out.len() || start > end {
+        if out.get(start..end).is_none() {
             return Err(Error::processing(format!(
-                "xml splice span {start}..{end} out of bounds (len {})",
+                "markup splice span {start}..{end} is out of bounds or mid-character (len {})",
                 out.len()
-            )));
-        }
-        if !out.is_char_boundary(start) || !out.is_char_boundary(end) {
-            return Err(Error::processing(format!(
-                "xml splice span {start}..{end} falls mid-character"
             )));
         }
         out.replace_range(start..end, &text);
@@ -130,7 +125,7 @@ mod tests {
     /// A markup body stream over its raw source, spliced back the way
     /// [`MarkupDocument`] does.
     struct Doc {
-        stream: ExtractStream<XmlSpan>,
+        stream: ExtractStream<MarkupSpan>,
         raw: String,
     }
 
