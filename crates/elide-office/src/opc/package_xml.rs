@@ -249,26 +249,31 @@ impl Edit for PackageMarkup {
         let mut cuts: Vec<(Range<usize>, &str)> = Vec::new();
         let mut open: Vec<Kept> = Vec::new();
         let mut removing: Option<Skipped> = None;
+        let mut seen_root = false;
         loop {
             let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
-            if let Some(skipped) = &mut removing {
-                if let Some(whole) = skipped.read(&event, span.end)? {
-                    cuts.push((whole, ""));
-                    removing = None;
-                }
+            if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
                 continue;
             }
             match event {
+                // The part is its root element, whole.
+                Event::Eof if !seen_root => {
+                    return Err(malformed_xml("a part without a root element"));
+                }
+                Event::Eof if !open.is_empty() => return Err(malformed_xml("unclosed element")),
                 Event::Eof => break,
-                Event::DocType(_) => return Err(malformed_xml("a document type declaration")),
                 Event::PI(_) => cuts.push((span, "")),
                 Event::Start(ref e) | Event::Empty(ref e) => {
                     let is_start = matches!(event, Event::Start(_));
                     let local = e.local_name().into_inner();
                     let kept = match open.last() {
+                        None if seen_root => {
+                            return Err(malformed_xml("a second root element"));
+                        }
                         None if vocabulary.owns(namespace.as_deref())
                             && local == vocabulary.root =>
                         {
+                            seen_root = true;
                             Kept::Root
                         }
                         None => {
@@ -280,13 +285,13 @@ impl Edit for PackageMarkup {
                         Some(Kept::Root) => match vocabulary.entry(namespace.as_deref(), local) {
                             Some(attributes) => Kept::Entry(attributes),
                             None => {
-                                cut_element(&mut cuts, &mut removing, span, is_start);
+                                removing = Skipped::begin(span, is_start, &mut cuts);
                                 continue;
                             }
                         },
                         // An entry holds nothing.
                         Some(Kept::Entry(_)) => {
-                            cut_element(&mut cuts, &mut removing, span, is_start);
+                            removing = Skipped::begin(span, is_start, &mut cuts);
                             continue;
                         }
                     };
@@ -307,21 +312,6 @@ impl Edit for PackageMarkup {
         }
         let count = cuts.len();
         Ok(Edited::from_cuts(raw, cuts, count))
-    }
-}
-
-/// Cut the element at `span`: an empty one now, a started one once
-/// `removing` reads to its end.
-fn cut_element(
-    cuts: &mut Vec<(Range<usize>, &str)>,
-    removing: &mut Option<Skipped>,
-    span: Range<usize>,
-    is_start: bool,
-) {
-    if is_start {
-        *removing = Some(Skipped::new(span.start));
-    } else {
-        cuts.push((span, ""));
     }
 }
 
@@ -436,6 +426,23 @@ mod tests {
         let raw = r#"<Types><Default Extension="xml" ContentType="x" Extra="1"/>text<x:y xmlns:x="urn:x"/></Types>"#;
         let once = allowlisted(raw, &CONTENT_TYPES);
         assert_eq!(allowlisted(&once, &CONTENT_TYPES), once);
+    }
+
+    /// A truncated part, one without a root, and one with a second root are
+    /// refused rather than cut down.
+    #[test]
+    fn a_part_that_is_not_one_whole_root_is_refused() {
+        let truncated = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/>"#;
+        assert!(PackageMarkup(&CONTENT_TYPES).apply(truncated).is_err());
+        let open_entry = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t" Target="a.xml">"#;
+        assert!(PackageMarkup(&RELATIONSHIPS).apply(open_entry).is_err());
+        assert!(
+            PackageMarkup(&CONTENT_TYPES)
+                .apply("<?xml version=\"1.0\"?>")
+                .is_err()
+        );
+        let twice = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+        assert!(PackageMarkup(&CONTENT_TYPES).apply(twice).is_err());
     }
 
     #[test]

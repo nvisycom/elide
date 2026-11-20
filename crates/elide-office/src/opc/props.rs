@@ -24,7 +24,7 @@ use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 
-use crate::opc::xml_edit::{Edit, Edited, SpannedReader, attribute_source, bom_len};
+use crate::opc::xml_edit::{Edit, Edited, Skipped, SpannedReader, attribute_source, bom_len};
 use crate::opc::{attribute_value, malformed_xml};
 
 /// The core and extended property elements surfaced as fields, each holding
@@ -122,123 +122,109 @@ impl Edit for UnsurfacedProperties {
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
         let mut reader = SpannedReader::new(raw);
         let mut walk = Walk::default();
-        let mut cuts = Cuts::default();
+        let mut cuts: Vec<(Range<usize>, Cut)> = Vec::new();
         // The kept elements that are not fields: the root, and the list
         // containers, vectors, and variants, kept only when an entry is.
         let mut frames: Vec<Frame> = Vec::new();
         // The depth of the surfaced field being read, everything inside kept.
         let mut reading: Option<usize> = None;
-        // The depth and start of the element being removed.
-        let mut removing: Option<(usize, usize)> = None;
+        // An element being removed, left out of the walk.
+        let mut removing: Option<Skipped> = None;
 
         loop {
             let (event, span) = reader.read_event().map_err(malformed_xml)?;
+            if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
+                continue;
+            }
             match event {
                 Event::Eof => break,
-                Event::DocType(_) => return Err(malformed_xml("a document type declaration")),
                 Event::Start(ref e) | Event::Empty(ref e) => {
                     let is_start = matches!(event, Event::Start(_));
                     let depth = walk.depth();
                     let field = walk.enter(e);
-                    if !is_start {
-                        walk.leave();
-                    }
-                    if removing.is_some() || reading.is_some() {
-                        continue;
-                    }
-                    if depth == 0 {
-                        if is_start {
-                            frames.push(Frame::new(depth, span.start, &cuts, None));
-                        }
+                    let kept = if reading.is_some() || depth == 0 {
+                        true
                     } else if let Some(field) = field {
-                        // A custom property's name is read only when it holds
-                        // a value, so an empty one is never surfaced.
-                        if is_start || field.place != Place::Custom {
+                        // A custom property's name is read only when it
+                        // holds a value, so an empty one is never surfaced.
+                        let read = is_start || field.place != Place::Custom;
+                        if read {
                             keep_child(&mut frames);
                             if is_start {
                                 reading = Some(depth);
                             }
-                        } else {
-                            cuts.remove(span);
                         }
-                    } else if is_start && walk.is_list_path() {
-                        frames.push(Frame::new(depth, span.start, &cuts, size(raw, e)?));
-                    } else if is_start {
-                        removing = Some((depth, span.start));
+                        read
                     } else {
-                        cuts.remove(span);
+                        is_start && walk.is_list_path()
+                    };
+                    if !kept {
+                        walk.leave();
+                        removing = Skipped::begin(span, is_start, &mut cuts);
+                        continue;
+                    }
+                    if !is_start {
+                        walk.leave();
+                    } else if reading.is_none() {
+                        let size = if depth == 0 { None } else { size(raw, e)? };
+                        frames.push(Frame::new(depth, span.start, cuts.len(), size));
                     }
                 }
                 Event::End(_) => {
                     walk.leave();
                     let depth = walk.depth();
-                    if let Some((removed, start)) = removing {
-                        if removed == depth {
-                            cuts.remove(start..span.end);
-                            removing = None;
-                        }
-                    } else if reading == Some(depth) {
+                    if reading == Some(depth) {
                         reading = None;
                     } else if reading.is_none()
                         && let Some(frame) = frames.pop_if(|frame| frame.depth == depth)
                     {
                         if frame.children == 0 && depth > 0 {
                             cuts.truncate(frame.cuts);
-                            cuts.remove(frame.start..span.end);
+                            cuts.push((frame.start..span.end, Cut::Removed));
                         } else {
                             if let Some((value, written)) = frame.size
                                 && written != frame.children.to_string()
                             {
-                                cuts.replace(value, frame.children.to_string());
+                                cuts.push((value, Cut::Written(frame.children.to_string())));
                             }
                             keep_child(&mut frames);
                         }
                     }
                 }
-                _ if removing.is_some() => {}
-                Event::Text(ref text) if reading.is_none() && !is_blank(text) => cuts.remove(span),
-                Event::CData(_) if reading.is_none() => cuts.remove(span),
-                Event::GeneralRef(ref r) if reading.is_none() || resolve_ref(r).is_empty() => {
-                    cuts.remove(span);
+                Event::Text(ref text) if reading.is_none() && !is_blank(text) => {
+                    cuts.push((span, Cut::Removed));
                 }
-                Event::PI(_) => cuts.remove(span),
+                Event::CData(_) if reading.is_none() => cuts.push((span, Cut::Removed)),
+                Event::GeneralRef(ref r) if reading.is_none() || resolve_ref(r).is_empty() => {
+                    cuts.push((span, Cut::Removed));
+                }
+                Event::PI(_) => cuts.push((span, Cut::Removed)),
                 _ => {}
             }
         }
-        Ok(cuts.into_edited(raw))
+        let count = cuts
+            .iter()
+            .filter(|(_, cut)| matches!(cut, Cut::Removed))
+            .count();
+        Ok(Edited::from_cuts(raw, cuts, count))
     }
 }
 
-/// The cuts of an [`UnsurfacedProperties`] edit, in document order: each
-/// range removed (counted) or a vector's `size` rewritten (not counted).
+/// What an [`UnsurfacedProperties`] edit writes in place of a range: nothing
+/// for what it removes (counted), or a vector's new `size` (not counted).
 #[derive(Default)]
-struct Cuts(Vec<(Range<usize>, String, bool)>);
+enum Cut {
+    #[default]
+    Removed,
+    Written(String),
+}
 
-impl Cuts {
-    /// Remove `range`.
-    fn remove(&mut self, range: Range<usize>) {
-        self.0.push((range, String::new(), true));
-    }
-
-    /// Write `with` in place of `range`.
-    fn replace(&mut self, range: Range<usize>, with: String) {
-        self.0.push((range, with, false));
-    }
-
-    /// Forget every cut after the first `len`, for an element removed whole.
-    fn truncate(&mut self, len: usize) {
-        self.0.truncate(len);
-    }
-
-    /// `raw` with these cuts, or `None` when there are none.
-    fn into_edited(self, raw: &str) -> Option<Edited> {
-        let count = self.0.iter().filter(|(_, _, counted)| *counted).count();
-        let cuts = self
-            .0
-            .into_iter()
-            .map(|(range, with, _)| (range, with))
-            .collect();
-        Edited::from_cuts(raw, cuts, count)
+impl AsRef<str> for Cut {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Removed => "",
+            Self::Written(text) => text,
+        }
     }
 }
 
@@ -259,11 +245,11 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(depth: usize, start: usize, cuts: &Cuts, size: Option<(Range<usize>, String)>) -> Self {
+    fn new(depth: usize, start: usize, cuts: usize, size: Option<(Range<usize>, String)>) -> Self {
         Self {
             depth,
             start,
-            cuts: cuts.0.len(),
+            cuts,
             size,
             children: 0,
         }

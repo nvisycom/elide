@@ -346,12 +346,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
 
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
-
-        if let Some(skipped) = &mut removing {
-            if let Some(whole) = skipped.read(&event, span.end)? {
-                cuts.push((whole, String::new()));
-                removing = None;
-            }
+        if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
             continue;
         }
 
@@ -364,9 +359,8 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
             Event::Eof if !open.is_empty() => return Err(malformed_xml("unclosed element")),
             Event::Eof => break,
             Event::Decl(_) => {}
-            Event::DocType(_) => {
-                return Err(malformed_xml("a document type declaration"));
-            }
+            // Refused by the skip above.
+            Event::DocType(_) => {}
             // Comments are cut by their own edit.
             Event::Comment(_) => {}
             Event::PI(_) => {
@@ -485,11 +479,7 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
                     }
                     Decision::Drop(content) => {
                         record(content);
-                        if is_start {
-                            removing = Some(Skipped::new(span.start));
-                        } else {
-                            cuts.push((span, String::new()));
-                        }
+                        removing = Skipped::begin(span, is_start, &mut cuts);
                     }
                 }
             }

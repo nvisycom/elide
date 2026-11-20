@@ -333,20 +333,11 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
 
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
-
-        if let Some(skipped) = &mut removing {
-            if let Some(whole) = skipped.read(&event, span.end)? {
-                cuts.push((whole, ""));
-                removing = None;
-            }
+        if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
             continue;
         }
-
         match event {
             Event::Eof => break,
-            Event::DocType(_) => {
-                return Err(malformed_xml("a document type declaration"));
-            }
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let is_start = matches!(event, Event::Start(_));
                 if is_start && open.len() >= MAX_DEPTH {
@@ -361,11 +352,11 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                 let attributes: Vec<Attribute<'_>> =
                     owned.iter().map(OwnedAttribute::view).collect();
                 match rules.element(name, &attributes) {
-                    Action::Remove if is_start => {
-                        removing = Some(Skipped::new(span.start));
+                    Action::Remove => {
+                        removing = Skipped::begin(span, is_start, &mut cuts);
                         count += 1;
                     }
-                    Action::Remove | Action::Unwrap => {
+                    Action::Unwrap => {
                         cuts.push((span.clone(), ""));
                         count += 1;
                         if is_start {
@@ -540,6 +531,50 @@ impl Skipped {
     /// The element whose start tag begins at `start`.
     pub(crate) fn new(start: usize) -> Self {
         Self { start, depth: 1 }
+    }
+
+    /// Begin removing the element whose tag spans `span`: an empty one is cut
+    /// into `cuts` now, a started one (`is_start`) is returned to skip to its
+    /// end tag.
+    pub(crate) fn begin<S: Default>(
+        span: Range<usize>,
+        is_start: bool,
+        cuts: &mut Vec<(Range<usize>, S)>,
+    ) -> Option<Self> {
+        if is_start {
+            Some(Self::new(span.start))
+        } else {
+            cuts.push((span, S::default()));
+            None
+        }
+    }
+
+    /// What a reader that removes elements does first with each `event`,
+    /// ending at `end`: refuse a document type declaration, and read an event
+    /// inside the element `removing` skips, cutting the element whole into
+    /// `cuts` once its end tag is read. `true` when the event was inside it.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) on
+    /// a document type declaration, or a part ending inside the element.
+    pub(crate) fn skip<S: Default>(
+        removing: &mut Option<Self>,
+        event: &Event<'_>,
+        end: usize,
+        cuts: &mut Vec<(Range<usize>, S)>,
+    ) -> Result<bool> {
+        if matches!(event, Event::DocType(_)) {
+            return Err(malformed_xml("a document type declaration"));
+        }
+        let Some(skipped) = removing else {
+            return Ok(false);
+        };
+        if let Some(whole) = skipped.read(event, end)? {
+            cuts.push((whole, S::default()));
+            *removing = None;
+        }
+        Ok(true)
     }
 
     /// Read `event`, ending at `end`, inside the element: the element's whole
