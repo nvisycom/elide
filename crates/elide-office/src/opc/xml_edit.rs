@@ -9,7 +9,8 @@
 //! element round-trip exactly. Element and attribute names are matched by
 //! namespace URI, never by prefix, so a part that binds `w:` to an unusual
 //! prefix is still recognized, and a strict namespace is matched as its
-//! transitional twin, so a strict part is edited as a transitional one.
+//! transitional twin, so a strict part is edited as a transitional one: every
+//! [`Name`] a [`Rules`] sees is already mapped.
 
 use std::borrow::Cow;
 use std::fmt::Display;
@@ -23,7 +24,7 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Reader};
 
 use crate::opc::malformed_xml;
-use crate::opc::schema::transitional;
+use crate::opc::ns::transitional;
 
 /// A namespace-qualified element or attribute name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

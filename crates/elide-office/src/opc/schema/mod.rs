@@ -60,8 +60,8 @@ use crate::opc::archive::MAX_PART_BYTES;
 use crate::opc::ct::{self, DML, PML, SML, WML};
 use crate::opc::malformed_xml;
 use crate::opc::ns::{
-    A, C, CUSTOM_PROPERTIES, DGM, DOC_PROPS_VTYPES, EXTENDED_PROPERTIES, LC, MC, P, PIC, R, VML,
-    VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15, W16CEX, W16CID, X, XDR, XMLNS,
+    A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
+    W16CEX, W16CID, X, XDR, XMLNS, transitional,
 };
 use crate::opc::xml_edit::{Name, Skipped, SpannedReader, attribute_source, bound, splice_with};
 
@@ -109,60 +109,6 @@ impl Type {
 
 /// The namespaces of a legacy VML drawing's shapes.
 const VML_SHAPES: &[&str] = &[VML, VML_OFFICE, VML_EXCEL, VML_POWERPOINT, VML_WORD];
-
-/// The strict namespaces and the transitional ones their schema follows.
-const STRICT: &[(&str, &str)] = &[
-    ("http://purl.oclc.org/ooxml/officeDocument/relationships", R),
-    (
-        "http://purl.oclc.org/ooxml/officeDocument/math",
-        "http://schemas.openxmlformats.org/officeDocument/2006/math",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/officeDocument/sharedTypes",
-        "http://schemas.openxmlformats.org/officeDocument/2006/sharedTypes",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/officeDocument/extendedProperties",
-        EXTENDED_PROPERTIES,
-    ),
-    (
-        "http://purl.oclc.org/ooxml/officeDocument/customProperties",
-        CUSTOM_PROPERTIES,
-    ),
-    (
-        "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes",
-        DOC_PROPS_VTYPES,
-    ),
-    ("http://purl.oclc.org/ooxml/wordprocessingml/main", W),
-    ("http://purl.oclc.org/ooxml/presentationml/main", P),
-    ("http://purl.oclc.org/ooxml/spreadsheetml/main", X),
-    ("http://purl.oclc.org/ooxml/drawingml/main", A),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing",
-        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
-    ),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing",
-        XDR,
-    ),
-    ("http://purl.oclc.org/ooxml/drawingml/picture", PIC),
-    ("http://purl.oclc.org/ooxml/drawingml/chart", C),
-    (
-        "http://purl.oclc.org/ooxml/drawingml/chartDrawing",
-        "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing",
-    ),
-    ("http://purl.oclc.org/ooxml/drawingml/diagram", DGM),
-    ("http://purl.oclc.org/ooxml/drawingml/lockedCanvas", LC),
-];
-
-/// The transitional twin of the strict `namespace`, or `namespace` itself when
-/// it is not a strict one.
-pub(crate) fn transitional(namespace: &str) -> &str {
-    STRICT
-        .iter()
-        .find(|(strict, _)| *strict == namespace)
-        .map_or(namespace, |(_, transitional)| transitional)
-}
 
 /// The index of `namespace` in [`NAMESPACES`] (0 for none), a strict one read
 /// as its transitional twin, or `None` when the schemas never name it.

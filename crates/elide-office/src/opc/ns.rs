@@ -1,7 +1,9 @@
 //! The XML namespaces named in more than one place, each by the prefix Office
 //! writes it under where it has a well-known one. The transitional URIs are
-//! listed; a strict part's namespaces map onto these through
-//! [`schema::transitional`](crate::opc::schema::transitional).
+//! listed; a strict part's namespaces map onto these through [`transitional`],
+//! and its relationship types through [`transitional_type`].
+
+use std::borrow::Cow;
 
 /// The namespace of the `xml:` attributes (`xml:space`, `xml:lang`).
 pub(crate) const XML: &str = "http://www.w3.org/XML/1998/namespace";
@@ -82,3 +84,72 @@ pub(crate) const VML_EXCEL: &str = "urn:schemas-microsoft-com:office:excel";
 pub(crate) const VML_POWERPOINT: &str = "urn:schemas-microsoft-com:office:powerpoint";
 /// Legacy Word drawing (`w10:`).
 pub(crate) const VML_WORD: &str = "urn:schemas-microsoft-com:office:word";
+
+/// The strict namespaces and the transitional ones they map onto.
+const STRICT: &[(&str, &str)] = &[
+    ("http://purl.oclc.org/ooxml/officeDocument/relationships", R),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/math",
+        "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/sharedTypes",
+        "http://schemas.openxmlformats.org/officeDocument/2006/sharedTypes",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/extendedProperties",
+        EXTENDED_PROPERTIES,
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/customProperties",
+        CUSTOM_PROPERTIES,
+    ),
+    (
+        "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes",
+        DOC_PROPS_VTYPES,
+    ),
+    ("http://purl.oclc.org/ooxml/wordprocessingml/main", W),
+    ("http://purl.oclc.org/ooxml/presentationml/main", P),
+    ("http://purl.oclc.org/ooxml/spreadsheetml/main", X),
+    ("http://purl.oclc.org/ooxml/drawingml/main", A),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing",
+        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    ),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing",
+        XDR,
+    ),
+    ("http://purl.oclc.org/ooxml/drawingml/picture", PIC),
+    ("http://purl.oclc.org/ooxml/drawingml/chart", C),
+    (
+        "http://purl.oclc.org/ooxml/drawingml/chartDrawing",
+        "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing",
+    ),
+    ("http://purl.oclc.org/ooxml/drawingml/diagram", DGM),
+    ("http://purl.oclc.org/ooxml/drawingml/lockedCanvas", LC),
+];
+
+/// The transitional twin of the strict `namespace`, or `namespace` itself when
+/// it is not a strict one.
+pub(crate) fn transitional(namespace: &str) -> &str {
+    STRICT
+        .iter()
+        .find(|(strict, _)| *strict == namespace)
+        .map_or(namespace, |(_, transitional)| transitional)
+}
+
+/// Where the transitional relationship types are named.
+const TRANSITIONAL_TYPES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+/// Where their strict twins are, each under the same name.
+const STRICT_TYPES: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/";
+
+/// The transitional twin of the strict relationship type `kind`, or `kind`
+/// itself when it is not a strict one.
+pub(crate) fn transitional_type(kind: &str) -> Cow<'_, str> {
+    match kind.strip_prefix(STRICT_TYPES) {
+        Some(name) => Cow::Owned(format!("{TRANSITIONAL_TYPES}{name}")),
+        None => Cow::Borrowed(kind),
+    }
+}

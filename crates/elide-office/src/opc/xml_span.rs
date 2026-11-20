@@ -28,9 +28,8 @@ use quick_xml::{NsReader, Reader};
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
-use crate::opc::ns::{W, X};
-use crate::opc::relationships::{HYPERLINK, transitional_type};
-use crate::opc::schema;
+use crate::opc::ns::{W, X, transitional, transitional_type};
+use crate::opc::relationships::HYPERLINK;
 use crate::opc::xml_edit::{Name, SpannedReader, attribute_source, bound};
 
 /// The XML construct a redactable span lives inside, which determines how a
@@ -331,7 +330,7 @@ fn visit_attributes(
             _ => continue,
         };
         let element = Name {
-            namespace: element_ns.as_deref().map(schema::transitional),
+            namespace: element_ns.as_deref().map(transitional),
             local: elem.local_name().into_inner(),
         };
         for attr in elem.attributes() {
@@ -339,7 +338,7 @@ fn visit_attributes(
             let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
             let attribute_ns = bound(&resolved);
             let attribute = Name {
-                namespace: attribute_ns.as_deref().map(schema::transitional),
+                namespace: attribute_ns.as_deref().map(transitional),
                 local: local.into_inner(),
             };
             visit(element, attribute, &attr)?;
@@ -504,7 +503,7 @@ pub(crate) fn preserve_space_at(raw: &str, start: usize, text: &str) -> Option<u
     let uri_start = raw.find(&declaration)? + declaration.len();
     let uri = &raw[uri_start..uri_start + raw[uri_start..].find('"')?];
     SPACE_COLLAPSING_NAMESPACES
-        .contains(&schema::transitional(uri))
+        .contains(&transitional(uri))
         .then_some(start - 1)
 }
 

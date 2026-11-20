@@ -17,7 +17,6 @@ use crate::opc::ns::{
     CORE_PROPERTIES, CUSTOM_PROPERTIES, DC, DCMITYPE, DCTERMS, DOC_PROPS_VTYPES,
     EXTENDED_PROPERTIES, XML, XMLNS, XSI,
 };
-use crate::opc::schema;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
 
 /// The reviewed namespaces: XML itself, the core properties with the Dublin
@@ -36,9 +35,10 @@ const VOCABULARIES: &[&str] = &[
     DOC_PROPS_VTYPES,
 ];
 
-/// Whether `namespace` is a reviewed vocabulary.
+/// Whether `namespace`, a strict one already mapped by
+/// [`edit`](crate::opc::xml_edit::edit), is a reviewed vocabulary.
 fn is_known(namespace: &str) -> bool {
-    VOCABULARIES.contains(&schema::transitional(namespace))
+    VOCABULARIES.contains(&namespace)
 }
 
 /// Element rules that change nothing and record the first element or

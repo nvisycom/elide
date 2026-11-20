@@ -10,11 +10,11 @@
 //! is read as [`package_xml`](super::package_xml) cuts it down to its OPC
 //! vocabulary, so it reads the same before and after.
 
-use std::borrow::Cow;
 use std::collections::HashSet;
 
 use elide_core::{Error, Result};
 
+use crate::opc::ns::transitional_type;
 use crate::opc::package_xml::{RELATIONSHIPS, entries, without_entries};
 use crate::opc::part::PartPath;
 
@@ -22,21 +22,6 @@ use crate::opc::part::PartPath;
 /// is visible content (a link a reader follows) rather than a hidden reference.
 pub(crate) const HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
-
-/// Where the transitional relationship types are named.
-const TRANSITIONAL_TYPES: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
-/// Where their strict twins are, each under the same name.
-const STRICT_TYPES: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/";
-
-/// The transitional twin of the strict relationship type `kind`, or `kind`
-/// itself when it is not a strict one.
-pub(crate) fn transitional_type(kind: &str) -> Cow<'_, str> {
-    match kind.strip_prefix(STRICT_TYPES) {
-        Some(name) => Cow::Owned(format!("{TRANSITIONAL_TYPES}{name}")),
-        None => Cow::Borrowed(kind),
-    }
-}
 
 /// One relationship: its id, its type URI (a strict one as its transitional
 /// twin), its raw target, and whether the target lies outside the package.
