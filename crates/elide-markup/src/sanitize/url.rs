@@ -4,43 +4,44 @@
 use crate::references::{CharacterReferences, decoded};
 
 /// URL schemes that run script when the URL is followed.
-pub(super) const SCRIPT_SCHEMES: [&str; 3] = ["javascript:", "vbscript:", "data:text/html"];
+const SCRIPT_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:text/html"];
 
 /// URL schemes (and the scheme-relative form) that reach a server.
-const REMOTE_SCHEMES: [&str; 5] = ["http:", "https:", "ftp:", "//", "\\\\"];
+const REMOTE_SCHEMES: &[&str] = &["http:", "https:", "ftp:", "//", "\\\\"];
 
-/// Whether the attribute `key`'s `value` loads anything from a server: a
-/// `srcset` lists several URLs, every other attribute one.
-///
-/// A `srcset` is decoded before it is split, since a reference can stand for
-/// the comma or space between candidates, and every word of it is checked:
-/// a descriptor is never a remote URL, so nothing is missed by not telling
-/// one from a URL.
-pub(super) fn loads_remote(value: &str, key: &str) -> bool {
-    if key == "srcset" {
-        decoded(value, CharacterReferences::Html)
-            .split(|c: char| c == ',' || c.is_ascii_whitespace())
-            .any(reaches_server)
-    } else {
-        is_remote(value)
-    }
+/// Whether the URL `decoded`, its character references already decoded, runs
+/// script when followed.
+pub(super) fn runs_script(decoded: &str) -> bool {
+    let url = scheme_of(decoded);
+    SCRIPT_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
 }
 
-/// Whether the URL attribute `value` reaches a server.
+/// Whether the URL attribute `value`, as written, reaches a server.
 pub(super) fn is_remote(value: &str) -> bool {
     reaches_server(&decoded(value, CharacterReferences::Html))
 }
 
 /// Whether the URL `decoded`, its character references already decoded,
 /// reaches a server.
-fn reaches_server(decoded: &str) -> bool {
+pub(super) fn reaches_server(decoded: &str) -> bool {
     let url = scheme_of(decoded);
     REMOTE_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
 }
 
+/// Whether a candidate of the `srcset` `decoded` reaches a server.
+///
+/// It is split once decoded, since a reference can stand for the comma or
+/// space between candidates, and every word of it is checked: a descriptor is
+/// never a remote URL, so nothing is missed by not telling one from a URL.
+pub(super) fn srcset_reaches_server(decoded: &str) -> bool {
+    decoded
+        .split(|c: char| c == ',' || c.is_ascii_whitespace())
+        .any(reaches_server)
+}
+
 /// The CSS functions whose arguments a browser may load: `url()`, `src()`,
 /// and `image-set()` (with its `-webkit-` form), whose strings are URLs too.
-const CSS_LOADING_FUNCTIONS: [&str; 3] = ["url(", "src(", "image-set("];
+const CSS_LOADING_FUNCTIONS: &[&str] = &["url(", "src(", "image-set("];
 
 /// Whether the CSS `css` loads anything from a server, through a loading
 /// function or an `@import`.
@@ -63,8 +64,8 @@ pub(super) fn css_loads_remote(css: &str) -> bool {
     .any(|css| css_reaches_server(&css.to_ascii_lowercase()))
 }
 
-/// Whether the CSS `css`, read as written and lowercased, names a remote URL in a loading
-/// function or an `@import`.
+/// Whether the CSS `css`, read as written and lowercased, names a remote URL
+/// in a loading function or an `@import`.
 fn css_reaches_server(css: &str) -> bool {
     let arguments = CSS_LOADING_FUNCTIONS.iter().flat_map(|function| {
         css.split(function).skip(1).flat_map(|rest| {
@@ -138,13 +139,6 @@ fn css_uncommented(css: &str) -> String {
     }
     out.push_str(rest);
     out
-}
-
-/// A URL attribute's `value` as a browser reads its scheme: character
-/// references decoded, the tab and line breaks a URL parser drops removed, and
-/// leading spaces and control characters trimmed, lowercased.
-pub(super) fn normalized_url(value: &str) -> String {
-    scheme_of(&decoded(value, CharacterReferences::Html))
 }
 
 /// A decoded URL as a browser reads its scheme: the tab and line breaks a URL

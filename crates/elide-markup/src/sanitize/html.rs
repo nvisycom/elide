@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
-use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
+use super::url::{css_loads_remote, is_remote, reaches_server, runs_script, srcset_reaches_server};
 use crate::engine::meta::MetaTag;
 use crate::engine::tag::{HtmlAttribute, keyword};
 use crate::references::{CharacterReferences, decoded};
@@ -158,7 +158,7 @@ const ACTIVE_ELEMENTS: &[&str] = &[
 
 /// HTML void elements: they have no end tag, so leaving one out leaves out its
 /// tag alone.
-pub(super) const VOID_ELEMENTS: &[&str] = &[
+const VOID_ELEMENTS: &[&str] = &[
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
     "track", "wbr",
 ];
@@ -802,7 +802,7 @@ const LOADING_ATTRIBUTES: &[&str] = &[
 
 /// The `http-equiv` directives that act when the page opens: a redirect, and a
 /// cookie set on the reader's browser.
-const ACTING_DIRECTIVES: [&str; 2] = ["refresh", "set-cookie"];
+const ACTING_DIRECTIVES: &[&str] = &["refresh", "set-cookie"];
 
 /// What the rebuild does with an element.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -823,22 +823,20 @@ pub(super) fn element(
     attributes: &[HtmlAttribute<'_>],
     policy: HiddenContentPolicy,
 ) -> Element {
-    let value = |key: &str| {
-        attributes
-            .iter()
-            .find(|attr| attr.name.eq_ignore_ascii_case(key))
-            .map(|attr| keyword(attr.value.unwrap_or_default()))
-    };
-    if value("hidden").is_some_and(|hidden| hidden != "until-found") {
+    let attributes = Attributes(attributes);
+    if attributes
+        .keyword("hidden")
+        .is_some_and(|hidden| hidden != "until-found")
+    {
         return Element::Drop(HiddenContent::Undisplayed);
     }
     match space {
-        Space::Html => html_element(name, attributes, &value, policy),
+        Space::Html => html_element(name, attributes, policy),
         Space::Svg => match name {
             "script" => Element::Drop(HiddenContent::Script),
             _ if SVG_ANIMATIONS.contains(&name) => Element::Drop(HiddenContent::Action),
             "metadata" => Element::Drop(HiddenContent::Properties),
-            _ if undisplayed_svg(&value) => Element::Drop(HiddenContent::Undisplayed),
+            _ if undisplayed_svg(attributes) => Element::Drop(HiddenContent::Undisplayed),
             _ if SVG_ELEMENTS.contains(&name) => Element::Keep,
             _ => Element::Drop(HiddenContent::ApplicationData),
         },
@@ -850,11 +848,10 @@ pub(super) fn element(
     }
 }
 
-/// [`element`] in HTML, `value` reading an attribute as a browser compares it.
+/// [`element`] in HTML.
 fn html_element(
     name: &str,
-    attributes: &[HtmlAttribute<'_>],
-    value: &dyn Fn(&str) -> Option<String>,
+    attributes: Attributes<'_, '_>,
     policy: HiddenContentPolicy,
 ) -> Element {
     match name {
@@ -862,28 +859,24 @@ fn html_element(
         _ if ACTIVE_ELEMENTS.contains(&name) => Element::Drop(HiddenContent::Control),
         "template" => Element::Drop(HiddenContent::Undisplayed),
         "base" => Element::Drop(HiddenContent::Link),
-        "link"
-            if attributes.iter().any(|attr| {
-                attr.name.eq_ignore_ascii_case("href") && attr.value.is_some_and(is_remote)
-            }) =>
-        {
-            Element::Drop(HiddenContent::Link)
-        }
+        "link" if attributes.remote_href() => Element::Drop(HiddenContent::Link),
         // Writing a repeated attribute once could turn a field into a tag that
         // renders the page, whose content is then never flagged, so such a
         // tag goes whole.
-        "meta" if repeats(attributes) => Element::Drop(HiddenContent::Properties),
-        "meta" => match meta_removal(attributes, policy) {
+        "meta" if repeats(attributes.0) => Element::Drop(HiddenContent::Properties),
+        "meta" => match meta_removal(attributes.0, policy) {
             Some(content) => Element::Drop(content),
             None => Element::Keep,
         },
         // A dialog shows only once opened by script, which never runs.
-        "dialog" if value("open").is_none() => Element::Drop(HiddenContent::Undisplayed),
-        "input" if value("type").as_deref() == Some("hidden") => {
+        "dialog" if attributes.keyword("open").is_none() => {
+            Element::Drop(HiddenContent::Undisplayed)
+        }
+        "input" if attributes.keyword("type").as_deref() == Some("hidden") => {
             Element::Drop(HiddenContent::Undisplayed)
         }
         // The root of SVG is read in SVG, where `display` is a property.
-        "svg" if undisplayed_svg(value) => Element::Drop(HiddenContent::Undisplayed),
+        "svg" if undisplayed_svg(attributes) => Element::Drop(HiddenContent::Undisplayed),
         "svg" => Element::Enter(Space::Svg),
         "math" => Element::Enter(Space::Math),
         _ if HTML_ELEMENTS.contains(&name) => Element::Keep,
@@ -891,10 +884,33 @@ fn html_element(
     }
 }
 
-/// Whether an SVG element whose attributes `value` reads is not displayed:
-/// its `display` property, read as CSS, is `none`.
-fn undisplayed_svg(value: &dyn Fn(&str) -> Option<String>) -> bool {
-    value("display").is_some_and(|display| display.trim() == "none")
+/// A tag's attributes as written, read as a browser compares them.
+#[derive(Clone, Copy)]
+struct Attributes<'t, 'a>(&'t [HtmlAttribute<'a>]);
+
+impl Attributes<'_, '_> {
+    /// The value of the first attribute named `key`, read as a keyword.
+    fn keyword(self, key: &str) -> Option<String> {
+        self.0
+            .iter()
+            .find(|attr| attr.name.eq_ignore_ascii_case(key))
+            .map(|attr| keyword(attr.value.unwrap_or_default()))
+    }
+
+    /// Whether an `href` among them reaches a server.
+    fn remote_href(self) -> bool {
+        self.0
+            .iter()
+            .any(|attr| attr.name.eq_ignore_ascii_case("href") && attr.value.is_some_and(is_remote))
+    }
+}
+
+/// Whether an SVG element with `attributes` is not displayed: its `display`
+/// property, read as CSS, is `none`.
+fn undisplayed_svg(attributes: Attributes<'_, '_>) -> bool {
+    attributes
+        .keyword("display")
+        .is_some_and(|display| display.trim() == "none")
 }
 
 /// Whether an attribute of `attributes` is written twice.
@@ -926,9 +942,31 @@ fn meta_removal(
 /// whatever its attributes.
 pub(super) fn names(space: Space, name: &str) -> bool {
     match space {
-        Space::Html => HTML_ELEMENTS.contains(&name) || name == "svg" || name == "math",
+        Space::Html => HTML_ELEMENTS.contains(&name) || enters(name).is_some(),
         Space::Svg => SVG_ELEMENTS.contains(&name),
         Space::Math => MATH_ELEMENTS.contains(&name),
+    }
+}
+
+/// The vocabulary the HTML element `name` (lowercased) enters: SVG for an
+/// `svg`, MathML for a `math`.
+pub(super) fn enters(name: &str) -> Option<Space> {
+    match name {
+        "svg" => Some(Space::Svg),
+        "math" => Some(Space::Math),
+        _ => None,
+    }
+}
+
+/// Whether the element `name` (lowercased), whose content is read in `own`,
+/// holds what follows: a void HTML element never does, and a browser ignores
+/// the `self_closing` flag on any other HTML element, but not on an SVG or
+/// MathML one, the root of either included.
+pub(super) fn opens(own: Space, name: &str, self_closing: bool) -> bool {
+    if own == Space::Html {
+        !VOID_ELEMENTS.contains(&name)
+    } else {
+        !self_closing
     }
 }
 
@@ -947,42 +985,47 @@ pub(super) fn breaks_out(space: Space, name: &str, attributes: &[HtmlAttribute<'
             }))
 }
 
-/// What the attribute `attr` of the element `element` (lowercased) read in
-/// `space` is left out as, or `None` when it is copied: an `on*` event
-/// handler or a URL that runs script, a URL the page loads from a server, a
-/// `ping` that reports a followed link, inline style or an SVG presentation
-/// attribute read as CSS that loads from a server, and anything else that no reader of
-/// the page sees.
+/// What the attribute `key` (lowercased) with `value` (as written) of the
+/// element `element` (lowercased) read in `space` is left out as, or `None`
+/// when it is copied: an `on*` event handler or a URL that runs script, a URL
+/// the page loads from a server, a `ping` that reports a followed link, inline
+/// style or an SVG presentation attribute read as CSS that loads from a
+/// server, and anything else that no reader of the page sees.
+///
+/// The value is read with its character references decoded, as a browser
+/// reads it; CSS reads its line breaks, which a URL parser drops.
 pub(super) fn attribute(
     space: Space,
     element: &str,
-    attr: &HtmlAttribute<'_>,
+    key: &str,
+    value: Option<&str>,
 ) -> Option<HiddenContent> {
-    let key = attr.name.to_ascii_lowercase();
-    let local = key.rsplit(':').next().unwrap_or(&key);
-    let value = attr.value.unwrap_or_default();
-    let url = normalized_url(value);
-    if key.starts_with("on") || SCRIPT_SCHEMES.iter().any(|scheme| url.starts_with(scheme)) {
+    let local = key.rsplit(':').next().unwrap_or(key);
+    let value = decoded(value.unwrap_or_default(), CharacterReferences::Html);
+    if key.starts_with("on") || runs_script(&value) {
         return Some(HiddenContent::Script);
     }
     let hyperlink = element == "a" || element == "area";
+    let loads = LOADING_ATTRIBUTES.contains(&local)
+        && if local == "srcset" {
+            srcset_reaches_server(&value)
+        } else {
+            reaches_server(&value)
+        };
     if local == "ping"
-        || (LOADING_ATTRIBUTES.contains(&local) && loads_remote(value, local))
-        || (local == "href" && !hyperlink && is_remote(value))
+        || loads
+        || (local == "href" && !hyperlink && reaches_server(&value))
         || ((local == "style" || (space == Space::Svg && SVG_CSS_ATTRIBUTES.contains(&local)))
-            && css_loads_remote(&decoded(value, CharacterReferences::Html)))
+            && css_loads_remote(&value))
     {
         return Some(HiddenContent::Link);
     }
     let allowed = match space {
-        Space::Html => {
-            HTML_GLOBAL.contains(&key.as_str()) || html_attributes(element).contains(&key.as_str())
-        }
+        Space::Html => HTML_GLOBAL.contains(&key) || html_attributes(element).contains(&key),
         Space::Svg => {
-            SVG_GLOBAL.contains(&key.as_str())
-                || (element.starts_with("fe") && SVG_FILTER.contains(&key.as_str()))
+            SVG_GLOBAL.contains(&key) || (element.starts_with("fe") && SVG_FILTER.contains(&key))
         }
-        Space::Math => MATH_GLOBAL.contains(&key.as_str()),
+        Space::Math => MATH_GLOBAL.contains(&key),
     };
     // Accessible names and descriptions are read to the reader by assistive
     // technology, and extracted like any other attribute value.
@@ -991,12 +1034,12 @@ pub(super) fn attribute(
 
 /// The HTML elements whose body a browser reads as text with references
 /// decoded (RCDATA), never as markup.
-pub(super) const RCDATA_ELEMENTS: [&str; 2] = ["textarea", "title"];
+const RCDATA_ELEMENTS: &[&str] = &["textarea", "title"];
 
-/// The HTML elements whose body a browser reads as text up to their end tag,
-/// never as markup: the RCDATA ones and the raw-text ones. A `<plaintext>`
-/// has no end tag, so its text runs to the end of the document.
-pub(super) const TEXT_ELEMENTS: [&str; 10] = [
+/// The HTML elements whose body a browser reads as text as written, never as
+/// markup. A `<plaintext>` has no end tag, so its text runs to the end of the
+/// document.
+const RAW_TEXT_ELEMENTS: &[&str] = &[
     "iframe",
     "noembed",
     "noframes",
@@ -1004,10 +1047,26 @@ pub(super) const TEXT_ELEMENTS: [&str; 10] = [
     "plaintext",
     "script",
     "style",
-    "textarea",
-    "title",
     "xmp",
 ];
+
+/// The HTML element `name` (lowercased), when its body is RCDATA.
+pub(super) fn rcdata_element(name: &str) -> Option<&'static str> {
+    RCDATA_ELEMENTS
+        .iter()
+        .find(|element| **element == name)
+        .copied()
+}
+
+/// The HTML element `name` (lowercased), when a browser reads its body as
+/// text up to its end tag: an RCDATA or a raw-text one.
+pub(super) fn text_element(name: &str) -> Option<&'static str> {
+    RCDATA_ELEMENTS
+        .iter()
+        .chain(RAW_TEXT_ELEMENTS)
+        .find(|element| **element == name)
+        .copied()
+}
 
 /// Whether the SVG or MathML element `name` (lowercased) read in `space` is
 /// one whose content a browser reads as HTML: an SVG `foreignObject`, `desc`,
