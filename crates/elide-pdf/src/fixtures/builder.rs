@@ -100,8 +100,8 @@ impl DocBuilder {
         self.doc
             .catalog_mut()
             .expect("the catalog just made")
-            .extend(&self.catalog);
-        self.doc.trailer.extend(&self.trailer);
+            .set_all(self.catalog);
+        self.doc.trailer.set_all(self.trailer);
         (self.doc, ids)
     }
 
@@ -140,18 +140,21 @@ impl Page {
     }
 
     /// Name `value` `name` in the resource category `category`.
-    pub(crate) fn resource(mut self, category: &str, name: &str, value: impl Into<Object>) -> Self {
-        let entries = match self.resources.get_mut(category.as_bytes()) {
-            Ok(Object::Dictionary(entries)) => entries,
-            _ => {
-                self.resources.set(category, Dictionary::new());
-                self.resources
-                    .get_mut(category.as_bytes())
-                    .and_then(Object::as_dict_mut)
-                    .expect("the category just set")
-            }
-        };
-        entries.set(name, value);
+    pub(crate) fn resource(
+        mut self,
+        category: impl AsRef<[u8]>,
+        name: impl Into<Vec<u8>>,
+        value: impl Into<Object>,
+    ) -> Self {
+        let category = category.as_ref();
+        if !matches!(self.resources.get(category), Ok(Object::Dictionary(_))) {
+            self.resources.set(category, Dictionary::new());
+        }
+        self.resources
+            .get_mut(category)
+            .and_then(Object::as_dict_mut)
+            .expect("the category just set")
+            .set(name, value);
         self
     }
 
@@ -160,9 +163,8 @@ impl Page {
         for (category, entries) in resources {
             match entries {
                 Object::Dictionary(entries) => {
-                    let category = String::from_utf8_lossy(&category).into_owned();
                     for (name, value) in entries {
-                        self = self.resource(&category, &String::from_utf8_lossy(&name), value);
+                        self = self.resource(&category, name, value);
                     }
                 }
                 value => self.resources.set(category, value),
@@ -191,7 +193,7 @@ impl Page {
 
     /// Set every entry of `entries` on the page.
     pub(crate) fn entries(mut self, entries: Dictionary) -> Self {
-        self.entries.extend(&entries);
+        self.entries.set_all(entries);
         self
     }
 
@@ -199,6 +201,20 @@ impl Page {
     pub(crate) fn set(mut self, key: &str, value: impl Into<Object>) -> Self {
         self.entries.set(key, value);
         self
+    }
+}
+
+/// Setting each entry of a dictionary over another's, replacing a key both
+/// have: lopdf's `extend` instead joins two arrays under one key.
+trait SetAll {
+    fn set_all(&mut self, entries: Dictionary);
+}
+
+impl SetAll for Dictionary {
+    fn set_all(&mut self, entries: Dictionary) {
+        for (key, value) in entries {
+            self.set(key, value);
+        }
     }
 }
 
@@ -270,5 +286,29 @@ mod tests {
         let content = doc.resolve(page.get(b"Contents").unwrap()).unwrap();
         let content = Content::decode(&content.as_stream().unwrap().content).unwrap();
         assert_eq!(content.operations.len(), 4);
+    }
+
+    /// Entries set over a page replace those it has, and resource names keep
+    /// their bytes.
+    #[test]
+    fn entries_replace_and_names_keep_their_bytes() {
+        let page = Page::new()
+            .size(100, 200)
+            .entries(dictionary! { "MediaBox" => vec![0.into(), 0.into(), 10.into(), 20.into()] })
+            .resources(dictionary! {
+                "XObject" => dictionary! { vec![0x80] => 1, vec![0x81] => 2 },
+            });
+        let media_box = page
+            .entries
+            .get(b"MediaBox")
+            .and_then(Object::as_array)
+            .unwrap();
+        assert_eq!(media_box.len(), 4);
+        let xobjects = page
+            .resources
+            .get(b"XObject")
+            .and_then(Object::as_dict)
+            .unwrap();
+        assert_eq!(xobjects.len(), 2);
     }
 }
