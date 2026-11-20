@@ -411,45 +411,66 @@ impl<'a> Rebuild<'a> {
             Event::Start(e) | Event::Empty(e) if html => {
                 let tag = e.html5_tag(raw)?;
                 let name = tag.name.to_ascii_lowercase();
-                // Whether the element is read as HTML: in HTML, or past an
-                // element of SVG or MathML that reads its content as HTML.
-                let as_html = region.space == Space::Html
-                    || html::integration_point(region.space, &region.name)
-                    || region
-                        .open
-                        .iter()
-                        .any(|open| html::integration_point(region.space, open));
-                let ends = if region.space == Space::Html {
-                    region.open.is_empty() && html::closes(&region.name, &name)
-                } else {
-                    html::breaks_out(region.space, &name, &tag.attributes)
+                // An HTML element in SVG or MathML closes the foreign elements
+                // open around it, up to one that reads its content as HTML;
+                // past the removed element itself, it ends the removal.
+                if html::breaks_out(region.current().1, &name, &tag.attributes) {
+                    while let Some((open, space)) = region.open.last()
+                        && *space != Space::Html
+                        && !html::integration_point(*space, open)
+                    {
+                        region.open.pop();
+                    }
+                    if region.open.is_empty()
+                        && region.space != Space::Html
                         && !html::integration_point(region.space, &region.name)
-                        && !region
-                            .open
-                            .iter()
-                            .any(|open| html::integration_point(region.space, open))
-                };
-                if ends {
+                    {
+                        self.dropping = None;
+                        return Ok(Skip::Outside);
+                    }
+                }
+                // In HTML, a start tag that closes the removed element ends it
+                // when nothing else is open in it.
+                if region.space == Space::Html
+                    && region.open.is_empty()
+                    && html::closes(&region.name, &name)
+                {
                     self.dropping = None;
                     return Ok(Skip::Outside);
                 }
+                // The vocabulary the element is in: HTML where the current
+                // element reads its content as HTML, but for an `svg` or
+                // `math` root; else the current element's, but for an `svg`
+                // in a MathML `annotation-xml`.
+                let (current, current_space) = region.current();
+                let as_html =
+                    current_space == Space::Html || html::integration_point(current_space, current);
+                let space = match name.as_str() {
+                    "svg" if as_html || current == "annotation-xml" => Space::Svg,
+                    "math" if as_html => Space::Math,
+                    _ if as_html => Space::Html,
+                    _ => current_space,
+                };
                 // A browser ignores the self-closing flag on a non-void HTML
                 // element, and reads a `/` an unquoted value took as its own.
                 let void = VOID_ELEMENTS.contains(&name.as_str());
                 let is_start = matches!(event, Event::Start(_));
                 if !self_closing(raw, span, &tag.attributes, is_start)
-                    || (region.space == Space::Html && !void)
+                    || (space == Space::Html && !void)
                 {
-                    if as_html && TEXT_ELEMENTS.contains(&name.as_str()) {
+                    if space == Space::Html && TEXT_ELEMENTS.contains(&name.as_str()) {
                         region.text = Some(name.clone());
                     }
-                    region.open.push(name);
+                    region.open.push((name, space));
                 }
             }
-            Event::Start(e) => region.open.push(start_name(e, raw, false)?),
+            Event::Start(e) => {
+                let space = region.space;
+                region.open.push((start_name(e, raw, false)?, space));
+            }
             Event::End(e) => {
                 let name = end_name(e, raw, html)?;
-                if let Some(at) = region.open.iter().rposition(|open| *open == name) {
+                if let Some(at) = region.open.iter().rposition(|(open, _)| *open == name) {
                     region.open.truncate(at);
                 } else if name == region.name {
                     self.dropping = None;
@@ -705,13 +726,23 @@ fn self_closing(
 struct Region {
     name: String,
     space: Space,
-    open: Vec<String>,
+    open: Vec<(String, Space)>,
     /// The text element, open in it or itself, whose body a browser reads
     /// as text up to its end tag.
     text: Option<String>,
 }
 
 impl Region {
+    /// The element whose content is being read, with its vocabulary: the
+    /// innermost one open in it, else itself.
+    fn current(&self) -> (&str, Space) {
+        self.open
+            .last()
+            .map_or((self.name.as_str(), self.space), |(name, space)| {
+                (name.as_str(), *space)
+            })
+    }
+
     fn new(name: String, space: Space) -> Self {
         Self {
             name,

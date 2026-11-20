@@ -578,3 +578,20 @@ fn a_text_element_in_a_removed_element_holds_its_end_tags() {
         assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
     }
 }
+
+/// Inside a removed element, each open element reads what follows in its own
+/// vocabulary: an SVG `title` in an `svg` inside `desc` is SVG, not HTML
+/// text, while a `title` in an HTML `div` inside `desc` is HTML text.
+#[test]
+fn a_removed_region_reads_each_element_in_its_own_vocabulary() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        "<svg hidden><desc><svg><title></svg></desc></svg><p>Visible</p>",
+        "<svg hidden><desc><div><title></svg></title></div></desc></svg><p>Visible</p>",
+        "<svg hidden><desc><textarea></svg></textarea></desc></svg><p>Visible</p>",
+        // The breakout `p` closes the SVG, then the hidden paragraph.
+        "<p hidden>Secret<svg><p>Visible</p>",
+    ] {
+        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+    }
+}
