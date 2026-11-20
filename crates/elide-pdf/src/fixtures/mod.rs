@@ -6,6 +6,8 @@
 //! `lopdf` or `image`. These helpers build and inspect such fixtures so the
 //! test stays in this crate's vocabulary.
 
+mod builder;
+
 use std::io::Cursor;
 
 use ::image::{DynamicImage, ImageFormat, Rgb, RgbImage};
@@ -13,6 +15,9 @@ use bytes::Bytes;
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 
+pub(crate) use self::builder::{DocBuilder, Page};
+#[cfg(test)]
+pub(crate) use self::builder::{blank, encoded, shown, text, tm, type1};
 use crate::pdf::reader::DictionaryExt;
 
 /// A one-page PDF drawing one 8x8 JPEG image (`DCTDecode`).
@@ -67,28 +72,28 @@ pub fn unsurfaceable_images() -> Bytes {
 /// `notes.txt`, holding `Jane Roe`.
 #[must_use]
 pub fn metadata_and_attachment() -> Bytes {
-    let mut doc = Document::with_version("1.7");
-    with_pages(&mut doc, [Dictionary::new()]);
-    let file = doc.add_object(Stream::new(
+    let mut pdf = DocBuilder::new();
+    let file = pdf.stream(
         dictionary! { "Type" => "EmbeddedFile" },
         b"Jane Roe".to_vec(),
-    ));
-    let spec = doc.add_object(dictionary! {
+    );
+    let spec = pdf.add(dictionary! {
         "Type" => "Filespec",
         "F" => Object::string_literal("notes.txt"),
         "EF" => dictionary! { "F" => file },
     });
-    doc.catalog_mut().expect("a catalog").set(
-        "Names",
-        dictionary! {
-            "EmbeddedFiles" => dictionary! {
-                "Names" => vec![Object::string_literal("notes.txt"), spec.into()],
+    let info = pdf.add(dictionary! { "Author" => Object::string_literal("Jane Roe") });
+    pdf.page(Page::new())
+        .catalog(
+            "Names",
+            dictionary! {
+                "EmbeddedFiles" => dictionary! {
+                    "Names" => vec![Object::string_literal("notes.txt"), spec.into()],
+                },
             },
-        },
-    );
-    let info = doc.add_object(dictionary! { "Author" => Object::string_literal("Jane Roe") });
-    doc.trailer.set("Info", info);
-    save(&mut doc)
+        )
+        .trailer("Info", info);
+    Bytes::from(pdf.bytes())
 }
 
 /// The stream bytes of every image XObject in `pdf`, to assert on them.
@@ -167,13 +172,13 @@ fn drawing_scaled(images: Vec<Stream>, size: i64) -> Bytes {
 /// A one-page PDF that draws each of `images`, scaled to `size` points square
 /// when given, then runs the `extra` operations.
 fn page_of(images: Vec<Stream>, extra: Vec<Operation>, size: Option<i64>) -> Bytes {
-    let mut doc = Document::with_version("1.5");
-    let mut xobjects = Dictionary::new();
+    let mut pdf = DocBuilder::with_version("1.5");
+    let mut page = Page::new().size(100, 100);
     let mut operations = Vec::new();
     for (index, image) in images.into_iter().enumerate() {
-        let id = doc.add_object(image);
+        let id = pdf.add(image);
         let name = format!("Im{}", index + 1);
-        xobjects.set(name.as_bytes(), id);
+        page = page.xobject(&name, id);
         if let Some(size) = size {
             operations.push(Operation::new("q", vec![]));
             operations.push(Operation::new(
@@ -194,19 +199,8 @@ fn page_of(images: Vec<Stream>, extra: Vec<Operation>, size: Option<i64>) -> Byt
         }
     }
     operations.extend(extra);
-    let resources = doc.add_object(dictionary! { "XObject" => xobjects });
-    let content = Content { operations }
-        .encode()
-        .expect("encode page content");
-    let contents = doc.add_object(Stream::new(dictionary! {}, content));
-    with_pages(
-        &mut doc,
-        [dictionary! {
-            "Contents" => contents, "Resources" => resources,
-            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-        }],
-    );
-    save(&mut doc)
+    pdf.page(page.ops(operations));
+    Bytes::from(pdf.bytes())
 }
 
 /// An image XObject dictionary of `width` x `height` 8-bit RGB samples, stored
@@ -254,8 +248,7 @@ fn streams(pdf: &[u8], matches: impl Fn(&Document, &Dictionary) -> bool) -> Vec<
 /// own kid of the `/EmbeddedFiles` tree.
 #[cfg(test)]
 pub(crate) fn with_attachments(files: &[(&str, &[u8])]) -> Bytes {
-    let mut doc = Document::with_version("1.7");
-    with_pages(&mut doc, [Dictionary::new()]);
+    let mut pdf = DocBuilder::new();
     let mut kids = Vec::new();
     for (name, bytes) in files {
         let mut stream = Stream::new(
@@ -266,22 +259,22 @@ pub(crate) fn with_attachments(files: &[(&str, &[u8])]) -> Bytes {
             bytes.to_vec(),
         );
         stream.compress().expect("compress an attached file");
-        let stream = doc.add_object(stream);
-        let spec = doc.add_object(dictionary! {
+        let stream = pdf.add(stream);
+        let spec = pdf.add(dictionary! {
             "Type" => "Filespec",
             "F" => Object::string_literal(*name),
             "EF" => dictionary! { "F" => stream },
         });
-        let kid = doc.add_object(dictionary! {
+        let kid = pdf.add(dictionary! {
             "Names" => vec![Object::string_literal(*name), spec.into()],
         });
         kids.push(Object::Reference(kid));
     }
-    doc.catalog_mut().expect("a catalog").set(
+    pdf.page(Page::new()).catalog(
         "Names",
         dictionary! { "EmbeddedFiles" => dictionary! { "Kids" => kids } },
     );
-    save(&mut doc)
+    Bytes::from(pdf.bytes())
 }
 
 /// Give `doc` a page tree of `pages`, each made a `/Page` under it, and a
@@ -308,11 +301,4 @@ pub(crate) fn with_pages(
     let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => tree });
     doc.trailer.set("Root", catalog);
     ids
-}
-
-/// `doc` serialized.
-fn save(doc: &mut Document) -> Bytes {
-    let mut out = Vec::new();
-    doc.save_to(&mut out).expect("save PDF fixture");
-    Bytes::from(out)
 }

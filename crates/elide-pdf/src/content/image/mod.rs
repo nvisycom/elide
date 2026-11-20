@@ -118,11 +118,10 @@ impl Redact for ImageRedaction<'_> {
 mod tests {
     use std::collections::HashSet;
 
-    use lopdf::content::{Content, Operation};
-    use lopdf::{Document, Object, Stream, dictionary};
+    use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{DocBuilder, Page};
     use crate::pdf::reader::DictionaryExt;
     use crate::sanitize::{Check, Rebuild};
 
@@ -140,38 +139,17 @@ mod tests {
     /// A one-page document whose page draws a form, which draws an image with a
     /// soft mask: neither image is in the page's own resources.
     fn drawn_through_a_form() -> (Document, ObjectId, ObjectId) {
-        let mut doc = Document::with_version("1.5");
-        let mask = doc.add_object(gray());
+        let mut pdf = DocBuilder::with_version("1.5");
+        let mask = pdf.add(gray());
         let mut image = gray();
         image.dict.set("SMask", mask);
-        let image = doc.add_object(image);
-        let form = doc.add_object(Stream::new(
-            dictionary! {
-                "Type" => "XObject", "Subtype" => "Form",
-                "Resources" => dictionary! { "XObject" => dictionary! { "Im" => image } },
-            },
-            Content {
-                operations: vec![Operation::new("Do", vec!["Im".into()])],
-            }
-            .encode()
-            .unwrap(),
-        ));
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content {
-                operations: vec![Operation::new("Do", vec!["Fm".into()])],
-            }
-            .encode()
-            .unwrap(),
-        ));
-        with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "Resources" => dictionary! { "XObject" => dictionary! { "Fm" => form } },
-            }],
+        let image = pdf.add(image);
+        let form = pdf.form(
+            dictionary! { "Resources" => dictionary! { "XObject" => dictionary! { "Im" => image } } },
+            b"/Im Do".to_vec(),
         );
-        (doc, image, mask)
+        pdf.page(Page::new().xobject("Fm", form).content(b"/Fm Do".to_vec()));
+        (pdf.finish().0, image, mask)
     }
 
     #[test]
@@ -194,17 +172,11 @@ mod tests {
     /// always follows, makes it an object of its own.
     #[test]
     fn an_image_drawn_by_a_pattern_or_glyph_is_cut() {
-        let mut doc = Document::with_version("1.5");
-        let image = doc.add_object(gray());
-        let draw = || {
-            Content {
-                operations: vec![Operation::new("Do", vec!["Im".into()])],
-            }
-            .encode()
-            .unwrap()
-        };
+        let mut pdf = DocBuilder::with_version("1.5");
+        let image = pdf.add(gray());
+        let draw = || b"/Im Do".to_vec();
         let resources = || dictionary! { "XObject" => dictionary! { "Im" => image } };
-        let pattern = doc.add_object(Stream::new(
+        let pattern = pdf.add(Stream::new(
             dictionary! {
                 "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
                 "BBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
@@ -212,7 +184,7 @@ mod tests {
             },
             draw(),
         ));
-        let glyph = doc.add_object(Stream::new(dictionary! {}, draw()));
+        let glyph = pdf.stream(Dictionary::new(), draw());
         let font = Object::Dictionary(dictionary! {
             "Type" => "Font", "Subtype" => "Type3",
             "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
@@ -222,23 +194,14 @@ mod tests {
             "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
             "Resources" => resources(),
         });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"/Pattern cs /P scn 0 0 1 1 re f BT /T3 1 Tf (a) Tj ET".to_vec(),
-        ));
-        with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "MediaBox" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-                "Resources" => dictionary! {
-                    "Pattern" => dictionary! { "P" => pattern },
-                    "Font" => dictionary! { "T3" => font },
-                },
-            }],
+        pdf.page(
+            Page::new()
+                .resource("Pattern", "P", pattern)
+                .font("T3", font)
+                .content(b"/Pattern cs /P scn 0 0 1 1 re f BT /T3 1 Tf (a) Tj ET".to_vec())
+                .size(10, 10),
         );
-        let mut bytes = Vec::new();
-        doc.save_to(&mut bytes).unwrap();
+        let bytes = pdf.bytes();
         let rebuilt = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
         let image = rebuilt
             .doc()

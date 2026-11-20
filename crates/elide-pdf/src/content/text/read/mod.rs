@@ -198,7 +198,7 @@ mod tests {
     use lopdf::{Dictionary, Object, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::{DocBuilder, Page, encoded, shown, tm, type1};
 
     /// Build a one-page document whose single content stream is `ops`, drawing
     /// with a simple Helvetica font (no `/Widths`, so glyph advances are the
@@ -211,7 +211,7 @@ mod tests {
     /// advances — and thus box widths — are known) and a descriptor with
     /// ascent/descent (so box heights are real rather than the default em box).
     fn extract_block_with_widths(ops: Vec<Operation>, widths: bool) -> super::TextBlock {
-        let mut font = simple_font("Helvetica");
+        let mut font = type1("Helvetica");
         if widths {
             // Every byte 0..=255 is 500/1000 em wide — enough to give boxes a real
             // width without modelling real Helvetica metrics.
@@ -231,34 +231,13 @@ mod tests {
         extract_block_in(ops, font)
     }
 
-    /// A simple Type1 font named `base_font`, with no `/Widths`.
-    fn simple_font(base_font: &str) -> Dictionary {
-        dictionary! {
-            "Type" => "Font",
-            "Subtype" => "Type1",
-            "BaseFont" => base_font,
-        }
-    }
-
     /// As [`extract_block`], drawing with `font`.
     fn extract_block_in(ops: Vec<Operation>, font: Dictionary) -> super::TextBlock {
-        let mut doc = Document::with_version("1.5");
-        let font_id = doc.add_object(font);
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font_id },
-        });
-        let content = Content { operations: ops };
-        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
-        let page_id = with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content_id,
-                "Resources" => resources,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-            }],
-        )[0];
-
-        text_block_for_page(&doc, 1, page_id).unwrap()
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(font);
+        pdf.page(Page::new().font("F1", font).ops(ops).size(100, 200));
+        let (doc, pages) = pdf.finish();
+        text_block_for_page(&doc, 1, pages[0]).unwrap()
     }
 
     /// The extracted page text for `ops`.
@@ -374,7 +353,7 @@ mod tests {
         let helvetica = one_glyph_at_a_time("a@b.io", &[556, 1015, 556, 278, 222, 556]);
         assert_eq!(extract_block(helvetica).text, "a@b.io");
         let courier = one_glyph_at_a_time("a@b.io", &[600; 6]);
-        let text = extract_block_in(courier, simple_font("ABCDEF+CourierNew")).text;
+        let text = extract_block_in(courier, type1("ABCDEF+CourierNew")).text;
         assert_eq!(text, "a@b.io");
     }
 
@@ -384,7 +363,7 @@ mod tests {
     #[test]
     fn a_font_with_unknown_widths_reads_by_gaps() {
         let ops = one_glyph_at_a_time("a@b.io", &[556, 1015, 556, 278, 222, 556]);
-        let text = extract_block_in(ops, simple_font("Unknown")).text;
+        let text = extract_block_in(ops, type1("Unknown")).text;
         assert_eq!(text, "a @ b . i o");
         let run = vec![
             Operation::new("BT", vec![]),
@@ -392,7 +371,7 @@ mod tests {
             show("a@b.io"),
             Operation::new("ET", vec![]),
         ];
-        assert_eq!(extract_block_in(run, simple_font("Unknown")).text, "a@b.io");
+        assert_eq!(extract_block_in(run, type1("Unknown")).text, "a@b.io");
     }
 
     /// Glyphs drawn contiguously (one `Tj`) are not split by spurious spaces.
@@ -433,33 +412,13 @@ mod tests {
             // First field.
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new(
-                "Tm",
-                vec![
-                    1.into(),
-                    0.into(),
-                    0.into(),
-                    1.into(),
-                    72.into(),
-                    700.into(),
-                ],
-            ),
+            tm(72, 700),
             show("Label:"),
             Operation::new("ET", vec![]),
             // Second field, a new text object positioned well to the right.
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new(
-                "Tm",
-                vec![
-                    1.into(),
-                    0.into(),
-                    0.into(),
-                    1.into(),
-                    200.into(),
-                    700.into(),
-                ],
-            ),
+            tm(200, 700),
             show("value"),
             Operation::new("ET", vec![]),
         ]);
@@ -514,52 +473,27 @@ mod tests {
     /// it, not at the content's local origin.
     #[test]
     fn form_xobject_text_inherits_the_transform() {
-        let mut doc = Document::with_version("1.5");
-        let font_id = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-        });
-        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
-
-        // The form's content: draw "Hi" at the form's own origin.
-        let form_ops = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 10.into()]),
-                Operation::new("Td", vec![0.into(), 0.into()]),
-                Operation::new("Tj", vec![Object::string_literal("Hi")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        // The form carries a /Matrix translating it to (20, 180) on the page.
-        let form_id = doc.add_object(Stream::new(
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        // The form draws "Hi" at its own origin, and its /Matrix translates it
+        // to (20, 180) on the page.
+        let form = pdf.form(
             dictionary! {
-                "Type" => "XObject",
-                "Subtype" => "Form",
                 "Matrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 20.into(), 180.into()],
-                "Resources" => font_res.clone(),
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
             },
-            form_ops.encode().unwrap(),
-        ));
-
+            encoded(crate::fixtures::text("F1", 10, "Hi")),
+        );
         // The page just invokes the form.
-        let page_content = Content {
-            operations: vec![Operation::new("Do", vec!["Fm".into()])],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "XObject" => dictionary! { "Fm" => form_id },
-        });
-        let page_id = with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content_id,
-                "Resources" => resources,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-            }],
-        )[0];
+        pdf.page(
+            Page::new()
+                .xobject("Fm", form)
+                .content(b"/Fm Do".to_vec())
+                .size(100, 200),
+        );
+        let (doc, pages) = pdf.finish();
 
-        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let block = text_block_for_page(&doc, 1, pages[0]).unwrap();
         // The form's text is extracted (inheritance did not drop it).
         assert_eq!(block.text, "Hi");
         // And it is positioned by the inherited transform: the glyph box sits
@@ -587,17 +521,7 @@ mod tests {
             Operation::new("BT", vec![]),
             Operation::new("Tf", vec!["F1".into(), 12.into()]),
             Operation::new("Tz", vec![(-100).into()]),
-            Operation::new(
-                "Tm",
-                vec![
-                    1.into(),
-                    0.into(),
-                    0.into(),
-                    1.into(),
-                    90.into(),
-                    100.into(),
-                ],
-            ),
+            tm(90, 100),
             Operation::new(
                 "TJ",
                 vec![Object::Array(vec![
@@ -654,60 +578,36 @@ mod tests {
     /// zero-advance fallback of an uninherited font).
     #[test]
     fn form_xobject_inherits_font_widths() {
-        let mut doc = Document::with_version("1.5");
+        let mut pdf = DocBuilder::with_version("1.5");
         // A font with explicit widths (500/1000 for every byte) and a descriptor.
-        let descriptor = doc.add_object(dictionary! {
+        let descriptor = pdf.add(dictionary! {
             "Type" => "FontDescriptor", "FontName" => "Helvetica",
             "Ascent" => 718, "Descent" => -207,
         });
-        let font_id = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        let mut font = type1("Helvetica");
+        font.extend(&dictionary! {
             "FirstChar" => 0, "LastChar" => 255,
             "Widths" => vec![Object::Integer(500); 256],
             "FontDescriptor" => descriptor,
         });
-        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
-
+        let font = pdf.add(font);
         // The form draws text with no `Tf` of its own — it relies on the font the
         // caller selected before the `Do`.
-        let form_ops = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Td", vec![10.into(), 100.into()]),
-                Operation::new("Tj", vec![Object::string_literal("Hi")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let form_id = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
-            form_ops.encode().unwrap(),
-        ));
-
+        let form = pdf.form(
+            dictionary! { "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } } },
+            b"BT 10 100 Td (Hi) Tj ET".to_vec(),
+        );
         // The page selects F1 at size 20, then invokes the form.
-        let page_content = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 20.into()]),
-                Operation::new("ET", vec![]),
-                Operation::new("Do", vec!["Fm".into()]),
-            ],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font_id },
-            "XObject" => dictionary! { "Fm" => form_id },
-        });
-        let page_id = with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content_id,
-                "Resources" => resources,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-            }],
-        )[0];
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .xobject("Fm", form)
+                .content(b"BT /F1 20 Tf ET /Fm Do".to_vec())
+                .size(100, 200),
+        );
+        let (doc, pages) = pdf.finish();
 
-        let block = text_block_for_page(&doc, 1, page_id).unwrap();
+        let block = text_block_for_page(&doc, 1, pages[0]).unwrap();
         assert_eq!(block.text, "Hi");
         let geometry = block.geometry();
         let rects = geometry.rects_for(0..block.text.chars().count());
@@ -727,88 +627,28 @@ mod tests {
     /// it — all three words stay space-separated, none run together.
     #[test]
     fn pen_is_shared_across_the_form_boundary() {
-        let mut doc = Document::with_version("1.5");
-        let font_id = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-        });
-        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
-
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
         // The form draws "Beta" at x=140 (a wide gap after the page's "Alpha").
-        let form_ops = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new(
-                    "Tm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        140.into(),
-                        150.into(),
-                    ],
-                ),
-                Operation::new("Tj", vec![Object::string_literal("Beta")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let form_id = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
-            form_ops.encode().unwrap(),
-        ));
-
+        let form = pdf.form(
+            dictionary! { "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } } },
+            b"BT /F1 12 Tf 1 0 0 1 140 150 Tm (Beta) Tj ET".to_vec(),
+        );
         // The page: "Alpha" at x=10, Do the form, then "Gamma" at x=300 (a wide
         // gap after the form's "Beta" ended around x≈160).
-        let page_content = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new(
-                    "Tm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        10.into(),
-                        150.into(),
-                    ],
-                ),
-                Operation::new("Tj", vec![Object::string_literal("Alpha")]),
-                Operation::new("ET", vec![]),
-                Operation::new("Do", vec!["Fm".into()]),
-                Operation::new("BT", vec![]),
-                Operation::new("Tf", vec!["F1".into(), 12.into()]),
-                Operation::new(
-                    "Tm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        300.into(),
-                        150.into(),
-                    ],
-                ),
-                Operation::new("Tj", vec![Object::string_literal("Gamma")]),
-                Operation::new("ET", vec![]),
-            ],
-        };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font_id },
-            "XObject" => dictionary! { "Fm" => form_id },
-        });
-        let page_id = with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content_id,
-                "Resources" => resources,
-                "MediaBox" => vec![0.into(), 0.into(), 400.into(), 200.into()],
-            }],
-        )[0];
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .xobject("Fm", form)
+                .content(
+                    b"BT /F1 12 Tf 1 0 0 1 10 150 Tm (Alpha) Tj ET /Fm Do \
+                      BT /F1 12 Tf 1 0 0 1 300 150 Tm (Gamma) Tj ET"
+                        .to_vec(),
+                )
+                .size(400, 200),
+        );
+        let (doc, pages) = pdf.finish();
+        let page_id = pages[0];
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         // A gap entering the form (Alpha→Beta) and leaving it (Beta→Gamma) are
@@ -821,54 +661,32 @@ mod tests {
     /// use the first font's widths (the font is part of the graphics state).
     #[test]
     fn q_restore_brings_back_the_selected_font() {
-        let mut doc = Document::with_version("1.5");
-        let descriptor = doc.add_object(dictionary! {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let descriptor = pdf.add(dictionary! {
             "Type" => "FontDescriptor", "FontName" => "F",
             "Ascent" => 700, "Descent" => -200,
         });
         // F1 is wide (900/1000 per glyph), F2 is narrow (100/1000).
-        let wide = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Wide",
-            "FirstChar" => 0, "LastChar" => 255,
-            "Widths" => vec![Object::Integer(900); 256],
-            "FontDescriptor" => descriptor,
-        });
-        let narrow = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Narrow",
-            "FirstChar" => 0, "LastChar" => 255,
-            "Widths" => vec![Object::Integer(100); 256],
-            "FontDescriptor" => descriptor,
-        });
-
-        // Select F1 (wide), q, select F2 (narrow), Q, then draw "AB".
-        let page_content = Content {
-            operations: vec![
-                Operation::new("BT", vec![]),
-                Operation::new(
-                    "Tm",
-                    vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 150.into()],
-                ),
-                Operation::new("Tf", vec!["F1".into(), 10.into()]),
-                Operation::new("q", vec![]),
-                Operation::new("Tf", vec!["F2".into(), 10.into()]),
-                Operation::new("Q", vec![]),
-                Operation::new("Tj", vec![Object::string_literal("AB")]),
-                Operation::new("ET", vec![]),
-            ],
+        let mut font = |name: &str, width: i64| {
+            let mut font = type1(name);
+            font.extend(&dictionary! {
+                "FirstChar" => 0, "LastChar" => 255,
+                "Widths" => vec![Object::Integer(width); 256],
+                "FontDescriptor" => descriptor,
+            });
+            pdf.add(font)
         };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => wide, "F2" => narrow },
-        });
-        let page_id = with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content_id,
-                "Resources" => resources,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-            }],
-        )[0];
+        let (wide, narrow) = (font("Wide", 900), font("Narrow", 100));
+        // Select F1 (wide), q, select F2 (narrow), Q, then draw "AB".
+        pdf.page(
+            Page::new()
+                .font("F1", wide)
+                .font("F2", narrow)
+                .content(b"BT 1 0 0 1 0 150 Tm /F1 10 Tf q /F2 10 Tf Q (AB) Tj ET".to_vec())
+                .size(100, 200),
+        );
+        let (doc, pages) = pdf.finish();
+        let page_id = pages[0];
 
         let block = text_block_for_page(&doc, 1, page_id).unwrap();
         let geometry = block.geometry();
@@ -890,41 +708,15 @@ mod tests {
         ops: Vec<Operation>,
         xobjects: impl FnOnce(&mut Document) -> Vec<ObjectId>,
     ) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-        });
-        let mut entries = Dictionary::new();
-        for (i, id) in xobjects(&mut doc).into_iter().enumerate() {
-            entries.set(format!("X{i}"), id);
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let mut page = Page::new().font("F1", font).ops(ops).size(100, 200);
+        for (i, id) in xobjects(pdf.doc()).into_iter().enumerate() {
+            page = page.xobject(&format!("X{i}"), id);
         }
-        let resources = doc.add_object(dictionary! {
-            "Font" => dictionary! { "F1" => font },
-            "XObject" => entries,
-        });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content { operations: ops }.encode().unwrap(),
-        ));
-        let page_id = with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "Resources" => resources,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
-            }],
-        )[0];
-        (doc, page_id)
-    }
-
-    /// Text shown with `/F1`, the font the page resources name.
-    fn hello() -> Vec<Operation> {
-        vec![
-            Operation::new("BT", vec![]),
-            Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal("Hello")]),
-            Operation::new("ET", vec![]),
-        ]
+        pdf.page(page);
+        let (doc, pages) = pdf.finish();
+        (doc, pages[0])
     }
 
     /// A form XObject drawing `ops`, its names resolved in `resources`.
@@ -955,7 +747,7 @@ mod tests {
                 "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
             });
             let mut inner = doc.add_object(form(
-                hello(),
+                shown("Hello"),
                 dictionary! { "Font" => dictionary! { "F1" => font } },
             ));
             for _ in 0..=MAX_XOBJECT_DEPTH {
@@ -972,7 +764,7 @@ mod tests {
 
     #[test]
     fn a_missing_content_stream_is_an_error() {
-        let (mut doc, page_id) = page_drawing(hello(), |_| Vec::new());
+        let (mut doc, page_id) = page_drawing(shown("Hello"), |_| Vec::new());
         let content = doc.get_page_contents(page_id)[0];
         doc.objects.remove(&content);
         assert!(text_block_for_page(&doc, 1, page_id).is_err());

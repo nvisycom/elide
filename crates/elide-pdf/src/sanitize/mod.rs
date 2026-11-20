@@ -411,7 +411,9 @@ mod tests {
     use super::*;
     use crate::content::attachment::Tree;
     use crate::content::text::{Detection, Text, TextBlock, TextRedaction};
-    use crate::fixtures::{with_attachments, with_pages};
+    use crate::fixtures::{
+        DocBuilder, Page, blank, encoded, shown, type1, with_attachments, with_pages,
+    };
     use crate::pdf::reader::DictionaryExt;
 
     /// A one-page document: Helvetica as `/F1`, the page drawing `operations`,
@@ -422,34 +424,20 @@ mod tests {
         resources: Dictionary,
         page: Dictionary,
     ) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.7");
-        let font = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-            "Secret" => Object::string_literal("Jane Roe"),
-        });
-        let mut all = dictionary! { "Font" => dictionary! { "F1" => font } };
-        all.extend(&resources);
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content { operations }.encode().unwrap(),
-        ));
-        let mut dict = dictionary! {
-            "Contents" => content, "Resources" => all,
-            "MediaBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
-        };
-        dict.extend(&page);
-        let page = with_pages(&mut doc, [dict])[0];
-        (doc, page)
-    }
-
-    /// Text `text` shown with `/F1`.
-    fn show(text: &str) -> Vec<Operation> {
-        vec![
-            Operation::new("BT", vec![]),
-            Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal(text)]),
-            Operation::new("ET", vec![]),
-        ]
+        let mut pdf = DocBuilder::new();
+        let mut font = type1("Helvetica");
+        font.set("Secret", Object::string_literal("Jane Roe"));
+        let font = pdf.add(font);
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .resources(resources)
+                .ops(operations)
+                .size(200, 200)
+                .entries(page),
+        );
+        let (doc, pages) = pdf.finish();
+        (doc, pages[0])
     }
 
     /// `doc` rebuilt, saved, and read back, with what the rebuild recorded.
@@ -513,7 +501,7 @@ mod tests {
     #[test]
     fn hidden_structures_are_left_behind_and_recorded() {
         let (mut doc, _) = document(
-            show("Hello"),
+            shown("Hello"),
             Dictionary::new(),
             dictionary! {
                 "Thumb" => Object::string_literal("thumbnail"),
@@ -575,7 +563,7 @@ mod tests {
     /// A rebuild of a rebuild drops nothing: the output check holds.
     #[test]
     fn a_rebuild_is_its_own_rebuild() {
-        let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (doc, _) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         let (out, _) = rebuilt(&doc);
         check(&out).unwrap();
         assert!(check(&doc).is_err(), "the source font's extra key passed");
@@ -589,7 +577,7 @@ mod tests {
             Operation::new("w", vec![Object::string_literal("123-45-6789")]),
             Operation::new("w", vec![2.into()]),
         ];
-        ops.extend(show("Hello"));
+        ops.extend(shown("Hello"));
         let (doc, _) = document(ops, Dictionary::new(), Dictionary::new());
         let (out, _) = rebuilt(&doc);
         let text = text_of(&out);
@@ -898,7 +886,7 @@ mod tests {
     /// specification does not define is recorded as application data.
     #[test]
     fn a_font_keeps_only_its_keys() {
-        let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (doc, _) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         let (out, stripped) = rebuilt(&doc);
         assert_eq!(count(&stripped, HiddenContent::ApplicationData), 1);
         assert!(!text_of(&out).contains("Jane Roe"));
@@ -910,7 +898,7 @@ mod tests {
     fn an_undrawn_form_is_left_behind() {
         let unused = (1000, 0);
         let (mut doc, _) = document(
-            show("Hello"),
+            shown("Hello"),
             dictionary! { "XObject" => dictionary! { "Unused" => unused } },
             Dictionary::new(),
         );
@@ -919,7 +907,7 @@ mod tests {
             Object::Stream(Stream::new(
                 dictionary! { "Type" => "XObject", "Subtype" => "Form" },
                 Content {
-                    operations: show("Jane Roe"),
+                    operations: shown("Jane Roe"),
                 }
                 .encode()
                 .unwrap(),
@@ -936,10 +924,10 @@ mod tests {
     fn hidden_layers_and_alternate_text_are_cut() {
         let (visible, hidden) = ((1000, 0), (1001, 0));
         let mut operations = vec![Operation::new("BDC", vec!["OC".into(), "A".into()])];
-        operations.extend(show("shown"));
+        operations.extend(shown("shown"));
         operations.push(Operation::new("EMC", vec![]));
         operations.push(Operation::new("BDC", vec!["OC".into(), "B".into()]));
-        operations.extend(show("secret"));
+        operations.extend(shown("secret"));
         operations.push(Operation::new("EMC", vec![]));
         operations.push(Operation::new(
             "BDC",
@@ -950,7 +938,7 @@ mod tests {
                 ),
             ],
         ));
-        operations.extend(show("J. R."));
+        operations.extend(shown("J. R."));
         operations.push(Operation::new("EMC", vec![]));
         let (mut built, _) = document(
             operations,
@@ -985,7 +973,7 @@ mod tests {
     /// An operator the specification does not define is cut.
     #[test]
     fn an_unknown_operator_is_cut() {
-        let mut operations = show("Hello");
+        let mut operations = shown("Hello");
         operations.push(Operation::new(
             "Xx",
             vec![Object::string_literal("Jane Roe")],
@@ -998,7 +986,7 @@ mod tests {
     /// A page's inherited box and rotation are set on the page itself.
     #[test]
     fn inherited_page_attributes_are_set_on_the_page() {
-        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         doc.get_dictionary_mut(page).unwrap().remove(b"MediaBox");
         let parent = doc
             .get_dictionary(page)
@@ -1019,7 +1007,7 @@ mod tests {
     /// leaves the document is recorded and left behind.
     #[test]
     fn an_internal_link_is_resolved_to_its_page() {
-        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         let annotations = vec![
             Object::Dictionary(dictionary! {
                 "Subtype" => "Link",
@@ -1062,8 +1050,7 @@ mod tests {
     /// as it is, whichever name sorts first.
     #[test]
     fn a_file_named_under_two_extensions_is_copied_for_each() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let stream = doc.add_object(Stream::new(
             dictionary! { "Type" => "EmbeddedFile" },
             b"Jane Roe".to_vec(),
@@ -1132,7 +1119,7 @@ mod tests {
     /// in a layer hidden by default is no link.
     #[test]
     fn links_resolve_in_their_own_namespace_and_hidden_ones_are_dropped() {
-        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         let layer = doc.add_object(dictionary! { "Type" => "OCG", "Name" => "Off" });
         let link = |dest: Object| {
             dictionary! {
@@ -1167,7 +1154,7 @@ mod tests {
     /// does not resolve.
     #[test]
     fn a_named_destination_is_found_past_a_dangling_kid() {
-        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         doc.get_dictionary_mut(page).unwrap().set(
             "Annots",
             vec![Object::Dictionary(dictionary! {
@@ -1413,7 +1400,7 @@ mod tests {
     /// detection did not.
     #[test]
     fn an_unreadable_to_unicode_is_dropped() {
-        let (mut doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut doc, _) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         let cmap = doc.add_object(Stream::new(
             Dictionary::new(),
             b"1 beginbfchar <48> <004A> endbfchar".to_vec(),
@@ -1477,7 +1464,7 @@ mod tests {
             Operation::new("ET", vec![]),
             Operation::new("Do", vec!["Fm".into()]),
         ];
-        ops.extend(show("Page"));
+        ops.extend(shown("Page"));
         let (mut doc, page) = document(ops, Dictionary::new(), Dictionary::new());
         let form = doc.add_object(Stream::new(
             dictionary! {
@@ -1504,7 +1491,7 @@ mod tests {
     #[test]
     fn a_print_box_dropped_is_recorded() {
         let (doc, _) = document(
-            show("Hello"),
+            shown("Hello"),
             Dictionary::new(),
             dictionary! { "TrimBox" => vec![500.into(), 500.into(), 600.into(), 600.into()] },
         );
@@ -1518,7 +1505,7 @@ mod tests {
     #[test]
     fn a_page_transition_is_recorded() {
         let (doc, _) = document(
-            show("Hello"),
+            shown("Hello"),
             Dictionary::new(),
             dictionary! { "Dur" => 5, "Trans" => dictionary! { "S" => "Dissolve" } },
         );
@@ -1536,7 +1523,7 @@ mod tests {
     /// the check refuses a document that still carries one.
     #[test]
     fn an_unused_font_fails_the_check() {
-        let (doc, _) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (doc, _) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         let (mut out, _) = rebuilt(&doc);
         check(&out).unwrap();
         let unused = out.add_object(dictionary! {
@@ -1688,7 +1675,7 @@ mod tests {
     #[test]
     fn layout_and_colour_targets_are_kept() {
         let (mut doc, page) = document(
-            show("Hello"),
+            shown("Hello"),
             Dictionary::new(),
             dictionary! {
                 "TrimBox" => vec![10.into(), 10.into(), 300.into(), 190.into()],
@@ -1853,34 +1840,21 @@ mod tests {
     /// many times stays one copy per form.
     #[test]
     fn a_form_without_resources_is_copied_once_per_scope() {
-        let mut doc = Document::with_version("1.7");
-        let leaf = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
-            Content {
-                operations: show("Hello"),
-            }
-            .encode()
-            .unwrap(),
-        ));
-        let middle = doc.add_object(Stream::new(
-            dictionary! { "Type" => "XObject", "Subtype" => "Form" },
-            b"/A Do /B Do /A Do".to_vec(),
-        ));
-        let font = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-        });
-        let content = doc.add_object(Stream::new(dictionary! {}, b"/M Do /N Do /M Do".to_vec()));
-        with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                "Resources" => dictionary! {
-                    "Font" => dictionary! { "F1" => font },
-                    "XObject" => dictionary! { "M" => middle, "N" => middle, "A" => leaf, "B" => leaf },
-                },
-            }],
+        let mut pdf = DocBuilder::new();
+        let leaf = pdf.form(Dictionary::new(), encoded(shown("Hello")));
+        let middle = pdf.form(Dictionary::new(), b"/A Do /B Do /A Do".to_vec());
+        let font = pdf.add(type1("Helvetica"));
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .xobject("M", middle)
+                .xobject("N", middle)
+                .xobject("A", leaf)
+                .xobject("B", leaf)
+                .content(b"/M Do /N Do /M Do".to_vec())
+                .size(100, 100),
         );
+        let (doc, _) = pdf.finish();
 
         let (out, stripped) = rebuilt(&doc);
         let forms = out
@@ -1917,37 +1891,24 @@ mod tests {
     /// The font each of two pages' copy of one shared form selects, each page
     /// naming a different font `/F1` and the form's `/Resources` `resources`.
     fn form_fonts(resources: Option<Object>) -> Vec<String> {
-        let mut doc = Document::with_version("1.7");
-        let mut dict = dictionary! { "Type" => "XObject", "Subtype" => "Form" };
+        let mut pdf = DocBuilder::new();
+        let mut dict = Dictionary::new();
         if let Some(resources) = resources {
             dict.set("Resources", resources);
         }
-        let form = doc.add_object(Stream::new(
-            dict,
-            Content {
-                operations: show("Hello"),
-            }
-            .encode()
-            .unwrap(),
-        ));
-        let content = doc.add_object(Stream::new(dictionary! {}, b"/Fm Do".to_vec()));
-        let pages: Vec<Dictionary> = ["Helvetica", "Courier"]
-            .into_iter()
-            .map(|base| {
-                let font = doc.add_object(dictionary! {
-                    "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
-                });
-                dictionary! {
-                    "Contents" => content,
-                    "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                    "Resources" => dictionary! {
-                        "Font" => dictionary! { "F1" => font },
-                        "XObject" => dictionary! { "Fm" => form },
-                    },
-                }
-            })
-            .collect();
-        with_pages(&mut doc, pages);
+        let form = pdf.form(dict, encoded(shown("Hello")));
+        let content = pdf.stream(Dictionary::new(), b"/Fm Do".to_vec());
+        for base in ["Helvetica", "Courier"] {
+            let font = pdf.add(type1(base));
+            pdf.page(
+                Page::new()
+                    .font("F1", font)
+                    .xobject("Fm", form)
+                    .set("Contents", content)
+                    .size(100, 100),
+            );
+        }
+        let (doc, _) = pdf.finish();
 
         let (out, _) = rebuilt(&doc);
         out.get_pages()
@@ -1996,8 +1957,9 @@ mod tests {
     fn type3_copies(
         resources: impl FnOnce(&mut Document, ObjectId) -> Option<Dictionary>,
     ) -> usize {
-        let mut doc = Document::with_version("1.7");
-        let glyph = doc.add_object(Stream::new(dictionary! {}, b"0 0 d0 /Fm Do".to_vec()));
+        let mut pdf = DocBuilder::new();
+        let glyph = pdf.stream(Dictionary::new(), b"0 0 d0 /Fm Do".to_vec());
+        let doc = pdf.doc();
         let font = doc.new_object_id();
         let mut dict = dictionary! {
             "Type" => "Font", "Subtype" => "Type3",
@@ -2007,32 +1969,22 @@ mod tests {
             "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::Name(b"a".to_vec())] },
             "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
         };
-        if let Some(resources) = resources(&mut doc, font) {
+        if let Some(resources) = resources(doc, font) {
             dict.set("Resources", resources);
         }
         doc.objects.insert(font, Object::Dictionary(dict));
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"BT /T3 1 Tf (a) Tj ET".to_vec(),
-        ));
-        let pages: Vec<Dictionary> = [&b"0 0 1 1 re f"[..], b"0 0 2 2 re f"]
-            .into_iter()
-            .map(|drawing| {
-                let form = doc.add_object(Stream::new(
-                    dictionary! { "Type" => "XObject", "Subtype" => "Form" },
-                    drawing.to_vec(),
-                ));
-                dictionary! {
-                    "Contents" => content,
-                    "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                    "Resources" => dictionary! {
-                        "Font" => dictionary! { "T3" => font },
-                        "XObject" => dictionary! { "Fm" => form },
-                    },
-                }
-            })
-            .collect();
-        with_pages(&mut doc, pages);
+        let content = pdf.stream(Dictionary::new(), b"BT /T3 1 Tf (a) Tj ET".to_vec());
+        for drawing in [&b"0 0 1 1 re f"[..], b"0 0 2 2 re f"] {
+            let form = pdf.form(Dictionary::new(), drawing.to_vec());
+            pdf.page(
+                Page::new()
+                    .font("T3", font)
+                    .xobject("Fm", form)
+                    .set("Contents", content)
+                    .size(100, 100),
+            );
+        }
+        let (doc, _) = pdf.finish();
         let (out, _) = rebuilt(&doc);
         out.objects
             .values()
@@ -2080,22 +2032,20 @@ mod tests {
     /// resources, and each selects its own font.
     #[test]
     fn type3_glyphs_selecting_different_state_fonts_keep_them_apart() {
-        let mut doc = Document::with_version("1.7");
-        let state = |doc: &mut Document, base: &str| {
-            let font = doc.add_object(dictionary! {
-                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
-            });
+        let mut pdf = DocBuilder::new();
+        let state = |pdf: &mut DocBuilder, base: &str| {
+            let font = pdf.add(type1(base));
             dictionary! { "Font" => vec![font.into(), 1.into()] }
         };
-        let (helvetica, courier) = (state(&mut doc, "Helvetica"), state(&mut doc, "Courier"));
-        let glyph = |doc: &mut Document, gs: &str| {
-            doc.add_object(Stream::new(
-                dictionary! {},
+        let (helvetica, courier) = (state(&mut pdf, "Helvetica"), state(&mut pdf, "Courier"));
+        let glyph = |pdf: &mut DocBuilder, gs: &str| {
+            pdf.stream(
+                Dictionary::new(),
                 format!("0 0 d0 /{gs} gs BT (x) Tj ET").into_bytes(),
-            ))
+            )
         };
-        let (a, b) = (glyph(&mut doc, "GA"), glyph(&mut doc, "GB"));
-        let font = doc.add_object(dictionary! {
+        let (a, b) = (glyph(&mut pdf, "GA"), glyph(&mut pdf, "GB"));
+        let font = pdf.add(dictionary! {
             "Type" => "Font", "Subtype" => "Type3",
             "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
             "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
@@ -2108,18 +2058,13 @@ mod tests {
                 "ExtGState" => dictionary! { "GA" => helvetica, "GB" => courier },
             },
         });
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            b"BT /T3 1 Tf (ab) Tj ET".to_vec(),
-        ));
-        with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                "Resources" => dictionary! { "Font" => dictionary! { "T3" => font } },
-            }],
+        pdf.page(
+            Page::new()
+                .font("T3", font)
+                .content(b"BT /T3 1 Tf (ab) Tj ET".to_vec())
+                .size(100, 100),
         );
+        let (doc, _) = pdf.finish();
 
         let (out, _) = rebuilt(&doc);
         check(&out).unwrap();
@@ -2162,40 +2107,27 @@ mod tests {
     /// names resolved in that page's resources.
     #[test]
     fn a_state_holding_a_borrowing_form_is_copied_per_scope() {
-        let mut doc = Document::with_version("1.7");
-        let form = doc.add_object(Stream::new(
-            dictionary! {
-                "Type" => "XObject", "Subtype" => "Form",
-                "BBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-            },
-            Content {
-                operations: show("Hello"),
-            }
-            .encode()
-            .unwrap(),
-        ));
-        let state = doc.add_object(dictionary! {
+        let mut pdf = DocBuilder::new();
+        let form = pdf.form(
+            dictionary! { "BBox" => vec![0.into(), 0.into(), 100.into(), 100.into()] },
+            encoded(shown("Hello")),
+        );
+        let state = pdf.add(dictionary! {
             "Type" => "ExtGState",
             "SMask" => dictionary! { "Type" => "Mask", "S" => "Luminosity", "G" => form },
         });
-        let content = doc.add_object(Stream::new(dictionary! {}, b"/S gs".to_vec()));
-        let pages: Vec<Dictionary> = ["Helvetica", "Courier"]
-            .into_iter()
-            .map(|base| {
-                let font = doc.add_object(dictionary! {
-                    "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base,
-                });
-                dictionary! {
-                    "Contents" => content,
-                    "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-                    "Resources" => dictionary! {
-                        "Font" => dictionary! { "F1" => font },
-                        "ExtGState" => dictionary! { "S" => state },
-                    },
-                }
-            })
-            .collect();
-        with_pages(&mut doc, pages);
+        let content = pdf.stream(Dictionary::new(), b"/S gs".to_vec());
+        for base in ["Helvetica", "Courier"] {
+            let font = pdf.add(type1(base));
+            pdf.page(
+                Page::new()
+                    .font("F1", font)
+                    .resource("ExtGState", "S", state)
+                    .set("Contents", content)
+                    .size(100, 100),
+            );
+        }
+        let (doc, _) = pdf.finish();
 
         let (out, _) = rebuilt(&doc);
         let fonts: Vec<String> = out
@@ -2233,7 +2165,7 @@ mod tests {
     /// found and deleted like the page's; a hidden widget is not drawn.
     #[test]
     fn form_fields_are_flattened_into_the_page() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let font = doc.add_object(dictionary! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
         });
@@ -2245,7 +2177,7 @@ mod tests {
                     "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
                 },
                 Content {
-                    operations: show(text),
+                    operations: shown(text),
                 }
                 .encode()
                 .unwrap(),
@@ -2321,7 +2253,7 @@ mod tests {
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             Content {
-                operations: show("Jane"),
+                operations: shown("Jane"),
             }
             .encode()
             .unwrap(),
@@ -2369,7 +2301,7 @@ mod tests {
     /// transparency group, with the annotation's blend mode and opacities.
     #[test]
     fn a_widget_keeps_its_blend_mode_and_opacity() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let answer = doc.add_object(Stream::new(
             dictionary! {
                 "Type" => "XObject", "Subtype" => "Form",
@@ -2444,14 +2376,14 @@ mod tests {
     /// resolves its font in the page's resources, so its text is kept.
     #[test]
     fn an_appearance_falls_back_to_the_page_resources() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let answer = doc.add_object(Stream::new(
             dictionary! {
                 "Type" => "XObject", "Subtype" => "Form",
                 "BBox" => vec![0.into(), 0.into(), 100.into(), 20.into()],
             },
             Content {
-                operations: show("Jane Roe"),
+                operations: shown("Jane Roe"),
             }
             .encode()
             .unwrap(),
@@ -2482,7 +2414,7 @@ mod tests {
     /// rebuilt page still reads.
     #[test]
     fn text_in_a_font_found_nowhere_is_cut_and_reported() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let answer = doc.add_object(Stream::new(
             dictionary! {
                 "Type" => "XObject", "Subtype" => "Form",
@@ -2509,7 +2441,7 @@ mod tests {
     /// Widgets showing one form grouped share the one grouped copy of it.
     #[test]
     fn widgets_share_a_grouped_form() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let answer = doc.add_object(Stream::new(
             dictionary! {
                 "Type" => "XObject", "Subtype" => "Form",
@@ -2544,7 +2476,7 @@ mod tests {
     /// A widget in a layer hidden by default is not drawn into the page.
     #[test]
     fn a_widget_in_a_hidden_layer_stays_hidden() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let layer = doc.add_object(dictionary! { "Type" => "OCG" });
         let answer = doc.add_object(Stream::new(
             dictionary! {
@@ -2575,7 +2507,7 @@ mod tests {
     /// default is not drawn into the page either.
     #[test]
     fn an_appearance_in_a_hidden_layer_stays_hidden() {
-        let (mut doc, page) = document(show("Name:"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Name:"), Dictionary::new(), Dictionary::new());
         let layer = doc.add_object(dictionary! { "Type" => "OCG" });
         let answer = doc.add_object(Stream::new(
             dictionary! {
@@ -2642,7 +2574,7 @@ mod tests {
     /// page requires.
     #[test]
     fn a_page_without_a_box_gets_letter() {
-        let (mut doc, page) = document(show("Hello"), Dictionary::new(), Dictionary::new());
+        let (mut doc, page) = document(shown("Hello"), Dictionary::new(), Dictionary::new());
         doc.get_dictionary_mut(page).unwrap().remove(b"MediaBox");
         let (out, _) = rebuilt(&doc);
         let media = page_dict(&out)
@@ -2799,7 +2731,7 @@ mod tests {
             Operation::new("W", vec![]),
             Operation::new("f", vec![]),
         ];
-        ops.extend(show("secret"));
+        ops.extend(shown("secret"));
         ops.push(Operation::new("EMC", vec![]));
         ops.push(Operation::new(
             "re",
@@ -2837,29 +2769,23 @@ mod tests {
 
     /// A one-page document whose page shows `text`, and its content id.
     fn showing(text: &str) -> (Document, ObjectId) {
-        let mut doc = Document::with_version("1.5");
-        let font = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
-        });
-        let operations = vec![
-            Operation::new("BT", vec![]),
-            Operation::new("Tf", vec!["F1".into(), 12.into()]),
-            Operation::new("Tj", vec![Object::string_literal(text)]),
-            Operation::new("ET", vec![]),
-        ];
-        let content = doc.add_object(Stream::new(
-            dictionary! {},
-            Content { operations }.encode().unwrap(),
-        ));
-        with_pages(
-            &mut doc,
-            [dictionary! {
-                "Contents" => content,
-                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
-                "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
-            }],
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let content = pdf.stream(
+            Dictionary::new(),
+            Content {
+                operations: shown(text),
+            }
+            .encode()
+            .unwrap(),
         );
-        (doc, content)
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .set("Contents", content)
+                .size(100, 100),
+        );
+        (pdf.finish().0, content)
     }
 
     fn contains(haystack: &[u8], needle: &[u8]) -> bool {

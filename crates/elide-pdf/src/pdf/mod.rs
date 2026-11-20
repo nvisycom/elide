@@ -353,19 +353,16 @@ mod tests {
 
     use elide_core::ErrorKind;
     use lopdf::encryption::crypt_filters::{Aes128CryptFilter, CryptFilter};
-    use lopdf::{
-        Dictionary, EncryptionState, EncryptionVersion, Object, Permissions, Stream, dictionary,
-    };
+    use lopdf::{EncryptionState, EncryptionVersion, Object, Permissions, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::with_pages;
+    use crate::fixtures::blank;
 
     /// A document that saves past the limit it would be opened within is
     /// refused when written, not when opened again.
     #[test]
     fn a_document_saved_past_the_limit_is_refused() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let large = doc.add_object(
             Stream::new(dictionary! {}, vec![0; Pdf::MAX_DOCUMENT_BYTES]).with_compression(false),
         );
@@ -379,8 +376,7 @@ mod tests {
     /// document is refused, not expanded.
     #[test]
     fn inlined_encodings_are_bounded() {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         let shared = doc.add_object(dictionary! {
             "Padding" => vec![Object::Integer(0); 100_000],
         });
@@ -398,8 +394,7 @@ mod tests {
 
     /// A one-page PDF, unencrypted.
     fn document() -> Document {
-        let mut doc = Document::with_version("1.7");
-        with_pages(&mut doc, [Dictionary::new()]);
+        let mut doc = blank();
         doc.trailer.set(
             "ID",
             vec![
