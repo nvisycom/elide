@@ -18,7 +18,9 @@ use quick_xml::events::{BytesStart, Event};
 
 use crate::opc::content_types::CONTENT_TYPES_PART;
 use crate::opc::part::PartPath;
-use crate::opc::xml_edit::{Edit, Edited, Skipped, SpannedReader, attribute_extent, splice};
+use crate::opc::xml_edit::{
+    Edit, Edited, Skipped, SpannedReader, attribute_extent, cut_events, splice,
+};
 use crate::opc::{malformed_xml, ns};
 
 /// The vocabulary of a package part: its root, and each entry the root may
@@ -276,14 +278,8 @@ impl Edit for PackageMarkup {
                 _ => {}
             }
         }
-        if cuts.is_empty() {
-            return Ok(None);
-        }
         let count = cuts.len();
-        Ok(Some(Edited {
-            text: splice(raw, cuts),
-            count,
-        }))
+        Ok(Edited::from_cuts(raw, cuts, count))
     }
 }
 
@@ -337,27 +333,11 @@ impl Edit for PackageText {
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        let mut reader = SpannedReader::new(raw);
-        let mut cuts: Vec<(Range<usize>, &str)> = Vec::new();
-        loop {
-            let (event, span) = reader.read_event().map_err(malformed_xml)?;
-            match event {
-                Event::Eof => break,
-                Event::Text(ref text) if !text.bytes().all(|byte| byte.is_ascii_whitespace()) => {
-                    cuts.push((span, ""));
-                }
-                Event::CData(_) | Event::GeneralRef(_) => cuts.push((span, "")),
-                _ => {}
-            }
-        }
-        if cuts.is_empty() {
-            return Ok(None);
-        }
-        let count = cuts.len();
-        Ok(Some(Edited {
-            text: splice(raw, cuts),
-            count,
-        }))
+        cut_events(raw, |event| match event {
+            Event::Text(text) => !text.bytes().all(|byte| byte.is_ascii_whitespace()),
+            Event::CData(_) | Event::GeneralRef(_) => true,
+            _ => false,
+        })
     }
 }
 

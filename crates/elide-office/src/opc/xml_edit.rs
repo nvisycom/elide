@@ -127,25 +127,31 @@ impl Edit for XmlComments {
         if !raw.contains("<!--") {
             return Ok(None);
         }
-        let mut reader = SpannedReader::new(raw);
-        let mut cuts = Vec::new();
-        loop {
-            let (event, span) = reader.read_event().map_err(malformed_xml)?;
-            match event {
-                Event::Eof => break,
-                Event::Comment(_) => cuts.push((span, "")),
-                _ => {}
-            }
-        }
-        if cuts.is_empty() {
-            return Ok(None);
-        }
-        let count = cuts.len();
-        Ok(Some(Edited {
-            text: splice(raw, cuts),
-            count,
-        }))
+        cut_events(raw, |event| matches!(event, Event::Comment(_)))
     }
+}
+
+/// `raw` without each event `cuts` picks, each counted, or `None` when it
+/// picks none.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// `raw` is not well-formed XML.
+pub(crate) fn cut_events(raw: &str, cuts: impl Fn(&Event<'_>) -> bool) -> Result<Option<Edited>> {
+    let mut reader = SpannedReader::new(raw);
+    let mut spans = Vec::new();
+    loop {
+        let (event, span) = reader.read_event().map_err(malformed_xml)?;
+        if matches!(event, Event::Eof) {
+            break;
+        }
+        if cuts(&event) {
+            spans.push((span, ""));
+        }
+    }
+    let count = spans.len();
+    Ok(Edited::from_cuts(raw, spans, count))
 }
 
 impl<R: Rules> Edit for R {
@@ -278,6 +284,21 @@ pub(crate) struct Edited {
     pub(crate) count: usize,
 }
 
+impl Edited {
+    /// `raw` with `cuts` [spliced](splice), `count` items changed, or `None`
+    /// when there are no cuts.
+    pub(crate) fn from_cuts<S: AsRef<str>>(
+        raw: &str,
+        cuts: Vec<(Range<usize>, S)>,
+        count: usize,
+    ) -> Option<Self> {
+        (!cuts.is_empty()).then(|| Self {
+            text: splice(raw, cuts),
+            count,
+        })
+    }
+}
+
 /// `raw` as `edit` changes it, for a test whose edit changes something.
 ///
 /// # Panics
@@ -380,15 +401,9 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
         }
     }
 
-    if cuts.is_empty() {
-        return Ok(None);
-    }
     // An attribute cut never overlaps another cut: an element removed whole is
     // cut before its attributes are looked at.
-    Ok(Some(Edited {
-        text: splice(raw, cuts),
-        count,
-    }))
+    Ok(Edited::from_cuts(raw, cuts, count))
 }
 
 /// An attribute with its namespace resolved into an owned string, so it

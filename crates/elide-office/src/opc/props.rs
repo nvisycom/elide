@@ -24,7 +24,7 @@ use quick_xml::writer::Writer;
 use quick_xml::{Reader, XmlVersion};
 
 use crate::opc::malformed_xml;
-use crate::opc::xml_edit::{Edit, Edited, SpannedReader, attribute_source, bom_len, splice};
+use crate::opc::xml_edit::{Edit, Edited, SpannedReader, attribute_source, bom_len};
 
 /// The core and extended property elements surfaced as fields, each holding
 /// its value as text.
@@ -231,19 +231,13 @@ impl Cuts {
 
     /// `raw` with these cuts, or `None` when there are none.
     fn into_edited(self, raw: &str) -> Option<Edited> {
-        if self.0.is_empty() {
-            return None;
-        }
         let count = self.0.iter().filter(|(_, _, counted)| *counted).count();
         let cuts = self
             .0
             .into_iter()
             .map(|(range, with, _)| (range, with))
             .collect();
-        Some(Edited {
-            text: splice(raw, cuts),
-            count,
-        })
+        Edited::from_cuts(raw, cuts, count)
     }
 }
 

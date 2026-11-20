@@ -29,7 +29,7 @@ use super::names::{
 };
 use crate::opc::ns::{VML, VML_EXCEL, X};
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader, splice};
+use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader};
 use crate::opc::{Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, malformed_xml};
 
 /// The Excel 2010 application-compatibility namespace (the saved-to path).
@@ -178,15 +178,9 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
             _ => {}
         }
     }
-    if cuts.is_empty() {
-        return Ok(None);
-    }
     // The cuts may nest: a crafted drawing can put a shape inside another.
     let cuts = cuts.into_iter().map(|cut| (cut, "")).collect();
-    Ok(Some(Edited {
-        text: splice(raw, cuts),
-        count,
-    }))
+    Ok(Edited::from_cuts(raw, cuts, count))
 }
 
 /// The text attributes a workbook surfaces for detection: its sheet, defined,
