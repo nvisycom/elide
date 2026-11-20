@@ -598,6 +598,29 @@ fn a_removed_region_reads_each_element_in_its_own_vocabulary() {
 
 /// An `mglyph` or `malignmark` in a MathML token element stays MathML, so a
 /// `title` in it is not HTML text and `</math>` still ends the math.
+/// End tags naming nothing open are turned away without a scan of what is
+/// open, so many of them under many open elements stay linear.
+#[test]
+fn unmatched_end_tags_under_deep_nesting_stay_linear() {
+    let policy = HiddenContentPolicy::default();
+    let n = 50_000;
+    let raw = format!(
+        "<math><mi>{}{}</mi></math><div hidden>{}{}</div><p>Visible</p>",
+        "<span>".repeat(n),
+        "</b>".repeat(n),
+        "<span>".repeat(n),
+        "</b>".repeat(n),
+    );
+    let started = std::time::Instant::now();
+    let out = sanitize(html(policy), &raw);
+    assert!(
+        out.ends_with("<p>Visible</p>"),
+        "{}",
+        &out[out.len().saturating_sub(80)..]
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+}
+
 #[test]
 fn mglyph_and_malignmark_stay_mathml() {
     let policy = HiddenContentPolicy::default();
@@ -613,6 +636,18 @@ fn mglyph_and_malignmark_stay_mathml() {
     // Under an HTML element in `mi`, an `mglyph` is HTML: its self-closing
     // flag is ignored and it holds what follows.
     let raw = "<math><mi><span><mglyph hidden/>Secret</mglyph></span></mi></math>";
+    let out = sanitize(html(policy), raw);
+    assert!(!out.contains("Secret"), "{out}");
+    // A second `<p>` closes the first, so after its end the `mglyph` is
+    // right in `mi` again and its self-closing flag holds.
+    let raw = "<math><mi><p>a<p>b</p><mglyph/>Visible</mi></math><p>After</p>";
+    let out = sanitize(html(policy), raw);
+    assert!(
+        out.contains("Visible") && out.ends_with("<p>After</p>"),
+        "{out}"
+    );
+    // While the `span` is open, the `p` it holds does not end it.
+    let raw = "<math><mi><span><p>a<p>b</p><mglyph hidden/>Secret</mglyph></span></mi></math>";
     let out = sanitize(html(policy), raw);
     assert!(!out.contains("Secret"), "{out}");
     // A kept `mi` holding a self-closed `mglyph` does not hold what follows.

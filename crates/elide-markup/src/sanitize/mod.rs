@@ -48,6 +48,7 @@
 //! bytes, which is how an encoded document is [`check`](MarkupSanitizer::check)ed.
 
 mod html;
+mod open;
 mod url;
 
 use std::ops::Range;
@@ -60,6 +61,7 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 
 use self::html::{Element, RCDATA_ELEMENTS, Space, TEXT_ELEMENTS, VOID_ELEMENTS};
+use self::open::OpenElements;
 use self::url::css_loads_remote;
 use crate::engine::parser::{bom_len, end_name, start_name};
 use crate::engine::tag::{HtmlAttribute, HtmlTagExt};
@@ -459,21 +461,22 @@ impl<'a> Rebuild<'a> {
                 if !self_closing(raw, span, &tag.attributes, is_start)
                     || (space == Space::Html && !void)
                 {
-                    if space == Space::Html && TEXT_ELEMENTS.contains(&name.as_str()) {
-                        region.text = Some(name.clone());
+                    if space == Space::Html {
+                        close_implied(&mut region.open, &name);
+                        if TEXT_ELEMENTS.contains(&name.as_str()) {
+                            region.text = Some(name.clone());
+                        }
                     }
-                    region.open.push((name, space));
+                    region.open.push(name, space);
                 }
             }
             Event::Start(e) => {
                 let space = region.space;
-                region.open.push((start_name(e, raw, false)?, space));
+                region.open.push(start_name(e, raw, false)?, space);
             }
             Event::End(e) => {
                 let name = end_name(e, raw, html)?;
-                if let Some(at) = region.open.iter().rposition(|(open, _)| *open == name) {
-                    region.open.truncate(at);
-                } else if name == region.name {
+                if !region.open.close(&name) && name == region.name {
                     self.dropping = None;
                 }
             }
@@ -572,6 +575,14 @@ impl<'a> Rebuild<'a> {
             }
             _ => self.space(),
         };
+        // A start tag that implies the end of the HTML element open right in
+        // the element read as HTML closes it, kept or not.
+        if space == Space::Html
+            && let Some(foreign) = self.spaces.last_mut()
+            && foreign.space == Space::Html
+        {
+            close_implied(&mut foreign.open, &name);
+        }
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
         let self_closing = self_closing(self.raw, &span, &tag.attributes, is_start);
         // Whether the element holds what follows: a browser ignores the
@@ -656,7 +667,7 @@ impl<'a> Rebuild<'a> {
                     if foreign.root == name {
                         foreign.depth += 1;
                     } else if foreign.space == Space::Html {
-                        foreign.open.push(name.clone());
+                        foreign.open.push(name.clone(), ());
                     }
                 }
                 // Inside an SVG `desc` or a MathML `mi`, a browser reads HTML
@@ -688,8 +699,7 @@ impl<'a> Rebuild<'a> {
         let named = html::names(space, &name) || html::names(Space::Html, &name);
         let leaves = self.spaces.last_mut().is_some_and(|foreign| {
             // An HTML element open inside the element read as HTML ends first.
-            if let Some(at) = foreign.open.iter().rposition(|open| *open == name) {
-                foreign.open.truncate(at);
+            if foreign.open.close(&name) {
                 return false;
             }
             if foreign.root == name {
@@ -732,13 +742,24 @@ fn self_closing(
         })
 }
 
+/// Close the HTML elements innermost in `open` whose end the start tag
+/// `name` implies, as a second `<p>` ends the first.
+fn close_implied<T>(open: &mut OpenElements<T>, name: &str) {
+    while open
+        .last()
+        .is_some_and(|(open, _)| html::closes(open, name))
+    {
+        open.pop();
+    }
+}
+
 /// An element being left out with its subtree: its lowercased name, the
 /// vocabulary it was read in, and the elements open inside it, so its own end
 /// tag is told from theirs.
 struct Region {
     name: String,
     space: Space,
-    open: Vec<(String, Space)>,
+    open: OpenElements<Space>,
     /// The text element, open in it or itself, whose body a browser reads
     /// as text up to its end tag.
     text: Option<String>,
@@ -759,7 +780,7 @@ impl Region {
         Self {
             name,
             space,
-            open: Vec::new(),
+            open: OpenElements::new(),
             text: None,
         }
     }
@@ -782,7 +803,7 @@ struct Foreign {
     depth: usize,
     /// Under HTML read inside an SVG or MathML element: the HTML elements
     /// open in it, so what is started right in that element is told apart.
-    open: Vec<String>,
+    open: OpenElements,
 }
 
 impl Foreign {
@@ -791,7 +812,7 @@ impl Foreign {
             space,
             root,
             depth: 1,
-            open: Vec::new(),
+            open: OpenElements::new(),
         }
     }
 }
