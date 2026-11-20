@@ -87,8 +87,16 @@ fn css_reaches_server(css: &str) -> bool {
 fn css_arguments(rest: &str) -> &str {
     let mut depth = 0usize;
     let mut quote = None;
+    let mut escaped = false;
     for (at, c) in rest.char_indices() {
+        // A backslash escapes the character after it, a quote or a
+        // parenthesis included.
+        if escaped {
+            escaped = false;
+            continue;
+        }
         match (quote, c) {
+            (_, '\\') => escaped = true,
             (Some(open), c) if c == open => quote = None,
             (Some(_), _) => {}
             (None, '"' | '\'') => quote = Some(c),

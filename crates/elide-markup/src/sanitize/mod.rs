@@ -476,6 +476,7 @@ impl<'a> Rebuild<'a> {
         let text = &self.raw[span];
         if let Some((amp, len)) = self.dangling
             && len == self.out.len()
+            && self.out.as_bytes().get(amp) == Some(&b'&')
             && text.starts_with(|c: char| c.is_ascii_alphanumeric() || matches!(c, '#' | ';'))
         {
             let reads = html::text_reference(&self.out[amp..]);
@@ -549,6 +550,11 @@ impl<'a> Rebuild<'a> {
             && css_loads_remote(&sheet.css)
         {
             self.out.truncate(sheet.start);
+            // A `&` left dangling in the sheet goes with it; one before the
+            // sheet still dangles across the removal.
+            if self.dangling.is_some_and(|(amp, _)| amp >= sheet.start) {
+                self.dangling = None;
+            }
             self.record(HiddenContent::Link);
         }
     }

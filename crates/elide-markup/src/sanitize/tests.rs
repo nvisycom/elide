@@ -1009,12 +1009,34 @@ fn every_image_set_candidate_is_checked() {
     for css in [
         "background:image-set(linear-gradient(red,blue) 1x, 'https://example.test/p.png' 2x)",
         "background:image-set('a)b.png' 1x, 'https://example.test/p.png' 2x)",
+        r"background:image-set('a\'b)' 1x, 'https://example.test/p.png' 2x)",
+        r#"background:image-set("a\"b)" 1x, "https://example.test/p.png" 2x)"#,
+        r"background:image-set(a\)b 1x, 'https://example.test/p.png' 2x)",
     ] {
         assert!(css_loads_remote(css), "{css}");
     }
     assert!(!css_loads_remote(
         "background:image-set(linear-gradient(red,blue) 1x, 'p.png' 2x)"
     ));
+}
+
+/// A `&` left dangling in a removed style sheet does not dangle after it,
+/// however long the markup written after the sheet grows the output.
+#[test]
+fn a_dangling_reference_goes_with_a_removed_style_sheet() {
+    for lead in ["", "a"] {
+        for pad in 0..80 {
+            let title = format!("{lead}{}", "é".repeat(pad));
+            let raw = format!(
+                "<svg><style>@import \"https://x.test/a.css\";é&am</style><p title=\"{title}\">p;</p>"
+            );
+            let out = rebuilt(&raw);
+            assert!(
+                out.ends_with(&format!("<p title=\"{title}\">p;</p>")),
+                "{out}"
+            );
+        }
+    }
 }
 
 /// Text joined across many removals is copied in linear time.
