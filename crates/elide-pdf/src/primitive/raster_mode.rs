@@ -15,11 +15,11 @@ use super::Dpi;
 
 /// Whether to render a document's pages to images: never, auto, or always.
 ///
-/// [`Auto`] is the default: use the text layer where it exists (redact by
-/// deleting glyphs) and render only the pages without one, for OCR.
-/// [`Always`] replaces every page by a redacted image of it, whatever its text
-/// layer, so nothing drawn on a page survives underneath. [`Never`] relies on
-/// the text layer only.
+/// [`Auto`] is the default: use the text layer where it can be placed (redact
+/// by deleting glyphs) and render the other pages, for OCR. [`Always`]
+/// replaces every page by a redacted image of it, detected on what it shows,
+/// whatever its text layer holds, so nothing drawn on a page survives
+/// underneath. [`Never`] relies on the text layer only.
 ///
 /// Serializes with an internal `kind` tag (`{"kind": "auto"}`,
 /// `{"kind": "always", "dpi": 300}`, `{"kind": "never"}`).
@@ -34,18 +34,23 @@ use super::Dpi;
 pub enum RasterMode {
     /// Delete the detected glyphs from the text layer, and render each page
     /// without one at [`Dpi::OCR`] for OCR, replacing it by its redacted
-    /// image. The default.
+    /// image where something on it is redacted. A page that draws text in a
+    /// font whose glyph widths can't be known is rendered too, and always
+    /// replaced, as where its glyphs land is up to each viewer. The default.
     #[default]
     Auto,
-    /// Render every page at the given [`Dpi`] and replace it by an image with
-    /// the detected text painted over, keeping no text layer: the strongest
-    /// redaction, for documents whose text layer is garbled or untrusted.
+    /// Render every page at the given [`Dpi`], detect on what it shows (OCR),
+    /// and replace it by its render with the detected regions painted over,
+    /// keeping no text layer: the strongest redaction, for documents whose
+    /// text layer is garbled or untrusted. The text layer is never read, so
+    /// one that differs from what the page shows can't hide a value.
     Always {
         /// Resolution to render pages at; [`Dpi::OCR`] (300) is typical.
         dpi: Dpi,
     },
     /// Never render: delete glyphs from the text layer only, leaving a page
-    /// without one to its embedded images' redaction.
+    /// without one to its embedded images' redaction. A page that draws text
+    /// in a font whose glyph widths can't be known is refused.
     Never,
 }
 

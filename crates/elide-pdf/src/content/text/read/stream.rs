@@ -337,6 +337,11 @@ impl<'d> Walk<'_, 'd> {
                         font: selected.slot,
                     };
                     run.show(text, operands, op_idx, base)?;
+                    if self.accum.rects.len() > shown
+                        && matches!(selected.widths, WidthSource::Unknown)
+                    {
+                        self.unplaced = true;
+                    }
                     // Text drawn with a pattern paints it where it shows,
                     // its stroke reaching past glyphs the clip hides.
                     let extent = self.accum.rects[shown..]

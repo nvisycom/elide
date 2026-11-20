@@ -29,17 +29,6 @@ pub(crate) struct DeviceRect {
 }
 
 impl DeviceRect {
-    /// The box's four corners, as `(x, y)` points.
-    #[cfg(feature = "render")]
-    pub(crate) fn corners(&self) -> [(f64, f64); 4] {
-        [
-            (self.min_x, self.min_y),
-            (self.max_x, self.min_y),
-            (self.max_x, self.max_y),
-            (self.min_x, self.max_y),
-        ]
-    }
-
     /// The axis-aligned bounds of four device-space corners (a glyph quad mapped
     /// through a possibly-rotated matrix is not axis-aligned; take its extent).
     pub(crate) fn of_corners(corners: [(f64, f64); 4]) -> DeviceRect {
@@ -133,16 +122,6 @@ pub(crate) struct PageFrame {
 }
 
 impl PageFrame {
-    /// The frame of a page with no readable box, as a viewer draws it: US
-    /// Letter, unrotated.
-    #[cfg(feature = "render")]
-    pub(crate) const LETTER: Self = Self {
-        crop_x0: 0.0,
-        crop_y0: 0.0,
-        crop_w: 612.0,
-        crop_h: 792.0,
-        rotate: 0,
-    };
     /// The frame of a page with no readable box: the unit square, unrotated,
     /// so geometry on it stays unnormalized rather than failing.
     pub(crate) const UNIT: Self = Self {

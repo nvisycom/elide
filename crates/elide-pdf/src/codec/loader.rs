@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use elide_codec::content::ContentData;
 use elide_codec::{Blob, Document, DocumentLoader, LocalId};
-use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
+use elide_core::{Error, Result};
 
 use super::FORMAT_ID;
 #[cfg(feature = "render")]
@@ -17,14 +17,14 @@ use super::blob_id::BlobId;
 use super::document::PdfDocument;
 #[cfg(feature = "render")]
 use super::page::PageStream;
-use super::state::{Pages, PdfState};
+use super::state::PdfState;
 use super::stream::PdfStream;
 use crate::content::attachment::Attachments;
 use crate::content::image::Images;
-use crate::content::text::Text;
+use crate::content::text::{Text, TextBlock};
 use crate::pdf::Pdf;
 #[cfg(feature = "render")]
-use crate::pdf::render::{Observation, Renders};
+use crate::pdf::render::Renders;
 #[cfg(feature = "render")]
 use crate::primitive::RasterMode;
 use crate::sanitize::{Rebuild, Rebuilt};
@@ -94,13 +94,13 @@ impl DocumentLoader for PdfDocumentLoader {
             bytes: attachment.bytes,
         }));
 
+        let blocks = pdf.read(Text)?;
         #[cfg(feature = "render")]
-        let (pages, scanned) = self.pages(&pdf)?;
+        let (state, rendered) = self.pages(&pdf, blocks)?;
         #[cfg(not(feature = "render"))]
-        let pages = Pages::Glyph(pdf.read(Text)?);
-        let state = PdfState::new(pages);
+        let state = PdfState::new(placed(blocks)?);
         #[cfg(feature = "render")]
-        let document = Self::document(pdf, state, scanned, blobs);
+        let document = Self::document(pdf, state, rendered, blobs);
         #[cfg(not(feature = "render"))]
         let document = Self::document(pdf, state, blobs);
         Ok(document.with_stripped(stripped))
@@ -109,57 +109,83 @@ impl DocumentLoader for PdfDocumentLoader {
 
 #[cfg(feature = "render")]
 impl PdfDocumentLoader {
-    /// The pages of `pdf` as the raster mode reads them, and each scanned
-    /// page's render as an image stream, for OCR.
+    /// The state of the pages of `pdf`, its text `blocks`, redacted by
+    /// deleting glyphs, and the render of each page redacted from it, for
+    /// OCR.
     ///
-    /// Under [`RasterMode::Always`] the text and glyph boxes come from PDFium,
-    /// and every page is replaced by a redacted image of it on encode;
-    /// otherwise they come from the content walk, for glyph deletion, and
-    /// under [`RasterMode::Auto`] a scanned page is rendered at [`SCAN_DPI`].
-    fn pages(&self, pdf: &Pdf) -> Result<(Pages, Vec<PageStream>)> {
-        let (pages, scanned, dpi) = match self.raster {
+    /// Under [`RasterMode::Always`] every page is redacted from its render
+    /// at its resolution: detected on what it shows, and replaced by it.
+    /// Under [`RasterMode::Auto`] a page that draws text in a font whose
+    /// advances can't be known is too, at [`SCAN_DPI`], and a scanned page is
+    /// rendered for OCR and replaced only where something on it is redacted.
+    /// Under [`RasterMode::Never`] nothing is rendered, so a page that would
+    /// need it is refused.
+    ///
+    /// # Errors
+    ///
+    /// As [`placed`] under [`RasterMode::Never`], and as [`Renders`].
+    fn pages(&self, pdf: &Pdf, blocks: Vec<TextBlock>) -> Result<(PdfState, Vec<PageStream>)> {
+        let (state, scanned, replaced, dpi) = match self.raster {
+            RasterMode::Never => return Ok((PdfState::new(placed(blocks)?), Vec::new())),
             RasterMode::Always { dpi } => {
-                let pages = pdf.read(Observation)?;
-                let scanned = scanned(pages.iter().map(|p| (p.page, p.text.as_str())));
-                let scale = dpi.scale_factor();
-                (Pages::Flatten { pages, scale }, scanned, dpi)
+                let every: BTreeSet<u32> = blocks.iter().map(|block| block.page).collect();
+                (PdfState::new(Vec::new()), BTreeSet::new(), every, dpi)
             }
             RasterMode::Auto => {
-                let blocks = pdf.read(Text)?;
+                let (unplaced, placed): (Vec<TextBlock>, Vec<TextBlock>) =
+                    blocks.into_iter().partition(|block| block.unplaced);
                 // A page is scanned when it shows no text: text located but
                 // placed nowhere (a pattern's it never paints) is no text a
                 // reader sees on the page.
-                let scanned = blocks
+                let scanned = placed
                     .iter()
                     .filter(|block| !block.shows_text())
                     .map(|block| block.page)
                     .collect();
-                (Pages::Glyph(blocks), scanned, SCAN_DPI)
+                let replaced = unplaced.iter().map(|block| block.page).collect();
+                (PdfState::new(placed), scanned, replaced, SCAN_DPI)
             }
-            RasterMode::Never => return Ok((Pages::Glyph(pdf.read(Text)?), Vec::new())),
         };
-        if scanned.is_empty() {
-            return Ok((pages, Vec::new()));
+        let scale = dpi.scale_factor();
+        let state = state.rendered_at(scale);
+        let pages: BTreeSet<u32> = scanned.union(&replaced).copied().collect();
+        if pages.is_empty() {
+            return Ok((state, Vec::new()));
         }
         let renders = pdf
-            .read(Renders {
-                pages: scanned,
-                scale: dpi.scale_factor(),
-            })?
+            .read(Renders { pages, scale })?
             .into_iter()
-            .map(|(number, png)| PageStream::new(number, png))
+            .map(|(number, png)| {
+                let page = PageStream::new(number, png);
+                if replaced.contains(&number) {
+                    page.replaced()
+                } else {
+                    page
+                }
+            })
             .collect();
-        Ok((pages, renders))
+        Ok((state, renders))
     }
 }
 
-/// The numbers of the pages with no text: scanned, or drawn as outlines.
-#[cfg(feature = "render")]
-fn scanned<'a>(texts: impl Iterator<Item = (u32, &'a str)>) -> BTreeSet<u32> {
-    texts
-        .filter(|(_, text)| text.trim().is_empty())
-        .map(|(number, _)| number)
-        .collect()
+/// `blocks`, every page of which can be redacted by deleting its glyphs.
+///
+/// # Errors
+///
+/// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
+/// for a page that draws text in a font whose advances can't be known:
+/// where its glyphs land is up to each viewer, so it can be redacted only from
+/// its render, which needs the `render` feature and a raster mode other than
+/// `Never`.
+fn placed(blocks: Vec<TextBlock>) -> Result<Vec<TextBlock>> {
+    if let Some(block) = blocks.iter().find(|block| block.unplaced) {
+        return Err(Error::capability_unavailable(format!(
+            "page {} draws text in a font whose glyph widths can't be known; it can be \
+             redacted only from its render",
+            block.page
+        )));
+    }
+    Ok(blocks)
 }
 
 /// The registry hint for an attachment named `name`: its lowercased file
@@ -177,10 +203,12 @@ mod tests {
     use std::io::Cursor;
 
     use bytes::Bytes;
-    use elide_codec::{Blob, Document, LocalId};
+    use elide_codec::content::ContentData;
+    use elide_codec::{Blob, Document, DocumentLoader, LocalId};
     use elide_core::ErrorKind;
+    use elide_core::modality::text::Text;
     use elide_core::modality::{ChunkReader, DataWriter};
-    use elide_core::redaction::Redactions;
+    use elide_core::redaction::{HiddenContentPolicy, Redactions};
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage, load_from_memory};
@@ -189,10 +217,11 @@ mod tests {
     use super::PdfDocumentLoader;
     use crate::codec::blob_id::BlobId;
     use crate::codec::page::PageStream;
-    use crate::codec::state::{Pages, PdfState};
+    use crate::codec::state::PdfState;
     use crate::content::image::Images;
-    use crate::fixtures::{DocBuilder, Page};
+    use crate::fixtures::{DocBuilder, Page, shown, type1};
     use crate::pdf::Pdf;
+    use crate::primitive::RasterMode;
     use crate::sanitize::Rebuild;
 
     /// A solid-colour PNG of `w`x`h`.
@@ -216,10 +245,117 @@ mod tests {
     /// The glyph-deletion document of `document`, page 1 scanned with the
     /// PNG `render`, and `blobs`.
     fn scanned_document(document: &[u8], render: &[u8], blobs: Vec<Blob>) -> Document {
-        let state = PdfState::new(Pages::Glyph(Vec::new()));
         let page = PageStream::new(1, Bytes::copy_from_slice(render));
+        rendered_document(document, page, blobs)
+    }
+
+    /// The document of `document` with page 1 redacted from `page`, and
+    /// `blobs`.
+    fn rendered_document(document: &[u8], page: PageStream, blobs: Vec<Blob>) -> Document {
+        let state = PdfState::new(Vec::new());
         let pdf = Pdf::open(document).unwrap().read(Rebuild).unwrap().pdf;
         PdfDocumentLoader::document(pdf, state, vec![page], blobs)
+    }
+
+    /// A one-page 100x100pt PDF showing `Jane Roe` in a font that gives no
+    /// widths and names no standard face.
+    fn unplaced_doc() -> Bytes {
+        let mut pdf = DocBuilder::new();
+        let font = pdf.add(type1("Custom"));
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .ops(shown("Jane Roe"))
+                .size(100, 100),
+        );
+        Bytes::from(pdf.bytes())
+    }
+
+    /// `bytes` decoded under `raster`.
+    async fn decoded(bytes: Bytes, raster: RasterMode) -> elide_core::Result<Document> {
+        PdfDocumentLoader::new(raster)
+            .decode(ContentData::new(bytes), HiddenContentPolicy::default())
+            .await
+    }
+
+    /// The text of the body stream of `doc`.
+    fn body_text(doc: &mut Document) -> String {
+        doc.stream_mut::<Text>("body")
+            .expect("the body stream")
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .map(|chunk| chunk.data.as_str().to_owned())
+            .collect()
+    }
+
+    /// A page redacted from its render is replaced by it with nothing on it
+    /// redacted, so its text layer never ships.
+    #[test]
+    fn a_rendered_page_is_replaced_with_nothing_redacted() {
+        let render = png(100, 100, [255, 255, 255]);
+        let page = PageStream::new(1, Bytes::from(render)).replaced();
+        let doc = rendered_document(&scanned_doc(), page, vec![]);
+        assert!(!holds_marker(doc.encode().unwrap().as_bytes()));
+
+        let kept = scanned_document(&scanned_doc(), &png(100, 100, [255, 255, 255]), vec![]);
+        assert!(holds_marker(kept.encode().unwrap().as_bytes()));
+    }
+
+    /// With rendering off, a page drawing text in a font whose advances
+    /// can't be known is refused rather than redacted by guesswork.
+    #[tokio::test]
+    async fn never_refuses_a_page_in_a_font_without_widths() {
+        let Err(error) = decoded(unplaced_doc(), RasterMode::Never).await else {
+            panic!("a page in a font without widths must be refused");
+        };
+        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+    }
+
+    /// Under the default mode a page drawing text in a font whose advances
+    /// can't be known is redacted from its render: it surfaces as an image
+    /// stream, its text is not read, and it is replaced on encode.
+    #[tokio::test]
+    #[ignore = "requires the native PDFium library at runtime"]
+    async fn auto_renders_a_page_in_a_font_without_widths() {
+        let mut doc = decoded(unplaced_doc(), RasterMode::Auto).await.unwrap();
+        assert!(doc.stream_mut::<Image>("page-1").is_some());
+        assert!(body_text(&mut doc).trim().is_empty());
+        let out = doc.encode().unwrap();
+        let mut again = decoded(Bytes::copy_from_slice(out.as_bytes()), RasterMode::Never)
+            .await
+            .unwrap();
+        assert!(
+            body_text(&mut again).trim().is_empty(),
+            "a text layer survived"
+        );
+    }
+
+    /// Under `Always` every page is redacted from its render, its text layer
+    /// never read, whatever its fonts.
+    #[tokio::test]
+    #[ignore = "requires the native PDFium library at runtime"]
+    async fn always_renders_every_page_without_reading_its_text() {
+        let mut pdf = DocBuilder::new();
+        let font = pdf.add(type1("Helvetica"));
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .ops(shown("Jane Roe"))
+                .size(100, 100),
+        );
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .ops(shown("John Doe"))
+                .size(100, 100),
+        );
+        let mut doc = decoded(Bytes::from(pdf.bytes()), RasterMode::always())
+            .await
+            .unwrap();
+        assert!(body_text(&mut doc).trim().is_empty());
+        assert!(doc.stream_mut::<Image>("page-1").is_some());
+        assert!(doc.stream_mut::<Image>("page-2").is_some());
     }
 
     /// The scanned page's own content: a drawing the rebuild keeps.

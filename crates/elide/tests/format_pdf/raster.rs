@@ -1,6 +1,7 @@
 //! End-to-end PDF **raster** redaction (feature `codec-pdf-render`): decode →
-//! analyze → anonymize → encode, where every page is rendered with the
-//! detected text painted over and replaced by that image.
+//! analyze → anonymize → encode, where every page is rendered, detected on
+//! what it shows by the image pipeline, and replaced by that render with the
+//! detected regions painted over.
 //!
 //! Requires the native PDFium library at runtime, so the test is `#[ignore]`d
 //! by default; run it where PDFium is installed:
@@ -10,9 +11,9 @@
 //!     --test e2e_pdf_raster -- --ignored
 //! ```
 //!
-//! Unlike glyph deletion, raster redaction does not depend on the font
-//! encoding: it paints over pixels. The proof is that the redacted output has
-//! **no extractable text at all**, it is images, and none of the original PII
+//! Unlike glyph deletion, raster redaction never reads the text layer: it
+//! paints over pixels. The proof is that the redacted output has **no
+//! extractable text at all**, it is images, and none of the original PII
 //! survives.
 
 use bytes::Bytes;
@@ -72,11 +73,12 @@ async fn raster_redaction_flattens_every_page() -> Result<()> {
         FormatRegistry::with_builtin().with_replaced_format(pdf_format_with(RasterMode::always()));
     let outcome = FIXTURE.run_with(registry).await?;
 
-    // The born-digital text layer detected the PII (the analysis ran over the
-    // observation text before redaction).
+    // Nothing is detected on the text layer: every page is detected on its
+    // render instead, by the image pipeline.
     assert!(
-        !outcome.entities.is_empty(),
-        "the born-digital text should detect entities",
+        outcome.entities.is_empty(),
+        "the text layer was read: {:?}",
+        outcome.entities,
     );
 
     // The redacted output is image-only: re-decoding recovers no text at all,

@@ -3,17 +3,14 @@
 //! that one image, so none of its text, vector content, or images survives
 //! underneath.
 //!
-//! A scanned page (no text layer) is redacted by the image pipeline on its
-//! render ([`ScannedPage`]), and is [`Repaint`]ed over a fresh render when the
-//! document's embedded images changed since; under
-//! [`RasterMode::Always`](crate::primitive::RasterMode::Always) every page is
-//! rendered with its detected glyphs painted over ([`Flatten`]). Either way the
-//! page is written back by a [`PageRedaction`].
+//! A page redacted from its render, a scanned page or one whose text layer
+//! can't be redacted, is redacted by the image pipeline on that render
+//! ([`ScannedPage`]), and is [`Repaint`]ed over a fresh render when the
+//! document's embedded images changed since. Either way the page is written
+//! back by a [`PageRedaction`].
 
 mod read;
 mod redact;
-
-use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
@@ -22,32 +19,8 @@ use elide_image::primitive::BoundingBox;
 use elide_image::{ImageBuffer, RasterImage};
 use lopdf::{Stream, dictionary};
 
-pub(crate) use self::read::glyph_boxes;
-use crate::pdf::reader::DeviceRect;
 use crate::pdf::writer::compressed;
 use crate::pdf::{Edit, Pdf, Read, Redact};
-
-/// The pages `pages` (1-based) rendered at `scale` with the glyph boxes
-/// `boxes` names for each painted over, each as the image that replaces it.
-///
-/// # Errors
-///
-/// As [`Renders`](crate::pdf::render::Renders), and
-/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a glyph box
-/// that cannot be placed on its rendered page.
-pub(crate) struct Flatten<'a> {
-    pub(crate) pages: BTreeSet<u32>,
-    pub(crate) scale: f32,
-    pub(crate) boxes: &'a BTreeMap<u32, Vec<DeviceRect>>,
-}
-
-impl Read for Flatten<'_> {
-    type Output = Vec<PageReplacement>;
-
-    fn read(self, pdf: &Pdf) -> Result<Self::Output> {
-        read::flatten(pdf, &self.pages, self.scale, self.boxes)
-    }
-}
 
 /// Each of the `scanned` pages rendered fresh at `scale`, with the regions
 /// redacted on it painted over, as the image that replaces it.
