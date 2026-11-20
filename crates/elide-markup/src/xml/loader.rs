@@ -1,9 +1,10 @@
 //! XML loader: rebuilds decoded content as parsed (without processing
 //! instructions, its document type, XInclude, or, under the policy, comments) and
-//! wires the rest through the shared [`parser`] into a leaf [`Document`] whose
-//! body is an [`ExtractStream`] re-serialised by [`MarkupDocument`].
+//! reads the rest with the shared markup engine ([`decode`]) into a leaf
+//! [`Document`] whose body is an [`ExtractStream`] re-serialised by
+//! [`MarkupDocument`].
 //!
-//! [`parser`]: crate::engine::parser
+//! [`decode`]: crate::engine::document::decode
 //! [`ExtractStream`]: elide_codec::extract::ExtractStream
 //! [`MarkupDocument`]: crate::engine::document::MarkupDocument
 
@@ -14,20 +15,15 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::handler::FORMAT_ID;
 use crate::engine::config::MarkupConfig;
-use crate::engine::document::markup_document;
-use crate::engine::parser::build_items;
-use crate::sanitize::{Dialect, MarkupSanitizer};
+use crate::engine::document::decode;
 
 /// Loader for XML files. Produces one leaf [`Document`] per input.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct XmlLoader;
 
 #[async_trait::async_trait]
 impl DocumentLoader for XmlLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
-        let sanitizer = MarkupSanitizer::new(Dialect::Xml, policy);
-        let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
-        let items = build_items(&text, MarkupConfig::xml())?;
-        Ok(markup_document(FORMAT_ID, text, items, sanitizer).with_stripped(stripped))
+        decode(FORMAT_ID, MarkupConfig::xml(), content, policy)
     }
 }

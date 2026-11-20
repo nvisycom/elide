@@ -13,5 +13,6 @@ pub(crate) mod config;
 pub(crate) mod document;
 pub(crate) mod meta;
 pub(crate) mod parser;
+pub(crate) mod reader;
 pub(crate) mod source;
 pub(crate) mod tag;

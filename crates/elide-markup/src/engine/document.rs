@@ -1,5 +1,5 @@
 //! [`MarkupDocument`]: a decoded markup document, its body stream and how it is
-//! re-serialised, and [`markup_document`], which assembles one.
+//! re-serialised, and [`decode`], which reads one.
 //!
 //! Re-serialisation preserves the document **verbatim**: [`MarkupDocument`]
 //! writes back only the stretch of each item's value a redaction changed,
@@ -15,9 +15,12 @@ use elide_codec::content::ContentData;
 use elide_codec::extract::{ExtractStream, Passage};
 use elide_codec::{Blob, Document, FormatId, LocalId, Native, StreamMut};
 use elide_core::modality::text::Text;
+use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
 use super::address::{MarkupAddresser, XmlItem, XmlSpan};
+use super::config::MarkupConfig;
+use super::parser::build_items;
 use crate::sanitize::MarkupSanitizer;
 
 /// The id of a markup document's one stream.
@@ -53,21 +56,25 @@ impl Native for MarkupDocument {
     }
 }
 
-/// Assemble a markup [`Document`] under `format_id` from the parsed `items` over
-/// the retained (sanitized) `raw` source, checked on encode against
-/// `sanitizer`. Shared by the XML and HTML loaders.
-pub(crate) fn markup_document(
+/// Decode `content` as a markup [`Document`] under `format_id`, read by
+/// `config`: rebuilt by the sanitizer of its dialect under `policy`, then
+/// parsed into its body items over the rebuilt source, which the output is
+/// checked against on encode. Shared by the XML and HTML loaders.
+pub(crate) fn decode(
     format_id: FormatId,
-    raw: String,
-    items: Vec<XmlItem>,
-    sanitizer: MarkupSanitizer,
-) -> Document {
+    config: MarkupConfig<'_>,
+    content: ContentData,
+    policy: HiddenContentPolicy,
+) -> Result<Document> {
+    let sanitizer = MarkupSanitizer::new(config.dialect, policy);
+    let (raw, stripped) = sanitizer.sanitize(content.decode()?)?;
+    let items = build_items(&raw, config)?;
     let native = MarkupDocument {
         body: ExtractStream::new(format_id, items, MarkupAddresser),
         raw,
         sanitizer,
     };
-    Document::new(format_id, native, Vec::new())
+    Ok(Document::new(format_id, native, Vec::new()).with_stripped(stripped))
 }
 
 /// Write each item's current value back into `raw`, returning the rebuilt
@@ -118,8 +125,6 @@ mod tests {
     use elide_core::redaction::Redactions;
 
     use super::*;
-    use crate::engine::config::MarkupConfig;
-    use crate::engine::parser::build_items;
     use crate::xml::FORMAT_ID;
 
     /// A markup body stream over its raw source, spliced back the way
@@ -389,7 +394,7 @@ mod tests {
         // other markup byte-identical, changing only the targeted span, the
         // splice offsets stay correct across the skipped region.
         let raw = r#"<p><script>var a="keep@x.com";</script>mail alice@example.com</p>"#;
-        let mut doc = Doc::new(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+        let mut doc = Doc::new(raw, MarkupConfig::html(TEST_BLOCKS, &["script"], &[]));
         let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::inline(

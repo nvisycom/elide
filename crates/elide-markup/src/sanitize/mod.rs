@@ -64,22 +64,13 @@ use quick_xml::name::{Namespace, ResolveResult};
 use self::html::{Element, RCDATA_ELEMENTS, Space, TEXT_ELEMENTS, VOID_ELEMENTS};
 use self::open::OpenElements;
 use self::url::css_loads_remote;
-use crate::engine::parser::{bom_len, end_name, start_name};
-use crate::engine::tag::{HtmlAttribute, HtmlTagExt};
+use crate::engine::config::Dialect;
+use crate::engine::reader::{EventSpans, configure, malformed_markup};
+use crate::engine::tag::{HtmlAttribute, HtmlTagExt, tag_name};
 use crate::references::{CharacterReferences, decode_references};
 
 /// The XInclude namespace, whose `include` element pulls in another document.
 const XINCLUDE: &str = "http://www.w3.org/2001/XInclude";
-
-/// The markup dialect a [`MarkupSanitizer`] reads: strict XML, or lenient HTML
-/// with its element vocabulary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Dialect {
-    /// Well-formed XML, kept as parsed.
-    Xml,
-    /// HTML, read leniently and rebuilt from what renders.
-    Html,
-}
 
 /// Rebuilds a markup document under a [`HiddenContentPolicy`].
 #[derive(Debug, Clone, Copy)]
@@ -226,28 +217,19 @@ impl<'a> Rebuild<'a> {
         let raw = self.raw;
         let html = self.html();
         let mut reader = NsReader::from_str(raw);
-        if html {
-            let config = reader.config_mut();
-            config.check_end_names = false;
-            config.allow_unmatched_ends = true;
-            config.allow_dangling_amp = true;
-        }
+        configure(reader.config_mut(), self.sanitizer.dialect);
         // quick-xml reports positions past a leading BOM, which is copied
         // ahead of the document.
-        let bom = bom_len(raw);
-        self.out.push_str(&raw[..bom]);
-        let mut last = bom;
+        let mut spans = EventSpans::new(raw);
+        self.out.push_str(&raw[..spans.bom()]);
 
         loop {
-            let (namespace, event) = reader
-                .read_resolved_event()
-                .map_err(|e| Error::malformed(format!("malformed markup: {e}")))?;
+            let (namespace, event) = reader.read_resolved_event().map_err(malformed_markup)?;
             let in_xinclude = match namespace {
                 ResolveResult::Bound(Namespace(uri)) => is_xinclude(uri)?,
                 _ => false,
             };
-            let span = last..reader.buffer_position() as usize + bom;
-            last = span.end;
+            let span = spans.next(reader.buffer_position());
 
             if self.dropping.is_some() {
                 match self.skip(&event, &span)? {
@@ -262,7 +244,9 @@ impl<'a> Rebuild<'a> {
             if self.noscript {
                 let in_style = self.style.as_ref().is_some_and(|sheet| sheet.raw);
                 match &event {
-                    Event::End(e) if !in_style && end_name(e, raw, true)? == "noscript" => {
+                    Event::End(e)
+                        if !in_style && tag_name(e, raw, Dialect::Html)? == "noscript" =>
+                    {
                         self.noscript = false;
                     }
                     _ if ends_text(&raw[span.clone()], "noscript") => {
@@ -292,7 +276,9 @@ impl<'a> Rebuild<'a> {
             if let Some(element) = self.rcdata.as_deref() {
                 match &event {
                     Event::Text(_) | Event::GeneralRef(_) | Event::Eof => {}
-                    Event::End(e) if end_name(e, raw, true)? == element => self.rcdata = None,
+                    Event::End(e) if tag_name(e, raw, Dialect::Html)? == element => {
+                        self.rcdata = None
+                    }
                     _ => {
                         return Err(Error::malformed(format!(
                             "a browser reads the markup inside this HTML <{element}> as its text"
@@ -380,7 +366,7 @@ impl<'a> Rebuild<'a> {
                         self.record(HiddenContent::Link);
                         if is_start {
                             self.dropping =
-                                Some(Region::new(start_name(e, raw, false)?, Space::Html));
+                                Some(Region::new(tag_name(e, raw, Dialect::Xml)?, Space::Html));
                         }
                     } else {
                         self.depth += usize::from(is_start);
@@ -419,7 +405,7 @@ impl<'a> Rebuild<'a> {
         // Inside a text element, only its own end tag is markup.
         if let Some(text) = region.text.as_deref() {
             let ends = match event {
-                Event::End(e) => text != "plaintext" && end_name(e, raw, true)? == text,
+                Event::End(e) => text != "plaintext" && tag_name(e, raw, Dialect::Html)? == text,
                 _ => false,
             };
             if !ends && !matches!(event, Event::Eof) {
@@ -498,10 +484,10 @@ impl<'a> Rebuild<'a> {
             }
             Event::Start(e) => {
                 let space = region.space;
-                region.open.push(start_name(e, raw, false)?, space);
+                region.open.push(tag_name(e, raw, Dialect::Xml)?, space);
             }
             Event::End(e) => {
-                let name = end_name(e, raw, html)?;
+                let name = tag_name(e, raw, self.sanitizer.dialect)?;
                 if !region.open.close(&name) && name == region.name {
                     self.dropping = None;
                 }
@@ -556,7 +542,7 @@ impl<'a> Rebuild<'a> {
     fn style_text(&mut self, event: &Event<'_>, span: Range<usize>) -> Result<bool> {
         match event {
             Event::Eof => return Ok(true),
-            Event::End(e) if end_name(e, self.raw, true)? == "style" => {
+            Event::End(e) if tag_name(e, self.raw, Dialect::Html)? == "style" => {
                 self.copy(span);
                 self.close_style();
                 return Ok(false);
@@ -901,7 +887,7 @@ fn is_xinclude(uri: &str) -> Result<bool> {
         return Ok(uri == XINCLUDE);
     }
     let decoded = quick_xml::escape::unescape(uri)
-        .map_err(|e| Error::malformed(format!("malformed markup: namespace {e}")))?;
+        .map_err(|e| malformed_markup(format_args!("namespace {e}")))?;
     Ok(decoded == XINCLUDE)
 }
 

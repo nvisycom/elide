@@ -13,6 +13,7 @@ use elide_core::{Error, Result};
 use quick_xml::events::BytesStart;
 
 use super::address::{XmlItem, XmlSpan};
+use super::config::Dialect;
 use super::meta::MetaTag;
 use super::tag::HtmlTagExt;
 
@@ -76,9 +77,9 @@ impl<'a> MarkupSource<'a> {
     /// redact and is left out.
     ///
     /// [`AttrError`]: quick_xml::events::attributes::AttrError
-    pub(crate) fn start_tag(&self, e: &BytesStart<'_>, html: bool) -> Result<StartTag> {
+    pub(crate) fn start_tag(&self, e: &BytesStart<'_>, dialect: Dialect) -> Result<StartTag> {
         let mut attributes = Vec::new();
-        if html {
+        if dialect == Dialect::Html {
             let tag = e.html5_tag(self.raw)?;
             for attr in &tag.attributes {
                 if let Some(value) = attr.value {

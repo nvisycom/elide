@@ -3,7 +3,7 @@
 //! HTML runs on the shared markup engine, the same byte-span tokenize-and-splice
 //! [`ExtractStream`](elide_codec::extract::ExtractStream) /
 //! [`MarkupDocument`](crate::engine::document::MarkupDocument), configured leniently
-//! (see [`MarkupConfig::lenient`](crate::engine::config::MarkupConfig::lenient)). There is
+//! (see [`MarkupConfig::html`](crate::engine::config::MarkupConfig::html)). There is
 //! no separate HTML stream or document type; this module supplies only the
 //! [`Format`].
 

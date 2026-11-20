@@ -23,19 +23,20 @@ use std::ops::Range;
 
 use elide_codec::extract::{ItemFlag, Passage};
 use elide_codec::string::ContextWords;
+use elide_core::Result;
 use elide_core::entity::builtins;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::redaction::HiddenContentKind;
-use elide_core::{Error, Result};
 use quick_xml::Reader;
-use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::events::Event;
 
 use super::address::{SpanKind, XmlItem, XmlSpan};
 use super::config::MarkupConfig;
 use super::meta::MetaTag;
+use super::reader::{EventSpans, configure, malformed_markup};
 use super::source::{AttributeSpan, MarkupSink, MarkupSource, StartTag};
-use super::tag::HtmlTagExt;
+use super::tag::tag_name;
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
 /// the HTML loader (lenient config) and for container formats that run the
@@ -99,27 +100,13 @@ impl<'a> MarkupParser<'a> {
     }
 
     fn run(mut self) -> Result<Vec<XmlItem>> {
-        let raw = self.source.raw();
-        let mut reader = Reader::from_str(raw);
-        let cfg = reader.config_mut();
-        if self.config.lenient {
-            // HTML in the wild is not well-formed: void elements never close,
-            // end tags go unmatched, and `&` is often a literal, not an entity.
-            cfg.check_end_names = false;
-            cfg.allow_unmatched_ends = true;
-            cfg.allow_dangling_amp = true;
-        }
-        // quick-xml reports positions relative to the text *after* a leading
-        // BOM, but our spans index the original bytes, so shift past the BOM.
-        let bom = bom_len(raw);
-        let mut last = bom;
+        let mut reader = Reader::from_str(self.source.raw());
+        configure(reader.config_mut(), self.config.dialect);
+        let mut spans = EventSpans::new(self.source.raw());
 
         loop {
-            let event = reader
-                .read_event()
-                .map_err(|e| Error::malformed(format!("malformed markup: {e}")))?;
-            let span = last..reader.buffer_position() as usize + bom;
-            last = span.end;
+            let event = reader.read_event().map_err(malformed_markup)?;
+            let span = spans.next(reader.buffer_position());
 
             if self.skipping(&event)? {
                 if matches!(event, Event::Eof) {
@@ -143,20 +130,20 @@ impl<'a> MarkupParser<'a> {
             match event {
                 Event::Eof => break,
                 Event::Start(ref e) => {
-                    let mut tag = self.source.start_tag(e, self.config.lenient)?;
+                    let mut tag = self.source.start_tag(e, self.config.dialect)?;
                     self.flag_meta(&mut tag);
                     self.open_passage_element(&tag.name, span.clone());
                     self.attributes(tag.attributes);
                     self.open_element(tag.name, &tag.written, span);
                 }
                 Event::Empty(ref e) => {
-                    let mut tag = self.source.start_tag(e, self.config.lenient)?;
+                    let mut tag = self.source.start_tag(e, self.config.dialect)?;
                     self.flag_meta(&mut tag);
                     self.open_passage_element(&tag.name, span);
                     self.attributes(tag.attributes);
                 }
                 Event::End(ref e) => {
-                    let name = end_name(e, self.source.raw(), self.config.lenient)?;
+                    let name = tag_name(e, self.source.raw(), self.config.dialect)?;
                     if self.config.bounds_passage(&name) {
                         self.end_passage();
                     }
@@ -198,13 +185,13 @@ impl<'a> MarkupParser<'a> {
     /// depth and swallow everything else. Returns whether `event` was consumed
     /// by the skip (the caller should `continue`).
     fn skipping(&mut self, event: &Event<'_>) -> Result<bool> {
-        let (raw, html) = (self.source.raw(), self.config.lenient);
+        let (raw, dialect) = (self.source.raw(), self.config.dialect);
         let Some(region) = &mut self.skip else {
             return Ok(false);
         };
         match event {
-            Event::Start(e) if start_name(e, raw, html)? == region.name => region.depth += 1,
-            Event::End(e) if end_name(e, raw, html)? == region.name => {
+            Event::Start(e) if tag_name(e, raw, dialect)? == region.name => region.depth += 1,
+            Event::End(e) if tag_name(e, raw, dialect)? == region.name => {
                 region.depth -= 1;
                 if region.depth == 0 {
                     self.skip = None;
@@ -367,7 +354,7 @@ impl<'a> MarkupParser<'a> {
             self.passages += 1;
             Passage::Start
         };
-        self.in_passage = self.config.inline_passages;
+        self.in_passage = self.config.inline_passages();
         let engine = self.items.offset()..self.items.offset() + value.len();
         let text = value.trim().to_owned();
         let item_index = self.items.push((value, address), passage);
@@ -384,7 +371,7 @@ impl<'a> MarkupParser<'a> {
     /// The decoded value of the escaped `kind` text at `range`, and its
     /// address.
     fn escaped(&self, range: Range<usize>, kind: SpanKind) -> (String, XmlSpan) {
-        XmlSpan::escaped(self.source.raw(), range, kind, self.config.references)
+        XmlSpan::escaped(self.source.raw(), range, kind, self.config.references())
     }
 
     /// Record a CDATA body, hinted by its enclosing element name, CDATA is
@@ -461,31 +448,6 @@ struct Frame {
 struct SkipRegion {
     name: String,
     depth: usize,
-}
-
-/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
-/// skips it and reports positions past it, so spans over the original bytes must
-/// add it back.
-pub(crate) fn bom_len(raw: &str) -> usize {
-    if raw.starts_with('\u{feff}') { 3 } else { 0 }
-}
-
-/// The lowercased name of the start tag `e`, read from `raw`: as a browser
-/// reads it in `html`, its local name in XML. HTML is case-insensitive, so
-/// lowercasing makes `<SCRIPT>` and `<P>` match too.
-pub(crate) fn start_name(e: &BytesStart<'_>, raw: &str, html: bool) -> Result<String> {
-    if html {
-        return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
-    }
-    Ok(e.local_name().as_ref().to_ascii_lowercase())
-}
-
-/// The end tag's lowercased name, read as [`start_name`] reads a start tag.
-pub(crate) fn end_name(e: &BytesEnd<'_>, raw: &str, html: bool) -> Result<String> {
-    if html {
-        return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
-    }
-    Ok(e.local_name().as_ref().to_ascii_lowercase())
 }
 
 /// Narrow `span` by its `open`/`close` delimiters, returning the inner range.
@@ -676,7 +638,7 @@ mod tests {
             r#"<p>ok</p><script>x<script>alice@example.com</script>y</script><p>after</p>"#,
         ];
         for raw in cases {
-            let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+            let h = handler_with(raw, MarkupConfig::html(TEST_BLOCKS, &["script"], &[]));
             let vs = values(&h);
             assert!(
                 !vs.iter().any(|v| v.contains("alice@example.com")),
@@ -698,7 +660,7 @@ mod tests {
             "<div><p>Contact <b>jane.roe@</b>example.com <a href=\"tel:x\">now</a><br>Rack 7</p>",
             "<p>Next</p></div>",
         );
-        let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
+        let h = handler_with(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]));
         assert_eq!(
             values(&h),
             ["Contact jane.roe@example.com now\nRack 7", "tel:x", "Next"],
@@ -721,7 +683,7 @@ mod tests {
         // that follows, which can change context-gated detection. The stray
         // end tag must be ignored so the following number keeps its hint.
         let raw = "<paymentCard>4111 <b>1111</b></div> 1111 1111</paymentCard>";
-        let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
+        let h = handler_with(raw, MarkupConfig::html(TEST_BLOCKS, &[], &[]));
         let mut hinted = false;
         for chunk in h.chunks().unwrap() {
             // The text after the stray `</div>` must still carry the

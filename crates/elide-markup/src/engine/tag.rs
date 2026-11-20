@@ -19,6 +19,8 @@ use std::ops::Range;
 use elide_core::{Error, Result};
 use quick_xml::events::{BytesEnd, BytesStart};
 
+use super::config::Dialect;
+
 /// An HTML tag as a browser reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HtmlTag<'a> {
@@ -43,6 +45,9 @@ pub(crate) struct HtmlAttribute<'a> {
 
 /// Reads a quick-xml tag event the way a browser reads the HTML tag.
 pub(crate) trait HtmlTagExt {
+    /// The tag's local name as XML reads it, its namespace prefix left out.
+    fn xml_name(&self) -> &str;
+
     /// The tag's name and attributes as a browser reads them, borrowed from
     /// `raw`, the document the event was read from.
     ///
@@ -57,6 +62,10 @@ pub(crate) trait HtmlTagExt {
 }
 
 impl HtmlTagExt for BytesStart<'_> {
+    fn xml_name(&self) -> &str {
+        self.local_name().into_inner()
+    }
+
     fn html5_tag<'a>(&self, raw: &'a str) -> Result<HtmlTag<'a>> {
         let mut text = place(raw, self)?;
         // quick-xml leaves the `/` of an empty tag's `/>` out of its bytes,
@@ -70,6 +79,10 @@ impl HtmlTagExt for BytesStart<'_> {
 }
 
 impl HtmlTagExt for BytesEnd<'_> {
+    fn xml_name(&self) -> &str {
+        self.local_name().into_inner()
+    }
+
     /// An end tag's attributes are ignored by a browser, so only its name is
     /// read.
     fn html5_tag<'a>(&self, raw: &'a str) -> Result<HtmlTag<'a>> {
@@ -79,6 +92,17 @@ impl HtmlTagExt for BytesEnd<'_> {
             attributes: Vec::new(),
         })
     }
+}
+
+/// The lowercased name of the tag `e`, read from `raw` as `dialect` reads it:
+/// as a browser reads it in HTML, its local name in XML. HTML is
+/// case-insensitive, so lowercasing makes `<SCRIPT>` and `<P>` match too.
+pub(crate) fn tag_name(e: &impl HtmlTagExt, raw: &str, dialect: Dialect) -> Result<String> {
+    let name = match dialect {
+        Dialect::Html => e.html5_tag(raw)?.name,
+        Dialect::Xml => e.xml_name(),
+    };
+    Ok(name.to_ascii_lowercase())
 }
 
 /// Where the tag bytes `tag`, borrowed from `raw`, sit in it.

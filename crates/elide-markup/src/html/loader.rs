@@ -16,9 +16,7 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::handler::FORMAT_ID;
 use crate::engine::config::MarkupConfig;
-use crate::engine::document::markup_document;
-use crate::engine::parser::build_items;
-use crate::sanitize::{Dialect, MarkupSanitizer};
+use crate::engine::document::decode;
 
 /// HTML block-level elements: each ends a passage, and its text children form
 /// one sibling-hint group, so a label and a value in separate passages of one
@@ -81,13 +79,8 @@ pub(crate) struct HtmlLoader;
 #[async_trait::async_trait]
 impl DocumentLoader for HtmlLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
-        let sanitizer = MarkupSanitizer::new(Dialect::Html, policy);
-        let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
-        let config = MarkupConfig::lenient(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS)
-            .with_passage_bounds(PASSAGE_BOUNDS);
-        // `build_items` already reports a `MalformedInput` parse error.
-        let items = build_items(&text, config)?;
-        Ok(markup_document(FORMAT_ID, text, items, sanitizer).with_stripped(stripped))
+        let config = MarkupConfig::html(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS, PASSAGE_BOUNDS);
+        decode(FORMAT_ID, config, content, policy)
     }
 }
 
