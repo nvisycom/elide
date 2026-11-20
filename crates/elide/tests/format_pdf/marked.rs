@@ -4,7 +4,7 @@
 
 use elide::codec::FormatRegistry;
 use elide::entity::{LabelRef, builtins};
-use elide::modality::text::{Text, TextLocation};
+use elide::modality::text::{Marked, Text, TextLocation};
 use elide::primitive::UnitBoundingBox;
 use elide::redaction::HiddenContentPolicy;
 use elide::{ErrorKind, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
@@ -68,6 +68,60 @@ async fn a_marked_region_is_redacted() -> Result<()> {
         "the marked number survived: {redacted}"
     );
     assert!(redacted.contains("alice.johnson@example.com"), "{redacted}");
+    Ok(())
+}
+
+/// A mark over the detected number deletes only the number: the glyphs have
+/// real widths, so the rest of its line lies outside the mark and survives.
+#[tokio::test]
+async fn a_marked_number_leaves_the_rest_of_its_line() -> Result<()> {
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = orchestrator(&registry)?;
+    let (number, rect) = drawn(&orchestrator, builtins::PHONE_NUMBER.to_ref()).await?;
+    assert!(
+        rect.width > 0.0 && rect.width < 0.5,
+        "the number's box spans its glyphs, not its line: {rect:?}"
+    );
+
+    let mut document = registry
+        .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
+        .await?;
+    orchestrator
+        .anonymize_with(&mut document, marked(number, rect))
+        .await?;
+
+    let redacted = extracted_text(document.document.encode()?.as_bytes()).await?;
+    assert!(!redacted.contains(PHONE), "{redacted}");
+    assert!(redacted.contains("For urgent matters call"), "{redacted}");
+    Ok(())
+}
+
+/// A mark of two regions with other text between them is refused: deleting
+/// the glyphs it covers would leave a hole in the middle of the text.
+#[tokio::test]
+async fn two_regions_with_text_between_fail() -> Result<()> {
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = orchestrator(&registry)?;
+    let (number, rect) = drawn(&orchestrator, builtins::PHONE_NUMBER.to_ref()).await?;
+    let slice = rect.width / 10.0;
+    let left = UnitBoundingBox::new(rect.x, rect.y, slice, rect.height);
+    let right = UnitBoundingBox::new(rect.x + rect.width - slice, rect.y, slice, rect.height);
+    let mark = TextLocation::Marked(Marked::Rendered {
+        page: number,
+        rects: vec![left, right],
+    });
+    let report = Report::new().insert_part::<Text>(
+        PartId::from(DOC),
+        vec![flagged(builtins::PHONE_NUMBER.to_ref(), mark)],
+    );
+
+    let mut document = registry
+        .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
+        .await?;
+    let Err(error) = orchestrator.anonymize_with(&mut document, report).await else {
+        panic!("a mark with text between its regions must fail");
+    };
+    assert_eq!(error.kind(), ErrorKind::MalformedInput);
     Ok(())
 }
 

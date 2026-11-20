@@ -244,31 +244,37 @@ impl GlyphMetrics {
         };
         let descriptor = font_descriptor(doc, font);
         let standard = Standard::of(doc, font);
+        // Each value with the scale into an em fraction: the descriptor's in
+        // glyph space, the standard face's in thousandths.
         let em = |key: &[u8]| {
             descriptor?
                 .get(key)
                 .ok()
                 .map(|o| o.as_number().unwrap_or(0.0))
                 .filter(|v| *v != 0.0)
-                .map(|v| v * unit)
+                .map(|v| (v, unit))
         };
-        let face = |value: fn(Standard) -> Option<f64>| value(standard?).map(|v| v / 1000.0);
+        let face = |value: fn(Standard) -> Option<f64>| value(standard?).map(|v| (v, 0.001));
+        // A Type3 matrix with a negative vertical scale draws glyphs upside
+        // down, so the default box is flipped with them.
+        let flip = unit.signum();
         // Top: a cap height (tight to the drawn glyphs) if either gives one,
         // else an ascent.
         let top = em(b"CapHeight")
             .or_else(|| face(Standard::cap_height))
             .or_else(|| em(b"Ascent"))
             .or_else(|| face(Standard::ascender))
-            .unwrap_or(default.top);
-        // Bottom sits *below* the baseline, so it must be negative. The spec says
-        // `/Descent` is typically negative, but some producers (e.g. Skia) store
-        // it as a positive magnitude; normalize to `-|value|` so either
-        // convention yields a below-baseline extent (otherwise the glyph box is
-        // placed entirely above the baseline and comes out too short).
+            .map_or(default.top * flip, |(v, scale)| v * scale);
+        // Bottom sits *below* the baseline in glyph space, so it must be
+        // negative there. The spec says `/Descent` is typically negative, but
+        // some producers (e.g. Skia) store it as a positive magnitude;
+        // normalize to `-|value|` before scaling so either convention yields a
+        // below-baseline extent.
         let bottom = em(b"Descent")
             .or_else(|| face(Standard::descender))
-            .map(|d| -d.abs())
-            .unwrap_or(default.bottom);
+            .map_or(default.bottom * flip, |(v, scale)| -v.abs() * scale);
+        // Under a flipped matrix the two ends swap sides of the baseline.
+        let (top, bottom) = (top.max(bottom), top.min(bottom));
         GlyphMetrics { top, bottom }
     }
 }
@@ -374,6 +380,17 @@ mod tests {
         let metrics = GlyphMetrics::from_font(&doc, &font);
         assert!((metrics.top - 0.7).abs() < 1e-6, "{metrics:?}");
         assert!((metrics.bottom + 0.2).abs() < 1e-6, "{metrics:?}");
+    }
+
+    /// A Type3 font whose matrix flips glyphs vertically keeps its full box,
+    /// above the baseline as well as below.
+    #[test]
+    fn a_flipped_type3_font_keeps_its_box() {
+        let doc = Document::with_version("1.4");
+        let font = type3([0.01, 0.0, 0.0, -0.01, 0.0, 0.0]);
+        let metrics = GlyphMetrics::from_font(&doc, &font);
+        assert!((metrics.top - 0.2).abs() < 1e-6, "{metrics:?}");
+        assert!((metrics.bottom + 0.7).abs() < 1e-6, "{metrics:?}");
     }
 
     /// A Type3 font whose matrix turns its advance off the baseline, or that

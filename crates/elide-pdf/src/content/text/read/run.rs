@@ -182,14 +182,16 @@ impl TextRun<'_> {
             // The gap threshold is a fraction of the font size *in device units*,
             // measured along the glyph-advance direction — so it holds under
             // rotation / shear, not just upright text. The axis scale carries one
-            // text unit to the page; its sign follows `font_size · h_scale`, which
-            // is negative for mirrored text (negative `Tz`), so the advance runs
-            // *backwards* along the matrix's x-basis: flip the axis then, and take
-            // the magnitude for `em`. Guard a degenerate transform so `em` stays
+            // text unit to the page; the advance runs *backwards* along the
+            // matrix's x-basis when `font_size · h_scale` is negative (mirrored
+            // text, a negative `Tz`) or the glyph's own advance is (a Type3 font
+            // whose `/FontMatrix` mirrors it): flip the axis then, and take the
+            // magnitude for `em`. Guard a degenerate transform so `em` stays
             // positive.
+            let w0 = self.widths.advance(glyph.width_key).unwrap_or(0.0) / 1000.0;
             let (mut axis, scale) = self.cursor.writing_axis(self.state.ctm);
             let signed = self.state.font_size * self.state.h_scale;
-            if signed < 0.0 {
+            if signed * w0.signum() < 0.0 {
                 axis = (-axis.0, -axis.1);
             }
             let em = (signed.abs() * scale).max(f64::MIN_POSITIVE);
@@ -209,7 +211,6 @@ impl TextRun<'_> {
             // text space, relative to the current pen: x from 0 to the advance,
             // y from descent to ascent (em fractions × font size). An unknown
             // width gives a zero-width advance; the box still has its height.
-            let w0 = self.widths.advance(glyph.width_key).unwrap_or(0.0) / 1000.0;
             let glyph_w = w0 * self.state.font_size * self.state.h_scale;
             let top = self.metrics.top * self.state.font_size;
             let bottom = self.metrics.bottom * self.state.font_size;

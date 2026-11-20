@@ -613,6 +613,42 @@ mod tests {
         assert_eq!(text, "Took here");
     }
 
+    /// A Type3 font whose `/FontMatrix` mirrors it advances each glyph
+    /// *backwards*; a `TJ` number still moves the pen by its own sign, so a
+    /// word gap in that font is a positive number. Spacing is judged along the
+    /// glyph's advance, so the small adjustment joins and the wide one splits.
+    #[test]
+    fn a_mirrored_type3_font_spaces_along_its_advance() {
+        let font = dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type3",
+            "FontMatrix" => vec![(-0.001).into(), 0.into(), 0.into(), 0.001.into(), 0.into(), 0.into()],
+            "FontBBox" => vec![0.into(), 0.into(), 500.into(), 700.into()],
+            "CharProcs" => Dictionary::new(),
+            "Encoding" => dictionary! { "BaseEncoding" => "WinAnsiEncoding" },
+            "FirstChar" => 0,
+            "LastChar" => 255,
+            "Widths" => vec![Object::Integer(500); 256],
+        };
+        let ops = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![90.into(), 100.into()]),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![
+                    Object::string_literal("To"),
+                    40.into(), // small adjustment along the advance: not a space
+                    Object::string_literal("ok"),
+                    400.into(), // wide gap along the advance: a space
+                    Object::string_literal("here"),
+                ])],
+            ),
+            Operation::new("ET", vec![]),
+        ];
+        assert_eq!(extract_block_in(ops, font).text, "Took here");
+    }
+
     /// A Form XObject that draws text *before its own `Tf`* uses the inherited
     /// font's advance widths, so the glyph box has a real width (not the
     /// zero-advance fallback of an uninherited font).
