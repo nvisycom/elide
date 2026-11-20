@@ -26,7 +26,8 @@ use crate::primitive::{BoundingBox, Dimensions, Point};
 pub const OCRS_MODELS_DIR_ENV: &str = "ELIDE_OCRS_MODELS_DIR";
 
 /// File name of the text-detection model within the models directory (the
-/// `.onnx` the download script fetches; RTen loads `.onnx` and `.rten` alike).
+/// `.onnx` the download script fetches; RTen no longer reads the older `.rten`
+/// format unless its `rten_format` feature is on).
 const DETECTION_MODEL: &str = "text-detection.onnx";
 /// File name of the text-recognition model within the models directory.
 const RECOGNITION_MODEL: &str = "text-recognition.onnx";

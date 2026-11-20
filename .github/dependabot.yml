@@ -18,6 +18,13 @@ updates:
     rebase-strategy: "auto"
     versioning-strategy: "auto"
     groups:
+      # ocrs pins its RTen version, so they always move together, a breaking
+      # bump included. A dependency joins the first group it matches.
+      rten:
+        patterns:
+          - "ocrs"
+          - "rten"
+          - "rten-*"
       rust-dependencies:
         patterns:
           - "*"
