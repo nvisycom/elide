@@ -629,7 +629,7 @@ impl Walk {
     ///
     /// An element is the one its local name says only in that name's
     /// vocabulary; in another namespace it is no field, and one in an
-    /// unreviewed namespace holds nothing read.
+    /// unreviewed namespace, or in none, holds nothing read.
     ///
     /// Every key is unique in its part. An element field is keyed by its name,
     /// a repeated one with `#<n>` after it (no element name holds a `#`). A
@@ -638,7 +638,7 @@ impl Walk {
     /// key; the name is a field of its own, `property/<n>/name`.
     fn enter(&mut self, namespace: Option<&str>, elem: &BytesStart<'_>) -> Option<Entered> {
         let namespace = namespace.map(transitional);
-        if self.outside.is_some() || namespace.is_some_and(|namespace| !is_known(namespace)) {
+        if self.outside.is_some() || namespace.is_none_or(|namespace| !is_known(namespace)) {
             self.outside.get_or_insert(self.open.len());
             self.open.push(String::new());
             return None;
@@ -1137,10 +1137,11 @@ fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
 mod tests {
     use super::*;
     use crate::fixtures::property_fields as pairs;
-    use crate::opc::xml_edit::expect_edit;
+    use crate::opc::vocabulary::Vocabulary;
+    use crate::opc::xml_edit::{edit, expect_edit};
 
     const CORE: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
-<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">
+<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">
   <dc:creator>Ada Lovelace</dc:creator>
   <lastModifiedBy>Alan Turing</lastModifiedBy>
   <dc:title></dc:title>
@@ -1257,6 +1258,9 @@ mod tests {
             .unwrap()
             .map_or_else(|| raw.to_owned(), |edited| edited.text);
         assert_eq!(unread(&text), Vec::<String>::new(), "{text}");
+        let vocabulary = Vocabulary::default();
+        edit(&text, &vocabulary).unwrap();
+        assert_eq!(vocabulary.unknown(), None, "{text}");
         assert!(
             UnsurfacedProperties.apply(&text).unwrap().is_none(),
             "a second removal changes {text}"
@@ -1324,22 +1328,23 @@ mod tests {
     }
 
     /// A field is its name in its own vocabulary: the same name in another
-    /// namespace is no field, and an element in an unreviewed namespace is
-    /// neither read nor kept, even inside a field.
+    /// namespace is no field, and an element in an unreviewed namespace, or
+    /// in none, is neither read nor kept, even inside a field.
     #[test]
     fn a_field_is_matched_by_its_namespace() {
-        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:v="urn:vendor"><v:title>Jane Roe</v:title><cp:title>John Doe</cp:title><dc:title>Plan</dc:title><dc:subject>a<v:x>Ada</v:x>b</dc:subject></cp:coreProperties>"#;
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:v="urn:vendor"><v:title>Jane Roe</v:title><cp:title>John Doe</cp:title><dc:title>Plan</dc:title><dc:subject>a<v:x>Ada</v:x>b</dc:subject><dc:description>c<note xmlns="">Jane</note>d</dc:description></cp:coreProperties>"#;
         assert_eq!(
             pairs(core.as_bytes()),
             [
                 ("title".to_owned(), "Plan".to_owned()),
                 ("subject".to_owned(), "ab".to_owned()),
+                ("description".to_owned(), "cd".to_owned()),
             ]
         );
         let text = surfaced_only(core);
         assert_eq!(
             text,
-            r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Plan</dc:title><dc:subject>ab</dc:subject></cp:coreProperties>"#
+            r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Plan</dc:title><dc:subject>ab</dc:subject><dc:description>cd</dc:description></cp:coreProperties>"#
         );
         let app = format!(
             r#"{EXTENDED}<Company xmlns="urn:vendor">Acme</Company><TitlesOfParts><vt:vector size="1" baseType="lpstr"><lpstr>Jane</lpstr></vt:vector></TitlesOfParts></Properties>"#
@@ -1587,7 +1592,7 @@ mod tests {
         assert!(after.contains(&("property/1".to_owned(), "ACME".to_owned())));
         assert!(after.contains(&("property/2".to_owned(), "Kyiv".to_owned())));
 
-        let core = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Ada</dc:creator><dc:creator>Alan</dc:creator></coreProperties>"#;
+        let core = br#"<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Ada</dc:creator><dc:creator>Alan</dc:creator></coreProperties>"#;
         let got = fields(core);
         assert_eq!(got[1].key, "creator#2");
         assert_eq!(got[1].label, LabelRef::from(&*builtins::PERSON_NAME));
@@ -1746,7 +1751,7 @@ mod tests {
     #[test]
     fn a_self_closing_sensitive_element_carries_no_value() {
         // `<dc:creator/>` has no text, so it is neither surfaced nor changed.
-        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator/></coreProperties>"#;
+        let xml = br#"<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator/></coreProperties>"#;
         assert!(pairs(xml).is_empty(), "empty self-closing field surfaced");
         let out = rewrite(xml, &[("creator", "")]);
         assert!(
@@ -1759,7 +1764,7 @@ mod tests {
     fn a_cdata_field_value_is_read_and_stripped() {
         // A value wrapped in CDATA is field text like any other: it must be
         // surfaced for detection and removed on strip, not passed through.
-        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator><![CDATA[Ada Lovelace]]></dc:creator></coreProperties>"#;
+        let xml = br#"<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator><![CDATA[Ada Lovelace]]></dc:creator></coreProperties>"#;
         assert!(
             pairs(xml).contains(&("creator".to_owned(), "Ada Lovelace".to_owned())),
             "CDATA field value not surfaced"
@@ -1782,7 +1787,7 @@ mod tests {
         // `José` written with a numeric character reference. quick-xml surfaces
         // the `&#233;` as its own event; the value must still read as `José` for
         // detection, and strip must clear the whole thing including the entity.
-        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jos&#233; Bob</dc:creator></coreProperties>"#;
+        let xml = br#"<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jos&#233; Bob</dc:creator></coreProperties>"#;
         assert!(
             pairs(xml).contains(&("creator".to_owned(), "José Bob".to_owned())),
             "numeric-entity value not fully surfaced: {:?}",
@@ -1809,7 +1814,7 @@ mod tests {
     fn a_wholly_entity_encoded_value_is_surfaced() {
         // A value made entirely of character references (`Hi`) must not vanish
         // from detection just because it carries no plain text node.
-        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>&#72;&#105;</dc:creator></coreProperties>"#;
+        let xml = br#"<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>&#72;&#105;</dc:creator></coreProperties>"#;
         assert!(
             pairs(xml).contains(&("creator".to_owned(), "Hi".to_owned())),
             "all-entity value not surfaced: {:?}",
@@ -1821,7 +1826,7 @@ mod tests {
     fn a_named_entity_reference_is_read_and_stripped() {
         // A predefined named entity (`&amp;`) inside a value: read as `&` and
         // cleared on strip.
-        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>A &amp; B</dc:creator></coreProperties>"#;
+        let xml = br#"<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>A &amp; B</dc:creator></coreProperties>"#;
         assert!(
             pairs(xml).contains(&("creator".to_owned(), "A & B".to_owned())),
             "named-entity value not surfaced: {:?}",
