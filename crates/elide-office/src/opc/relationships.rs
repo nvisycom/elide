@@ -12,7 +12,7 @@
 
 use std::collections::HashSet;
 
-use elide_core::Result;
+use elide_core::{Error, Result};
 
 use crate::opc::package_xml::{RELATIONSHIPS, entries, without_entries};
 use crate::opc::part::PartPath;
@@ -47,7 +47,7 @@ impl Relationship {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
-    Ok(entries(xml, &RELATIONSHIPS, "relationships part")?
+    entries(xml, &RELATIONSHIPS, "relationships part")?
         .into_iter()
         .map(|(_, attributes)| {
             let mut relationship = Relationship {
@@ -56,17 +56,28 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
                 target: String::new(),
                 external: false,
             };
+            let mut has_id = false;
             for (key, value) in attributes {
                 match key {
-                    "Id" => relationship.id = value,
+                    "Id" => {
+                        relationship.id = value;
+                        has_id = true;
+                    }
                     "Type" => relationship.kind = value,
                     "Target" => relationship.target = value,
                     _ => relationship.external = value == "External",
                 }
             }
-            relationship
+            // A relationship is removed by its id, so one without could not
+            // be.
+            if !has_id {
+                return Err(Error::malformed(
+                    "relationships part malformed: a relationship without an `Id`",
+                ));
+            }
+            Ok(relationship)
         })
-        .collect())
+        .collect()
 }
 
 /// The relationships part `xml` with every relationship whose id is in
@@ -159,6 +170,18 @@ mod tests {
         // A kept id stays whatever its qualified shadow names.
         let raw = rels(&entry(r#"v:Id="drop" Id="keep""#));
         assert_eq!(without(&raw, &removed).unwrap(), raw);
+    }
+
+    /// A relationship without an unqualified `Id` is refused, a qualified
+    /// one standing in for it or not.
+    #[test]
+    fn a_relationship_without_an_id_is_refused() {
+        for attributes in ["", r#"xmlns:v="urn:vendor" v:Id="rId9""#] {
+            let raw = format!(
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship {attributes} Type="t/template" Target="https://example.com/private" TargetMode="External"/></Relationships>"#
+            );
+            assert!(parse(&raw).is_err(), "{raw}");
+        }
     }
 
     #[test]
