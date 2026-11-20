@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContent;
+use quick_xml::escape::unescape;
 
 use crate::opc::ns::R;
 use crate::opc::schema;
@@ -68,12 +69,17 @@ impl Rules for References<'_> {
                 .is_some_and(|namespace| schema::transitional(namespace) == R)
         });
         for attribute in named {
-            match self.ids {
-                Ids::Drop(ids) if ids.contains(attribute.value) => return Action::Remove,
-                Ids::Present(ids) if !ids.contains(attribute.value) => {
+            // The id compares as the value XML reads, its references decoded.
+            // One that does not decode names no relationship: it goes under
+            // `drop`, and dangles under `check`.
+            let id = unescape(attribute.value).ok();
+            match (&self.ids, id.as_deref()) {
+                (Ids::Drop(_), None) => return Action::Remove,
+                (Ids::Drop(ids), Some(id)) if ids.contains(id) => return Action::Remove,
+                (Ids::Present(ids), id) if !id.is_some_and(|id| ids.contains(id)) => {
                     self.dangling
                         .borrow_mut()
-                        .get_or_insert_with(|| attribute.value.to_owned());
+                        .get_or_insert_with(|| id.unwrap_or(attribute.value).to_owned());
                 }
                 _ => {}
             }
@@ -103,6 +109,21 @@ mod tests {
         let edited = expect_edit(STRICT, &References::dropping(&ids));
         assert!(edited.text.contains(r#"r:id="rId1""#));
         assert!(!edited.text.contains("rId2"));
+    }
+
+    /// An id spelled with a character reference names the same relationship.
+    #[test]
+    fn an_escaped_reference_compares_decoded() {
+        let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:hyperlink r:id="rId&#50;"/><w:hyperlink r:id="rId1"/></w:p>"#;
+        let present: HashSet<&str> = ["rId1", "rId2"].into_iter().collect();
+        let references = References::checking(&present);
+        edit(raw, &references).unwrap();
+        assert_eq!(references.dangling(), None);
+
+        let dropped: HashSet<String> = ["rId2".to_owned()].into_iter().collect();
+        let edited = expect_edit(raw, &References::dropping(&dropped));
+        assert!(!edited.text.contains("rId&#50;"));
+        assert!(edited.text.contains(r#"r:id="rId1""#));
     }
 
     #[test]

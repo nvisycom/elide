@@ -4,16 +4,14 @@
 //! OPC types a part by an `<Override PartName="/word/document.xml" …>` for that
 //! exact part, else by a `<Default Extension="xml" …>` for its extension. Part
 //! names and extensions compare ASCII case-insensitively, as OPC requires.
-//! The reader is lenient; what the manifest may ship is cut down to its OPC
-//! vocabulary by [`package_xml`](super::package_xml).
+//! The manifest is read as [`package_xml`](super::package_xml) cuts it down
+//! to its OPC vocabulary, so it types every part the same before and after.
 
 use std::collections::{HashMap, HashSet};
 
-use elide_core::{Error, Result};
-use quick_xml::Reader;
-use quick_xml::escape::unescape;
-use quick_xml::events::Event;
+use elide_core::Result;
 
+use crate::opc::package_xml::{CONTENT_TYPES, entries};
 use crate::opc::part::PartPath;
 use crate::opc::xml_edit::without_elements;
 
@@ -37,41 +35,30 @@ impl ContentTypes {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the manifest is not well-formed.
     pub(crate) fn parse(xml: &str) -> Result<Self> {
         let mut types = Self::default();
-        let mut reader = Reader::from_str(xml);
-        loop {
-            let element = match reader
-                .read_event()
-                .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?
-            {
-                Event::Eof => break,
-                Event::Empty(e) | Event::Start(e) => e,
-                _ => continue,
+        for (name, attributes) in entries(xml, &CONTENT_TYPES, CONTENT_TYPES_PART)? {
+            let value = |key: &str| {
+                attributes
+                    .iter()
+                    .find(|(name, _)| *name == key)
+                    .map(|(_, value)| value.clone())
             };
-            let mut key = None;
-            let mut content_type = None;
-            for attr in element.attributes() {
-                let attr = attr
-                    .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
-                let value = unescape(&attr.value)
-                    .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
-                match attr.key.local_name().as_ref() {
-                    "Extension" | "PartName" => key = Some(value.to_ascii_lowercase()),
-                    "ContentType" => content_type = Some(value.into_owned()),
-                    _ => {}
-                }
-            }
-            let (Some(key), Some(content_type)) = (key, content_type) else {
+            let Some(content_type) = value("ContentType") else {
                 continue;
             };
-            match element.local_name().as_ref() {
+            match name {
                 "Default" => {
-                    types.defaults.insert(key, content_type);
+                    if let Some(extension) = value("Extension") {
+                        types
+                            .defaults
+                            .insert(extension.to_ascii_lowercase(), content_type);
+                    }
                 }
-                "Override" => {
-                    let path = key.trim_start_matches('/').to_owned();
-                    types.overrides.insert(path, content_type);
+                _ => {
+                    if let Some(part) = value("PartName") {
+                        let path = part.trim_start_matches('/').to_ascii_lowercase();
+                        types.overrides.insert(path, content_type);
+                    }
                 }
-                _ => {}
             }
         }
         Ok(types)

@@ -11,8 +11,9 @@
 
 use std::ops::Range;
 
-use elide_core::Result;
 use elide_core::redaction::HiddenContent;
+use elide_core::{Error, Result};
+use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, Event};
 
 use crate::opc::content_types::CONTENT_TYPES_PART;
@@ -59,6 +60,67 @@ pub(crate) fn vocabulary_of(path: &PartPath) -> Option<&'static Vocabulary> {
     } else {
         None
     }
+}
+
+/// An entry the package part's readers take: its local name and its
+/// allowed attributes with their decoded values.
+pub(crate) type Entry = (&'static str, Vec<(&'static str, String)>);
+
+/// The entries of the package part `xml` as [`PackageMarkup`] keeps them:
+/// the root's children in `vocabulary`'s namespace (or none), with their
+/// unqualified allowed attributes. Anything the allowlist cuts is not read,
+/// so the part reads the same before and after it.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// `xml` is not well-formed, naming the part as `what`.
+pub(crate) fn entries(xml: &str, vocabulary: &Vocabulary, what: &str) -> Result<Vec<Entry>> {
+    let malformed = |e: &dyn std::fmt::Display| Error::malformed(format!("{what} malformed: {e}"));
+    let mut reader = SpannedReader::new_ns(xml);
+    let mut entries = Vec::new();
+    let mut depth = 0usize;
+    loop {
+        let (namespace, event, _) = reader.read_resolved_event().map_err(|e| malformed(&e))?;
+        let (e, is_start) = match &event {
+            Event::Eof => break,
+            Event::Start(e) => (e, true),
+            Event::Empty(e) => (e, false),
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                continue;
+            }
+            _ => continue,
+        };
+        if depth == 1
+            && let Some((name, allowed)) = vocabulary
+                .entries
+                .iter()
+                .find(|(name, _)| *name == e.local_name().into_inner())
+            && vocabulary.owns(namespace.as_deref())
+        {
+            let mut attributes = Vec::new();
+            for attr in e.attributes() {
+                let attr = attr.map_err(|e| malformed(&e))?;
+                if attr.key.prefix().is_some() {
+                    continue;
+                }
+                let Some(key) = allowed
+                    .iter()
+                    .find(|key| **key == attr.key.local_name().into_inner())
+                else {
+                    continue;
+                };
+                let value = unescape(&attr.value).map_err(|e| malformed(&e))?;
+                attributes.push((*key, value.into_owned()));
+            }
+            entries.push((*name, attributes));
+        }
+        if is_start {
+            depth += 1;
+        }
+    }
+    Ok(entries)
 }
 
 impl Vocabulary {
@@ -327,6 +389,36 @@ mod tests {
         );
         let raw = r#"<Types xmlns="urn:vendor"/>"#;
         assert!(PackageMarkup(&CONTENT_TYPES).apply(raw).is_err());
+    }
+
+    /// The readers take only what the allowlist keeps: a foreign or nested
+    /// entry and a qualified attribute are not read.
+    #[test]
+    fn the_readers_take_only_what_the_allowlist_keeps() {
+        let manifest = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types" xmlns:v="urn:vendor"><Default Extension="xml" ContentType="application/xml"/><v:Override PartName="/word/vendor.xml" ContentType="application/vnd.vendor"/><v:x><Override PartName="/word/nested.xml" ContentType="application/vnd.vendor"/></v:x><Override PartName="/word/document.xml" v:ContentType="application/vnd.vendor"/></Types>"#;
+        let read = entries(manifest, &CONTENT_TYPES, "manifest").unwrap();
+        assert_eq!(
+            read,
+            [
+                (
+                    "Default",
+                    vec![
+                        ("Extension", "xml".to_owned()),
+                        ("ContentType", "application/xml".to_owned())
+                    ]
+                ),
+                (
+                    "Override",
+                    vec![("PartName", "/word/document.xml".to_owned())]
+                ),
+            ]
+        );
+        let kept = allowlisted(manifest, &CONTENT_TYPES);
+        assert_eq!(
+            entries(&kept, &CONTENT_TYPES, "manifest").unwrap(),
+            read,
+            "{kept}"
+        );
     }
 
     #[test]

@@ -6,17 +6,15 @@
 //! image) does so through a relationship in its sidecar `_rels/<name>.rels`
 //! part; the package itself keeps its own in `_rels/.rels`. A relationship's
 //! target is a URI relative to its source part's directory, or, with
-//! `TargetMode="External"`, a URL outside the package. The reader is lenient;
-//! what a relationships part may ship is cut down to its OPC vocabulary by
-//! [`package_xml`](super::package_xml).
+//! `TargetMode="External"`, a URL outside the package. A relationships part
+//! is read as [`package_xml`](super::package_xml) cuts it down to its OPC
+//! vocabulary, so it reads the same before and after.
 
 use std::collections::HashSet;
 
-use elide_core::{Error, Result};
-use quick_xml::Reader;
-use quick_xml::escape::unescape;
-use quick_xml::events::Event;
+use elide_core::Result;
 
+use crate::opc::package_xml::{RELATIONSHIPS, entries};
 use crate::opc::part::PartPath;
 use crate::opc::xml_edit::without_elements;
 
@@ -50,39 +48,26 @@ impl Relationship {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
-    let mut reader = Reader::from_str(xml);
-    let mut relationships = Vec::new();
-    loop {
-        let element = match reader
-            .read_event()
-            .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?
-        {
-            Event::Eof => break,
-            Event::Empty(e) | Event::Start(e) if e.local_name().as_ref() == "Relationship" => e,
-            _ => continue,
-        };
-        let mut relationship = Relationship {
-            id: String::new(),
-            kind: String::new(),
-            target: String::new(),
-            external: false,
-        };
-        for attr in element.attributes() {
-            let attr =
-                attr.map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-            let value = unescape(&attr.value)
-                .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-            match attr.key.local_name().as_ref() {
-                "Id" => relationship.id = value.into_owned(),
-                "Type" => relationship.kind = value.into_owned(),
-                "Target" => relationship.target = value.into_owned(),
-                "TargetMode" => relationship.external = value == "External",
-                _ => {}
+    Ok(entries(xml, &RELATIONSHIPS, "relationships part")?
+        .into_iter()
+        .map(|(_, attributes)| {
+            let mut relationship = Relationship {
+                id: String::new(),
+                kind: String::new(),
+                target: String::new(),
+                external: false,
+            };
+            for (key, value) in attributes {
+                match key {
+                    "Id" => relationship.id = value,
+                    "Type" => relationship.kind = value,
+                    "Target" => relationship.target = value,
+                    _ => relationship.external = value == "External",
+                }
             }
-        }
-        relationships.push(relationship);
-    }
-    Ok(relationships)
+            relationship
+        })
+        .collect())
 }
 
 /// The relationships part `xml` with every relationship whose id is in

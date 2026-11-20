@@ -494,6 +494,13 @@ pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
     // cut never overlaps another: an element left out whole is cut before its
     // attributes are read.
     let text = splice_with(raw, cuts, push_joined);
+    // Escaped CDATA and carried declarations can grow the part past what a
+    // package may hold.
+    if text.len() as u64 > MAX_PART_BYTES {
+        return Err(malformed_xml(
+            "the rebuilt part outgrows the part size limit",
+        ));
+    }
     Ok(Some(Rebuilt { text, removed }))
 }
 
