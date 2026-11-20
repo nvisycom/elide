@@ -31,8 +31,9 @@ differently from this engine is refused.
 
 `html_format()` and `xml_format()` are behind the `html` and `xml` features;
 `elide-format`'s `FormatRegistry::with_builtin` wires the enabled ones in. With
-no feature, the crate is only `decode_references`, which a format that reads
-XML another way (`elide-office`'s OOXML parts) decodes its text with.
+no feature, the crate is only `decode_references` and the `CharacterReferences`
+rules it decodes by, which a format that reads XML another way
+(`elide-office`'s OOXML parts) decodes its text with.
 
 ## Documentation
 

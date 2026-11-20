@@ -1,13 +1,17 @@
-//! HTML loader: runs the XML markup engine over HTML with lenient parsing.
+//! HTML loader: runs the shared markup engine over HTML with lenient parsing.
 //!
 //! HTML has no engine of its own. The [`MarkupSanitizer`] first rebuilds the
 //! document from what renders, leaving out scripts and other active content,
-//! comments, `<meta>` fields, and anything else it does not name; then the shared XML engine ([`build_items`]) reads the
-//! rest leniently (tolerating void elements, stray end tags, and bare `&`) with
-//! the two HTML vocabularies it takes as plain element-name lists: the block
-//! elements that group sibling text for context hints, and the `<style>` bodies
-//! not to scan. Everything downstream, streaming, redaction, byte-faithful
-//! splice, is the XML handler.
+//! anything else it does not name, and, under the policy, comments and
+//! `<meta>` fields; then the markup engine ([`decode`]) reads the rest
+//! leniently (tolerating void elements, stray end tags, and bare `&`) with the
+//! three HTML vocabularies it takes as plain element-name lists: the block
+//! elements that group sibling text for context hints, the `<style>` bodies
+//! not to scan, and the other elements text does not read across. Everything
+//! downstream, streaming, redaction, byte-faithful splice, is the markup
+//! engine's, as for XML.
+//!
+//! [`MarkupSanitizer`]: crate::sanitize::MarkupSanitizer
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document, DocumentLoader};
@@ -20,9 +24,10 @@ use crate::engine::document::decode;
 
 /// HTML block-level elements: each ends a passage, and its text children form
 /// one sibling-hint group, so a label and a value in separate passages of one
-/// block (`<td>Card number<p>4111…</p></td>`) still surface to a boost. Names are lowercased and
-/// sorted. Membership is a linear scan (see `MarkupConfig::is_block`), fine for
-/// a list this size checked once per closing tag.
+/// block (`<td>Card number<p>4111…</p></td>`) still surface to a boost. Names
+/// are lowercased and sorted. Membership is a linear scan (see
+/// `MarkupConfig::is_block`), fine for a list this size checked once per start
+/// and end tag.
 const BLOCK_ELEMENTS: &[&str] = &[
     "address",
     "article",

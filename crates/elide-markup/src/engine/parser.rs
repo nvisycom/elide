@@ -5,15 +5,17 @@
 //!
 //! Emits items for element text content, attribute values, comment bodies, and
 //! CDATA payloads, each addressed by an exact source span recovered from
-//! quick-xml event positions. Each item's `value` is the raw on-the-wire slice
-//! (never a decoded form), so encode is a byte-for-byte splice at the recorded
-//! span: the declaration, whitespace, tags, and everything outside the redacted
-//! spans round-trip unchanged.
+//! quick-xml event positions. A text run's or an attribute value's `value` is
+//! read with its character references decoded, and its [`MarkupSpan`] maps it
+//! back onto the raw bytes, so encode writes back only the stretch a redaction
+//! changed: the declaration, whitespace, tags, and everything outside the
+//! changed stretches round-trip unchanged.
 //!
 //! The same parser serves HTML through a lenient [`MarkupConfig`]: it tolerates
 //! HTML's void elements, stray end tags, and bare `&`, and takes the HTML
-//! vocabulary (block elements, skipped bodies) as plain element-name lists, so
-//! the parser itself knows nothing of `<script>` or "block level".
+//! vocabulary (block elements, skipped bodies, passage bounds) as plain
+//! element-name lists, so the parser itself knows nothing of `<style>` or
+//! "block level".
 //!
 //! [`ExtractedItem`]: elide_codec::extract::ExtractedItem
 //! [`MarkupDocument`]: super::document::MarkupDocument
@@ -37,18 +39,16 @@ use super::reader::{EventSpans, configure, malformed_markup};
 use super::sink::MarkupSink;
 use super::tag::{AttributeSpan, start_tag, tag_name};
 
-/// Extract the redactable markup items from `raw` under `config`. Exposed for
-/// the HTML loader (lenient config) and for container formats that run the
-/// engine over a part.
+/// Extract the redactable markup items from `raw` under `config`.
 pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<MarkupItem>> {
     MarkupParser::new(raw, config).run()
 }
 
 /// One streaming pass over a markup document. Owns the accumulating item
-/// stream and the parse state (the open-element stack, the pending
-/// text-node/hint records, and any skipped-subtree region), so the per-event
-/// handlers are methods sharing `self` rather than a function threading a
-/// half-dozen `&mut` locals.
+/// stream and the parse state (the open-element stack, the text-node records,
+/// and any skipped-subtree region), so the per-event handlers are methods
+/// sharing `self` rather than a function threading a half-dozen `&mut`
+/// locals.
 struct MarkupParser<'a> {
     /// The document read.
     raw: &'a str,
@@ -62,8 +62,8 @@ struct MarkupParser<'a> {
     /// The open-element stack: each frame names the element and where its text
     /// children begin, so a block element can group them for sibling hints.
     stack: Vec<Frame>,
-    /// A skipped subtree (an HTML `<script>`/`<style>` the caller does not
-    /// scan) is opaque: while inside one, all content, text and any
+    /// A skipped subtree (an HTML `<style>` the caller does not scan) is
+    /// opaque: while inside one, all content, text and any
     /// markup-like inner tags, is ignored until the *matching* close, so a
     /// nested element or a stray end tag cannot leak the body or pop early.
     skip: Option<SkipRegion>,
@@ -420,8 +420,8 @@ struct Frame {
 }
 
 /// The active skipped subtree: the element whose body is opaque, and the open
-/// depth of that same element name, so a nested `<script>` inside a `<script>`
-/// (or a stray close) resolves to the matching close.
+/// depth of that same element name, so a nested element of the same name (or a
+/// stray close) resolves to the matching close.
 struct SkipRegion {
     name: String,
     depth: usize,
