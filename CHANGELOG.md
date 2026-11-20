@@ -42,9 +42,9 @@ and this project adheres to
   feature), which redacts a page from its render: the page is rendered, the
   image pipeline detects on what it shows (OCR) and redacts it, and the page
   is replaced by that render with its redacted embedded images. Scanned pages
-  are redacted this way, and so are pages that draw text in a font whose glyph
-  widths can't be known (without the feature, or under `RasterMode::Never`,
-  such a page is refused); `RasterMode::Always` redacts every page this way at
+  are redacted this way, and so are pages that draw text whose glyphs can't be
+  placed, in a font whose widths can't be known or written vertically (without
+  the feature, or under `RasterMode::Never`, such a page is refused); `RasterMode::Always` redacts every page this way at
   its configured DPI, never reading the text layer. A page replaced by its
   render that no image pipeline read is refused rather than shipped
   unredacted
@@ -128,7 +128,9 @@ and this project adheres to
   internal links, and its attached files: page content is re-encoded through
   the operator set (hidden layers, marked-content property lists, inline
   images, and undefined operators cut), every resource is copied with the
-  keys its kind defines and its values resolved, a resource no page draws is
+  keys its kind defines and its values resolved, each value only where its
+  kind can hold it (so no string rides in a number's place, and a file path
+  wherever it is given is recorded, not copied), a resource no page draws is
   left behind, a visible form field's appearance is drawn into its page (with
   its annotation's blend mode and opacity) so its answer is detected like any
   text, and what the rebuild does not copy is recorded by category; encode
@@ -138,7 +140,8 @@ and this project adheres to
   every image, stencil masks included, is surfaced to the image pipeline
   wherever it is drawn from, and one that cannot be (fax, JBIG2, inline
   images, external data) is removed rather than shipped unscanned; text in a
-  tiling pattern or a form is detected and deleted like the page's; a glyph
+  tiling pattern, a form or a soft mask's group is detected and deleted like
+  the page's, and the kerning beside a deleted glyph is zeroed; a glyph
   reads as its font's `/ToUnicode` gives it, ahead of its encoding, as a
   viewer reads it, and a `/ToUnicode` the reader cannot parse is dropped; text a
   font maps to a presentation form (a Kangxi radical, a ligature, an Arabic
@@ -149,12 +152,18 @@ and this project adheres to
   embeds no program (or one named by an alias, such as `Arial`) is written
   with every code's glyph, and, without `/Widths` of its own, every code's
   width from Adobe's metrics for its face, so every viewer selects and places
-  its glyphs as they were read; where its `/ToUnicode` maps no code, its text
-  reads from those glyphs' names; a page whose content cannot be read,
-  text drawn before a font is selected, content nested too deep, and an
-  encode naming a part the document never surfaced are refused rather than
-  passed through. The output is untagged (its structure tree carried
-  alternate text), and embedded font programs are copied as stored
+  its glyphs as they were read; where a simple font's `/ToUnicode` maps no
+  code, its text reads from the glyph name its encoding gives it (by the
+  Adobe Glyph List), and a code whose text can't be known is refused; a font
+  that embeds a TrueType, OpenType or CFF program and gives no `/Widths` is
+  written with every code's width from that program; content is charged as
+  it is decoded, however many times a stream is drawn; a page whose content
+  cannot be read, text drawn before a font is selected, content nested too
+  deep, and an encode naming a part the document never surfaced are refused
+  rather than passed through. The output is untagged (its structure tree
+  carried alternate text), and embedded font programs are copied as stored.
+  Metadata and collaboration content are stripped and recorded whatever the
+  `HiddenContentPolicy` asks
 - Office documents surface the text they keep in attributes and outside a
   workbook's cells (authors, sheet, table, and defined names, bookmarks,
   dropdown entries, validation messages, headers and footers, formulas,

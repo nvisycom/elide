@@ -139,6 +139,9 @@ impl<'a> Builder<'a> {
                 "content nests deeper than {MAX_NESTING} levels"
             )));
         }
+        // Reading the content costs its bytes, whatever it writes: one stream
+        // many glyphs or scopes draw is read each time.
+        self.charge(bytes.len())?;
         let content =
             Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let mut copy = ContentCopy {
@@ -148,7 +151,6 @@ impl<'a> Builder<'a> {
             kept: Vec::with_capacity(content.operations.len()),
             open: Vec::new(),
             hiding: 0,
-            saved: 0,
             font_lost: at.no_font,
             font_saves: Vec::new(),
             in_text: false,
@@ -187,13 +189,12 @@ struct ContentCopy<'c, 'a, 's> {
     /// How many of the open sequences hide, so whether content is hidden is
     /// known at once.
     hiding: usize,
-    /// How many `q` saves are open.
-    saved: usize,
     /// Whether there is no font to show text in (none is selected yet, or
     /// the one selected could not be copied), so the text shown is cut and
     /// reported; saved and restored with `q`/`Q`, as the font is graphics
     /// state.
     font_lost: bool,
+    /// What each open `q` saved of `font_lost`, one per open save.
     font_saves: Vec<bool>,
     /// Whether a text object is open.
     in_text: bool,
@@ -257,7 +258,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         match operator {
             "BDC" | "DP" => self.marked(operation),
             "BMC" => {
-                self.open_written();
+                self.push(Marked::Written);
                 self.kept.push(operation);
             }
             "EMC" => {
@@ -302,16 +303,16 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             "Do" => self.draw(operation)?,
             "BX" | "EX" => {}
             "q" => {
-                self.saved += 1;
                 self.font_saves.push(self.font_lost);
                 self.kept.push(operation);
             }
-            "Q" if self.saved == 0 => self.builder.residue += 1,
-            "Q" => {
-                self.saved -= 1;
-                self.font_lost = self.font_saves.pop().unwrap_or(false);
-                self.kept.push(operation);
-            }
+            "Q" => match self.font_saves.pop() {
+                Some(font_lost) => {
+                    self.font_lost = font_lost;
+                    self.kept.push(operation);
+                }
+                None => self.builder.residue += 1,
+            },
             "Tj" | "TJ" | "'" | "\"" if self.font_lost => self.unreadable_text(&operation),
             "BT" if self.in_text => self.builder.residue += 1,
             "BT" => {
@@ -327,11 +328,6 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             _ => self.builder.residue += 1,
         }
         Ok(())
-    }
-
-    /// Open a marked-content sequence written as `BMC`.
-    fn open_written(&mut self) {
-        self.push(Marked::Written);
     }
 
     /// Open a marked-content sequence of kind `marked`.
@@ -384,7 +380,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         let [Object::Name(tag), properties] = operation.operands.as_slice() else {
             builder.residue += 1;
             if is_sequence {
-                self.open_written();
+                self.push(Marked::Written);
                 self.kept
                     .push(Operation::new("BMC", vec![Object::Name(b"Span".to_vec())]));
             }
@@ -407,7 +403,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         }
         let tag = Object::Name(tag.clone());
         if is_sequence {
-            self.open_written();
+            self.push(Marked::Written);
             self.kept.push(Operation::new("BMC", vec![tag]));
         } else {
             self.kept.push(Operation::new("MP", vec![tag]));
@@ -451,11 +447,13 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             self.builder.residue += 1;
             return Ok(false);
         };
+        // The name must be the source scope's: one the rebuild gave a
+        // resource of its own names nothing the source drew with.
+        let Some(value) = self.at.scope.lookup(self.builder.source, category, name) else {
+            self.builder.residue += 1;
+            return Ok(false);
+        };
         if !has(self.resources, category, name) {
-            let Some(value) = self.at.scope.lookup(self.builder.source, category, name) else {
-                self.builder.residue += 1;
-                return Ok(false);
-            };
             let Some(copy) = self
                 .builder
                 .copy(resource.kind(), value, self.at.deeper())?
@@ -626,7 +624,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 self.kept.push(Operation::new("EMC", Vec::new()));
             }
         }
-        for _ in 0..self.saved {
+        for _ in 0..self.font_saves.len() {
             self.kept.push(Operation::new("Q", Vec::new()));
         }
         // A default colour space remaps the device space of that name for
@@ -709,8 +707,15 @@ impl Fresh {
 
     /// The next name not `taken`.
     pub(super) fn name(&mut self, taken: impl Fn(&[u8]) -> bool) -> Vec<u8> {
+        self.name_ending("", |name| taken(name.as_bytes()))
+            .into_bytes()
+    }
+
+    /// The next name ending in `suffix` not `taken`. A number tried is
+    /// never tried again, so naming many takes one pass.
+    pub(super) fn name_ending(&mut self, suffix: &str, taken: impl Fn(&str) -> bool) -> String {
         loop {
-            let name = format!("{}{}", self.prefix, self.next).into_bytes();
+            let name = format!("{}{}{suffix}", self.prefix, self.next);
             self.next += 1;
             if !taken(&name) {
                 return name;

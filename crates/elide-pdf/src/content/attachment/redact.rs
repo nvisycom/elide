@@ -1,7 +1,7 @@
 //! Redacting a PDF's embedded files: a redacted file written back into its
 //! stream, and every reference to a file no codec could read dropped.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use elide_core::{Error, Result};
 use lopdf::{Object, ObjectId};
@@ -18,8 +18,8 @@ pub(super) fn replace(
     removed: &[AttachmentId],
 ) -> Result<()> {
     let doc = edit.doc();
-    let Tree { nodes, entries } = Tree::read(doc)?;
-    let known: BTreeSet<ObjectId> = entries
+    let Tree { nodes, entries, .. } = Tree::read(doc)?;
+    let known: HashSet<ObjectId> = entries
         .iter()
         .chain(associated(doc).iter())
         .map(|entry| entry.stream)
@@ -45,14 +45,26 @@ pub(super) fn replace(
             )));
         };
         stream.set_plain_content(replacement.bytes.clone());
-        if let Ok(Object::Dictionary(params)) = stream.dict.get_mut(b"Params") {
-            params.set("Size", Object::Integer(replacement.bytes.len() as i64));
-        }
         // Best effort: an uncompressible file is stored plain.
         let _ = stream.compress();
+        let size = Object::Integer(replacement.bytes.len() as i64);
+        let params = match stream.dict.get_mut(b"Params") {
+            Ok(Object::Dictionary(params)) => Some(params),
+            Ok(Object::Reference(id)) => {
+                let id = *id;
+                edit.doc_mut()
+                    .get_object_mut(id)
+                    .ok()
+                    .and_then(|params| params.as_dict_mut().ok())
+            }
+            _ => None,
+        };
+        if let Some(params) = params {
+            params.set("Size", size);
+        }
     }
 
-    let removed: BTreeSet<ObjectId> = removed.iter().map(|id| id.object()).collect();
+    let removed: HashSet<ObjectId> = removed.iter().map(|id| id.object()).collect();
     if !removed.is_empty() {
         drop_entries(edit, &nodes, &removed);
         drop_associated(edit, &removed);
@@ -62,7 +74,7 @@ pub(super) fn replace(
 
 /// Drop every entry whose embedded-file stream is in `removed` from the tree
 /// `nodes` of `edit`.
-fn drop_entries(edit: &mut Edit, nodes: &[Node], removed: &BTreeSet<ObjectId>) {
+fn drop_entries(edit: &mut Edit, nodes: &[Node], removed: &HashSet<ObjectId>) {
     edit.retain_names(EMBEDDED_FILES, nodes, |doc, key, value| {
         entry(doc, key, value).is_none_or(|entry| !removed.contains(&entry.stream))
     });
@@ -70,7 +82,7 @@ fn drop_entries(edit: &mut Edit, nodes: &[Node], removed: &BTreeSet<ObjectId>) {
 
 /// Drop every `/AF` association whose file is in `removed`, removing an array
 /// left empty.
-fn drop_associated(edit: &mut Edit, removed: &BTreeSet<ObjectId>) {
+fn drop_associated(edit: &mut Edit, removed: &HashSet<ObjectId>) {
     let doc = edit.doc_mut();
     // Decide which arrays change while the document is readable: an
     // association resolves to its stream through a (possibly referenced) file

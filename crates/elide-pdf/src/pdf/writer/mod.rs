@@ -12,6 +12,8 @@ use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 pub(crate) use self::cmap::{UnicodeMap, scrub};
+use super::reader::{Node, ObjectExt, Scope};
+use super::{Pdf, Redact};
 
 /// A stream of `dict` holding `content`, compressed.
 ///
@@ -26,8 +28,6 @@ pub(crate) fn compressed(dict: Dictionary, content: Vec<u8>) -> Result<Stream> {
         .map_err(|e| Error::malformed(format!("could not compress a stream: {e}")))?;
     Ok(stream)
 }
-use super::reader::{Node, ObjectExt, Scope};
-use super::{Pdf, Redact};
 
 /// One copy of a document being changed: redactions are written into it, and
 /// [`finish`](Edit::finish) saves it once as a new [`Pdf`].

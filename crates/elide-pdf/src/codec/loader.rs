@@ -71,6 +71,8 @@ impl PdfDocumentLoader {
 
 #[async_trait::async_trait]
 impl DocumentLoader for PdfDocumentLoader {
+    /// Metadata and collaboration content are stripped whatever `_policy`
+    /// asks: the rebuild models neither as content.
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
         // Hidden content goes first, so everything below (the text, the
         // rendering, the surfaced images) reads only what will ship.
@@ -114,9 +116,9 @@ impl PdfDocumentLoader {
     /// Under [`RasterMode::Always`] every page is redacted from its render
     /// at its resolution: detected on what it shows, and replaced by it; its
     /// text layer is not read, so one that can't be decoded doesn't stop it.
-    /// Under [`RasterMode::Auto`] a page that draws text in a font whose
-    /// advances can't be known is too, at [`SCAN_DPI`], and a scanned page is
-    /// rendered for OCR and replaced only where something on it is redacted.
+    /// Under [`RasterMode::Auto`] a page that draws text whose glyphs can't
+    /// be placed is too, at [`SCAN_DPI`], and a scanned page is rendered for
+    /// OCR and replaced only where something on it is redacted.
     /// Under [`RasterMode::Never`] nothing is rendered, so a page that would
     /// need it is refused.
     ///
@@ -177,15 +179,16 @@ impl PdfDocumentLoader {
 /// # Errors
 ///
 /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
-/// for a page that draws text in a font whose advances can't be known:
+/// for a page that draws text whose glyphs can't be placed (in a font whose
+/// advances can't be known, or written vertically):
 /// where its glyphs land is up to each viewer, so it can be redacted only from
 /// its render, which needs the `render` feature and a raster mode other than
 /// `Never`.
 fn placed(blocks: Vec<TextBlock>) -> Result<Vec<TextBlock>> {
     if let Some(block) = blocks.iter().find(|block| block.unplaced) {
         return Err(Error::capability_unavailable(format!(
-            "page {} draws text in a font whose glyph widths can't be known; it can be \
-             redacted only from its render",
+            "page {} draws text whose glyphs can't be placed (in a font whose widths \
+             can't be known, or written vertically); it can be redacted only from its render",
             block.page
         )));
     }
@@ -223,7 +226,7 @@ mod tests {
     use crate::codec::page::PageStream;
     use crate::codec::state::PdfState;
     use crate::content::image::Images;
-    use crate::fixtures::{DocBuilder, Page, shown, type1};
+    use crate::fixtures::{DocBuilder, FontFile, Page, Sfnt, embedding, shown, type1};
     use crate::pdf::Pdf;
     use crate::primitive::RasterMode;
     use crate::sanitize::Rebuild;
@@ -317,6 +320,27 @@ mod tests {
         assert!(holds_marker(kept.encode().unwrap().as_bytes()));
     }
 
+    /// A page replaced by its render keeps no print box: each placed the
+    /// page as it was, not its image.
+    #[test]
+    fn a_rendered_page_keeps_no_print_box() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let trim = vec![10.into(), 10.into(), 90.into(), 90.into()];
+        pdf.page(
+            Page::new()
+                .content(MARKER.to_vec())
+                .size(100, 100)
+                .set("TrimBox", trim),
+        );
+        let render = png(100, 100, [255, 255, 255]);
+        let page = PageStream::new(1, Bytes::from(render)).replaced();
+        let mut doc = rendered_document(&pdf.bytes(), page, vec![]);
+        read_pages(&mut doc);
+        let out = PdfDocument::load_mem(doc.encode().unwrap().as_bytes()).unwrap();
+        let page = *out.get_pages().get(&1).unwrap();
+        assert!(out.get_dictionary(page).unwrap().get(b"TrimBox").is_err());
+    }
+
     /// A page replaced by its render that nothing read is refused: with no
     /// image pipeline to detect on it, what it shows would ship unredacted.
     #[test]
@@ -351,6 +375,29 @@ mod tests {
             panic!("a page in a font without widths must be refused");
         };
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+    }
+
+    /// A page drawing text in a font that gives no widths but embeds a
+    /// program they are read from is read from its text, even with rendering
+    /// off.
+    #[tokio::test]
+    async fn a_page_in_an_embedded_font_without_widths_is_read() {
+        let mut pdf = DocBuilder::new();
+        let program =
+            Sfnt::new(1000, &[(".notdef", 0), ("A", 400), ("B", 500)]).cmap(3, 1, 0x41, &[1, 2]);
+        let font = embedding(
+            pdf.doc(),
+            "TrueType",
+            FontFile::TrueType,
+            program.build(),
+            32,
+        );
+        let font = pdf.add(font);
+        pdf.page(Page::new().font("F1", font).ops(shown("AB")).size(100, 100));
+        let mut doc = decoded(Bytes::from(pdf.bytes()), RasterMode::Never)
+            .await
+            .unwrap();
+        assert_eq!(body_text(&mut doc).trim(), "AB");
     }
 
     /// Under the default mode a page drawing text in a font whose advances

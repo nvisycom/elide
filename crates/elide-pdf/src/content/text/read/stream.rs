@@ -3,7 +3,8 @@
 //! pattern.
 
 use std::collections::BTreeMap;
-use std::slice;
+use std::rc::Rc;
+use std::{array, slice};
 
 use elide_core::{Error, Result};
 use lopdf::Object;
@@ -32,7 +33,7 @@ pub(super) fn operand_f64(operands: &[Object], index: usize) -> f64 {
 /// `None` when fewer than six are present.
 pub(super) fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
     (operands.len() >= base + 6)
-        .then(|| Matrix::from(std::array::from_fn(|i| operand_f64(operands, base + i))))
+        .then(|| Matrix::from(array::from_fn(|i| operand_f64(operands, base + i))))
 }
 
 /// A font selected to show text with, part of the graphics state: its slot in
@@ -43,7 +44,7 @@ pub(super) fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
 #[derive(Clone, Copy)]
 pub(super) struct Font<'f> {
     pub(super) slot: u16,
-    pub(super) text: Option<&'f FontText<'f>>,
+    pub(super) text: Option<&'f FontText>,
     pub(super) widths: &'f WidthSource,
     pub(super) metrics: GlyphMetrics,
     /// Whether its glyphs are outlines a clipping rendering mode clips to;
@@ -53,20 +54,20 @@ pub(super) struct Font<'f> {
 
 /// The fonts a stream's scope names, each with its slot in the page's font
 /// table.
-struct Fonts<'d> {
-    by_name: BTreeMap<Vec<u8>, ScopeFont<'d>>,
+struct Fonts {
+    by_name: BTreeMap<Vec<u8>, Rc<ScopeFont>>,
 }
 
 /// One font a scope names, read.
-struct ScopeFont<'d> {
+pub(super) struct ScopeFont {
     slot: u16,
-    text: Option<FontText<'d>>,
+    text: Option<FontText>,
     widths: WidthSource,
     metrics: GlyphMetrics,
     outlines: bool,
 }
 
-impl Fonts<'_> {
+impl Fonts {
     /// The font `name` selects, or, when the scope names no such font, one
     /// whose codes can't be read, keeping the slot of `previous`.
     fn select(&self, name: &[u8], previous: Option<Font<'_>>) -> Font<'_> {
@@ -107,7 +108,7 @@ pub(super) struct Inherited<'a> {
 
 /// A graphics-state snapshot pushed by `q` and restored by `Q`: the parametric
 /// text state, the patterns painted with, and the selected font, all graphics
-/// state (ISO 32000-1 §8.4). The text matrix is *not* graphics state (it
+/// state (8.4). The text matrix is *not* graphics state (it
 /// resets at `BT`), so it is not saved.
 struct SavedState<'a> {
     state: TextState,
@@ -135,13 +136,21 @@ impl<'d> Walk<'_, 'd> {
     /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the table
     /// would outgrow its `u16` slots, so a deleted glyph's code could be
     /// routed to the wrong `/ToUnicode`; or as [`FontText::of`].
-    fn fonts(&mut self, scope: &Scope<'d>) -> Result<Fonts<'d>> {
+    ///
+    /// A font held as an object of its own is read once a page, however many
+    /// streams' scopes name it, and keeps one slot.
+    fn fonts(&mut self, scope: &Scope<'d>) -> Result<Fonts> {
         let doc = self.doc;
         let mut by_name = BTreeMap::new();
-        for (name, font) in scope.entries(doc, b"Font") {
-            let Some(font) = doc.resolve_dict(font) else {
+        for (name, entry) in scope.entries(doc, b"Font") {
+            let Some(font) = doc.resolve_dict(entry) else {
                 continue;
             };
+            let id = entry.as_reference().ok();
+            if let Some(read) = id.and_then(|id| self.read_fonts.get(&id)) {
+                by_name.insert(name.to_vec(), Rc::clone(read));
+                continue;
+            }
             let to_unicode = font
                 .get(b"ToUnicode")
                 .ok()
@@ -158,16 +167,17 @@ impl<'d> Walk<'_, 'd> {
                 )));
             };
             self.accum.fonts.push(FontEntry { to_unicode });
-            by_name.insert(
-                name.to_vec(),
-                ScopeFont {
-                    slot,
-                    text: FontText::of(doc, font)?,
-                    widths: WidthSource::from_font(doc, font),
-                    metrics: GlyphMetrics::from_font(doc, font),
-                    outlines: !font.is_subtype(doc, b"Type3"),
-                },
-            );
+            let read = Rc::new(ScopeFont {
+                slot,
+                text: FontText::of(doc, font)?,
+                widths: WidthSource::from_font(doc, font),
+                metrics: GlyphMetrics::from_font(doc, font),
+                outlines: !font.is_subtype(doc, b"Type3"),
+            });
+            if let Some(id) = id {
+                self.read_fonts.insert(id, Rc::clone(&read));
+            }
+            by_name.insert(name.to_vec(), read);
         }
         Ok(Fonts { by_name })
     }
@@ -245,7 +255,7 @@ impl<'d> Walk<'_, 'd> {
                 }
 
                 // Text object: the text and line matrices reset to the
-                // identity (ISO 32000-1 §9.4.1). The pen is kept across the
+                // identity (9.4.1). The pen is kept across the
                 // boundary: it is a device-space position, unaffected by the
                 // matrix reset, so a gap between one text object's last glyph
                 // and the next object's first is judged by the same rule. Many
@@ -337,8 +347,10 @@ impl<'d> Walk<'_, 'd> {
                         font: selected.slot,
                     };
                     run.show(text, operands, op_idx, base)?;
+                    // Vertical writing is not laid out, so its glyphs are
+                    // placed no better than in a font without widths.
                     if self.accum.rects.len() > shown
-                        && matches!(selected.widths, WidthSource::Unknown)
+                        && (matches!(selected.widths, WidthSource::Unknown) || text.is_vertical())
                     {
                         self.unplaced = true;
                     }
@@ -410,6 +422,7 @@ impl<'d> Walk<'_, 'd> {
                             .and_then(|graphics| self.doc.resolve_dict(graphics))
                     {
                         painting.state(self.doc, graphics);
+                        self.walk_soft_mask(graphics, state.ctm, depth)?;
                     }
                 }
                 "sc" | "g" | "rg" | "k" | "cs" => painting.fill = None,

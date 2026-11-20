@@ -5,13 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
-use lopdf::{Document, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use super::geometry::TextState;
 use super::paint::{Painted, Painting};
 use super::run::gap;
 use super::stream::Frame;
-use super::{Inherited, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
+use super::{Inherited, MAX_WALKED_BYTES, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
 use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
 use crate::pdf::reader::{
@@ -273,6 +273,43 @@ impl<'d> Walk<'_, 'd> {
         Some(id)
     }
 
+    /// Walk the group of the soft mask the graphics state `graphics` sets,
+    /// if it sets one: the group is drawn under `ctm`, the CTM where the state
+    /// is set, in a graphics state of its own (11.6.5.2), and the text it
+    /// draws shows wherever the mask lets later painting through.
+    ///
+    /// # Errors
+    ///
+    /// As [`walk_nested`](Self::walk_nested).
+    pub(super) fn walk_soft_mask(
+        &mut self,
+        graphics: &'d Dictionary,
+        ctm: Matrix,
+        depth: u8,
+    ) -> Result<()> {
+        let doc = self.doc;
+        let Some(id) = graphics
+            .get(b"SMask")
+            .ok()
+            .and_then(|mask| doc.resolve_dict(mask))
+            .and_then(|mask| mask.get(b"G").ok()?.as_reference().ok())
+        else {
+            return Ok(());
+        };
+        let Ok(Object::Stream(group)) = doc.get_object(id) else {
+            return Ok(());
+        };
+        let inherited = Inherited {
+            font: None,
+            state: TextState {
+                ctm,
+                ..TextState::default()
+            },
+            painting: Painting::default(),
+        };
+        self.walk_nested(id, group, depth, inherited)
+    }
+
     /// Walk the selected tiling `pattern`'s cell.
     ///
     /// A pattern's cell is drawn in its own graphics state, so it inherits no
@@ -497,7 +534,18 @@ impl<'d> Walk<'_, 'd> {
                 self.page
             )));
         }
-        let content = Content::decode(&stream.decoded()?)
+        let decoded = stream.decoded()?;
+        self.decoded_remaining = self
+            .decoded_remaining
+            .checked_sub(decoded.len())
+            .ok_or_else(|| {
+                Error::resource_limit(format!(
+                    "page {} draws forms and patterns decoding to more than \
+                     {MAX_WALKED_BYTES} bytes; its text cannot be walked",
+                    self.page
+                ))
+            })?;
+        let content = Content::decode(&decoded)
             .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
         // Its own resources: in a rebuild, every form and pattern has them.

@@ -104,11 +104,13 @@ pub(crate) struct TextBlock {
     /// be scrubbed from the right CMap even when a font name recurs across
     /// resource scopes.
     pub(crate) fonts: Vec<FontEntry>,
-    /// Whether the page draws text in a font whose advances can't be known
-    /// (one with no widths that names no standard face, or a Type3 font whose
-    /// matrix can't be used): where its glyphs land, and so what they read as
-    /// and where a deletion leaves a gap, is up to each viewer. Such a page is
-    /// redacted from its render instead.
+    /// Whether the page draws text whose glyphs can't be placed: in a font
+    /// whose advances can't be known (one with no widths that names no
+    /// standard face and embeds no program they are read from, or a Type3
+    /// font whose matrix can't be used), or written vertically, which is
+    /// not laid out. Where its glyphs land, and so what they read as and
+    /// where a deletion leaves a gap, isn't known, so such a page is redacted
+    /// from its render instead.
     pub(crate) unplaced: bool,
 }
 
@@ -222,8 +224,9 @@ pub(crate) struct OffsetRun {
 }
 
 /// The glyph bytes that drew a run's characters: the string operand address,
-/// the byte range within that operand's string, and the font that drew it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// the byte range within that operand's string, the code they spell, and the
+/// font that drew it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct GlyphBytes {
     /// Which stream/operation/operand/item the glyph's code lives in.
     pub(crate) address: Address,
@@ -231,6 +234,8 @@ pub(crate) struct GlyphBytes {
     pub(crate) byte_start: usize,
     /// End byte offset (exclusive) of the glyph's code within that operand.
     pub(crate) byte_end: usize,
+    /// The glyph's code: its bytes, big-endian.
+    pub(crate) code: u32,
     /// Index into the block's font table of the font that drew the glyph, so its
     /// code can be scrubbed from that font's `/ToUnicode` CMap.
     pub(crate) font: u16,
@@ -319,6 +324,7 @@ mod tests {
             },
             byte_start: 0,
             byte_end: 1,
+            code: 0,
             font: 0,
         };
         let map = OffsetMap::new(vec![OffsetRun {
@@ -580,6 +586,45 @@ mod tests {
         let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
         let blocks = pdf.read(Text).unwrap();
         assert_eq!(blocks[0].text.trim_end(), "Jane Roe");
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &blocks,
+            detections: &[Detection::new(1, 0, 8)],
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        assert!(!streams_of(&out.bytes()).contains("Jane Roe"));
+        out.read(Check).unwrap();
+    }
+
+    /// Text a soft mask's group draws shows wherever the mask lets later
+    /// painting through, so it is read and deleted like the page's own.
+    #[test]
+    fn text_in_a_soft_mask_group_is_found_and_deleted() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let group = pdf.form(
+            dictionary! {
+                "BBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
+                "Group" => dictionary! { "S" => "Transparency", "CS" => "DeviceGray" },
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            },
+            b"BT /F1 12 Tf 10 100 Td (Jane Roe) Tj ET".to_vec(),
+        );
+        let state = pdf.add(dictionary! {
+            "Type" => "ExtGState",
+            "SMask" => dictionary! { "Type" => "Mask", "S" => "Luminosity", "G" => group },
+        });
+        pdf.page(
+            Page::new()
+                .resource("ExtGState", "GS1", state)
+                .content(b"/GS1 gs 0 0 200 200 re f".to_vec())
+                .size(200, 200),
+        );
+        let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let blocks = pdf.read(Text).unwrap();
+        assert_eq!(blocks[0].text.trim(), "Jane Roe");
         let mut edit = pdf.edit();
         edit.redact(TextRedaction {
             source: &pdf,

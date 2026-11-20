@@ -1,11 +1,17 @@
-//! A CMap's codespace (9.7.6.2): which byte sequences are codes, and how
-//! long each is, so a composite font's string splits into its codes whether
-//! or not the CMap maps each one to a CID.
+//! What is read from a CMap's own bytes, past what hayro-cmap and lopdf read
+//! of it: its codespace, and how many codes it maps.
 //!
-//! hayro-cmap reads a CMap's mappings but keeps its codespace to itself, so
-//! the ranges of a CMap a font embeds are read here from the same bytes. A
-//! predefined CMap (one named, or one an embedded CMap names by `usecmap`)
-//! maps every code of its codespace, so its mappings split codes alone.
+//! A CMap's codespace (9.7.6.2) says which byte sequences are codes, and how
+//! long each is, so a composite font's string splits into its codes whether
+//! or not the CMap maps each one to a CID. hayro-cmap reads a CMap's mappings
+//! but keeps its codespace to itself, so the ranges of a CMap a font embeds
+//! are read here from the same bytes. A predefined CMap (one named, or one an
+//! embedded CMap names by `usecmap`) maps every code of its codespace, so its
+//! mappings split codes alone.
+//!
+//! lopdf expands every range a `/ToUnicode` CMap maps into a table entry per
+//! code, so the codes it maps are counted ([`mapped_codes`]) before it reads
+//! one.
 
 /// The most ranges one codespace holds (the operator allows 100 a section).
 const MAX_RANGES: usize = 1024;
@@ -73,16 +79,62 @@ impl Codespace {
     }
 }
 
-/// A token of a CMap, as far as its codespace is read: a keyword, a hex
-/// string's bytes, or anything else.
+/// How many codes the CMap `data` maps, at least: one for each `bfchar`
+/// entry (a pair of hex strings), and the codes each `bfrange` entry spans
+/// (a `<lo> <hi>` pair of hex strings of one length opening it).
+pub(crate) fn mapped_codes(data: &[u8]) -> u64 {
+    // Each `bfrange` entry's tokens: a hex string's bytes, or `None` for an
+    // array of destinations.
+    let mut ranges: Vec<Option<Vec<u8>>> = Vec::new();
+    let (mut in_ranges, mut in_chars) = (false, false);
+    let mut char_strings = 0u64;
+    for token in Tokens::new(data) {
+        match token {
+            Token::Keyword(b"beginbfrange") => in_ranges = true,
+            Token::Keyword(b"endbfrange") => in_ranges = false,
+            Token::Keyword(b"beginbfchar") => in_chars = true,
+            Token::Keyword(b"endbfchar") => in_chars = false,
+            Token::Hex(bytes) if in_ranges => ranges.push(Some(bytes)),
+            Token::Array if in_ranges => ranges.push(None),
+            Token::Hex(_) => char_strings += u64::from(in_chars),
+            _ => {}
+        }
+    }
+    let code = |bytes: &Option<Vec<u8>>| {
+        let bytes = bytes.as_ref().filter(|bytes| bytes.len() <= 4)?;
+        let value = bytes
+            .iter()
+            .fold(0u64, |code, &byte| code << 8 | u64::from(byte));
+        Some((bytes.len(), value))
+    };
+    let mut count = 0u64;
+    let mut i = 0;
+    while i + 1 < ranges.len() {
+        if let (Some((lo_len, lo)), Some((hi_len, hi))) = (code(&ranges[i]), code(&ranges[i + 1]))
+            && lo_len == hi_len
+            && hi >= lo
+        {
+            count = count.saturating_add(hi - lo + 1);
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    count.saturating_add(char_strings / 2)
+}
+
+/// A token of a CMap, as far as it is read: a keyword, a hex string's bytes,
+/// an array, or anything else.
 enum Token<'a> {
     Keyword(&'a [u8]),
     Hex(Vec<u8>),
+    Array,
     Other,
 }
 
-/// The tokens of CMap data: comments and literal strings are passed over
-/// whole, so neither hides nor fakes a keyword or a code.
+/// The tokens of CMap data: comments, literal strings and arrays are passed
+/// over whole, and dictionary delimiters as such, so none hides nor fakes a
+/// keyword or a code.
 struct Tokens<'a> {
     data: &'a [u8],
     at: usize,
@@ -137,9 +189,16 @@ impl<'a> Iterator for Tokens<'a> {
                 self.at = self.past_string(start);
                 Token::Other
             }
-            b'<' if data.get(start + 1) == Some(&b'<') => {
+            b'<' | b'>' if data.get(start + 1) == Some(&byte) => {
                 self.at += 2;
                 Token::Other
+            }
+            b'[' => {
+                self.at = data[start..]
+                    .iter()
+                    .position(|&b| b == b']')
+                    .map_or(data.len(), |end| start + end + 1);
+                Token::Array
             }
             b'<' => {
                 let end = data[start..]

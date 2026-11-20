@@ -80,10 +80,12 @@ pub(super) fn trailer(key: &[u8]) -> Option<HiddenContent> {
 
 /// What an entry `key` of any other copied object held. A key the
 /// specification does not define is application data.
-pub(super) fn entry(key: &[u8]) -> Option<HiddenContent> {
-    Some(match key {
+pub(super) fn entry(key: &[u8]) -> HiddenContent {
+    match key {
         b"Metadata" | b"LastModified" | b"Desc" | b"CreationDate" | b"ModDate" | b"CheckSum"
-        | b"Mac" | b"CI" | b"RF" | b"Measure" | b"PtData" => HiddenContent::Properties,
+        | b"Mac" | b"CI" | b"RF" | b"Measure" | b"PtData" | b"Info" | b"OutputCondition" => {
+            HiddenContent::Properties
+        }
         b"PieceInfo" | b"Alternates" => HiddenContent::ApplicationData,
         b"AA" | b"A" => HiddenContent::Action,
         b"Thumb" => HiddenContent::Thumbnail,
@@ -91,7 +93,7 @@ pub(super) fn entry(key: &[u8]) -> Option<HiddenContent> {
         b"StructParent" | b"StructParents" => HiddenContent::AlternativeText,
         b"OPI" | b"Ref" => HiddenContent::Link,
         _ => HiddenContent::ApplicationData,
-    })
+    }
 }
 
 /// What the annotation `dict` is, by its subtype: a form widget, a link, rich

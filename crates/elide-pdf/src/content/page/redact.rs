@@ -6,7 +6,7 @@ use lopdf::{Object, Stream, dictionary};
 
 use super::PageReplacement;
 use crate::pdf::Edit;
-use crate::pdf::reader::{PageBoxes, page_boxes};
+use crate::pdf::reader::{PRINT_BOXES, PageBoxes, page_boxes};
 
 /// Replace the whole content of each page `replacements` names with its
 /// image; see [`PageRedaction`](super::PageRedaction).
@@ -56,6 +56,10 @@ pub(super) fn reflatten(edit: &mut Edit, replacements: &[PageReplacement]) -> Re
         page.set("CropBox", size);
         page.set("Rotate", 0);
         page.set("UserUnit", 1);
+        // The print boxes place the page as it was, not its image.
+        for key in PRINT_BOXES {
+            page.remove(key);
+        }
     }
     Ok(())
 }

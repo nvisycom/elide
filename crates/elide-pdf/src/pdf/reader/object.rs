@@ -35,11 +35,11 @@ pub(crate) trait DocumentExt {
 
     /// The value of the page attribute `key` on `page` or the nearest
     /// page-tree ancestor holding one `read` accepts.
-    fn inherited<T>(
-        &self,
+    fn inherited<'a, T>(
+        &'a self,
         page: ObjectId,
         key: &[u8],
-        read: impl Fn(&Object) -> Option<T>,
+        read: impl Fn(&'a Object) -> Option<T>,
     ) -> Option<T>;
 
     /// The decoded content of `page`, its content streams concatenated, at
@@ -92,11 +92,11 @@ impl DocumentExt for Document {
         Some(numbers)
     }
 
-    fn inherited<T>(
-        &self,
+    fn inherited<'a, T>(
+        &'a self,
         page: ObjectId,
         key: &[u8],
-        read: impl Fn(&Object) -> Option<T>,
+        read: impl Fn(&'a Object) -> Option<T>,
     ) -> Option<T> {
         let mut id = page;
         for _ in 0..MAX_PARENT_WALK {

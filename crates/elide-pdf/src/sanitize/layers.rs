@@ -6,7 +6,8 @@
 //! XObject that belongs to it. A visible layer's content stays, as plain page
 //! content.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
@@ -28,6 +29,13 @@ pub(super) struct Layers<'a> {
     /// visibility rule (its `/Intent` is an empty array), so everything
     /// shows.
     hidden: Option<HashSet<ObjectId>>,
+    /// Whether each membership held as an object of its own hides what it
+    /// marks: content may name one any number of times, and it is evaluated
+    /// once.
+    memberships: RefCell<HashMap<ObjectId, bool>>,
+    /// Whether each visibility expression held as an object of its own
+    /// evaluates visible, as memberships may share one.
+    expressions: RefCell<HashMap<ObjectId, bool>>,
 }
 
 impl<'a> Layers<'a> {
@@ -36,6 +44,8 @@ impl<'a> Layers<'a> {
         Self {
             doc,
             hidden: hidden_groups(doc),
+            memberships: RefCell::new(HashMap::new()),
+            expressions: RefCell::new(HashMap::new()),
         }
     }
 
@@ -60,6 +70,19 @@ impl<'a> Layers<'a> {
         let Some(dict) = self.doc.resolve_dict(membership) else {
             return false;
         };
+        let Ok(id) = membership.as_reference() else {
+            return self.membership_hidden(dict);
+        };
+        if let Some(&hidden) = self.memberships.borrow().get(&id) {
+            return hidden;
+        }
+        let hidden = self.membership_hidden(dict);
+        self.memberships.borrow_mut().insert(id, hidden);
+        hidden
+    }
+
+    /// Whether the membership dictionary `dict` hides what it marks.
+    fn membership_hidden(&self, dict: &Dictionary) -> bool {
         if !dict.is_type(self.doc, b"OCMD") {
             return false;
         }
@@ -119,17 +142,29 @@ impl<'a> Layers<'a> {
             return None;
         }
         *work = work.checked_sub(1)?;
-        let expression = match expression {
+        match expression {
             Object::Reference(id) => match self.doc.get_object(*id).ok()? {
-                Object::Array(array) => array,
-                Object::Dictionary(group) if group.is_type(self.doc, b"OCG") => {
-                    return Some(!self.group_hidden(expression));
+                Object::Array(array) => {
+                    if let Some(&visible) = self.expressions.borrow().get(id) {
+                        return Some(visible);
+                    }
+                    let visible = self.operation(array, depth, work)?;
+                    self.expressions.borrow_mut().insert(*id, visible);
+                    Some(visible)
                 }
-                _ => return None,
+                Object::Dictionary(group) if group.is_type(self.doc, b"OCG") => {
+                    Some(!self.group_hidden(expression))
+                }
+                _ => None,
             },
-            Object::Array(array) => array,
-            _ => return None,
-        };
+            Object::Array(array) => self.operation(array, depth, work),
+            _ => None,
+        }
+    }
+
+    /// The visibility the expression `expression` (an operator and its
+    /// operands) evaluates to, as [`evaluate`](Self::evaluate).
+    fn operation(&self, expression: &[Object], depth: usize, work: &mut usize) -> Option<bool> {
         let (Object::Name(operator), operands) = expression.split_first()? else {
             return None;
         };
@@ -248,6 +283,22 @@ mod tests {
         assert!(!layers.is_hidden(&membership(not(5.into()))));
         assert!(!layers.is_hidden(&membership(not(layer.into()))));
         assert!(layers.is_hidden(&membership(not(not(layer.into())))));
+    }
+
+    /// A membership and an expression held as objects of their own are
+    /// evaluated once, however often content names them.
+    #[test]
+    fn a_membership_named_again_is_evaluated_once() {
+        let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
+        let expression = doc.add_object(vec![Object::Name(b"Not".to_vec()), layer.into()]);
+        let membership =
+            doc.add_object(dictionary! { "Type" => "OCMD", "VE" => vec![Object::Name(b"Not".to_vec()), expression.into()] });
+        let layers = Layers::read(&doc);
+        for _ in 0..3 {
+            assert!(layers.is_hidden(&Object::Reference(membership)));
+        }
+        assert_eq!(layers.memberships.borrow().len(), 1);
+        assert_eq!(layers.expressions.borrow().len(), 1);
     }
 
     /// A group meant only for design has no effect on viewing, so being off

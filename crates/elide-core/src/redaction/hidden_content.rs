@@ -23,6 +23,11 @@ use serde::{Deserialize, Serialize};
 /// object is decoded and redacted as content when a codec can read it and
 /// stripped when none can; and structure a codec does not recognize rejects
 /// the document.
+///
+/// A format may honour only the stripping choice for a kind it does not
+/// model as content: it then strips that kind whatever the policy, and
+/// records what it stripped, so asking to scan or flag it is not a guarantee
+/// that it is kept. Each such format's documentation says so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]

@@ -34,9 +34,9 @@ use super::Dpi;
 pub enum RasterMode {
     /// Delete the detected glyphs from the text layer, and render each page
     /// without one at [`Dpi::OCR`] for OCR, replacing it by its redacted
-    /// image where something on it is redacted. A page that draws text in a
-    /// font whose glyph widths can't be known is rendered too, and always
-    /// replaced, as where its glyphs land is up to each viewer; like every
+    /// image where something on it is redacted. A page that draws text whose
+    /// glyphs can't be placed (in a font whose widths can't be known, or
+    /// written vertically) is rendered too, and always replaced; like every
     /// page of [`Always`](Self::Always), it needs an image pipeline to read it.
     /// The default.
     #[default]
@@ -54,7 +54,7 @@ pub enum RasterMode {
     },
     /// Never render: delete glyphs from the text layer only, leaving a page
     /// without one to its embedded images' redaction. A page that draws text
-    /// in a font whose glyph widths can't be known is refused.
+    /// whose glyphs can't be placed is refused.
     Never,
 }
 

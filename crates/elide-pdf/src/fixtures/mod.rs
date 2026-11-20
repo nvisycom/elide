@@ -7,6 +7,8 @@
 //! test stays in this crate's vocabulary.
 
 mod builder;
+#[cfg(test)]
+mod font;
 
 use std::io::Cursor;
 
@@ -18,6 +20,8 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 pub(crate) use self::builder::{DocBuilder, Page};
 #[cfg(test)]
 pub(crate) use self::builder::{blank, encoded, shown, text, tm, type1};
+#[cfg(test)]
+pub(crate) use self::font::{Cff, FontFile, Sfnt, embedding};
 use crate::pdf::reader::DictionaryExt;
 
 /// A one-page PDF drawing one 8x8 JPEG image (`DCTDecode`).

@@ -33,7 +33,7 @@ fn parse(list: &'static str) -> HashMap<&'static str, String> {
 /// The text the glyph `name` stands for, `dingbats` when it names a glyph of
 /// ZapfDingbats; `None` when the name spells none. A suffix after the first
 /// `.` is dropped, and each `_`-joined component maps on its own.
-pub(super) fn text(name: &str, dingbats: bool) -> Option<String> {
+pub(crate) fn text(name: &str, dingbats: bool) -> Option<String> {
     let base = name.split('.').next().unwrap_or_default();
     let text: String = base
         .split('_')

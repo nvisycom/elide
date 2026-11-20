@@ -11,7 +11,7 @@
 //! next glyph starts further along than its predecessor's advance accounts for —
 //! reads the gap as a space.
 //!
-//! The vocabulary follows the PDF specification (ISO 32000-1 §9.4): a
+//! The vocabulary follows the PDF specification (9.4): a
 //! [`Matrix`] places text space on the page; [`TextState`] is the parametric text state
 //! the `q`/`Q` graphics-state stack saves; the text matrix and line matrix are
 //! *not* part of that state (they reset at `BT` and are set by the text-
@@ -19,7 +19,7 @@
 
 use crate::pdf::reader::Matrix;
 
-/// The parametric text state (ISO 32000-1 §9.3) the `q`/`Q` stack saves and
+/// The parametric text state (9.3) the `q`/`Q` stack saves and
 /// restores. The text matrix and line matrix are deliberately absent: the spec
 /// makes them reset at `BT`, not part of the saved graphics state.
 #[derive(Debug, Clone, Copy)]
@@ -35,8 +35,8 @@ pub(super) struct TextState {
     pub(super) h_scale: f64,
     /// Text leading `TL` (text-space units): the line-to-line advance `T*` uses.
     pub(super) leading: f64,
-    /// Text rise `Ts` (text-space units). Tracked for completeness; horizontal
-    /// spacing does not use it.
+    /// Text rise `Ts` (text-space units): how far glyphs are drawn above the
+    /// baseline, which raises their boxes but not the pen.
     pub(super) rise: f64,
     /// The current transformation matrix (from `cm`), mapping text/user space to
     /// device space. Combined with the text matrix to place a glyph on the page.
@@ -57,7 +57,7 @@ impl Default for TextState {
     }
 }
 
-/// The text matrix `Tm` and text line matrix `Tlm` (ISO 32000-1 §9.4.2). Both
+/// The text matrix `Tm` and text line matrix `Tlm` (9.4.2). Both
 /// reset to the identity at `BT`; the positioning operators move them, and each
 /// shown glyph advances `Tm`.
 #[derive(Debug, Clone, Copy)]
