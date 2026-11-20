@@ -26,6 +26,7 @@ use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{NsReader, Reader};
 
+use crate::opc::attribute_value;
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
 use crate::opc::ns::{W, X, transitional, transitional_type};
@@ -89,21 +90,31 @@ impl Span {
     /// in that text back to its raw source range. Errs on malformed XML.
     ///
     /// Text and attribute values carry entities, so they unescape and get an
-    /// entity-aware map; a comment or CDATA body is byte-identical to its source,
-    /// so its text is borrowed as-is over a single identity run. A separator
-    /// reads as its character and maps to no source text.
+    /// entity-aware map; an attribute value reads a literal tab, line feed, or
+    /// carriage return as a space, as [`attribute_value`] does (a CR-LF pair
+    /// as two, so each byte keeps its offset). A comment or CDATA body is
+    /// byte-identical to its source, so its text is borrowed as-is over a
+    /// single identity run. A separator reads as its character and maps to no
+    /// source text.
     pub(crate) fn decode<'a>(
         &self,
         raw: &'a str,
     ) -> std::result::Result<(Cow<'a, str>, OffsetMap), ()> {
         let slice = &raw[self.range.clone()];
         match self.kind {
-            BlockKind::Text | BlockKind::Attribute => {
-                // XML refuses a reference it cannot decode, so the slice must
-                // unescape whole before it is mapped reference by reference.
+            // XML refuses a reference it cannot decode, so the slice must
+            // decode whole before it is mapped reference by reference.
+            BlockKind::Text => {
                 unescape(slice).map_err(|_| ())?;
                 let (text, offsets) =
                     decode_references(slice, self.range.start, CharacterReferences::Xml);
+                Ok((Cow::Owned(text), offsets))
+            }
+            BlockKind::Attribute => {
+                attribute_value(slice).map_err(|_| ())?;
+                let spaced = slice.replace(['\t', '\n', '\r'], " ");
+                let (text, offsets) =
+                    decode_references(&spaced, self.range.start, CharacterReferences::Xml);
                 Ok((Cow::Owned(text), offsets))
             }
             BlockKind::Comment | BlockKind::Cdata => Ok((
@@ -384,7 +395,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
             if attr.key.prefix().is_some() {
                 continue;
             }
-            let value = || unescape(&attr.value).map_err(|_| ());
+            let value = || attribute_value(&attr.value).map_err(|_| ());
             match attr.key.local_name().as_ref() {
                 "Type" => is_hyperlink = transitional_type(&value()?) == HYPERLINK,
                 "TargetMode" => is_external = value()? == "External",
@@ -629,6 +640,16 @@ mod tests {
     /// The `(range, kind)` pairs of `spans`, for terse assertions.
     fn pairs(spans: &[Span]) -> Vec<(Range<usize>, BlockKind)> {
         spans.iter().map(|s| (s.range.clone(), s.kind)).collect()
+    }
+
+    #[test]
+    fn an_attribute_span_reads_literal_whitespace_as_a_space() {
+        let raw = "<a v=\"Jane\nRoe&#10;x\"/>";
+        let start = raw.find("Jane").unwrap();
+        let span = Span::new(start..raw.rfind('"').unwrap(), BlockKind::Attribute);
+        let (text, offsets) = span.decode(raw).unwrap();
+        assert_eq!(text, "Jane Roe\nx");
+        assert_eq!(offsets.raw_ranges(5..8), vec![(start + 5)..(start + 8)]);
     }
 
     #[test]

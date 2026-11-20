@@ -20,7 +20,6 @@ use std::ops::Range;
 
 use elide_core::Result;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
-use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use super::SheetClassifier;
@@ -30,7 +29,9 @@ use super::names::{
 use crate::opc::ns::{VML, VML_EXCEL, X};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader};
-use crate::opc::{Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, malformed_xml};
+use crate::opc::{
+    Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, attribute_value, malformed_xml,
+};
 
 /// The Excel 2010 application-compatibility namespace (the saved-to path).
 const X15AC: &str = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac";
@@ -135,7 +136,7 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
                     // that does not decode may be a note.
                     let note = e.attributes().flatten().any(|attr| {
                         attr.key.local_name().as_ref() == "ObjectType"
-                            && unescape(&attr.value).map_or(true, |kind| kind == "Note")
+                            && attribute_value(&attr.value).map_or(true, |kind| kind == "Note")
                     });
                     if note && let Some(shape) = shapes.last_mut() {
                         shape.note = true;

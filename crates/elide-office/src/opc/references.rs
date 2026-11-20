@@ -7,11 +7,10 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContent;
-use quick_xml::escape::unescape;
 
 use crate::opc::ns::{R, VML_OFFICE};
-use crate::opc::schema;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
+use crate::opc::{attribute_value, schema};
 
 /// Element rules over the relationship-naming attributes (`r:id`, `r:embed`,
 /// `r:link`, …): drop every element naming a removed relationship by an
@@ -73,7 +72,7 @@ impl Rules for References<'_> {
                     }
                 }
                 Ids::Present(ids) => {
-                    let id = unescape(attribute.value).ok();
+                    let id = attribute_value(attribute.value).ok();
                     if !id.as_deref().is_some_and(|id| ids.contains(id)) {
                         self.dangling.borrow_mut().get_or_insert_with(|| {
                             id.map_or_else(|| attribute.value.to_owned(), |id| id.into_owned())
@@ -106,7 +105,7 @@ fn is_relid(attribute: &Attribute<'_>) -> bool {
 /// value XML reads, its references decoded; one that does not decode names no
 /// relationship, so it goes under `drop` and dangles under `check`.
 fn dropped(ids: &HashSet<String>, attribute: &Attribute<'_>) -> bool {
-    unescape(attribute.value).map_or(true, |id| ids.contains(id.as_ref()))
+    attribute_value(attribute.value).map_or(true, |id| ids.contains(id.as_ref()))
 }
 
 #[cfg(test)]

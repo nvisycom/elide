@@ -13,7 +13,6 @@ use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, Event};
 
 use crate::opc::content_types::CONTENT_TYPES_PART;
@@ -21,7 +20,7 @@ use crate::opc::part::PartPath;
 use crate::opc::xml_edit::{
     Edit, Edited, Skipped, SpannedReader, attribute_extent, cut_events, splice,
 };
-use crate::opc::{malformed_xml, ns};
+use crate::opc::{attribute_value, malformed_xml, ns};
 
 /// The vocabulary of a package part: its root, and each entry the root may
 /// hold with the unqualified attributes it may carry.
@@ -160,7 +159,7 @@ fn spanned_entries(
                 else {
                     continue;
                 };
-                let value = unescape(&attr.value).map_err(|e| malformed(&e))?;
+                let value = attribute_value(&attr.value).map_err(|e| malformed(&e))?;
                 attributes.push((*key, value.into_owned()));
             }
             let entry = (*name, attributes);

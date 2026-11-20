@@ -10,14 +10,15 @@
 //! and the preceding cell, so a sparse or reference-less sheet is placed
 //! correctly.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::ops::Range;
 
 use elide_core::{Error, Result};
-use quick_xml::XmlVersion;
 use quick_xml::events::Event;
 use quick_xml::events::attributes::Attribute;
 
+use crate::opc::attribute_value;
 use crate::opc::xml_edit::SpannedReader;
 use crate::xlsx::cellref::parse_cell_ref;
 
@@ -29,9 +30,7 @@ use crate::xlsx::cellref::parse_cell_ref;
 /// reference are read correctly regardless of how they were escaped. The raw
 /// value is still used where an attribute is re-emitted verbatim.
 fn normalized(attr: &Attribute<'_>) -> Result<String> {
-    attr.normalized_value(XmlVersion::Implicit1_0)
-        .map(|value| value.into_owned())
-        .map_err(|e| Error::malformed(format!("attribute value: {e}")))
+    attribute_value(&attr.value).map(Cow::into_owned)
 }
 
 /// One text-bearing cell of a worksheet.

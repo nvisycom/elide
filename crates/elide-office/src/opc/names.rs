@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use elide_core::{Error, Result};
-use quick_xml::escape::unescape;
 
+use crate::opc::attribute_value;
 use crate::opc::attributes::TextAttribute;
 use crate::opc::block::Replacement;
 use crate::opc::part::PartPath;
@@ -254,7 +254,7 @@ fn redacted(
 
 /// `raw` attribute text with its entities resolved.
 fn decoded(part: &PartPath, raw: &str) -> Result<String> {
-    unescape(raw)
+    attribute_value(raw)
         .map(|text| text.into_owned())
         .map_err(|e| Error::malformed(format!("`{part}` has a malformed attribute value: {e}")))
 }

@@ -11,6 +11,7 @@
 //! is treated as content, [`UnsurfacedProperties`] strips everything else by
 //! the same walk, so the part keeps exactly what [`fields`] reads.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -18,13 +19,13 @@ use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::redaction::HiddenContent;
+use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
-use quick_xml::{Reader, XmlVersion};
 
-use crate::opc::malformed_xml;
 use crate::opc::xml_edit::{Edit, Edited, SpannedReader, attribute_source, bom_len};
+use crate::opc::{attribute_value, malformed_xml};
 
 /// The core and extended property elements surfaced as fields, each holding
 /// its value as text.
@@ -351,14 +352,14 @@ impl Walk {
                 .try_get_attribute("name")
                 .ok()
                 .flatten()
-                .and_then(|name| name.normalized_value(XmlVersion::Implicit1_0).ok())
+                .and_then(|name| attribute_value(&name.value).ok().map(Cow::into_owned))
                 .map(|name| {
                     self.properties += 1;
                     Entered {
                         key: format!("{CUSTOM_PROPERTY}/{}", self.properties - 1),
                         place: Place::Custom,
                         label: Place::Custom.label(&local),
-                        name: Some(name.into_owned()),
+                        name: Some(name),
                     }
                 }),
             1 if LISTS.contains(&local.as_str()) => {

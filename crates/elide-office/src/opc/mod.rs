@@ -31,10 +31,12 @@ pub(crate) mod vocabulary;
 pub(crate) mod xml_edit;
 pub(crate) mod xml_span;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
+use quick_xml::escape::{EscapeError, unescape};
 
 pub use self::attributes::TextAttribute;
 pub(crate) use self::attributes::{Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns};
@@ -48,6 +50,26 @@ use self::store::StoredPart;
 /// A part's XML failing to read, as `e` says.
 pub(crate) fn malformed_xml(e: impl std::fmt::Display) -> Error {
     Error::malformed(format!("malformed part XML: {e}"))
+}
+
+/// The attribute value written `raw` (inside its quotes) as XML reads it
+/// (XML 1.0 §3.3.3, for an attribute of no declared type): a literal tab,
+/// line feed, or carriage return (a CR-LF pair as one) read as a space, and
+/// every reference decoded, a character reference to whitespace kept as that
+/// character.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
+/// reference does not decode.
+pub(crate) fn attribute_value(raw: &str) -> Result<Cow<'_, str>> {
+    let malformed = |e: EscapeError| Error::malformed(format!("malformed attribute value: {e}"));
+    if !raw.contains(['\t', '\n', '\r']) {
+        return unescape(raw).map_err(malformed);
+    }
+    let spaced = raw.replace("\r\n", " ").replace(['\t', '\n', '\r'], " ");
+    let value = unescape(&spaced).map_err(malformed)?.into_owned();
+    Ok(Cow::Owned(value))
 }
 
 /// An opened OOXML package: every part read once and classified, ready to
@@ -364,6 +386,22 @@ mod tests {
     use zip::{CompressionMethod, ZipWriter};
 
     use super::*;
+
+    #[test]
+    fn an_attribute_value_reads_as_xml_normalizes_it() {
+        assert_eq!(
+            attribute_value("Jane\tRoe\r\nand\nco").unwrap(),
+            "Jane Roe and co"
+        );
+        // A reference to whitespace is that character, not a space.
+        assert_eq!(attribute_value("a&#10;b&amp;c").unwrap(), "a\nb&c");
+        assert!(matches!(
+            attribute_value("plain").unwrap(),
+            Cow::Borrowed("plain")
+        ));
+        assert!(attribute_value("a&unknown;").is_err());
+        assert!(attribute_value("a\n&unknown;").is_err());
+    }
 
     /// A classifier that makes the main part text, an image binary, and the
     /// rest structure, so every replacement guard can be exercised.

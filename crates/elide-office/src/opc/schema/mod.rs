@@ -50,19 +50,19 @@ use std::sync::OnceLock;
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
+use quick_xml::NsReader;
 use quick_xml::escape::partial_escape;
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::{NsReader, XmlVersion};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
 use crate::opc::archive::MAX_PART_BYTES;
 use crate::opc::ct::{self, DML, PML, SML, WML};
-use crate::opc::malformed_xml;
 use crate::opc::ns::{
     A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
     W16CEX, W16CID, X, XDR, transitional,
 };
 use crate::opc::xml_edit::{Name, Skipped, SpannedReader, attribute_extent, bound, splice_with};
+use crate::opc::{attribute_value, malformed_xml};
 
 /// An element type of the schema.
 #[derive(Debug)]
@@ -556,9 +556,7 @@ fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
         return Ok(None);
     };
     // A reference in the value stands for the character it names.
-    let uri = uri
-        .normalized_value(XmlVersion::Implicit1_0)
-        .map_err(malformed_xml)?;
+    let uri = attribute_value(&uri.value)?;
     let uri: &str = &uri;
     Ok(PAYLOADS
         .iter()

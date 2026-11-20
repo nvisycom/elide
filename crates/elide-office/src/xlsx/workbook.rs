@@ -10,11 +10,10 @@ use std::collections::HashMap;
 
 use elide_core::{Error, Result};
 use quick_xml::Reader;
-use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use super::WORKBOOK_PART;
-use crate::opc::{PartPath, relationships};
+use crate::opc::{PartPath, attribute_value, relationships};
 
 /// One worksheet: its display name and the package part path holding its cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,7 +103,7 @@ fn worksheet_targets(rels: &str) -> Result<HashMap<String, PartPath>> {
 
 /// Decode an attribute value to an unescaped owned `String`.
 fn decode(value: &str) -> Result<String> {
-    Ok(unescape(value)
+    Ok(attribute_value(value)
         .map_err(|e| Error::malformed(format!("workbook attribute entity: {e}")))?
         .into_owned())
 }
