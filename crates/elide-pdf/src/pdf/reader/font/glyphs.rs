@@ -17,6 +17,7 @@ use hayro_cmap::{BfString, CMap, CMapName, CidFamily, load_embedded};
 use lopdf::{Dictionary, Document, Encoding, Object, Stream, dictionary};
 use unicode_normalization::UnicodeNormalization;
 
+use super::Standard;
 use super::codespace::Codespace;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, StreamExt};
 
@@ -85,12 +86,23 @@ pub(crate) enum FontText<'a> {
 }
 
 /// How a simple font's codes read: one byte per code, read through its
-/// `/ToUnicode` where that maps the code, else its encoding.
+/// `/ToUnicode` where that maps the code, else through [`Codes`].
 pub(crate) struct Simple<'a> {
-    /// The encoding, or `None` for a symbolic font's built-in one, which
-    /// lives in its font program and is not read.
-    encoding: Option<Encoding<'a>>,
+    codes: Codes<'a>,
     to_unicode: Option<Encoding<'static>>,
+}
+
+/// What a simple font's codes read as where its `/ToUnicode` maps none.
+enum Codes<'a> {
+    /// Each code's text, from the glyph the standard face the font names
+    /// selects: the same glyphs its widths are read from, and the rebuild
+    /// pins.
+    Standard(Box<[Option<String>; 256]>),
+    /// The font's encoding, as lopdf reads it.
+    Encoding(Encoding<'a>),
+    /// None: a symbolic font's built-in encoding, which lives in its font
+    /// program and is not read.
+    Unread,
 }
 
 /// How a composite (Type0) font's codes read: split by its encoding CMap,
@@ -139,7 +151,9 @@ impl<'a> FontText<'a> {
                 collection,
             }))));
         }
-        let encoding = if let Ok(named) = font.get(b"Encoding") {
+        let codes = if let Some(standard) = Standard::of(doc, font) {
+            Codes::Standard(standard.text(doc, font))
+        } else if let Ok(named) = font.get(b"Encoding") {
             // A composite encoding is no simple font's, and lopdf would read
             // one through `/ToUnicode` again, past the guard above.
             let base = match doc.resolve(named) {
@@ -153,16 +167,13 @@ impl<'a> FontText<'a> {
             let Ok(encoding) = font.get_font_encoding_with_limit(doc, MAX_CONTENT_BYTES) else {
                 return Ok(None);
             };
-            Some(encoding)
+            Codes::Encoding(encoding)
         } else {
             // With no `/Encoding`, a code the `/ToUnicode` lacks reads through
             // the font's built-in encoding (9.6.5).
-            built_in(doc, font)
+            built_in(doc, font).map_or(Codes::Unread, Codes::Encoding)
         };
-        Ok(Some(Self::Simple(Box::new(Simple {
-            encoding,
-            to_unicode,
-        }))))
+        Ok(Some(Self::Simple(Box::new(Simple { codes, to_unicode }))))
     }
 }
 
@@ -532,10 +543,7 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
         // maps the byte, else the encoding; a byte neither decodes is likewise
         // an unmatchable glyph.
         FontText::Simple(simple) => {
-            let Simple {
-                encoding,
-                to_unicode,
-            } = &**simple;
+            let Simple { codes, to_unicode } = &**simple;
             bytes
                 .iter()
                 .enumerate()
@@ -546,16 +554,24 @@ pub(crate) fn decode_glyphs(font: &FontText<'_>, bytes: &[u8]) -> Result<Vec<Gly
                     };
                     let text = match mapped {
                         Some(units) => mapped_text(&units)?,
-                        None => encoding
-                            .as_ref()
-                            .and_then(|encoding| encoding.bytes_to_string(&[b]).ok())
-                            .map(|t| readable(&t))
-                            .ok_or_else(|| {
-                                Error::redaction(
-                                    "text drawn with a byte that does not decode under its \
+                        None => match codes {
+                            Codes::Standard(text) => Some(
+                                text[usize::from(b)]
+                                    .as_deref()
+                                    .map(readable)
+                                    .unwrap_or_default(),
+                            ),
+                            Codes::Encoding(encoding) => {
+                                encoding.bytes_to_string(&[b]).ok().map(|t| readable(&t))
+                            }
+                            Codes::Unread => None,
+                        }
+                        .ok_or_else(|| {
+                            Error::redaction(
+                                "text drawn with a byte that does not decode under its \
                                  font; its glyph cannot be located for redaction",
-                                )
-                            })?,
+                            )
+                        })?,
                     };
                     Ok(Glyph {
                         byte_start: i,
@@ -829,8 +845,9 @@ mod tests {
 
     /// A symbolic font, or an embedded Type1 font, with no `/Encoding` has a
     /// built-in encoding of its own, so a byte its `/ToUnicode` lacks is
-    /// refused, not read as the standard encoding's letter; and a simple font
-    /// naming a composite encoding is no font whose codes can be read.
+    /// refused, not read as the standard encoding's letter; the standard
+    /// Symbol face's is known, so it reads. A simple font naming a composite
+    /// encoding is no font whose codes can be read.
     #[test]
     fn a_symbolic_font_refuses_a_byte_its_map_lacks() {
         let mut doc = Document::with_version("1.7");
@@ -840,8 +857,17 @@ mod tests {
         let embedded = doc.add_object(dictionary! {
             "Type" => "FontDescriptor", "Flags" => 32, "FontFile" => program,
         });
+        let symbol = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Symbol", "ToUnicode" => map,
+        };
+        let text = FontText::of(&doc, &symbol).unwrap().unwrap();
+        let glyphs: Vec<String> = decode_glyphs(&text, b"\x41\x42")
+            .unwrap()
+            .into_iter()
+            .map(|glyph| glyph.text)
+            .collect();
+        assert_eq!(glyphs, ["J", "\u{392}"], "Beta, by Symbol's own encoding");
         for font in [
-            dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Symbol", "ToUnicode" => map },
             dictionary! {
                 "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "ABCDEF+Glyphs",
                 "ToUnicode" => map, "FontDescriptor" => descriptor,

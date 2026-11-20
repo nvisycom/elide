@@ -1,5 +1,6 @@
-//! The standard 14 fonts (9.6.2.2): the widths and vertical metrics a reader
-//! supplies for a simple font that names one and embeds no font program.
+//! The standard 14 fonts (9.6.2.2): the glyphs, widths and vertical metrics a
+//! reader supplies for a simple font that names one and embeds no font
+//! program.
 //!
 //! The metrics are Adobe's Core14 AFM files (`assets/afm`). A font's codes
 //! reach its glyphs by name: its encoding names the glyph each code selects
@@ -8,47 +9,29 @@
 //! which renderers draw with the face's metrics.
 //!
 //! Such a font carries no widths of its own, so its glyphs are as wide as the
-//! renderer showing it makes them. Where PDFium and pdf.js agree, a glyph has
-//! the width they give it, even where they depart from the letter of Annex D;
-//! where they disagree, it has none. So a code has no width when its glyph
-//! is one the renderers size differently ([`UNSETTLED`]), when they select
-//! different glyphs for it, or when it selects a glyph the face lacks.
+//! renderer showing it makes them, and renderers differ on a few. The rebuild
+//! makes them definite: it writes the glyphs and widths read here into the
+//! font ([`Standard::names`], [`Standard::widths`]), so every viewer selects
+//! and places the same glyphs. Where PDFium and pdf.js select a glyph alike,
+//! that is the glyph read, even where they depart from the letter of Annex D;
+//! where they differ, the spec's reading is. Every glyph is as wide as its AFM
+//! says, and a code that selects no glyph the face has is 0 wide.
 
 mod encodings;
+mod glyph_list;
 
 use std::array;
 use std::collections::HashMap;
 use std::str::SplitWhitespace;
 use std::sync::OnceLock;
 
-use lopdf::{Dictionary, Document, Object};
+use lopdf::{Dictionary, Document, Object, dictionary};
 
-use self::encodings::{MAC_ROMAN, WIN_ANSI};
+use self::encodings::{MAC_EXPERT, MAC_OS_ROMAN, MAC_ROMAN, WIN_ANSI};
 use crate::pdf::reader::{DictionaryExt, DocumentExt};
 
 /// A code's glyph name in a 256-code simple-font encoding.
-type GlyphNames<'a> = [Option<&'a str>; 256];
-
-/// The glyphs of the Helvetica and Times faces that PDFium, which draws
-/// them with fonts of its own, gives widths other than the AFMs', which
-/// pdf.js and PDFBox use: in some style of each family, each of these differs.
-const UNSETTLED: &[&str] = &[
-    "Lcaron",
-    "commaaccent",
-    "dcaron",
-    "divide",
-    "imacron",
-    "lcaron",
-    "lozenge",
-    "macron",
-    "mu",
-    "partialdiff",
-    "periodcentered",
-    "plusminus",
-    "radical",
-    "summation",
-    "tcaron",
-];
+pub(crate) type GlyphNames<'a> = [Option<&'a str>; 256];
 
 /// The Symbolic and Nonsymbolic font descriptor flags (Table 121).
 const SYMBOLIC: i64 = 1 << 2;
@@ -127,22 +110,6 @@ impl Face {
         matches!(self, Face::Symbol | Face::ZapfDingbats)
     }
 
-    /// The face's [`UNSETTLED`] glyphs: none for Courier, whose glyphs
-    /// renderers all draw 600 wide, or for the symbolic faces.
-    fn unsettled(self) -> &'static [&'static str] {
-        match self {
-            Face::Helvetica
-            | Face::HelveticaBold
-            | Face::HelveticaOblique
-            | Face::HelveticaBoldOblique
-            | Face::TimesRoman
-            | Face::TimesBold
-            | Face::TimesItalic
-            | Face::TimesBoldItalic => UNSETTLED,
-            _ => &[],
-        }
-    }
-
     /// The face's metrics, read from its AFM on first use.
     fn metrics(self) -> &'static Metrics {
         static FACES: [OnceLock<Metrics>; 14] = [const { OnceLock::new() }; 14];
@@ -210,6 +177,11 @@ struct Metrics {
     cap_height: Option<f64>,
     ascender: Option<f64>,
     descender: Option<f64>,
+    /// `FontBBox`: the glyphs' joint bounding box.
+    bbox: [f64; 4],
+    italic_angle: f64,
+    /// `StdVW`: the dominant vertical stem width.
+    stem_v: f64,
 }
 
 impl Metrics {
@@ -220,6 +192,7 @@ impl Metrics {
         let mut built_in = [None; 256];
         let mut widths = HashMap::new();
         let (mut cap_height, mut ascender, mut descender) = (None, None, None);
+        let (mut bbox, mut italic_angle, mut stem_v) = ([0.0; 4], 0.0, 0.0);
         for line in afm.lines() {
             if let Some(fields) = line.strip_prefix("C ") {
                 let mut code = None;
@@ -250,6 +223,13 @@ impl Metrics {
                 Some("CapHeight") => cap_height = value(&mut words),
                 Some("Ascender") => ascender = value(&mut words),
                 Some("Descender") => descender = value(&mut words),
+                Some("FontBBox") => {
+                    for corner in &mut bbox {
+                        *corner = value(&mut words).unwrap_or_default();
+                    }
+                }
+                Some("ItalicAngle") => italic_angle = value(&mut words).unwrap_or_default(),
+                Some("StdVW") => stem_v = value(&mut words).unwrap_or_default(),
                 _ => {}
             }
         }
@@ -259,6 +239,9 @@ impl Metrics {
             cap_height,
             ascender,
             descender,
+            bbox,
+            italic_angle,
+            stem_v,
         }
     }
 }
@@ -293,21 +276,66 @@ impl Standard {
         Some(Standard { face })
     }
 
-    /// The advance width of each code of `font`, in thousandths of an em:
-    /// its glyph's width in the face, `None` where the code has no settled
-    /// width. `None` overall when renderers read the font's encoding
-    /// differently throughout.
-    pub(crate) fn widths(self, doc: &Document, font: &Dictionary) -> Option<[Option<f64>; 256]> {
-        let metrics = self.face.metrics();
-        let unsettled = self.face.unsettled();
-        let names = glyph_names(doc, font, self.face)?;
-        Some(array::from_fn(|code| {
-            let name = names[code]?;
-            if unsettled.contains(&name) {
-                return None;
-            }
-            metrics.widths.get(name).copied()
+    /// The glyph each code of `font` selects, `None` for a code that
+    /// selects none.
+    pub(crate) fn names<'a>(self, doc: &'a Document, font: &'a Dictionary) -> GlyphNames<'a> {
+        glyph_names(doc, font, self.face)
+    }
+
+    /// The text each code of `font` stands for, from the glyph it selects
+    /// (Adobe Glyph List), `None` for a code whose glyph spells none.
+    pub(crate) fn text(self, doc: &Document, font: &Dictionary) -> Box<[Option<String>; 256]> {
+        let dingbats = self.face == Face::ZapfDingbats;
+        let names = glyph_names(doc, font, self.face);
+        Box::new(array::from_fn(|code| {
+            glyph_list::text(names[code]?, dingbats)
         }))
+    }
+
+    /// The advance width of each code of `font`, in thousandths of an em:
+    /// its glyph's width in the face, 0 for a code that selects no glyph the
+    /// face has.
+    pub(crate) fn widths(self, doc: &Document, font: &Dictionary) -> [f64; 256] {
+        let metrics = self.face.metrics();
+        let names = glyph_names(doc, font, self.face);
+        array::from_fn(|code| {
+            names[code]
+                .and_then(|name| metrics.widths.get(name).copied())
+                .unwrap_or(0.0)
+        })
+    }
+
+    /// The font descriptor `/Flags` that make every reader take `names` as
+    /// they are: Symbolic for Symbol and ZapfDingbats, Nonsymbolic for the
+    /// others, as an explicit `/Encoding` is read only for a nonsymbolic
+    /// TrueType font (9.6.5.4). `flags`'s other bits are kept.
+    pub(crate) fn flags(self, flags: i64) -> i64 {
+        if self.face.is_symbolic() {
+            (flags | SYMBOLIC) & !NONSYMBOLIC
+        } else {
+            (flags | NONSYMBOLIC) & !SYMBOLIC
+        }
+    }
+
+    /// A font descriptor (9.8.1) for the face, named `name`, with `flags`
+    /// and the face's metrics: what a font that names the face and has none
+    /// is given, so its flags can be set (see [`flags`](Self::flags)). A
+    /// symbolic face, which declares no cap height or descender, takes its
+    /// bounding box's.
+    pub(crate) fn descriptor(self, name: &[u8], flags: i64) -> Dictionary {
+        let metrics = self.face.metrics();
+        let [left, bottom, right, top] = metrics.bbox;
+        dictionary! {
+            "Type" => "FontDescriptor",
+            "FontName" => Object::Name(name.to_vec()),
+            "Flags" => flags,
+            "FontBBox" => vec![left.into(), bottom.into(), right.into(), top.into()],
+            "ItalicAngle" => metrics.italic_angle,
+            "Ascent" => metrics.ascender.unwrap_or(top),
+            "Descent" => metrics.descender.unwrap_or(bottom),
+            "CapHeight" => metrics.cap_height.unwrap_or(top),
+            "StemV" => metrics.stem_v,
+        }
     }
 
     /// The face's cap height, in thousandths of an em.
@@ -326,56 +354,55 @@ impl Standard {
     }
 }
 
-/// The glyph name each code of the simple `font` in `face` selects (9.6.5),
-/// as PDFium and pdf.js select it: its encoding's base encoding, with any
-/// `/Differences` applied.
+/// The glyph name each code of the simple `font` in `face` selects (9.6.5):
+/// its encoding's base encoding, with any `/Differences` applied.
 ///
-/// The base is `WinAnsiEncoding` or `MacRomanEncoding` when the encoding
-/// names one, and otherwise the [`default`](default_encoding): Symbol and
-/// ZapfDingbats always read by their own. `None` when renderers read the
-/// encoding differently throughout: an `/Encoding` neither a name nor a
-/// dictionary, a `MacExpertEncoding` base (pdf.js reads it, PDFium reads
-/// `WinAnsiEncoding` for it), or a `/Differences` they apply differently.
-fn glyph_names<'a>(doc: &'a Document, font: &'a Dictionary, face: Face) -> Option<GlyphNames<'a>> {
+/// The base is `WinAnsiEncoding`, `MacRomanEncoding` or `MacExpertEncoding`
+/// when the encoding names one, and otherwise the
+/// [`default`](default_encoding); Symbol and ZapfDingbats always read by their
+/// own, as PDFium and pdf.js read them. An `/Encoding` neither a name nor a
+/// dictionary, a base that isn't a known name, and a `/Differences` that isn't
+/// an array are ignored.
+fn glyph_names<'a>(doc: &'a Document, font: &'a Dictionary, face: Face) -> GlyphNames<'a> {
     let default = default_encoding(doc, font, face);
-    let Ok(encoding) = font.get(b"Encoding") else {
-        return Some(default);
-    };
-    let (base, differences) = match doc.resolve(encoding)? {
-        Object::Name(name) => (Some(name.as_slice()), None),
-        Object::Dictionary(dict) => {
+    let (base, differences) = match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
+        Some(Object::Name(name)) => (Some(name.as_slice()), None),
+        Some(Object::Dictionary(dict)) => {
             let base = dict
                 .get(b"BaseEncoding")
                 .ok()
                 .and_then(|base| doc.resolve(base))
                 .and_then(|base| base.as_name().ok());
-            (base, dict.get(b"Differences").ok())
+            let differences = dict
+                .get(b"Differences")
+                .ok()
+                .and_then(|d| doc.resolve_array(d));
+            (base, differences)
         }
-        _ => return None,
+        _ => (None, None),
     };
     let mut names: GlyphNames<'a> = match base {
         _ if face.is_symbolic() => default,
         Some(b"WinAnsiEncoding") => WIN_ANSI,
         Some(b"MacRomanEncoding") => MAC_ROMAN,
-        Some(b"MacExpertEncoding") => return None,
+        Some(b"MacExpertEncoding") => MAC_EXPERT,
         _ => default,
     };
     if let Some(differences) = differences {
-        apply_differences(doc, doc.resolve_array(differences)?, &mut names)?;
+        apply_differences(doc, differences, &mut names);
     }
-    Some(names)
+    names
 }
 
-/// The base encoding `font` in `face` reads by when it names none it can:
-/// a symbolic face's built-in one; else, by its font descriptor's flags,
-/// `StandardEncoding` for a font flagged nonsymbolic or a Type1 font flagged
-/// neither way, and `WinAnsiEncoding` for a TrueType font flagged neither
-/// way. For a font flagged symbolic only, PDFium reads `WinAnsiEncoding` and
-/// pdf.js `MacRomanEncoding`, so only the codes the two name alike have a
-/// glyph.
+/// The base encoding `font` in `face` reads by when it names none it can: a
+/// symbolic face's built-in one; else, by its font descriptor's flags, the
+/// standard encoding (the face's built-in one) for a Type1 font or one flagged
+/// nonsymbolic, `WinAnsiEncoding` for a TrueType font flagged neither way, as
+/// PDFium and pdf.js read it, and the Mac OS Roman encoding for a TrueType
+/// font flagged symbolic only, as the spec reads it (9.6.5.4).
 fn default_encoding(doc: &Document, font: &Dictionary, face: Face) -> GlyphNames<'static> {
     let built_in = face.metrics().built_in;
-    if face.is_symbolic() {
+    if face.is_symbolic() || !font.is_subtype(doc, b"TrueType") {
         return built_in;
     }
     let flags = font
@@ -387,38 +414,33 @@ fn default_encoding(doc: &Document, font: &Dictionary, face: Face) -> GlyphNames
     if flags & NONSYMBOLIC != 0 {
         built_in
     } else if flags & SYMBOLIC != 0 {
-        array::from_fn(|code| WIN_ANSI[code].filter(|_| WIN_ANSI[code] == MAC_ROMAN[code]))
-    } else if font.is_subtype(doc, b"TrueType") {
-        WIN_ANSI
+        MAC_OS_ROMAN
     } else {
-        built_in
+        WIN_ANSI
     }
 }
 
 /// Apply the `/Differences` array `entries` to `names`: each integer is the
 /// code the names after it start at (9.6.5.1), and names before any integer
-/// start at code 0. A name for a code past 255 selects nothing. `None` for an
-/// entry renderers read differently: a negative code, or one neither an
-/// integer nor a name.
-fn apply_differences<'a>(
-    doc: &'a Document,
-    entries: &'a [Object],
-    names: &mut GlyphNames<'a>,
-) -> Option<()> {
-    let mut code = 0_usize;
+/// start at code 0. A name for a code past 255 selects nothing, the names
+/// after a negative code are skipped up to the next integer, and an entry
+/// neither an integer nor a name is skipped.
+fn apply_differences<'a>(doc: &'a Document, entries: &'a [Object], names: &mut GlyphNames<'a>) {
+    let mut code = Some(0_usize);
     for entry in entries {
-        match doc.resolve(entry)? {
-            Object::Integer(start) => code = usize::try_from(*start).ok()?,
-            Object::Name(name) => {
-                if let Some(slot) = names.get_mut(code) {
-                    *slot = str::from_utf8(name).ok();
+        match doc.resolve(entry) {
+            Some(Object::Integer(start)) => code = usize::try_from(*start).ok(),
+            Some(Object::Name(name)) => {
+                if let Some(at) = code {
+                    if let Some(slot) = names.get_mut(at) {
+                        *slot = str::from_utf8(name).ok();
+                    }
+                    code = at.checked_add(1);
                 }
-                code = code.saturating_add(1);
             }
-            _ => return None,
+            _ => {}
         }
     }
-    Some(())
 }
 
 #[cfg(test)]
@@ -439,9 +461,19 @@ mod tests {
         font
     }
 
-    fn widths(font: &Dictionary) -> Option<[Option<f64>; 256]> {
+    fn widths(font: &Dictionary) -> Option<[f64; 256]> {
         let doc = Document::with_version("1.4");
-        Standard::of(&doc, font)?.widths(&doc, font)
+        Some(Standard::of(&doc, font)?.widths(&doc, font))
+    }
+
+    /// The widths of the Type1 face `base_font` under the encoding `encoding`.
+    fn encoded(base_font: &str, encoding: impl Into<Object>) -> [f64; 256] {
+        widths(&font(
+            "Type1",
+            base_font,
+            dictionary! { "Encoding" => encoding.into() },
+        ))
+        .unwrap()
     }
 
     /// Every face's AFM reads whole: the glyph counts Adobe's files hold,
@@ -478,87 +510,63 @@ mod tests {
         assert_eq!(standard[0x27], Some("quoteright"));
     }
 
-    /// Helvetica's widths reach codes through each encoding by glyph name.
+    /// Helvetica's widths reach codes through each encoding by glyph name; a
+    /// code that selects no glyph the face has is 0 wide.
     #[test]
     fn widths_follow_the_encoding() {
         let built_in = widths(&font("Type1", "Helvetica", Dictionary::new())).unwrap();
-        assert_eq!(built_in[usize::from(b'A')], Some(667.0));
-        assert_eq!(built_in[usize::from(b' ')], Some(278.0));
-        assert_eq!(built_in[0x27], Some(222.0), "quoteright");
-        assert_eq!(built_in[0x80], None, "no glyph");
+        assert_eq!(built_in[usize::from(b'A')], 667.0);
+        assert_eq!(built_in[usize::from(b' ')], 278.0);
+        assert_eq!(built_in[0x27], 222.0, "quoteright");
+        assert_eq!(built_in[0x80], 0.0, "no glyph");
 
-        let named = |encoding: &str| {
-            widths(&font(
-                "Type1",
-                "Helvetica",
-                dictionary! { "Encoding" => encoding },
-            ))
-            .unwrap()
-        };
-        let win_ansi = named("WinAnsiEncoding");
-        assert_eq!(win_ansi[0x27], Some(191.0), "quotesingle");
-        assert_eq!(win_ansi[0xE9], Some(556.0), "eacute");
-        assert_eq!(win_ansi[0xA0], Some(278.0), "space");
-        assert_eq!(win_ansi[0xAD], Some(333.0), "hyphen");
-        assert_eq!(win_ansi[0x81], Some(350.0), "unused: bullet");
-        assert_eq!(win_ansi[0x7F], Some(350.0), "unused: bullet");
+        let win_ansi = encoded("Helvetica", "WinAnsiEncoding");
+        assert_eq!(win_ansi[0x27], 191.0, "quotesingle");
+        assert_eq!(win_ansi[0xE9], 556.0, "eacute");
+        assert_eq!(win_ansi[0xA0], 278.0, "space");
+        assert_eq!(win_ansi[0xAD], 333.0, "hyphen");
+        assert_eq!(win_ansi[0x81], 350.0, "unused: bullet");
+        assert_eq!(win_ansi[0x7F], 350.0, "unused: bullet");
 
-        let mac_roman = named("MacRomanEncoding");
-        assert_eq!(mac_roman[0xCA], Some(278.0), "space");
-        assert_eq!(mac_roman[0x8E], Some(556.0), "eacute");
-        assert_eq!(mac_roman[0xAD], Some(549.0), "Mac OS: notequal");
-        assert_eq!(mac_roman[0xB0], None, "Mac OS: infinity, not in the face");
+        let mac_roman = encoded("Helvetica", "MacRomanEncoding");
+        assert_eq!(mac_roman[0xCA], 278.0, "space");
+        assert_eq!(mac_roman[0x8E], 556.0, "eacute");
+        assert_eq!(mac_roman[0xAD], 549.0, "Mac OS: notequal");
+        assert_eq!(mac_roman[0xB0], 0.0, "Mac OS: infinity, not in the face");
 
-        let standard = widths(&font(
-            "Type1",
-            "Times-Roman",
-            dictionary! { "Encoding" => "StandardEncoding" },
-        ))
-        .unwrap();
-        assert_eq!(standard[0x27], Some(333.0), "quoteright");
+        let expert = encoded("Helvetica", "MacExpertEncoding");
+        assert_eq!(expert[0x2C], 278.0, "comma");
+        assert_eq!(expert[0x30], 0.0, "zerooldstyle, not in the face");
+
+        assert_eq!(
+            encoded("Times-Roman", "StandardEncoding")[0x27],
+            333.0,
+            "quoteright"
+        );
     }
 
-    /// A glyph renderers size differently has no width in the Helvetica and
-    /// Times faces, however the font names them; Courier's are all settled.
+    /// Every glyph is as wide as Adobe's metrics say, including those a
+    /// renderer sizes otherwise, and an alias reads as its face.
     #[test]
-    fn unsettled_glyphs_have_no_width() {
-        let win_ansi = |subtype: &str, base_font: &str| {
-            widths(&font(
-                subtype,
-                base_font,
-                dictionary! { "Encoding" => "WinAnsiEncoding" },
-            ))
-            .unwrap()
-        };
-        for base_font in ["Helvetica", "Times-Bold"] {
-            let face = win_ansi("Type1", base_font);
-            assert_eq!(face[0xF7], None, "{base_font}: divide");
-            assert_eq!(face[0xAF], None, "{base_font}: macron");
-        }
-        assert_eq!(win_ansi("Type1", "Courier")[0xF7], Some(600.0));
-        assert_eq!(
-            win_ansi("TrueType", "Arial"),
-            win_ansi("Type1", "Helvetica")
-        );
-        assert_eq!(
-            win_ansi("TrueType", "TimesNewRoman,Bold"),
-            win_ansi("Type1", "Times-Bold")
-        );
+    fn glyphs_take_adobes_widths() {
+        let helvetica = encoded("Helvetica", "WinAnsiEncoding");
+        assert_eq!(helvetica[0xF7], 584.0, "divide");
+        assert_eq!(helvetica[0xAF], 333.0, "macron");
+        let arial = widths(&font(
+            "TrueType",
+            "Arial",
+            dictionary! { "Encoding" => "WinAnsiEncoding" },
+        ))
+        .unwrap();
+        assert_eq!(arial, helvetica);
+        assert_eq!(encoded("Courier", "WinAnsiEncoding")[0xF7], 600.0);
     }
 
     /// `/Differences` renames codes over the base encoding, from code 0
-    /// before any code is given, and past code 255 selects nothing.
+    /// before any code is given; past code 255 selects nothing.
     #[test]
     fn differences_rename_codes() {
-        let differences = |base_font: &str, encoding: Dictionary| {
-            widths(&font(
-                "Type1",
-                base_font,
-                dictionary! { "Encoding" => encoding },
-            ))
-            .unwrap()
-        };
-        let courier = differences(
+        let courier = encoded(
             "Courier-Bold",
             dictionary! {
                 "BaseEncoding" => "WinAnsiEncoding",
@@ -568,24 +576,24 @@ mod tests {
                 ],
             },
         );
-        assert_eq!(courier[65], Some(600.0));
-        assert_eq!(courier[66], Some(600.0));
-        assert_eq!(courier[200], None, "a glyph the face lacks");
+        assert_eq!(courier[65], 600.0);
+        assert_eq!(courier[66], 600.0);
+        assert_eq!(courier[200], 0.0, "a glyph the face lacks");
 
-        let helvetica = differences(
+        let helvetica = encoded(
             "Helvetica",
             dictionary! { "Differences" => vec![65.into(), "W".into()] },
         );
-        assert_eq!(helvetica[65], Some(944.0), "W");
-        assert_eq!(helvetica[66], Some(667.0), "B, from the built-in base");
+        assert_eq!(helvetica[65], 944.0, "W");
+        assert_eq!(helvetica[66], 667.0, "B, from the built-in base");
 
-        let leading = differences(
+        let leading = encoded(
             "Helvetica",
             dictionary! { "Differences" => vec!["W".into()] },
         );
-        assert_eq!(leading[0], Some(944.0), "a name before any code");
+        assert_eq!(leading[0], 944.0, "a name before any code");
 
-        let past = differences(
+        let past = encoded(
             "Helvetica",
             dictionary! {
                 "Differences" => vec![
@@ -595,74 +603,67 @@ mod tests {
                 ],
             },
         );
-        assert_eq!(past[255], Some(667.0), "A");
-        assert_eq!(past[65], Some(944.0), "W, after codes past 255");
+        assert_eq!(past[255], 667.0, "A");
+        assert_eq!(past[65], 944.0, "W, after codes past 255");
     }
 
-    /// An encoding renderers read differently gives no widths at all.
+    /// Entries the spec gives no reading of are skipped: the names after a
+    /// negative code, and entries neither an integer nor a name.
     #[test]
-    fn an_unsettled_encoding_gives_none() {
-        for encoding in [
-            Object::from("MacExpertEncoding"),
-            Object::from(3),
-            Object::Dictionary(dictionary! { "BaseEncoding" => "MacExpertEncoding" }),
-            Object::Dictionary(dictionary! { "Differences" => vec![(-1).into(), "A".into()] }),
-            Object::Dictionary(dictionary! { "Differences" => vec![65.into(), 1.5.into()] }),
-            Object::Dictionary(dictionary! {
-                "Differences" => vec![65.into(), Object::string_literal("x"), "W".into()],
-            }),
-            Object::Dictionary(dictionary! { "Differences" => 3 }),
-        ] {
-            let font = font(
-                "Type1",
+    fn malformed_differences_are_skipped() {
+        let negative = encoded(
+            "Helvetica",
+            dictionary! { "Differences" => vec![(-1).into(), "W".into(), "W".into(), 66.into(), "W".into()] },
+        );
+        assert_eq!(negative[0], 0.0, "no name reaches code 0");
+        assert_eq!(negative[66], 944.0);
+
+        for entry in [Object::Real(1.5), Object::string_literal("x")] {
+            let skipped = encoded(
                 "Helvetica",
-                dictionary! { "Encoding" => encoding.clone() },
+                dictionary! { "Differences" => vec![65.into(), entry.clone(), "W".into()] },
             );
-            assert!(widths(&font).is_none(), "{encoding:?}");
+            assert_eq!(skipped[65], 944.0, "{entry:?}");
         }
     }
 
-    /// A base encoding renderers don't know, or that isn't a name, leaves the
-    /// font's default in place: the standard encoding for a Type1 font,
-    /// WinAnsi for a TrueType font, unless its flags say otherwise.
+    /// An encoding no reader can use leaves the font's default in place.
+    #[test]
+    fn an_unusable_encoding_is_the_default() {
+        for encoding in [
+            Object::from(3),
+            Object::from("Foo"),
+            Object::Dictionary(dictionary! { "BaseEncoding" => 1 }),
+            Object::Dictionary(dictionary! { "BaseEncoding" => "Foo" }),
+            Object::Dictionary(dictionary! { "Differences" => 3 }),
+        ] {
+            assert_eq!(
+                encoded("Helvetica", encoding.clone())[0x27],
+                222.0,
+                "{encoding:?}"
+            );
+        }
+    }
+
+    /// With no encoding of its own, a Type1 font reads by the standard
+    /// encoding, a TrueType font by WinAnsi, or by Mac OS Roman when flagged
+    /// symbolic only, or by the standard encoding when flagged nonsymbolic.
     #[test]
     fn the_default_encoding_follows_subtype_and_flags() {
+        let flags =
+            |flags: i64| dictionary! { "FontDescriptor" => dictionary! { "Flags" => flags } };
         let quote = |subtype: &str, base_font: &str, extra: Dictionary| {
             widths(&font(subtype, base_font, extra)).unwrap()[0x27]
         };
-        let flags =
-            |flags: i64| dictionary! { "FontDescriptor" => dictionary! { "Flags" => flags } };
-        let quoteright = Some(222.0);
-        let quotesingle = Some(191.0);
+        assert_eq!(quote("Type1", "Helvetica", Dictionary::new()), 222.0);
+        assert_eq!(quote("Type1", "Helvetica", flags(SYMBOLIC)), 222.0);
+        assert_eq!(quote("TrueType", "Arial", Dictionary::new()), 191.0);
+        assert_eq!(quote("TrueType", "Arial", flags(NONSYMBOLIC)), 222.0);
 
-        assert_eq!(quote("Type1", "Helvetica", Dictionary::new()), quoteright);
-        assert_eq!(quote("TrueType", "Arial", Dictionary::new()), quotesingle);
-        assert_eq!(quote("TrueType", "Arial", flags(NONSYMBOLIC)), quoteright);
-        for encoding in [
-            Object::from("Foo"),
-            Object::from("StandardEncoding"),
-            Object::Dictionary(dictionary! { "BaseEncoding" => 1 }),
-            Object::Dictionary(dictionary! { "BaseEncoding" => "Foo" }),
-        ] {
-            let extra = dictionary! { "Encoding" => encoding.clone() };
-            assert_eq!(
-                quote("Type1", "Helvetica", extra.clone()),
-                quoteright,
-                "{encoding:?}"
-            );
-            assert_eq!(
-                quote("TrueType", "Arial", extra),
-                quotesingle,
-                "{encoding:?}"
-            );
-        }
-
-        // Flagged symbolic only: WinAnsi and MacRoman agree on ASCII, not
-        // above it.
-        let symbolic = widths(&font("Type1", "Helvetica", flags(SYMBOLIC))).unwrap();
-        assert_eq!(symbolic[0x27], quotesingle);
-        assert_eq!(symbolic[usize::from(b'A')], Some(667.0));
-        assert_eq!(symbolic[0x80], None, "Euro or Adieresis");
+        let mac_os = widths(&font("TrueType", "Arial", flags(SYMBOLIC))).unwrap();
+        assert_eq!(mac_os[0x27], 191.0, "quotesingle");
+        assert_eq!(mac_os[0x80], 667.0, "Adieresis");
+        assert_eq!(mac_os[0xDB], 556.0, "Euro");
     }
 
     /// Symbol and ZapfDingbats read through their own built-in encodings,
@@ -670,35 +671,43 @@ mod tests {
     #[test]
     fn symbolic_faces_use_their_own_encoding() {
         let symbol = widths(&font("Type1", "Symbol", Dictionary::new())).unwrap();
-        assert_eq!(symbol[usize::from(b'a')], Some(631.0), "alpha");
-        let named = font(
-            "Type1",
-            "Symbol",
-            dictionary! { "Encoding" => "WinAnsiEncoding" },
+        assert_eq!(symbol[usize::from(b'a')], 631.0, "alpha");
+        assert_eq!(
+            encoded("Symbol", "WinAnsiEncoding")[usize::from(b'a')],
+            631.0
         );
-        assert_eq!(widths(&named).unwrap()[usize::from(b'a')], Some(631.0));
 
         let dingbats = widths(&font("Type1", "ZapfDingbats", Dictionary::new())).unwrap();
-        assert_eq!(dingbats[0x21], Some(974.0), "a1");
-        let differences = font(
-            "Type1",
+        assert_eq!(dingbats[0x21], 974.0, "a1");
+        let differences = encoded(
             "ZapfDingbats",
-            dictionary! { "Encoding" => dictionary! {
+            dictionary! {
                 "BaseEncoding" => "WinAnsiEncoding",
                 "Differences" => vec![33.into(), "a2".into()],
-            } },
+            },
         );
-        assert_eq!(widths(&differences).unwrap()[0x21], Some(961.0), "a2");
+        assert_eq!(differences[0x21], 961.0, "a2");
+    }
+
+    /// The flags a pinned font is written with: Nonsymbolic for the Latin
+    /// faces, Symbolic for the symbolic ones, other bits kept.
+    #[test]
+    fn pinned_flags_follow_the_face() {
+        let doc = Document::with_version("1.4");
+        let helvetica = Standard::of(&doc, &font("Type1", "Helvetica", Dictionary::new())).unwrap();
+        assert_eq!(helvetica.flags(SYMBOLIC | 1 << 6), NONSYMBOLIC | 1 << 6);
+        let symbol = Standard::of(&doc, &font("Type1", "Symbol", Dictionary::new())).unwrap();
+        assert_eq!(symbol.flags(NONSYMBOLIC), SYMBOLIC);
     }
 
     /// Aliases and subset prefixes name the standard faces.
     #[test]
     fn aliases_and_subsets_name_faces() {
         let courier_new = widths(&font("TrueType", "CourierNewPSMT", Dictionary::new())).unwrap();
-        assert_eq!(courier_new[usize::from(b'A')], Some(600.0));
+        assert_eq!(courier_new[usize::from(b'A')], 600.0);
 
         let subset = widths(&font("Type1", "ABCDEF+Times-Italic", Dictionary::new())).unwrap();
-        assert_eq!(subset[usize::from(b'A')], Some(611.0));
+        assert_eq!(subset[usize::from(b'A')], 611.0);
         for name in [
             "abcdef+Times-Italic",
             "ABCDE+Times-Italic",

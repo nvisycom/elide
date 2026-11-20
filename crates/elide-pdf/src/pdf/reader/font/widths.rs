@@ -54,9 +54,6 @@ pub(crate) enum WidthSource {
         w: BTreeMap<u32, f64>,
         ranges: Vec<CidRange>,
     },
-    /// A standard font with no `/Widths`: each code's width in the face, `None`
-    /// for a code whose glyph the face gives no width.
-    Standard(Box<[Option<f64>; 256]>),
     /// No usable width table: the caller treats positional moves as word
     /// boundaries instead of computing an exact advance.
     Unknown,
@@ -105,9 +102,6 @@ impl WidthSource {
                     .map(|r| r.width);
                 Some(in_range.unwrap_or(*dw))
             }
-            WidthSource::Standard(widths) => usize::try_from(code)
-                .ok()
-                .and_then(|code| *widths.get(code)?),
             WidthSource::Unknown => None,
         }
     }
@@ -128,11 +122,11 @@ impl WidthSource {
         if let Some(widths) = Self::from_widths(doc, font, scale) {
             return widths;
         }
-        Standard::of(doc, font)
-            .and_then(|standard| standard.widths(doc, font))
-            .map_or(WidthSource::Unknown, |widths| {
-                WidthSource::Standard(Box::new(widths))
-            })
+        Standard::of(doc, font).map_or(WidthSource::Unknown, |standard| WidthSource::Simple {
+            first_char: 0,
+            widths: standard.widths(doc, font).to_vec(),
+            missing: 0.0,
+        })
     }
 
     /// `/Widths` + `/FirstChar` of a simple font, each width times `scale`.
@@ -415,7 +409,7 @@ mod tests {
         };
         let face = WidthSource::from_font(&doc, &font);
         assert_eq!(face.advance(u32::from(b'A')), Some(722.0));
-        assert_eq!(face.advance(256), None);
+        assert_eq!(face.advance(0x80), Some(0.0), "no glyph");
         let metrics = GlyphMetrics::from_font(&doc, &font);
         assert!((metrics.top - 0.662).abs() < 1e-6, "{metrics:?}");
         assert!((metrics.bottom + 0.217).abs() < 1e-6, "{metrics:?}");

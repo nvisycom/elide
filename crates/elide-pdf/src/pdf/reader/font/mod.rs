@@ -7,4 +7,5 @@ mod standard;
 mod widths;
 
 pub(crate) use self::glyphs::{FontText, decode_glyphs, readable, to_unicode};
+pub(crate) use self::standard::Standard;
 pub(crate) use self::widths::{GlyphMetrics, WidthSource};
