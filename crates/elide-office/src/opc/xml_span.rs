@@ -17,6 +17,7 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ops::Range;
 
 use elide_codec::extract::{OffsetMap, Passage};
@@ -29,9 +30,11 @@ use quick_xml::events::Event;
 use crate::opc::attribute_value;
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
-use crate::opc::ns::{W, X, transitional};
+use crate::opc::ns::{W, X, XML, transitional};
 use crate::opc::relationships::{self, HYPERLINK};
-use crate::opc::xml_edit::{Action, Attribute, Name, Rules, SpannedReader, edit, local_name};
+use crate::opc::xml_edit::{
+    Action, Attribute, Name, Rules, SpannedReader, edit, local_name, namespace_of,
+};
 
 /// A read of a part's spans, which fails (with nothing more to say) on
 /// malformed XML; the caller reports the part as an issue.
@@ -418,42 +421,54 @@ const SPACE_COLLAPSING_NAMESPACES: &[&str] = &[W, X];
 /// whitespace.
 pub(crate) const PRESERVE_SPACE: &str = " xml:space=\"preserve\"";
 
-/// Where to insert [`PRESERVE_SPACE`] so `text`, written as the text of `raw`
-/// at `start`, keeps its leading and trailing whitespace: at the `>` of the
-/// start tag before `start`, when that tag opens a run text element of a
-/// [space-collapsing namespace](SPACE_COLLAPSING_NAMESPACES) that does not
-/// already say how to treat space. `None` when `text` needs nothing.
-///
-/// The tag's prefix resolves against the first declaration of it in the part,
-/// where Office declares every prefix it uses: on the root element.
-pub(crate) fn preserve_space_at(raw: &str, start: usize, text: &str) -> Option<usize> {
-    let edge = |c: Option<char>| c.is_some_and(|c| matches!(c, ' ' | '\t' | '\n' | '\r'));
-    if !edge(text.chars().next()) && !edge(text.chars().next_back()) {
-        return None;
+/// The run text elements of a part whose text drops its leading and trailing
+/// whitespace: those of a [space-collapsing namespace](SPACE_COLLAPSING_NAMESPACES)
+/// that do not say how to treat space, each by where its start tag ends.
+#[derive(Debug, Default)]
+pub(crate) struct CollapsingRuns(HashSet<usize>);
+
+impl CollapsingRuns {
+    /// The collapsing run text elements of `raw`, each name and `xml:space`
+    /// resolved by the namespaces in scope where it is written. Errs on
+    /// malformed XML.
+    pub(crate) fn read(raw: &str) -> Readable<Self> {
+        let mut reader = SpannedReader::new_ns(raw);
+        let mut ends = HashSet::new();
+        loop {
+            let (namespace, event, span) = reader.read_resolved_event().map_err(|_| ())?;
+            let e = match event {
+                Event::Eof => break,
+                Event::Start(ref e) => e,
+                _ => continue,
+            };
+            let collapsing = namespace.as_deref().is_some_and(|namespace| {
+                SPACE_COLLAPSING_NAMESPACES.contains(&transitional(namespace))
+            });
+            if !collapsing || !RUN_TEXT_ELEMENTS.contains(&e.local_name().into_inner()) {
+                continue;
+            }
+            let mut says_space = false;
+            for attr in e.attributes() {
+                let attr = attr.map_err(|_| ())?;
+                let (resolved, local) = reader.reader.resolver().resolve_attribute(attr.key);
+                says_space |= namespace_of(&resolved) == Some(XML) && local.into_inner() == "space";
+            }
+            if !says_space {
+                ends.insert(span.end);
+            }
+        }
+        Ok(Self(ends))
     }
-    let before = raw.get(..start)?;
-    if !before.ends_with('>') || before.ends_with("/>") {
-        return None;
+
+    /// Where to insert [`PRESERVE_SPACE`] so `text`, written as the text of
+    /// the part at `start`, keeps its leading and trailing whitespace: at the
+    /// `>` of a collapsing run text element's start tag ending at `start`.
+    /// `None` when `text` needs nothing.
+    pub(crate) fn preserve_space_at(&self, start: usize, text: &str) -> Option<usize> {
+        let edge = |c: Option<char>| c.is_some_and(|c| matches!(c, ' ' | '\t' | '\n' | '\r'));
+        let needs = edge(text.chars().next()) || edge(text.chars().next_back());
+        (needs && self.0.contains(&start)).then(|| start - 1)
     }
-    let tag = &before[before.rfind('<')? + 1..before.len() - 1];
-    if tag.contains("xml:space") {
-        return None;
-    }
-    let name = tag.split(|c: char| c.is_ascii_whitespace()).next()?;
-    let (prefix, local) = name.split_once(':').unwrap_or(("", name));
-    if !RUN_TEXT_ELEMENTS.contains(&local) {
-        return None;
-    }
-    let declaration = if prefix.is_empty() {
-        "xmlns=\"".to_owned()
-    } else {
-        format!("xmlns:{prefix}=\"")
-    };
-    let uri_start = raw.find(&declaration)? + declaration.len();
-    let uri = &raw[uri_start..uri_start + raw[uri_start..].find('"')?];
-    SPACE_COLLAPSING_NAMESPACES
-        .contains(&transitional(uri))
-        .then_some(start - 1)
 }
 
 /// The local names of the elements whose start and end end the passage before
@@ -749,28 +764,45 @@ mod tests {
         );
     }
 
+    /// Where `raw` needs [`PRESERVE_SPACE`] for `text` written as the text
+    /// of its first `x`.
+    fn preserve_space_at(raw: &str, text: &str) -> Option<usize> {
+        let start = raw.find("x<").unwrap();
+        CollapsingRuns::read(raw)
+            .unwrap()
+            .preserve_space_at(start, text)
+    }
+
     #[test]
     fn edge_whitespace_in_word_run_text_needs_preserve_space() {
         let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>x</w:t></w:r></w:p>"#;
-        let start = raw.find("x<").unwrap();
-        let at = preserve_space_at(raw, start, " and").expect("needs preserve");
+        let at = preserve_space_at(raw, " and").expect("needs preserve");
         assert_eq!(&raw[at..=at], ">");
-        assert_eq!(preserve_space_at(raw, start, "and"), None);
+        assert_eq!(preserve_space_at(raw, "and"), None);
     }
 
     #[test]
     fn preserve_space_is_left_alone_where_it_is_said_or_not_needed() {
         let said = r#"<w:t xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xml:space="preserve">x</w:t>"#;
-        assert_eq!(
-            preserve_space_at(said, said.find("x<").unwrap(), " x"),
-            None
-        );
+        assert_eq!(preserve_space_at(said, " x"), None);
         let drawing =
             r#"<a:t xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">x</a:t>"#;
-        assert_eq!(
-            preserve_space_at(drawing, drawing.find("x<").unwrap(), " x"),
-            None
-        );
+        assert_eq!(preserve_space_at(drawing, " x"), None);
+    }
+
+    /// A prefix is resolved where the element is written: a nested
+    /// redeclaration decides, not the first declaration in the part.
+    #[test]
+    fn preserve_space_resolves_a_redeclared_prefix() {
+        let elsewhere = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t xmlns:w="urn:vendor">x</w:t></w:r></w:p>"#;
+        assert_eq!(preserve_space_at(elsewhere, " x"), None);
+        let word = r#"<w:p xmlns:w="urn:vendor"><w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:t>x</w:t></w:r></w:p>"#;
+        let at = preserve_space_at(word, " x").expect("needs preserve");
+        assert_eq!(&word[at - 4..=at], "<w:t>");
+        // A strict namespace collapses as its transitional twin, and a
+        // default namespace is resolved too.
+        let strict = r#"<t xmlns="http://purl.oclc.org/ooxml/spreadsheetml/main">x</t>"#;
+        assert!(preserve_space_at(strict, " x").is_some());
     }
 
     #[test]

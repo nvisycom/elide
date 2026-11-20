@@ -14,8 +14,8 @@ use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
 use crate::opc::xml_edit::check_cuts;
 use crate::opc::xml_span::{
-    BlockKind, PRESERVE_SPACE, Readable, Span, attribute_spans, cell_markup_spans,
-    preserve_space_at, relationship_spans, text_spans,
+    BlockKind, CollapsingRuns, PRESERVE_SPACE, Readable, Span, attribute_spans, cell_markup_spans,
+    relationship_spans, text_spans,
 };
 
 /// One package part: its path, its role, and its bytes, retained for extraction
@@ -158,6 +158,21 @@ impl StoredPart {
         Ok(anchored.into_iter().map(|(_, span)| span).collect())
     }
 
+    /// The collapsing run text elements of this part's XML `raw`, read into
+    /// `read` the first time.
+    fn collapsing_runs<'c>(
+        &self,
+        raw: &str,
+        read: &'c mut Option<CollapsingRuns>,
+    ) -> Result<&'c CollapsingRuns> {
+        if read.is_none() {
+            let runs = CollapsingRuns::read(raw)
+                .map_err(|_| Error::malformed(format!("part `{}` malformed XML", self.path)))?;
+            *read = Some(runs);
+        }
+        Ok(read.get_or_insert_default())
+    }
+
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
     pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
@@ -175,6 +190,8 @@ impl StoredPart {
 
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
+        // Read once a replacement needs it.
+        let mut collapsing: Option<CollapsingRuns> = None;
         for r in ordered {
             let span = Span::covering(&spans, r.start, r.end).ok_or_else(|| {
                 Error::processing(format!(
@@ -185,7 +202,9 @@ impl StoredPart {
             let safe = span.escape(&r.text, r)?;
             // A run whose new text starts or ends with whitespace keeps it.
             if span.kind == BlockKind::Text
-                && let Some(at) = preserve_space_at(raw, r.start, &safe)
+                && let Some(at) = self
+                    .collapsing_runs(raw, &mut collapsing)?
+                    .preserve_space_at(r.start, &safe)
                 && at >= cursor
             {
                 out.push_str(&raw[cursor..at]);
