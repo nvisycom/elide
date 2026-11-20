@@ -864,3 +864,216 @@ fn a_longer_end_tag_name_does_not_end_a_text_body() {
         assert!(refused(sanitizer, raw), "{raw:?}");
     }
 }
+
+#[test]
+fn a_removal_never_joins_text_into_a_reference() {
+    // The text reads `&amp;` as written; joined, it would read `&`.
+    assert_eq!(rebuilt("<p>&am<!-- note -->p;</p>"), "<p>&amp;amp;</p>");
+    assert_eq!(rebuilt("<p>&am<b hidden>x</b>p;</p>"), "<p>&amp;amp;</p>");
+    // A number without its `;` reads as its character either way.
+    assert_eq!(rebuilt("<p>&#38<!-- note -->4;</p>"), "<p>&amp;4;</p>");
+    // A `#` continues a reference too, and a name a browser reads without
+    // its `;` is written as what it reads.
+    assert_eq!(
+        rebuilt("<p>&<b hidden>x</b>#60;script&gt;</p>"),
+        "<p>&amp;#60;script&gt;</p>"
+    );
+    assert_eq!(rebuilt("<p>&am<b hidden>x</b>px</p>"), "<p>&amp;ampx</p>");
+    assert_eq!(rebuilt("<p>a&amp<b hidden>x</b>;</p>"), "<p>a&amp;;</p>");
+    // A reference already whole on either side is left as written.
+    assert_eq!(rebuilt("<p>&amp;<!-- note -->p;</p>"), "<p>&amp;p;</p>");
+    assert_eq!(rebuilt("<p>a&<!-- note --> b</p>"), "<p>a& b</p>");
+}
+
+#[test]
+fn a_cdata_section_in_svg_or_mathml_holds_a_gt() {
+    for raw in [
+        "<svg><text><![CDATA[a > b]]></text></svg>",
+        "<math><mtext><![CDATA[a > b]]></mtext></math>",
+    ] {
+        assert_eq!(sanitize(html(keep_comments()), raw), raw);
+    }
+    // In HTML read inside them, a browser reads it as a comment ended at
+    // its first `>`.
+    for raw in [
+        "<math><mtext><b><![CDATA[a > b]]></b></mtext></math>",
+        "<svg><desc><p><![CDATA[a > b]]></p></desc></svg>",
+    ] {
+        assert!(refused(html(keep_comments()), raw), "{raw}");
+    }
+}
+
+#[test]
+fn a_cdata_section_right_in_a_mathml_token_element_stays() {
+    let raw = "<math><mtext><![CDATA[Note]]></mtext></math>";
+    assert_eq!(rebuilt(raw), raw);
+    // In an HTML element inside it, a browser reads it as a comment.
+    assert_eq!(
+        rebuilt("<math><mtext><b><![CDATA[Note]]></b></mtext></math>"),
+        "<math><mtext><b></b></mtext></math>"
+    );
+    assert_eq!(
+        rebuilt("<math><mtext><b>x</b><![CDATA[Note]]></mtext></math>"),
+        "<math><mtext><b>x</b><![CDATA[Note]]></mtext></math>"
+    );
+    // Past misnested tags a browser may still have an HTML element open, so
+    // the section goes and the `mtext`'s end is refused.
+    let raw = "<math><mtext><b><i>x</b><![CDATA[Note]]></mtext></math>";
+    assert!(refused(html(keep_comments()), raw), "{raw}");
+}
+
+#[test]
+fn an_unquoted_value_ending_in_a_quote_keeps_its_space_before_the_slash() {
+    let raw = "<svg><circle id=x'' /><rect/></svg>";
+    assert_eq!(rebuilt(raw), raw);
+}
+
+/// A browser ends a list item at its list's end tag, which this reader does
+/// not follow outside the item, so the rest goes with it.
+#[test]
+fn a_dropped_list_item_goes_with_what_follows() {
+    for raw in [
+        "<ul><li hidden>Draft</ul><p>Published</p>",
+        "<ul><li><div>a<li hidden>secret</div>more secret</ul>",
+        "<dl><dd><div>a<dd hidden>secret</div>more secret</dl>",
+        "<button><div>a<button hidden>secret</div>more secret</button>",
+    ] {
+        let out = rebuilt(raw);
+        assert!(!out.contains("secret") && !out.contains("Draft"), "{out}");
+    }
+}
+
+/// An end tag a browser ignores, because an element open inside the one
+/// being left out keeps it from closing it, does not end the removal.
+#[test]
+fn an_end_tag_held_open_by_an_element_inside_does_not_end_a_removal() {
+    for raw in [
+        "<div hidden><table><tr><td>a</div>more secret</td></tr></table></div>",
+        "<div hidden><svg><foreignObject><p>a</div>more secret",
+        "<span hidden><div>a</span>more secret",
+        "<form hidden><div>a</form>more secret",
+        "<li hidden><ul><li>a</li></ul></ol>more secret",
+    ] {
+        let out = rebuilt(raw);
+        assert!(!out.contains("secret"), "{raw}: {out}");
+    }
+    // One that closes everything open inside it does.
+    assert_eq!(
+        rebuilt("<div hidden><p>a<span>b</div><p>Visible</p>"),
+        "<p>Visible</p>"
+    );
+    assert_eq!(
+        rebuilt("<math hidden><mi><mglyph><title></math><p>Visible</p>"),
+        "<p>Visible</p>"
+    );
+}
+
+/// In SVG or MathML, even an element reading HTML, an end tag closes the
+/// innermost element of its name with everything inside it.
+#[test]
+fn an_end_tag_in_svg_or_mathml_closes_its_ancestor() {
+    // After `</math>`, the CDATA section is an HTML comment.
+    for raw in [
+        "<math><mtext></math><![CDATA[><img src=x onerror=alert(1)>]]>",
+        "<svg><desc></svg><![CDATA[><img src=x onerror=alert(1)>]]>",
+    ] {
+        assert!(refused(html(keep_comments()), raw), "{raw}");
+    }
+    // After `</mrow>`, the `math` is open, where it is a CDATA section.
+    let raw = "<math><mrow><mi></mrow><![CDATA[a > b]]></math>";
+    assert_eq!(sanitize(html(keep_comments()), raw), raw);
+    assert_eq!(
+        rebuilt("<math><mtext></math><![CDATA[Note]]><p>a</p>"),
+        "<math><mtext></math><p>a</p>"
+    );
+    // An end tag that may close the HTML around them is refused.
+    let raw = "<div><svg><g></div><![CDATA[><img src=x onerror=alert(1)>]]>";
+    assert!(refused(html(keep_comments()), raw), "{raw}");
+    // Under an HTML element, HTML's rules stop at the element reading HTML.
+    let raw = "<math><mtext><b></math></b><![CDATA[Note]]></mtext></math>";
+    assert_eq!(rebuilt(raw), raw);
+}
+
+#[test]
+fn a_mixed_slash_prefix_reaches_a_server() {
+    assert_eq!(
+        rebuilt(
+            r#"<img src="/\example.test/p.png"><img src="\/example.test/p.png"><img src="/p.png" alt="ok">"#
+        ),
+        r#"<img><img><img src="/p.png" alt="ok">"#
+    );
+}
+
+#[test]
+fn every_image_set_candidate_is_checked() {
+    for css in [
+        "background:image-set(linear-gradient(red,blue) 1x, 'https://example.test/p.png' 2x)",
+        "background:image-set('a)b.png' 1x, 'https://example.test/p.png' 2x)",
+    ] {
+        assert!(css_loads_remote(css), "{css}");
+    }
+    assert!(!css_loads_remote(
+        "background:image-set(linear-gradient(red,blue) 1x, 'p.png' 2x)"
+    ));
+}
+
+/// Text joined across many removals is copied in linear time.
+#[test]
+fn text_joined_across_many_removals_stays_linear() {
+    let raw = format!("<p>&{}</p>", "ab<!---->".repeat(100_000));
+    let started = std::time::Instant::now();
+    let out = rebuilt(&raw);
+    assert!(out.starts_with("<p>&amp;abab"), "{}", &out[..40]);
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+}
+
+/// In SVG or MathML, `</br>` and `</p>` leave them, as an HTML start tag
+/// does, so what follows is HTML.
+#[test]
+fn a_br_or_p_end_tag_leaves_svg_and_mathml() {
+    for raw in [
+        "<svg></br><![CDATA[><img src=x onerror=alert(1)>]]>",
+        "<math></br><![CDATA[><img src=x onerror=alert(1)>]]>",
+        "<svg><g></p><![CDATA[><img src=x onerror=alert(1)>]]>",
+    ] {
+        assert!(refused(html(keep_comments()), raw), "{raw}");
+    }
+    assert_eq!(
+        rebuilt("<svg><g></p><![CDATA[Jane]]><p>a</p>"),
+        "<svg><g></p><p>a</p>"
+    );
+    // Right in an element reading HTML, they stay there.
+    let raw = "<math><mtext></p><![CDATA[a > b]]></mtext></math>";
+    assert_eq!(sanitize(html(keep_comments()), raw), raw);
+}
+
+/// An end tag for an element open in the one being left out closes it only
+/// where a browser does: not past an element that keeps it open.
+#[test]
+fn an_inner_end_tag_held_open_does_not_close_its_element() {
+    for raw in [
+        "<div hidden><div><table><tr><td>a</div></div>secret",
+        "<span hidden><span><div>a</span></span>secret",
+        "<svg hidden><g><foreignObject><b></g></svg>secret",
+    ] {
+        let out = rebuilt(raw);
+        assert!(!out.contains("secret"), "{raw}: {out}");
+    }
+    assert_eq!(
+        rebuilt("<div hidden><div><p>a</div></div><p>Visible</p>"),
+        "<p>Visible</p>"
+    );
+}
+
+/// SVG and MathML elements are no scope boundary: an HTML end tag closes
+/// them with what holds them.
+#[test]
+fn an_html_end_tag_closes_svg_in_a_removal() {
+    assert_eq!(
+        rebuilt("<div hidden><svg><g></div><p>Visible</p>"),
+        "<p>Visible</p>"
+    );
+    // An element reading HTML inside them still is.
+    let out = rebuilt("<div hidden><svg><desc></div>secret");
+    assert!(!out.contains("secret"), "{out}");
+}

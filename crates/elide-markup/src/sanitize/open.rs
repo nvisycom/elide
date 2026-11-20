@@ -9,6 +9,8 @@ use std::collections::HashMap;
 pub(super) struct OpenElements<T = ()> {
     stack: Vec<(String, T)>,
     counts: HashMap<String, usize>,
+    /// How many times an element has opened or closed.
+    changes: u64,
 }
 
 impl<T> OpenElements<T> {
@@ -16,11 +18,28 @@ impl<T> OpenElements<T> {
         Self {
             stack: Vec::new(),
             counts: HashMap::new(),
+            changes: 0,
         }
     }
 
     pub(super) fn is_empty(&self) -> bool {
         self.stack.is_empty()
+    }
+
+    /// Whether an element named `name` is open.
+    pub(super) fn contains(&self, name: &str) -> bool {
+        self.counts.contains_key(name)
+    }
+
+    /// How many times an element has opened or closed, which tells whether
+    /// what is open has changed since.
+    pub(super) fn changes(&self) -> u64 {
+        self.changes
+    }
+
+    /// The open elements, innermost first.
+    pub(super) fn innermost_first(&self) -> impl Iterator<Item = &(String, T)> {
+        self.stack.iter().rev()
     }
 
     /// The innermost open element.
@@ -30,12 +49,14 @@ impl<T> OpenElements<T> {
 
     pub(super) fn push(&mut self, name: String, value: T) {
         *self.counts.entry(name.clone()).or_default() += 1;
+        self.changes += 1;
         self.stack.push((name, value));
     }
 
     /// Close the innermost open element.
     pub(super) fn pop(&mut self) -> Option<(String, T)> {
         let (name, value) = self.stack.pop()?;
+        self.changes += 1;
         if let Some(count) = self.counts.get_mut(&name) {
             *count -= 1;
             if *count == 0 {

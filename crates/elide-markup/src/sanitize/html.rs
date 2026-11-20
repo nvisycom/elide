@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
+use super::open::OpenElements;
 use super::url::{css_loads_remote, is_remote, reaches_server, runs_script, srcset_reaches_server};
 use crate::engine::meta::MetaTag;
 use crate::engine::tag::{HtmlAttribute, keyword};
@@ -1147,3 +1148,245 @@ const P_CLOSERS: &[&str] = &[
     "ul",
     "xmp",
 ];
+
+/// The HTML end tags that close their element, open in scope, with every
+/// element open inside it: the grouping elements' and the list items'.
+const SCOPED_ENDS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "center",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "header",
+    "hgroup",
+    "li",
+    "listing",
+    "main",
+    "menu",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "search",
+    "section",
+    "summary",
+    "ul",
+];
+
+/// The HTML elements that bound the scope an end tag looks for its element
+/// in, and a `<select>`, whose content is read by other rules.
+const SCOPE_BOUNDS: &[&str] = &[
+    "applet", "caption", "html", "marquee", "object", "select", "table", "td", "template", "th",
+];
+
+/// The HTML elements a browser stops at when it looks for the element an
+/// end tag outside [`SCOPED_ENDS`] closes, so the tag closes nothing.
+const SPECIAL: &[&str] = &[
+    "address",
+    "applet",
+    "area",
+    "article",
+    "aside",
+    "base",
+    "basefont",
+    "bgsound",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "caption",
+    "center",
+    "col",
+    "colgroup",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "iframe",
+    "img",
+    "input",
+    "keygen",
+    "li",
+    "link",
+    "listing",
+    "main",
+    "marquee",
+    "menu",
+    "meta",
+    "nav",
+    "noembed",
+    "noframes",
+    "noscript",
+    "object",
+    "ol",
+    "p",
+    "param",
+    "plaintext",
+    "pre",
+    "script",
+    "search",
+    "section",
+    "select",
+    "source",
+    "style",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "track",
+    "ul",
+    "wbr",
+    "xmp",
+];
+
+/// The HTML formatting elements, which a browser reopens past an element
+/// that closed them.
+const FORMATTING: &[&str] = &[
+    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u",
+];
+
+/// Whether the HTML element `inner`, open inside the HTML element whose end
+/// tag is `end` (both lowercased), keeps a browser from reading that tag as
+/// its end.
+fn keeps_end(end: &str, inner: &str) -> bool {
+    if !SCOPED_ENDS.contains(&end) {
+        return SPECIAL.contains(&inner);
+    }
+    SCOPE_BOUNDS.contains(&inner)
+        || (end == "p" && inner == "button")
+        || (end == "li" && matches!(inner, "ol" | "ul"))
+}
+
+/// Whether the elements `above` (innermost first, each with the vocabulary
+/// it is read in), open inside the element the end tag `end` (lowercased)
+/// names, read in `target`, keep a browser from reading the tag as its end.
+///
+/// SVG and MathML close by name from the current element, while it and all
+/// passed are theirs. Past an HTML element, HTML's rules read the tag: an
+/// element reading HTML stops them, as does a scope boundary for a grouping
+/// element's end, any of HTML's special elements for another's, and anything
+/// for a form's, which closes the form alone.
+pub(super) fn keeps_open<'a>(
+    end: &str,
+    target: Space,
+    above: impl IntoIterator<Item = (&'a str, Space)>,
+) -> bool {
+    let mut above = above.into_iter().peekable();
+    if above.peek().is_none() {
+        return false;
+    }
+    if end == "form" && target == Space::Html {
+        return true;
+    }
+    above.any(|(inner, space)| match space {
+        Space::Html => target != Space::Html || keeps_end(end, inner),
+        _ => {
+            target == Space::Html && (integration_point(space, inner) || inner == "annotation-xml")
+        }
+    })
+}
+
+/// Whether the HTML end tag `end` (lowercased), closing its element past the
+/// elements `above` it (innermost first), closes just those, as a browser
+/// does: none reopens, and none keeps the tag from closing its element.
+pub(super) fn closes_cleanly<'a>(end: &str, above: impl Iterator<Item = &'a str>) -> bool {
+    let mut above = above.peekable();
+    if above.peek().is_none() {
+        return true;
+    }
+    end != "form"
+        && !FORMATTING.contains(&end)
+        && above.all(|inner| !FORMATTING.contains(&inner) && !keeps_end(end, inner))
+}
+
+/// Whether the HTML start tag `start` (lowercased) may close more of `open`
+/// than [`closes`] reads, or is read by rules other than those of a body.
+pub(super) fn may_close_more<T>(start: &str, open: &OpenElements<T>) -> bool {
+    let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+    match start {
+        "li" => open.contains("li"),
+        "dd" | "dt" => open.contains("dd") || open.contains("dt"),
+        "button" | "a" | "nobr" | "form" => open.contains(start),
+        "body" | "caption" | "col" | "colgroup" | "frame" | "frameset" | "head" | "html"
+        | "image" | "rb" | "rp" | "rt" | "rtc" | "select" | "table" | "tbody" | "td"
+        | "template" | "tfoot" | "th" | "thead" | "tr" => true,
+        _ if heading(start) => open.last().is_some_and(|(name, _)| heading(name)),
+        _ => P_CLOSERS.contains(&start) && open.contains("p"),
+    }
+}
+
+/// The names a browser reads in text without their `;`.
+const LEGACY_NAMES: &[&str] = &[
+    "AElig", "AMP", "Aacute", "Acirc", "Agrave", "Aring", "Atilde", "Auml", "COPY", "Ccedil",
+    "ETH", "Eacute", "Ecirc", "Egrave", "Euml", "GT", "Iacute", "Icirc", "Igrave", "Iuml", "LT",
+    "Ntilde", "Oacute", "Ocirc", "Ograve", "Oslash", "Otilde", "Ouml", "QUOT", "REG", "THORN",
+    "Uacute", "Ucirc", "Ugrave", "Uuml", "Yacute", "aacute", "acirc", "acute", "aelig", "agrave",
+    "amp", "aring", "atilde", "auml", "brvbar", "ccedil", "cedil", "cent", "copy", "curren", "deg",
+    "divide", "eacute", "ecirc", "egrave", "eth", "euml", "frac12", "frac14", "frac34", "gt",
+    "iacute", "icirc", "iexcl", "igrave", "iquest", "iuml", "laquo", "lt", "macr", "micro",
+    "middot", "nbsp", "not", "ntilde", "oacute", "ocirc", "ograve", "ordf", "ordm", "oslash",
+    "otilde", "ouml", "para", "plusmn", "pound", "quot", "raquo", "reg", "sect", "shy", "sup1",
+    "sup2", "sup3", "szlig", "thorn", "times", "uacute", "ucirc", "ugrave", "uml", "uuml",
+    "yacute", "yen", "yuml",
+];
+
+/// The text a browser reads `tail` as, a `&` and the letters, digits, or `#`
+/// after it that end a text: a number, or the longest name it reads without
+/// its `;`, decoded, the rest as written.
+pub(super) fn text_reference(tail: &str) -> String {
+    let rest = &tail[1..];
+    if rest.starts_with('#') {
+        return decoded(tail, CharacterReferences::Html);
+    }
+    LEGACY_NAMES
+        .iter()
+        .filter(|name| rest.starts_with(**name))
+        .max_by_key(|name| name.len())
+        .and_then(|name| {
+            // Without the `html` feature, only XML's names decode.
+            let reference = format!("&{name};");
+            let reads = decoded(&reference, CharacterReferences::Html);
+            (reads != reference).then(|| format!("{reads}{}", &rest[name.len()..]))
+        })
+        .unwrap_or_else(|| tail.to_owned())
+}

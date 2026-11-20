@@ -6,8 +6,9 @@ use crate::references::{CharacterReferences, decoded};
 /// URL schemes that run script when the URL is followed.
 const SCRIPT_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:text/html"];
 
-/// URL schemes (and the scheme-relative form) that reach a server.
-const REMOTE_SCHEMES: &[&str] = &["http:", "https:", "ftp:", "//", "\\\\"];
+/// URL schemes (and the scheme-relative form) that reach a server, read with
+/// each backslash as a slash, as a browser reads one in a web URL.
+const REMOTE_SCHEMES: &[&str] = &["http:", "https:", "ftp:", "//"];
 
 /// Whether the URL `decoded`, its character references already decoded, runs
 /// script when followed.
@@ -24,7 +25,7 @@ pub(super) fn is_remote(value: &str) -> bool {
 /// Whether the URL `decoded`, its character references already decoded,
 /// reaches a server.
 pub(super) fn reaches_server(decoded: &str) -> bool {
-    let url = scheme_of(decoded);
+    let url = scheme_of(decoded).replace('\\', "/");
     REMOTE_SCHEMES.iter().any(|scheme| url.starts_with(scheme))
 }
 
@@ -69,11 +70,9 @@ pub(super) fn css_loads_remote(css: &str) -> bool {
 fn css_reaches_server(css: &str) -> bool {
     let arguments = CSS_LOADING_FUNCTIONS.iter().flat_map(|function| {
         css.split(function).skip(1).flat_map(|rest| {
-            rest.split(')')
-                .next()
-                .unwrap_or_default()
+            css_arguments(rest)
                 .split(|c: char| c == ',' || c.is_whitespace())
-                .map(|word| word.trim_matches(['"', '\'']))
+                .map(|word| word.trim_matches(['"', '\'', '(', ')']))
         })
     });
     let imports = css
@@ -81,6 +80,25 @@ fn css_reaches_server(css: &str) -> bool {
         .skip(1)
         .map(|rest| rest.trim_start().trim_start_matches(['"', '\'']));
     arguments.chain(imports).any(reaches_server)
+}
+
+/// The arguments at the start of `rest`, just past a function's `(`: up to
+/// the `)` that closes it, past nested functions and strings, or to the end.
+fn css_arguments(rest: &str) -> &str {
+    let mut depth = 0usize;
+    let mut quote = None;
+    for (at, c) in rest.char_indices() {
+        match (quote, c) {
+            (Some(open), c) if c == open => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(') => depth += 1,
+            (None, ')') if depth == 0 => return &rest[..at],
+            (None, ')') => depth -= 1,
+            _ => {}
+        }
+    }
+    rest
 }
 
 /// The CSS `css` with its escapes read: a backslash and up to six hex digits

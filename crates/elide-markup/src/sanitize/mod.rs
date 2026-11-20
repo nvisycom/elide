@@ -51,7 +51,7 @@ mod html;
 mod open;
 mod url;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use elide_codec::StrippedContent;
@@ -160,6 +160,9 @@ struct Rebuild<'a> {
     /// The SVG and MathML a page has entered, and the HTML read inside them,
     /// innermost last.
     spaces: Vec<Foreign>,
+    /// Where the output ends in a `&` and the letters, digits, or `#` after
+    /// it, copied from text: the `&`'s offset and the output's length then.
+    dangling: Option<(usize, usize)>,
     /// The HTML `<textarea>` or `<title>` whose body is being read.
     rcdata: Option<&'static str>,
     /// Whether a kept HTML `<noscript>` is open.
@@ -200,6 +203,7 @@ impl<'a> Rebuild<'a> {
             dropping: None,
             style: None,
             spaces: Vec::new(),
+            dangling: None,
             rcdata: None,
             noscript: false,
             depth: 0,
@@ -215,6 +219,15 @@ impl<'a> Rebuild<'a> {
         self.spaces
             .last()
             .map_or(Space::Html, |foreign| foreign.space)
+    }
+
+    /// Whether the element open is surely SVG or MathML, though it read its
+    /// content as HTML: an `mtext` with nothing open in it. A browser reads a
+    /// CDATA section there as one, elsewhere in HTML as a comment.
+    fn in_foreign_element(&self) -> bool {
+        self.spaces.last().is_some_and(|foreign| {
+            foreign.space != Space::Html || (foreign.open.is_empty() && foreign.exact)
+        })
     }
 
     /// Whether an HTML `<style>`, whose body a browser reads as text, is open.
@@ -278,7 +291,7 @@ impl<'a> Rebuild<'a> {
                         sheet.css.push_str(text.as_ref());
                     }
                     if html {
-                        self.copy(span);
+                        self.copy_html_text(span);
                     } else {
                         self.copy_xml_text(span);
                     }
@@ -294,9 +307,9 @@ impl<'a> Rebuild<'a> {
                     self.copy(span);
                 }
                 Event::CData(text) => {
-                    // A browser reads a CDATA section as one only in SVG and
-                    // MathML; in HTML it is a comment.
-                    if html && self.space() == Space::Html {
+                    // A browser reads a CDATA section as one only in an SVG
+                    // or MathML element; in HTML it is a comment.
+                    if html && !self.in_foreign_element() {
                         self.record(HiddenContent::Undisplayed);
                     } else {
                         if let Some(sheet) = self.style.as_mut() {
@@ -343,7 +356,7 @@ impl<'a> Rebuild<'a> {
                 Event::Empty(e) => self.xml_start(e, span, false, in_xinclude)?,
                 // `end` names every end tag.
                 Event::End(e) if html => {
-                    self.html_end(e.html5_tag(raw)?.name, end.unwrap_or_default());
+                    self.html_end(e.html5_tag(raw)?.name, end.unwrap_or_default())?;
                 }
                 Event::End(_) => {
                     self.depth = self.depth.saturating_sub(1);
@@ -386,7 +399,7 @@ impl<'a> Rebuild<'a> {
             return self.style_text(event, end, span);
         }
         if self.html()
-            && let Some(construct) = ends_early(event)
+            && let Some(construct) = ends_early(event, self.in_foreign_element())
         {
             return Err(Error::malformed(format!(
                 "a browser ends this HTML {construct} at an earlier `>`, so markup inside it renders"
@@ -453,6 +466,32 @@ impl<'a> Rebuild<'a> {
         } else {
             self.out.push_str(text);
         }
+    }
+
+    /// Copy the HTML text at `span`. Where a removal leaves a `&` with the
+    /// letters, digits, or `#` after it, which the text would continue into
+    /// a reference, those are written as the text a browser reads them as,
+    /// escaped, so no reference spans the removal.
+    fn copy_html_text(&mut self, span: Range<usize>) {
+        let text = &self.raw[span];
+        if let Some((amp, len)) = self.dangling
+            && len == self.out.len()
+            && text.starts_with(|c: char| c.is_ascii_alphanumeric() || matches!(c, '#' | ';'))
+        {
+            let reads = html::text_reference(&self.out[amp..]);
+            let escaped = reads.replace('&', "&amp;").replace('<', "&lt;");
+            self.out.replace_range(amp.., &escaped);
+        }
+        let start = self.out.len();
+        self.out.push_str(text);
+        let run = text
+            .bytes()
+            .rev()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'#')
+            .count();
+        self.dangling = text[..text.len() - run]
+            .ends_with('&')
+            .then(|| (start + text.len() - run - 1, self.out.len()));
     }
 
     /// Leave the SVG and MathML the reader is in, back to the HTML around
@@ -528,17 +567,24 @@ impl<'a> Rebuild<'a> {
                     && html::integration_point(Space::Math, &foreign.root)
                     && html::stays_math(&name) =>
             {
+                if !foreign.exact {
+                    return Err(unsure_foreign());
+                }
                 Space::Math
             }
             _ => self.space(),
         };
         // A start tag that implies the end of the HTML element open right in
-        // the element read as HTML closes it, kept or not.
+        // the element read as HTML closes it, kept or not; one that may close
+        // more leaves what is open there unsure.
         if space == Space::Html
             && let Some(foreign) = self.spaces.last_mut()
             && foreign.space == Space::Html
         {
             close_implied(&mut foreign.open, &name);
+            if html::may_close_more(&name, &foreign.open) {
+                foreign.exact = false;
+            }
         }
         let element = html::element(space, &name, &tag.attributes, self.sanitizer.policy);
         // The vocabulary the element's content is read in, and its
@@ -617,9 +663,16 @@ impl<'a> Rebuild<'a> {
             last = Some(attr);
         }
         if tag.self_closing {
-            // An unquoted value would read a `/` right after it as its own.
-            let unquoted = last
-                .is_some_and(|attr| attr.value.is_some() && !attr.source.ends_with(['"', '\'']));
+            // An unquoted value would read a `/` right after it as its own;
+            // a quoted one starts right after its quote.
+            let unquoted = last.is_some_and(|attr| {
+                attr.value.is_some_and(|value| {
+                    attr.source
+                        .substr_range(value)
+                        .and_then(|range| range.start.checked_sub(1))
+                        .is_none_or(|quote| !matches!(attr.source.as_bytes()[quote], b'"' | b'\''))
+                })
+            });
             self.out.push_str(if unquoted { " />" } else { "/>" });
         } else {
             self.out.push('>');
@@ -638,18 +691,19 @@ impl<'a> Rebuild<'a> {
     ) -> Result<()> {
         match element {
             Element::Enter(entered) => self.spaces.push(Foreign::new(entered, name.clone())),
+            // Inside an SVG `desc` or a MathML `mi`, a browser reads HTML
+            // until the element ends.
+            _ if html::integration_point(space, &name) => {
+                self.spaces.push(Foreign::new(Space::Html, name.clone()));
+            }
             _ => {
                 if let Some(foreign) = self.spaces.last_mut() {
-                    if foreign.root == name {
-                        foreign.depth += 1;
-                    } else if foreign.space == Space::Html {
-                        foreign.open.push(name.clone(), ());
+                    // An `mglyph` in a token element is MathML, which ends
+                    // by other rules than the HTML around it.
+                    if foreign.space == Space::Html && space != Space::Html {
+                        foreign.exact = false;
                     }
-                }
-                // Inside an SVG `desc` or a MathML `mi`, a browser reads HTML
-                // until the element ends.
-                if html::integration_point(space, &name) {
-                    self.spaces.push(Foreign::new(Space::Html, name.clone()));
+                    foreign.open.push(name.clone(), ());
                 }
             }
         }
@@ -678,34 +732,112 @@ impl<'a> Rebuild<'a> {
     }
 
     /// Rebuild the HTML end tag `written`, named `name` lowercased.
-    fn html_end(&mut self, written: &str, name: &str) {
+    fn html_end(&mut self, written: &str, name: &str) -> Result<()> {
         let space = self.space();
         // An end tag holds nothing, so one the allowlist does not name is
         // left out unrecorded; a stray HTML one in SVG or MathML still acts.
         let named = html::names(space, name) || html::names(Space::Html, name);
-        let leaves = self.spaces.last_mut().is_some_and(|foreign| {
-            // An HTML element open inside the element read as HTML ends first.
-            if foreign.open.close(name) {
-                return false;
-            }
-            if foreign.root == name {
-                foreign.depth -= 1;
-            }
-            foreign.depth == 0
-        });
-        if leaves {
-            self.spaces.pop();
-        }
+        let closed = self.end_foreign(name)?;
         // A `style` is always named.
-        if named || leaves {
+        if named || closed {
             self.out.push_str("</");
             self.out.push_str(written);
             self.out.push('>');
         }
-        if name == "style" && space != Space::Html {
+        // A style sheet in SVG ends with the element it is.
+        if self.style.as_ref().is_some_and(|sheet| !sheet.as_text)
+            && !self
+                .spaces
+                .iter()
+                .any(|foreign| foreign.space != Space::Html && foreign.open.contains("style"))
+        {
             self.close_style();
         }
+        Ok(())
     }
+
+    /// Close what the end tag `name` (lowercased) closes of the SVG and
+    /// MathML open and the HTML read inside them. Returns whether it closed
+    /// an SVG or MathML element.
+    ///
+    /// Where an HTML element is open, a browser reads it by HTML's rules,
+    /// which stop at the element reading HTML. Where an SVG or MathML element
+    /// is, even one reading HTML, it closes the innermost of them of its name
+    /// with everything inside it, and failing one, falls to HTML's rules from
+    /// the first HTML element; those stop at an element reading HTML passed on
+    /// the way.
+    fn end_foreign(&mut self, name: &str) -> Result<bool> {
+        let Some(last) = self.spaces.last_mut() else {
+            return Ok(false);
+        };
+        if last.space == Space::Html && !last.open.is_empty() {
+            if last.open.contains(name) {
+                let above = last.open.innermost_first().map(|(open, ())| open.as_str());
+                if !html::closes_cleanly(name, above.take_while(|open| *open != name)) {
+                    last.exact = false;
+                }
+                last.open.close(name);
+            } else if !last.exact && self.names_foreign(name) {
+                return Err(unsure_foreign());
+            }
+            return Ok(false);
+        }
+        // `</br>` and `</p>` leave SVG and MathML, as an HTML start tag does,
+        // and are read as HTML.
+        if last.space != Space::Html && matches!(name, "br" | "p") {
+            self.leave_foreign();
+            return Ok(true);
+        }
+        let mut passed_point = false;
+        for at in (0..self.spaces.len()).rev() {
+            let foreign = &mut self.spaces[at];
+            if foreign.space == Space::Html {
+                if !foreign.exact {
+                    return Err(unsure_foreign());
+                }
+                if !foreign.open.is_empty() {
+                    // An HTML element, past SVG or MathML elements.
+                    if !passed_point && foreign.open.contains(name) {
+                        return Err(unsure_foreign());
+                    }
+                    return Ok(false);
+                }
+                if foreign.root == name {
+                    self.spaces.truncate(at);
+                    return Ok(true);
+                }
+                passed_point = true;
+            } else if foreign.open.close(name) {
+                self.spaces.truncate(at + 1);
+                return Ok(true);
+            } else if foreign.root == name {
+                self.spaces.truncate(at);
+                return Ok(true);
+            }
+        }
+        // The HTML around them, which this reader does not follow: an end tag
+        // that may close an element of it closes the SVG or MathML too.
+        if passed_point || matches!(name, "html" | "body") {
+            return Ok(false);
+        }
+        Err(unsure_foreign())
+    }
+
+    /// Whether `name` (lowercased) names an SVG or MathML element open.
+    fn names_foreign(&self, name: &str) -> bool {
+        self.spaces.iter().any(|foreign| {
+            foreign.root == name || (foreign.space != Space::Html && foreign.open.contains(name))
+        })
+    }
+}
+
+/// The refusal of markup whose SVG or MathML a browser may close where this
+/// reader does not.
+fn unsure_foreign() -> Error {
+    Error::malformed(
+        "a browser may close the SVG or MathML here otherwise than this reader, \
+         reading what follows in another vocabulary",
+    )
 }
 
 /// Close the HTML elements innermost in `open` whose end the start tag
@@ -729,6 +861,9 @@ struct Region {
     /// The text element, open in it or itself, whose body a browser reads
     /// as text up to its end tag.
     text: Option<&'static str>,
+    /// Whether end tags close what they name, as read when `open` had seen
+    /// this many changes.
+    closes_read: (u64, HashMap<String, bool>),
 }
 
 impl Region {
@@ -738,6 +873,7 @@ impl Region {
             space,
             open: OpenElements::new(),
             text: None,
+            closes_read: (0, HashMap::new()),
         }
     }
 
@@ -760,6 +896,9 @@ impl Region {
     ///   open (`<p hidden>a<p>b` closes the first paragraph);
     /// - in SVG or MathML, at an element that breaks out to HTML, unless an
     ///   element inside it reads its content as HTML.
+    ///
+    /// Its own end tag does not end it past an element open in it that keeps
+    /// a browser from reading the tag as its end.
     fn skip(
         &mut self,
         event: &Event<'_>,
@@ -800,14 +939,45 @@ impl Region {
             }
             Event::End(_) => {
                 let name = end.unwrap_or_default();
-                if !self.open.close(name) && name == self.name {
-                    Ok(Skip::Last)
-                } else {
-                    Ok(Skip::Inside)
+                let inside = self.open.contains(name);
+                if !inside && name != self.name || !self.closes(name, inside) {
+                    return Ok(Skip::Inside);
                 }
+                if inside {
+                    self.open.close(name);
+                    return Ok(Skip::Inside);
+                }
+                Ok(Skip::Last)
             }
             _ => Ok(Skip::Inside),
         }
+    }
+
+    /// Whether the end tag `name` (lowercased) closes the innermost element
+    /// of its name open `inside` it, else the element itself, past what is
+    /// open in it: unless that keeps a browser from reading the tag as its
+    /// end, which it then ignores.
+    fn closes(&mut self, name: &str, inside: bool) -> bool {
+        // Known while nothing has opened or closed since it was read.
+        let changes = self.open.changes();
+        if self.closes_read.0 != changes {
+            self.closes_read = (changes, HashMap::new());
+        }
+        if let Some(closes) = self.closes_read.1.get(name) {
+            return *closes;
+        }
+        let mut target = self.space;
+        let mut above = Vec::new();
+        for (open, space) in self.open.innermost_first() {
+            if inside && open == name {
+                target = *space;
+                break;
+            }
+            above.push((open.as_str(), *space));
+        }
+        let closes = !html::keeps_open(name, target, above);
+        self.closes_read.1.insert(name.to_owned(), closes);
+        closes
     }
 
     /// Close what an HTML element breaking out of SVG or MathML closes: the
@@ -877,14 +1047,17 @@ struct StyleSheet {
 }
 
 /// SVG or MathML entered by its root element, or HTML read inside an element
-/// of theirs, and the open depth of that element's name.
+/// of theirs, and the elements open in it.
 struct Foreign {
     space: Space,
     root: String,
-    depth: usize,
-    /// Under HTML read inside an SVG or MathML element: the HTML elements
-    /// open in it, so what is started right in that element is told apart.
+    /// The elements open inside the root, innermost last: SVG or MathML, or
+    /// under HTML read inside an element, HTML (and an `mglyph`), so what is
+    /// started right in that element is told apart.
     open: OpenElements,
+    /// Under HTML read inside an element: whether `open` is what a browser
+    /// has open, which it is not once a tag may have closed otherwise.
+    exact: bool,
 }
 
 impl Foreign {
@@ -892,8 +1065,8 @@ impl Foreign {
         Self {
             space,
             root,
-            depth: 1,
             open: OpenElements::new(),
+            exact: true,
         }
     }
 }
@@ -901,9 +1074,9 @@ impl Foreign {
 /// The construct `event` is, when a browser ends it before quick-xml does, so
 /// markup quick-xml reads as inside it renders: a comment a browser closes
 /// abruptly (`<!-->`, `<!--->`) or at `--!>`, and a processing instruction,
-/// CDATA section, or document type with a `>` inside, which a browser ends at
-/// its first `>`.
-fn ends_early(event: &Event<'_>) -> Option<&'static str> {
+/// CDATA section (but `in_foreign` an SVG or MathML element, where it is one),
+/// or document type with a `>` inside, which a browser ends at its first `>`.
+fn ends_early(event: &Event<'_>, in_foreign: bool) -> Option<&'static str> {
     match event {
         Event::Comment(text) => {
             let text: &str = text.as_ref();
@@ -914,7 +1087,9 @@ fn ends_early(event: &Event<'_>) -> Option<&'static str> {
             .as_ref()
             .contains('>')
             .then_some("processing instruction"),
-        Event::CData(text) => text.as_ref().contains('>').then_some("CDATA section"),
+        Event::CData(text) => {
+            (!in_foreign && text.as_ref().contains('>')).then_some("CDATA section")
+        }
         Event::DocType(text) => text.as_ref().contains('>').then_some("document type"),
         _ => None,
     }
