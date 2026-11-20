@@ -431,6 +431,29 @@ mod tests {
         check(&out, policy, &WordFormat).unwrap();
     }
 
+    /// An accepted insertion's children keep the namespaces it declared, and
+    /// its siblings are left as they were.
+    #[test]
+    fn an_accepted_insertion_hands_its_namespaces_to_its_children() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{STRICT_W}"><w:body><w:p><w:ins w:id="2" xmlns:s="{STRICT_W}"><s:r><s:t>added</s:t></s:r><s:r xmlns:s="{STRICT_W}"><s:t>again</s:t></s:r></w:ins><w:r><w:t>kept</w:t></w:r></w:p></w:body></w:document>"#
+        );
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
+        let policy = HiddenContentPolicy::default();
+        let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap();
+        let body = read_text_part(&out, "word/document.xml");
+        assert!(
+            body.contains(&format!(
+                r#"<w:p><s:r xmlns:s="{STRICT_W}"><s:t>added</s:t></s:r><s:r xmlns:s="{STRICT_W}"><s:t>again</s:t></s:r><w:r><w:t>kept</w:t></w:r></w:p>"#
+            )),
+            "{body}"
+        );
+        check(&out, policy, &WordFormat).unwrap();
+        let (again, _) = sanitize(&out, policy, &WordFormat).unwrap();
+        assert!(again.is_none_or(|again| again == out));
+    }
+
     /// A strict external hyperlink is visible content, kept with its text.
     #[test]
     fn a_strict_external_hyperlink_is_kept() {

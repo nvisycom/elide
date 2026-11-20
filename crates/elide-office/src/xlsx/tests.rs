@@ -355,3 +355,114 @@ fn a_part_replacement_naming_a_cell_part_is_refused() {
         PartReplacement::new(PartPath::from("xl/worksheets/sheet1.xml"), b"<x/>".to_vec());
     assert!(xlsx.rewrite(&[], &[], &[replacement]).is_err());
 }
+
+/// A workbook whose tabs are a worksheet, a chart sheet, and a dialog sheet.
+fn workbook_with_sheet_kinds() -> Vec<u8> {
+    let workbook = format!(
+        r#"<?xml version="1.0"?><workbook xmlns="{X}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="Chart" sheetId="2" r:id="rId2"/><sheet name="Dialog" sheetId="3" r:id="rId3"/></sheets></workbook>"#
+    );
+    let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet" Target="chartsheets/sheet1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/dialogsheet" Target="dialogsheets/sheet1.xml"/></Relationships>"#;
+    let sheet = format!(
+        r#"<?xml version="1.0"?><worksheet xmlns="{X}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Jane Roe</t></is></c></row></sheetData></worksheet>"#
+    );
+    let chart = format!(
+        r#"<?xml version="1.0"?><chartsheet xmlns="{X}"><sheetViews><sheetView workbookViewId="0"/></sheetViews><headerFooter><oddHeader>Chart by Jane Roe</oddHeader></headerFooter></chartsheet>"#
+    );
+    let dialog = format!(
+        r#"<?xml version="1.0"?><dialogsheet xmlns="{X}"><headerFooter><oddHeader>Dialog by Jane Roe</oddHeader></headerFooter></dialogsheet>"#
+    );
+    pack_typed(&[
+        ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+        ("xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml", workbook.as_bytes()),
+        ("xl/_rels/workbook.xml.rels", "", rels.as_bytes()),
+        ("xl/worksheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", sheet.as_bytes()),
+        ("xl/chartsheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml", chart.as_bytes()),
+        ("xl/dialogsheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.dialogsheet+xml", dialog.as_bytes()),
+    ])
+}
+
+/// A chart sheet or a dialog sheet is a tab without cells: the workbook
+/// opens, its cells come from its worksheets, and its other sheets' text is
+/// surfaced as markup.
+#[test]
+fn chart_and_dialog_sheets_open_beside_worksheets() {
+    let xlsx = Xlsx::open(&workbook_with_sheet_kinds()).unwrap();
+    let names: Vec<_> = xlsx.sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Data"]);
+    let cells = xlsx.extract().unwrap();
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].text, "Jane Roe");
+    let texts = xlsx.markup().texts();
+    for header in ["Chart by Jane Roe", "Dialog by Jane Roe"] {
+        assert!(texts.iter().any(|t| *t == header), "{texts:?}");
+    }
+    let edits = [CellEdit::new("Data", 0, 0, "[PERSON]")];
+    let out = xlsx.rewrite(&edits, &[], &[]).unwrap();
+    crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier)
+        .expect("the redacted workbook passes the output check");
+}
+
+/// A chart-sheet or dialog-sheet relationship whose target is no part of that
+/// kind is refused, so a worksheet behind it is never left unread.
+#[test]
+fn a_sheet_relationship_of_another_kind_than_its_part_is_refused() {
+    let workbook = format!(
+        r#"<?xml version="1.0"?><workbook xmlns="{X}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+    );
+    let sheet = format!(
+        r#"<?xml version="1.0"?><worksheet xmlns="{X}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Jane Roe</t></is></c></row></sheetData></worksheet>"#
+    );
+    for (kind, target) in [
+        ("chartsheet", "worksheets/sheet1.xml"),
+        ("dialogsheet", "worksheets/sheet1.xml"),
+        ("chartsheet", "chartsheets/missing.xml"),
+    ] {
+        let rels = format!(
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/{kind}" Target="{target}"/></Relationships>"#
+        );
+        let package = pack_typed(&[
+            ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml", workbook.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", "", rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", sheet.as_bytes()),
+        ]);
+        assert!(Xlsx::open(&package).is_err(), "{kind} -> {target} opened");
+    }
+}
+
+/// A chart sheet holds no cells: cell markup in one is outside its schema,
+/// so a package carrying it fails the output check rather than shipping
+/// text the cell model never read.
+#[test]
+fn cells_in_a_chart_sheet_fail_the_check() {
+    let source = workbook_with_sheet_kinds();
+    let smuggled = crate::fixtures::part_names(&source)
+        .into_iter()
+        .map(|name| {
+            let bytes = crate::fixtures::read_part(&source, &name).unwrap();
+            let bytes = if name == "xl/chartsheets/sheet1.xml" {
+                String::from_utf8(bytes)
+                    .unwrap()
+                    .replace(
+                        "<sheetViews>",
+                        r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Jane Roe</t></is></c></row></sheetData><sheetViews>"#,
+                    )
+                    .into_bytes()
+            } else {
+                bytes
+            };
+            (name, bytes)
+        })
+        .collect::<Vec<_>>();
+    let parts: Vec<(&str, &[u8])> = smuggled
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    let package = crate::fixtures::pack_parts(&parts);
+    let xlsx = Xlsx::open(&package).unwrap();
+    assert!(xlsx.extract().unwrap().iter().all(|c| c.sheet == "Data"));
+    let out = xlsx.rewrite(&[], &[], &[]).unwrap();
+    assert!(
+        crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier).is_err()
+    );
+}

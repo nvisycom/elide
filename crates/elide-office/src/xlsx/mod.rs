@@ -145,7 +145,7 @@ impl Xlsx {
             .map(|b| text(WORKBOOK_RELS_PART, b))
             .transpose()?
             .unwrap_or_default();
-        let sheets = resolve_sheets(workbook, rels)?;
+        let sheets = resolve_sheets(workbook, rels, |part| package.content_type(part))?;
         Ok(Self { package, sheets })
     }
 

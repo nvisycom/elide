@@ -154,7 +154,7 @@ fn cut_notes(raw: &str, cut: NoteCut) -> Result<Option<Edited>> {
                     let mut note = false;
                     for attr in e.attributes() {
                         let attr = attr.map_err(malformed_xml)?;
-                        note |= attr.key.local_name().as_ref() == "ObjectType"
+                        note |= attr.key.as_ref() == "ObjectType"
                             && attribute_value(&attr.value).map_or(true, |kind| kind == "Note");
                     }
                     if note && let Some(shape) = shapes.last_mut() {
@@ -406,6 +406,14 @@ mod tests {
         let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><x:ClientData ObjectType="Not&#101;"/></v:shape></xml>"#;
         let edited = expect_edit(raw, &CommentNotes);
         assert!(!edited.text.contains("v:shape"), "{}", edited.text);
+    }
+
+    /// Only the unqualified `ObjectType` is a shape's kind; a foreign one is
+    /// an undeclared attribute the rebuild drops.
+    #[test]
+    fn a_qualified_object_type_is_not_a_kind() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:z="urn:vendor"><v:shape><x:ClientData ObjectType="Button" z:ObjectType="Note"/></v:shape></xml>"#;
+        assert!(CommentNotes.apply(raw).unwrap().is_none());
     }
 
     /// A note's kind that cannot be read refuses the drawing rather than

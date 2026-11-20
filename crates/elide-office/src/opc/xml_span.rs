@@ -20,7 +20,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ops::Range;
 
-use elide_codec::extract::{OffsetMap, Passage};
+use elide_codec::extract::{OffsetMap, OffsetRun, Passage};
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
@@ -99,7 +99,7 @@ impl Span {
     /// Text and attribute values carry entities, so they unescape and get an
     /// entity-aware map; an attribute value reads a literal tab, line feed, or
     /// carriage return as a space, as [`attribute_value`] does (a CR-LF pair
-    /// as two, so each byte keeps its offset). A comment or CDATA body is
+    /// as one, mapped onto both bytes). A comment or CDATA body is
     /// byte-identical to its source, so its text is borrowed as-is over a
     /// single identity run. A separator reads as its character and maps to no
     /// source text.
@@ -116,9 +116,7 @@ impl Span {
             }
             BlockKind::Attribute => {
                 attribute_value(slice).map_err(|_| ())?;
-                let spaced = slice.replace(['\t', '\n', '\r'], " ");
-                let (text, offsets) =
-                    decode_references(&spaced, self.range.start, CharacterReferences::Xml);
+                let (text, offsets) = decode_attribute(slice, self.range.start);
                 Ok((Cow::Owned(text), offsets))
             }
             BlockKind::Comment | BlockKind::Cdata => Ok((
@@ -167,6 +165,49 @@ impl Span {
             ))),
         }
     }
+}
+
+/// The attribute value `raw`, one [`attribute_value`] reads, decoded with its
+/// map back to the source at `base`. A literal tab, line feed, or carriage
+/// return reads as a space; a CR-LF pair reads as one space and, like a
+/// reference, maps onto all its bytes.
+fn decode_attribute(raw: &str, base: usize) -> (String, OffsetMap) {
+    let mut text = String::with_capacity(raw.len());
+    let mut runs = Vec::new();
+    let literal = |text: &mut String, runs: &mut Vec<OffsetRun>, from: usize, to: usize| {
+        if from < to {
+            let start = text.len();
+            text.push_str(&raw[from..to].replace(['\t', '\n', '\r'], " "));
+            runs.push(OffsetRun::identity(
+                start..text.len(),
+                base + from..base + to,
+            ));
+        }
+    };
+    let bytes = raw.as_bytes();
+    let (mut copied, mut at) = (0, 0);
+    while at < raw.len() {
+        let end = match bytes[at] {
+            b'\r' if bytes.get(at + 1) == Some(&b'\n') => at + 2,
+            b'&' => raw[at..].find(';').map_or(raw.len(), |end| at + end + 1),
+            _ => {
+                at += 1;
+                continue;
+            }
+        };
+        literal(&mut text, &mut runs, copied, at);
+        let start = text.len();
+        if bytes[at] == b'&' {
+            let (decoded, _) = decode_references(&raw[at..end], 0, CharacterReferences::Xml);
+            text.push_str(&decoded);
+        } else {
+            text.push(' ');
+        }
+        runs.push(OffsetRun::entity(start..text.len(), base + at..base + end));
+        (copied, at) = (end, end);
+    }
+    literal(&mut text, &mut runs, copied, raw.len());
+    (text, OffsetMap::new(runs))
 }
 
 /// The text/comment/CDATA spans of `raw`, each with its inner byte range
@@ -451,7 +492,8 @@ impl CollapsingRuns {
             for attr in e.attributes() {
                 let attr = attr.map_err(|_| ())?;
                 let (resolved, local) = reader.reader.resolver().resolve_attribute(attr.key);
-                says_space |= namespace_of(&resolved) == Some(XML) && local.into_inner() == "space";
+                says_space |= namespace_of(&resolved).as_deref() == Some(XML)
+                    && local.into_inner() == "space";
             }
             if !says_space {
                 ends.insert(span.end);
@@ -598,6 +640,25 @@ mod tests {
         let (text, offsets) = span.decode(raw).unwrap();
         assert_eq!(text, "Jane Roe\nx");
         assert_eq!(offsets.raw_ranges(5..8), vec![(start + 5)..(start + 8)]);
+    }
+
+    /// A literal CR-LF pair reads as one space, as `attribute_value` reads
+    /// it, and that space lifts back to both bytes.
+    #[test]
+    fn an_attribute_span_reads_a_crlf_pair_as_one_space() {
+        let raw = "<a v=\"Jane\r\nRoe&amp;\r\r\nx\"/>";
+        let start = raw.find("Jane").unwrap();
+        let span = Span::new(start..raw.rfind('"').unwrap(), BlockKind::Attribute);
+        let (text, offsets) = span.decode(raw).unwrap();
+        assert_eq!(
+            text,
+            crate::opc::attribute_value(&raw[span.range.clone()]).unwrap()
+        );
+        assert_eq!(text, "Jane Roe&  x");
+        assert_eq!(offsets.raw_ranges(4..5), vec![(start + 4)..(start + 6)]);
+        assert_eq!(offsets.raw_ranges(5..8), vec![(start + 6)..(start + 9)]);
+        assert_eq!(offsets.raw_ranges(8..9), vec![(start + 9)..(start + 14)]);
+        assert_eq!(offsets.raw_ranges(9..12), vec![(start + 14)..(start + 18)]);
     }
 
     #[test]

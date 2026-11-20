@@ -117,7 +117,8 @@ pub struct Field {
 /// references outside a field, an entity reference no field resolves, and
 /// every processing instruction, and an array inside a field, whose bounds
 /// nothing reads; whitespace between elements stays. A vector that loses
-/// entries has its `size` set to the entries it keeps. A kept element keeps
+/// entries has its `size` set to the entries it keeps. A heading keeps its
+/// count, written as the titles of parts it groups. A kept element keeps
 /// only the attributes [`cut_attributes`] allows, none of them free text.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct UnsurfacedProperties;
@@ -144,9 +145,33 @@ impl Edit for UnsurfacedProperties {
         let mut removing: Option<Skipped> = None;
         // How many custom properties are kept, which numbers each.
         let mut properties = 0usize;
+        // The heading counts, written once the titles they group are known.
+        let mut counts: Vec<Count<'_>> = Vec::new();
+        // A heading count being read: where its content begins, and how many
+        // elements are open inside it, itself included.
+        let mut counting: Option<(usize, usize)> = None;
+        // How many titles of parts are kept.
+        let mut titles = 0usize;
 
         loop {
             let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
+            if let Some((start, depth)) = &mut counting {
+                match event {
+                    Event::Start(_) => *depth += 1,
+                    Event::End(_) => *depth -= 1,
+                    Event::Eof => return Err(malformed_xml("unclosed element")),
+                    _ => {}
+                }
+                if *depth == 0 {
+                    counts.push(Count {
+                        range: *start..span.start,
+                        close: None,
+                    });
+                    counting = None;
+                    walk.leave();
+                }
+                continue;
+            }
             if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
                 continue;
             }
@@ -157,6 +182,28 @@ impl Edit for UnsurfacedProperties {
                     let depth = walk.depth();
                     let field = walk.enter(e);
                     let local = e.local_name().into_inner();
+                    // A heading's count is kept, its value written from the
+                    // titles it groups.
+                    if reading.is_none() && walk.is_count() {
+                        keep_child(&mut frames);
+                        let element = Element {
+                            namespace: namespace.as_deref().map(transitional),
+                            local,
+                            sized: false,
+                            pid: None,
+                        };
+                        cut_attributes(&reader.reader, raw, e, &element, &mut cuts)?;
+                        if is_start {
+                            counting = Some((span.end, 1));
+                        } else {
+                            walk.leave();
+                            counts.push(Count {
+                                range: span.end - 2..span.end,
+                                close: Some(&raw[span.start + 1..][..e.name().as_ref().len()]),
+                            });
+                        }
+                        continue;
+                    }
                     let mut pid = None;
                     let kept = if reading.is_some() {
                         // An array's bounds are numbers nothing reads.
@@ -172,6 +219,9 @@ impl Edit for UnsurfacedProperties {
                             if field.place == Place::Custom {
                                 properties += 1;
                                 pid = Some(properties + 1);
+                            }
+                            if field.place == Place::Entry && walk.open[1] == "TitlesOfParts" {
+                                titles += 1;
                             }
                             if is_start {
                                 reading = Some(depth);
@@ -240,8 +290,52 @@ impl Edit for UnsurfacedProperties {
                 _ => {}
             }
         }
+        write_counts(raw, &counts, titles, &mut cuts);
         let count = cuts.iter().filter(|(_, cut)| cut.counted()).count();
         Ok(Edited::from_cuts(raw, cuts, count))
+    }
+}
+
+/// A heading's count in a property part.
+struct Count<'a> {
+    /// What holds its value: its content, or the `/>` of an empty one.
+    range: Range<usize>,
+    /// For an empty one, its name, to close it with once it holds a value.
+    close: Option<&'a str>,
+}
+
+/// Write each of `counts` as the titles of parts its heading groups: of the
+/// `titles` kept, in order, as many as it says, the last heading taking the
+/// rest. A count that is no number groups none, so none carries data.
+fn write_counts(
+    raw: &str,
+    counts: &[Count<'_>],
+    titles: usize,
+    cuts: &mut Vec<(Range<usize>, Cut)>,
+) {
+    let mut rest = titles;
+    for (at, count) in counts.iter().enumerate() {
+        let written = &raw[count.range.clone()];
+        let value = if at + 1 == counts.len() {
+            rest
+        } else {
+            let said = count
+                .close
+                .is_none()
+                .then(|| unescape(written).ok()?.trim().parse::<usize>().ok())
+                .flatten();
+            said.unwrap_or(0).min(rest)
+        };
+        rest -= value;
+        let value = value.to_string();
+        match count.close {
+            None if written == value => {}
+            None => cuts.push((count.range.clone(), Cut::Replaced(value))),
+            Some(name) => cuts.push((
+                count.range.clone(),
+                Cut::Replaced(format!(">{value}</{name}>")),
+            )),
+        }
     }
 }
 
@@ -305,7 +399,7 @@ fn cut_attributes(
         } else {
             let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
             let qualified = namespace_of(&resolved);
-            match (element.local, qualified, local.into_inner()) {
+            match (element.local, qualified.as_deref(), local.into_inner()) {
                 (_, Some(XSI), "type")
                     if element.namespace == Some(DCTERMS) && is_w3cdtf(reader, value) =>
                 {
@@ -357,7 +451,7 @@ fn is_w3cdtf(reader: &NsReader<&[u8]>, value: Option<&str>) -> bool {
         format!("{prefix}:x")
     };
     let (resolved, _) = reader.resolver().resolve_element(QName(&name));
-    namespace_of(&resolved) == Some(DCTERMS)
+    namespace_of(&resolved).as_deref() == Some(DCTERMS)
 }
 
 /// What an [`UnsurfacedProperties`] edit writes in place of a range: nothing
@@ -553,6 +647,21 @@ impl Walk {
         self.open.len()
     }
 
+    /// Whether the innermost open element is a custom property.
+    fn is_property(&self) -> bool {
+        self.open.len() == 2 && self.open[1] == CUSTOM_PROPERTY
+    }
+
+    /// Whether the innermost open element is a heading's count: an `i4`
+    /// variant of the heading pairs' vector.
+    fn is_count(&self) -> bool {
+        self.open.len() == 5
+            && self.open[1] == "HeadingPairs"
+            && self.open[2] == "vector"
+            && self.open[3] == "variant"
+            && self.open[4] == "i4"
+    }
+
     /// Whether the innermost open element is a list container, its vector,
     /// or a variant of that vector: the path to a list entry.
     fn is_list_path(&self) -> bool {
@@ -675,8 +784,10 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
 /// value becomes its only text, and a blank one, or any value for a field
 /// holding a typed timestamp, leaves it empty. A custom property takes its new
 /// value in its typed value when that holds text, and is otherwise dropped
-/// whole, since an empty or mistyped value is not valid. A key that names no
-/// field is a no-op; the rest of the document is preserved in structure.
+/// whole, since an empty or mistyped value is not valid, and those after it
+/// are numbered past every pid before it, so none repeats and the numbering
+/// has no gap. A key that names no field is a no-op; the rest of the
+/// document is preserved in structure.
 ///
 /// Fails closed: on non-UTF-8 input or a mid-stream parse error, the original
 /// bytes are returned unchanged rather than a blank or truncated part, since a
@@ -707,6 +818,8 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
     // A custom property being overwritten, held back until its typed child
     // says whether the new value fits.
     let mut held: Option<(BytesStart<'static>, &str)> = None;
+    // The pids of the custom properties written.
+    let mut pids = Pids::default();
 
     loop {
         let event = match reader.read_event() {
@@ -732,6 +845,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
             match event {
                 Event::Start(elem) if is_text_type(&elem) => {
                     walk.enter(&elem);
+                    let property = pids.number(property);
                     let _ = writer.write_event(Event::Start(property));
                     let _ = writer.write_event(Event::Start(elem));
                     let _ = writer.write_event(Event::Text(BytesText::new(value)));
@@ -740,9 +854,17 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                 Event::Start(elem) => {
                     walk.enter(&elem);
                     dropping = 2;
+                    pids.dropped = true;
                 }
-                Event::Empty(_) => dropping = 1,
-                Event::End(_) => walk.leave(),
+                Event::Empty(_) => {
+                    dropping = 1;
+                    pids.dropped = true;
+                }
+                // A property with no typed value goes.
+                Event::End(_) => {
+                    walk.leave();
+                    pids.dropped = true;
+                }
                 // Text before the typed value is whitespace; keep waiting.
                 _ => held = Some((property, value)),
             }
@@ -756,8 +878,17 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                     let _ = writer.write_event(Event::Start(elem));
                     continue;
                 }
+                // A custom property written as it is takes its number now;
+                // one edited, once it is known to stay.
+                let as_is = |elem: BytesStart<'_>, pids: &mut Pids| {
+                    if walk.is_property() {
+                        pids.number(elem.into_owned())
+                    } else {
+                        elem.into_owned()
+                    }
+                };
                 let Some(field) = field else {
-                    let _ = writer.write_event(Event::Start(elem));
+                    let _ = writer.write_event(Event::Start(as_is(elem, &mut pids)));
                     continue;
                 };
                 let value = value_of(&field.key);
@@ -765,13 +896,16 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                     .then(|| value_of(&field.name_key()))
                     .flatten();
                 if value.is_none() && name.is_none() {
-                    let _ = writer.write_event(Event::Start(elem));
+                    let _ = writer.write_event(Event::Start(as_is(elem, &mut pids)));
                     continue;
                 }
                 match field.place {
                     // A custom property needs a name and a value: a blank one
                     // drops it whole.
-                    Place::Custom if value == Some("") || name == Some("") => dropping = 1,
+                    Place::Custom if value == Some("") || name == Some("") => {
+                        dropping = 1;
+                        pids.dropped = true;
+                    }
                     Place::Custom => {
                         let elem = match name {
                             Some(name) => renamed(&elem, name),
@@ -780,6 +914,7 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                         match value {
                             Some(value) => held = Some((elem, value)),
                             None => {
+                                let elem = pids.number(elem);
                                 let _ = writer.write_event(Event::Start(elem));
                             }
                         }
@@ -802,6 +937,11 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
             }
             Event::Empty(elem) => {
                 walk.enter(&elem);
+                let elem = if walk.is_property() {
+                    pids.number(elem.into_owned())
+                } else {
+                    elem
+                };
                 walk.leave();
                 let _ = writer.write_event(Event::Empty(elem));
             }
@@ -826,15 +966,55 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
 /// `elem` with its `name` attribute set to `name`, every other attribute as it
 /// was.
 fn renamed(elem: &BytesStart<'_>, name: &str) -> BytesStart<'static> {
-    let mut renamed = BytesStart::new(elem.name().as_ref().to_owned());
-    for attribute in elem.attributes().flatten() {
-        if attribute.key.as_ref() == "name" {
-            renamed.push_attribute(("name", name));
+    with_attribute(elem, "name", name)
+}
+
+/// The pids of the custom properties [`rewrite`] writes: each as written
+/// until a property is dropped, then each after it numbered past every pid
+/// before it, so the numbering closes over the gap and no pid repeats.
+#[derive(Debug, Default)]
+struct Pids {
+    /// Whether a property has been dropped.
+    dropped: bool,
+    /// The highest pid written.
+    highest: usize,
+}
+
+impl Pids {
+    /// The custom property `elem`, numbered; one without a pid is as it was.
+    fn number(&mut self, elem: BytesStart<'static>) -> BytesStart<'static> {
+        let Some(written) = elem.try_get_attribute("pid").ok().flatten() else {
+            return elem;
+        };
+        let written = attribute_value(&written.value)
+            .ok()
+            .and_then(|pid| pid.parse().ok());
+        if !self.dropped {
+            self.highest = self.highest.max(written.unwrap_or(0));
+            return elem;
+        }
+        // The first pid of a custom property is 2.
+        self.highest = self.highest.max(1) + 1;
+        if written == Some(self.highest) {
+            elem
         } else {
-            renamed.push_attribute(attribute);
+            with_attribute(&elem, "pid", &self.highest.to_string())
         }
     }
-    renamed
+}
+
+/// `elem` with its unqualified attribute `key` set to `value`, every other
+/// attribute as it was.
+fn with_attribute(elem: &BytesStart<'_>, key: &str, value: &str) -> BytesStart<'static> {
+    let mut edited = BytesStart::new(elem.name().as_ref().to_owned());
+    for attribute in elem.attributes().flatten() {
+        if attribute.key.as_ref() == key {
+            edited.push_attribute((key, value));
+        } else {
+            edited.push_attribute(attribute);
+        }
+    }
+    edited
 }
 
 /// `bytes` as `&str`, split into the leading byte-order mark some Office parts
@@ -906,17 +1086,18 @@ mod tests {
 
         let app = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>C:\Users\jroe\Normal.dotm</Template><Company>Acme</Company><HyperlinkBase>https://intranet</HyperlinkBase><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Secret sheet</vt:lpstr></vt:vector></TitlesOfParts><Application>Microsoft Excel</Application></Properties>"#;
         let edited = expect_edit(app, &UnsurfacedProperties);
-        // The application, and the heading's count, which no field reads.
-        assert_eq!(edited.count, 2);
+        // The application; the heading keeps its count of the one title.
+        assert_eq!(edited.count, 1);
         for kept in ["jroe", "Acme", "intranet", "Worksheets", "Secret sheet"] {
             assert!(edited.text.contains(kept), "{kept} was stripped");
         }
-        assert!(!edited.text.contains("Excel") && !edited.text.contains("vt:i4"));
+        assert!(!edited.text.contains("Excel"));
         assert!(
             edited
                 .text
-                .contains(r#"<vt:vector size="1" baseType="variant">"#)
+                .contains(r#"<vt:vector size="2" baseType="variant">"#)
         );
+        assert!(edited.text.contains("<vt:i4>1</vt:i4>"));
 
         let custom = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
         assert!(UnsurfacedProperties.apply(custom).unwrap().is_none());
@@ -947,6 +1128,7 @@ mod tests {
     /// Every piece of text `xml` carries that no field of it reads: text,
     /// CDATA, an entity reference, or a processing instruction outside a
     /// surfaced field, or anything a field holds that its value leaves out.
+    /// A heading's count is structure, written from the titles it groups.
     fn unread(xml: &str) -> Vec<String> {
         let read: Vec<String> = fields(xml.as_bytes())
             .into_iter()
@@ -954,8 +1136,18 @@ mod tests {
             .collect();
         let mut reader = Reader::from_str(xml);
         let mut unread = Vec::new();
+        let mut walk = Walk::default();
         loop {
-            let text = match reader.read_event().unwrap() {
+            let event = reader.read_event().unwrap();
+            match &event {
+                Event::Start(e) => {
+                    walk.enter(e);
+                }
+                Event::End(_) => walk.leave(),
+                Event::Text(_) if walk.is_count() => continue,
+                _ => {}
+            }
+            let text = match event {
                 Event::Eof => break,
                 Event::Text(t) => unescape(t.as_ref()).unwrap().into_owned(),
                 Event::CData(t) => t.as_ref().to_owned(),
@@ -1012,8 +1204,52 @@ mod tests {
         let text = surfaced_only(&app);
         assert!(!text.contains("Jane Roe"), "{text}");
         assert!(
-            text.contains("Worksheets") && text.contains(r#"size="1""#),
+            text.contains("Worksheets") && text.contains("<vt:i4>0</vt:i4>"),
             "{text}"
+        );
+    }
+
+    /// Each heading keeps its count, written as the titles it groups: the
+    /// titles kept, taken in order, the last heading taking the rest.
+    #[test]
+    fn a_heading_keeps_a_count_of_the_titles_it_groups() {
+        let app = |counts: [&str; 2], titles: &str| {
+            format!(
+                r#"{EXTENDED}<HeadingPairs><vt:vector size="4" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>{}</vt:i4></vt:variant><vt:variant><vt:lpstr>Charts</vt:lpstr></vt:variant><vt:variant><vt:i4>{}</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="3" baseType="lpstr">{titles}</vt:vector></TitlesOfParts></Properties>"#,
+                counts[0], counts[1]
+            )
+        };
+        let titles = "<vt:lpstr>Payroll</vt:lpstr><vt:lpstr/><vt:lpstr>Chart 1</vt:lpstr>";
+        assert!(
+            UnsurfacedProperties
+                .apply(&app(["2", "1"], titles))
+                .unwrap()
+                .is_none()
+        );
+        for (counts, kept) in [
+            (["555123456", "1"], ["3", "0"]),
+            (["Jane Roe", "-4"], ["0", "3"]),
+            (["1", ""], ["1", "2"]),
+        ] {
+            let text = surfaced_only(&app(counts, titles));
+            assert_eq!(text, app(kept, titles));
+        }
+        let empty = format!(
+            r#"{EXTENDED}<HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Pages</vt:lpstr></vt:variant><vt:variant><vt:i4/></vt:variant></vt:vector></HeadingPairs></Properties>"#
+        );
+        assert!(surfaced_only(&empty).contains("<vt:i4>0</vt:i4>"));
+    }
+
+    /// Where a cut joins text into a `]]>`, its `>` is written as a
+    /// reference, the value read as before.
+    #[test]
+    fn a_cut_joining_text_keeps_it_well_formed() {
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>a]]<?pi x?>>b</dc:title></cp:coreProperties>"#;
+        let text = surfaced_only(core);
+        assert!(!text.contains("]]>"), "{text}");
+        assert_eq!(
+            pairs(text.as_bytes()),
+            [("title".to_owned(), "a]]>b".to_owned())]
         );
     }
 
@@ -1276,6 +1512,66 @@ mod tests {
                 ("property/0/name".to_owned(), "creator".to_owned()),
                 ("property/0".to_owned(), "42".to_owned()),
             ]
+        );
+    }
+
+    /// A custom property dropped by a redaction leaves the rest numbered by
+    /// position, so the part needs no removal after.
+    #[test]
+    fn a_dropped_custom_property_leaves_the_rest_numbered() {
+        let custom = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Team"><vt:lpwstr>Ops</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="4" name="Site"><vt:lpwstr>Kyiv</vt:lpwstr></property></Properties>"#;
+        let raw = std::str::from_utf8(custom).unwrap();
+        assert!(UnsurfacedProperties.apply(raw).unwrap().is_none());
+        for edits in [
+            &[("property/0", "")][..],
+            &[("property/1/name", "")],
+            &[("property/0", ""), ("property/2/name", "[NAME]")],
+        ] {
+            let out = rewrite(custom, edits);
+            let text = std::str::from_utf8(&out).unwrap();
+            assert!(
+                text.contains(r#"pid="2""#) && text.contains(r#"pid="3""#),
+                "{text}"
+            );
+            assert!(!text.contains(r#"pid="4""#), "{text}");
+            assert!(
+                UnsurfacedProperties.apply(text).unwrap().is_none(),
+                "{edits:?}: {text}"
+            );
+        }
+    }
+
+    /// An empty custom property keeps a pid of its own beside a renumbered
+    /// one, and an edit naming no field leaves the pids as written.
+    #[test]
+    fn custom_property_pids_never_repeat_and_stay_put_without_a_drop() {
+        let custom = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="7" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property pid="2" name="A"/><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="5" name="B"><vt:lpwstr>x</vt:lpwstr></property></Properties>"#;
+        let out = rewrite(custom, &[("nothing", "x")]);
+        assert_eq!(std::str::from_utf8(&out), std::str::from_utf8(custom));
+        let out = rewrite(custom, &[("property/0", "")]);
+        let text = std::str::from_utf8(&out).unwrap();
+        let mut pids: Vec<&str> = text
+            .split(r#"pid=""#)
+            .skip(1)
+            .map(|rest| rest.split('"').next().unwrap())
+            .collect();
+        assert_eq!(pids.len(), 2, "{text}");
+        pids.dedup();
+        assert_eq!(pids.len(), 2, "{text}");
+    }
+
+    /// An overwritten custom property with no typed value is dropped, and
+    /// the next one numbered into its place.
+    #[test]
+    fn an_overwritten_property_without_a_value_leaves_no_gap() {
+        let custom = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Team"><vt:lpwstr>Ops</vt:lpwstr></property></Properties>"#;
+        let out = rewrite(custom, &[("property/0", "x")]);
+        let text = std::str::from_utf8(&out).unwrap();
+        assert!(!text.contains("Client"), "{text}");
+        assert!(text.contains(r#"pid="2" name="Team""#), "{text}");
+        assert!(
+            UnsurfacedProperties.apply(text).unwrap().is_none(),
+            "{text}"
         );
     }
 

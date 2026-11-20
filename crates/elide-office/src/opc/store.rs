@@ -29,6 +29,8 @@ pub(crate) struct StoredPart {
     /// For an XML part, the text attributes redacted in it; `None` for a part
     /// that is not XML.
     attributes: Option<&'static [TextAttribute]>,
+    /// The content type the manifest names for it, if any.
+    content_type: Option<String>,
 }
 
 impl StoredPart {
@@ -47,7 +49,19 @@ impl StoredPart {
             role,
             bytes,
             attributes,
+            content_type: None,
         }
+    }
+
+    /// This part, of the content type `content_type`.
+    pub(crate) fn with_content_type(mut self, content_type: Option<&str>) -> Self {
+        self.content_type = content_type.map(str::to_owned);
+        self
+    }
+
+    /// The content type the manifest names for the part, if any.
+    pub(crate) fn content_type(&self) -> Option<&str> {
+        self.content_type.as_deref()
     }
 
     /// Whether the part's text is read into blocks and spliced: every XML part

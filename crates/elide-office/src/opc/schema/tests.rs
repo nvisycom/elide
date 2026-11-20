@@ -306,3 +306,57 @@ fn every_kept_content_type_names_a_root_the_schema_defines() {
         );
     }
 }
+
+/// The attributes an unwrapped compatibility tag carries go with it and are
+/// recorded; the namespaces it declares are carried, not recorded.
+#[test]
+fn attributes_of_an_unwrapped_tag_are_recorded() {
+    let raw = word(
+        r#"<w:p><mc:AlternateContent xmlns:x="urn:x" x:a="Jane"><mc:Fallback mc:Ignorable="v" v:note="Roe"><w:r><w:t>Hi</w:t></w:r></mc:Fallback></mc:AlternateContent></w:p>"#,
+    );
+    let (text, removed) = rebuilt(&raw, DOCUMENT);
+    assert_eq!(
+        text,
+        word(r#"<w:p><w:r xmlns:x="urn:x"><w:t>Hi</w:t></w:r></w:p>"#)
+    );
+    assert_eq!(removed, [(HiddenContent::ApplicationData, 3)]);
+}
+
+/// The part size limit holds the rebuilt part, the bytes cut counted
+/// against those declared again.
+#[test]
+fn the_size_limit_holds_the_net_growth() {
+    let raw = word(
+        r#"<w:p><mc:AlternateContent><mc:Fallback xmlns:x="urn:x"><w:r/></mc:Fallback></mc:AlternateContent></w:p>"#,
+    );
+    let limit = raw.len() as u64;
+    let Rebuilt { text, .. } = rebuild_within(&raw, DOCUMENT, limit).unwrap().unwrap();
+    assert_eq!(text, word(r#"<w:p><w:r xmlns:x="urn:x"/></w:p>"#));
+    // Declaring more than the cuts free outgrows the part.
+    let raw = word(&format!(
+        r#"<w:p><mc:AlternateContent><mc:Fallback xmlns:x="urn:x">{}</mc:Fallback></mc:AlternateContent></w:p>"#,
+        "<w:r/>".repeat(8)
+    ));
+    let limit = raw.len() as u64;
+    assert!(rebuild_within(&raw, DOCUMENT, limit).is_err());
+}
+
+/// A namespace declared with a reference in its value is the namespace the
+/// reference spells, its declaration kept as written.
+#[test]
+fn a_namespace_written_with_a_reference_is_read_decoded() {
+    let q = W.replace("main", "mai&#110;");
+    let raw = word(&format!(
+        r#"<w:p a:x="1" xmlns:a="urn:vendor" xmlns:q="{q}"><w:pPr><w:jc q:val="center"/></w:pPr><w:r><w:t>Hi</w:t></w:r></w:p>"#
+    ))
+    .replacen("2006/main\"", "2006/mai&#110;\"", 1);
+    let (text, removed) = rebuilt(&raw, DOCUMENT);
+    assert_eq!(
+        text,
+        word(&format!(
+            r#"<w:p xmlns:a="urn:vendor" xmlns:q="{q}"><w:pPr><w:jc q:val="center"/></w:pPr><w:r><w:t>Hi</w:t></w:r></w:p>"#
+        ))
+        .replacen("2006/main\"", "2006/mai&#110;\"", 1)
+    );
+    assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
+}

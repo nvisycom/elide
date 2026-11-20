@@ -13,6 +13,7 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use super::WORKBOOK_PART;
+use crate::opc::ct::SML;
 use crate::opc::{PartPath, attribute_value, relationships};
 
 /// One worksheet: its display name and the package part path holding its cells.
@@ -28,11 +29,21 @@ pub(crate) struct Sheet {
 /// The workbook's sheets in tab order, resolved from the workbook part `raw` and
 /// its relationships `rels`.
 ///
+/// A chart sheet or a dialog sheet holds no cells, so it is no [`Sheet`]; its
+/// part, whose `content_type` must say it is one, is read as any other part
+/// of the package.
+///
 /// **Fail-closed:** a `<sheet>` that names a worksheet the relationships cannot
 /// resolve is an error, not a skipped sheet, a workbook must never report a
-/// successful redaction while an unresolved worksheet's text ships unread.
-pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
-    let targets = worksheet_targets(rels)?;
+/// successful redaction while an unresolved worksheet's text ships unread. So
+/// is a chart or dialog sheet whose part is missing or of another type, which
+/// could be a worksheet passed off as one.
+pub(crate) fn resolve_sheets<'c>(
+    raw: &str,
+    rels: &str,
+    content_type: impl Fn(&PartPath) -> Option<&'c str>,
+) -> Result<Vec<Sheet>> {
+    let targets = sheet_targets(rels)?;
     let mut reader = Reader::from_str(raw);
     let mut sheets = Vec::new();
 
@@ -68,15 +79,31 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
                 "workbook `<sheet>` missing a name or relationship id".to_owned(),
             ));
         };
-        let Some(target) = targets.get(&rid) else {
-            return Err(Error::malformed(format!(
-                "sheet `{name}` references relationship `{rid}` with no worksheet target"
-            )));
+        let part = match targets.get(&rid) {
+            Some((WORKSHEET_TYPE, part)) => part.clone(),
+            Some((kind, part)) => {
+                let expected = kind.rsplit('/').next().unwrap_or(kind);
+                let typed = content_type(part).is_some_and(|content_type| {
+                    content_type
+                        .to_ascii_lowercase()
+                        .strip_prefix(SML)
+                        .and_then(|rest| rest.strip_suffix("+xml"))
+                        == Some(expected)
+                });
+                if !typed {
+                    return Err(Error::malformed(format!(
+                        "sheet `{name}` names a {expected} whose part `{part}` is not one"
+                    )));
+                }
+                continue;
+            }
+            None => {
+                return Err(Error::malformed(format!(
+                    "sheet `{name}` references relationship `{rid}` with no sheet target"
+                )));
+            }
         };
-        sheets.push(Sheet {
-            name,
-            part: target.clone(),
-        });
+        sheets.push(Sheet { name, part });
     }
     Ok(sheets)
 }
@@ -85,18 +112,28 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
 const WORKSHEET_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 
-/// The `Id -> part` map of every worksheet relationship in `rels`, each target
-/// resolved against the workbook part. Only internal worksheet relationships
-/// with an id and a target are kept; the shared-strings and styles targets are
-/// resolved by their well-known paths, not through this map.
-fn worksheet_targets(rels: &str) -> Result<HashMap<String, PartPath>> {
+/// The relationship types of a sheet: a worksheet, then the sheets without
+/// cells.
+const SHEET_TYPES: [&str; 3] = [
+    WORKSHEET_TYPE,
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet",
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/dialogsheet",
+];
+
+/// The `Id -> (type, part)` map of every sheet relationship in `rels`, each
+/// target resolved against the workbook part. Only internal sheet
+/// relationships with an id and a target are kept; the shared-strings and
+/// styles targets are resolved by their well-known paths, not through this
+/// map.
+fn sheet_targets(rels: &str) -> Result<HashMap<String, (&'static str, PartPath)>> {
     let workbook = PartPath::from(WORKBOOK_PART);
     Ok(relationships::parse(rels)?
         .into_iter()
-        .filter(|rel| rel.kind == WORKSHEET_TYPE && !rel.id.is_empty() && !rel.target.is_empty())
+        .filter(|rel| !rel.id.is_empty() && !rel.target.is_empty())
         .filter_map(|rel| {
+            let kind = SHEET_TYPES.into_iter().find(|kind| rel.kind == *kind)?;
             let part = rel.target_part(Some(&workbook))?;
-            Some((rel.id, part))
+            Some((rel.id, (kind, part)))
         })
         .collect())
 }
@@ -128,7 +165,7 @@ mod tests {
 
     #[test]
     fn resolves_sheets_in_tab_order() {
-        let sheets = resolve_sheets(WORKBOOK, RELS).unwrap();
+        let sheets = resolve_sheets(WORKBOOK, RELS, |_| None).unwrap();
         assert_eq!(
             sheets,
             vec![
@@ -153,7 +190,7 @@ mod tests {
             r#"<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
             r#"<sheets><sheet name="Ghost" sheetId="1" r:id="rIdMissing"/></sheets></workbook>"#,
         );
-        assert!(resolve_sheets(workbook, RELS).is_err());
+        assert!(resolve_sheets(workbook, RELS, |_| None).is_err());
     }
 
     #[test]
@@ -165,8 +202,8 @@ mod tests {
             r#"<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="..\xl\worksheets\sheet3.xml"/>"#,
             r#"</Relationships>"#,
         );
-        let targets = worksheet_targets(rels).unwrap();
-        let part = |id: &str| targets.get(id).map(PartPath::as_str);
+        let targets = sheet_targets(rels).unwrap();
+        let part = |id: &str| targets.get(id).map(|(_, part)| part.as_str());
         assert_eq!(part("rId1"), Some("xl/worksheets/sheet1.xml"));
         assert_eq!(part("rId2"), Some("xl/worksheets/sheet2.xml"));
         assert_eq!(part("rId3"), Some("xl/worksheets/sheet3.xml"));
@@ -181,9 +218,9 @@ mod tests {
             r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/&#119;orksheet" Target="worksheets/sheet1.xml"/>"#,
             r#"</Relationships>"#,
         );
-        let targets = worksheet_targets(rels).unwrap();
+        let targets = sheet_targets(rels).unwrap();
         assert_eq!(
-            targets.get("rId1").map(PartPath::as_str),
+            targets.get("rId1").map(|(_, part)| part.as_str()),
             Some("xl/worksheets/sheet1.xml")
         );
     }
@@ -195,6 +232,6 @@ mod tests {
             r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="https://example.com/sheet1.xml" TargetMode="External"/>"#,
             r#"</Relationships>"#,
         );
-        assert!(worksheet_targets(rels).unwrap().is_empty());
+        assert!(sheet_targets(rels).unwrap().is_empty());
     }
 }

@@ -3,16 +3,18 @@
 //!
 //! An OOXML part is sanitized by cutting byte ranges out of its source: an
 //! element removed with its subtree, an element unwrapped (its tags gone, its
-//! children kept), an attribute removed from a start tag, or an attribute's
-//! value replaced with a neutral one. Nothing is
-//! re-serialized, so formatting, namespace declarations, and every untouched
-//! element round-trip exactly. Element and attribute names are matched by
-//! namespace URI, never by prefix, so a part that binds `w:` to an unusual
-//! prefix is still recognized, and a strict namespace is matched as its
-//! transitional twin, so a strict part is edited as a transitional one: every
-//! [`Name`] a [`Rules`] sees is already mapped.
+//! children kept, each declaring again the namespaces the tags declared), an
+//! attribute removed from a start tag, or an attribute's value replaced with a
+//! neutral one. Nothing is re-serialized, so formatting, namespace
+//! declarations, and every untouched element round-trip exactly. Element and
+//! attribute names are matched by namespace URI, never by prefix, so a part
+//! that binds `w:` to an unusual prefix is still recognized; a URI written
+//! with a reference is matched as the URI it spells, and a strict namespace is
+//! matched as its transitional twin, so a strict part is edited as a
+//! transitional one: every [`Name`] a [`Rules`] sees is already mapped.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::ops::Range;
 
@@ -23,8 +25,9 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Reader};
 
-use crate::opc::malformed_xml;
+use crate::opc::archive::MAX_PART_BYTES;
 use crate::opc::ns::transitional;
+use crate::opc::{attribute_value, malformed_xml};
 
 /// A namespace-qualified element or attribute name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,7 +70,8 @@ pub(crate) enum Action {
     Keep,
     /// Remove the element with everything inside it.
     Remove,
-    /// Remove the element's own tags, keeping its children in its place.
+    /// Remove the element's own tags, keeping its children in its place,
+    /// each declaring again the namespaces the tags declared.
     Unwrap,
 }
 
@@ -285,15 +289,15 @@ pub(crate) struct Edited {
 }
 
 impl Edited {
-    /// `raw` with `cuts` [spliced](splice), `count` items changed, or `None`
-    /// when there are no cuts.
+    /// `raw` with `cuts` [spliced](splice), each kept span [joined](push_joined),
+    /// `count` items changed, or `None` when there are no cuts.
     pub(crate) fn from_cuts<S: AsRef<str>>(
         raw: &str,
         cuts: Vec<(Range<usize>, S)>,
         count: usize,
     ) -> Option<Self> {
         (!cuts.is_empty()).then(|| Self {
-            text: splice(raw, cuts),
+            text: splice_with(raw, cuts, push_joined),
             count,
         })
     }
@@ -320,14 +324,19 @@ pub(crate) fn expect_edit(raw: &str, edit: &(impl Edit + ?Sized)) -> Edited {
 /// text no extraction reads, and OOXML never uses one.
 pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     let mut reader = SpannedReader::new_ns(raw);
-    // Each byte range cut, and what takes its place (nothing, or a neutral
-    // attribute value).
-    let mut cuts: Vec<(Range<usize>, &str)> = Vec::new();
+    // Each byte range cut, and what takes its place (nothing, a neutral
+    // attribute value, or the namespaces an unwrapped element declared).
+    let mut cuts: Vec<(Range<usize>, Cow<'_, str>)> = Vec::new();
+    let mut growth = Growth::new(raw, MAX_PART_BYTES);
     // Elements and attributes removed, unwrapped, or neutralized; an unwrapped
     // element's end tag is cut too, but it is one element.
     let mut count = 0;
-    // The open elements' actions, to know what an end tag closes.
-    let mut open: Vec<Action> = Vec::new();
+    // The open elements, to know what an end tag closes.
+    let mut open: Vec<Opened> = Vec::new();
+    // The namespace declarations the open unwrapped elements carried, as
+    // (attribute name, source), innermost last: the children of an unwrapped
+    // element declare them again.
+    let mut carried: Vec<(&str, &str)> = Vec::new();
     // A removed element in progress.
     let mut removing: Option<Skipped> = None;
 
@@ -348,42 +357,67 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                     namespace: namespace.as_deref().map(transitional),
                     local: local.into_inner(),
                 };
-                let attributes = attributes(&reader.reader, raw, e)?;
-                match rules.element(name, &attributes) {
+                let namespaces = attribute_namespaces(&reader.reader, e)?;
+                let attributes = attributes(&namespaces, raw, e)?;
+                // Where what the unwrapped element around this one carried
+                // begins, its later bindings shadowing the earlier.
+                let around = match open.last() {
+                    Some(opened) if opened.action == Action::Unwrap => opened.carried_from,
+                    _ => carried.len(),
+                };
+                let own_from = carried.len();
+                let mut carried_from = own_from;
+                let action = rules.element(name, &attributes);
+                match action {
                     Action::Remove => {
                         removing = Skipped::begin(span, is_start, &mut cuts);
                         count += 1;
                     }
+                    // The tags go, the namespaces they declare carried to the
+                    // children they held.
                     Action::Unwrap => {
-                        cuts.push((span.clone(), ""));
+                        cuts.push((span.clone(), Cow::Borrowed("")));
                         count += 1;
                         if is_start {
-                            open.push(Action::Unwrap);
+                            carried_from = around;
+                            carried.extend(declarations(raw, e)?);
                         }
                     }
                     Action::Keep => {
+                        let missing = redeclared(&carried, around, raw, e)?;
+                        if !missing.is_empty() {
+                            let at = span.start + 1 + e.name().as_ref().len();
+                            cuts.push((at..at, Cow::Owned(missing)));
+                            growth.count(&cuts)?;
+                        }
                         for attribute in &attributes {
                             if rules.removes_attribute(name, attribute) {
-                                cuts.push((attribute.range.clone(), ""));
+                                cuts.push((attribute.range.clone(), Cow::Borrowed("")));
                                 count += 1;
                             } else if let Some(neutral) =
                                 rules.neutralizes_attribute(name, attribute)
                                 && attribute.value != neutral
                             {
-                                cuts.push((attribute.value_range.clone(), neutral));
+                                cuts.push((attribute.value_range.clone(), Cow::Borrowed(neutral)));
                                 count += 1;
                             }
                         }
-                        if is_start {
-                            open.push(Action::Keep);
-                        }
                     }
+                }
+                if is_start && action != Action::Remove {
+                    open.push(Opened {
+                        action,
+                        carried_from,
+                        own_from,
+                    });
                 }
             }
             Event::End(_) => {
-                let closed = open.pop();
-                if closed == Some(Action::Unwrap) {
-                    cuts.push((span, ""));
+                if let Some(closed) = open.pop() {
+                    carried.truncate(closed.own_from);
+                    if closed.action == Action::Unwrap {
+                        cuts.push((span, Cow::Borrowed("")));
+                    }
                 }
             }
             _ => {}
@@ -395,38 +429,62 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     Ok(Edited::from_cuts(raw, cuts, count))
 }
 
+/// An element open in an [`edit`]: what was done with it, and where in the
+/// carried declarations those its children declare again, and those it
+/// carries itself, begin.
+struct Opened {
+    action: Action,
+    carried_from: usize,
+    own_from: usize,
+}
+
 /// The namespace URI a resolved name is bound to, if any.
 pub(crate) fn bound(resolved: &ResolveResult<'_>) -> Option<String> {
+    namespace_of(resolved).map(Cow::into_owned)
+}
+
+/// The namespace URI a resolved name is bound to, if any. quick-xml reads a
+/// declaration's value as written, so a reference in it is decoded here; the
+/// declaration itself is left as written.
+pub(crate) fn namespace_of<'r>(resolved: &ResolveResult<'r>) -> Option<Cow<'r, str>> {
     match resolved {
-        ResolveResult::Bound(Namespace(uri)) => Some((*uri).to_owned()),
+        ResolveResult::Bound(Namespace(uri)) if uri.contains(['&', '\t', '\n', '\r']) => {
+            Some(attribute_value(uri).unwrap_or(Cow::Borrowed(uri)))
+        }
+        ResolveResult::Bound(Namespace(uri)) => Some(Cow::Borrowed(uri)),
         _ => None,
     }
 }
 
-/// The namespace URI a resolved name is bound to, if any, borrowed from the
-/// resolver.
-pub(crate) fn namespace_of<'r>(resolved: &ResolveResult<'r>) -> Option<&'r str> {
-    match resolved {
-        ResolveResult::Bound(Namespace(uri)) => Some(uri),
-        _ => None,
+/// The namespace of each attribute of `e`, resolved by `reader`.
+fn attribute_namespaces<'r>(
+    reader: &'r NsReader<&[u8]>,
+    e: &BytesStart<'_>,
+) -> Result<Vec<Option<Cow<'r, str>>>> {
+    let mut out = Vec::new();
+    for attr in e.attributes() {
+        let attr = attr.map_err(malformed_xml)?;
+        let (resolved, _) = reader.resolver().resolve_attribute(attr.key);
+        out.push(namespace_of(&resolved));
     }
+    Ok(out)
 }
 
-/// Every attribute of `e`, resolved by `reader` and located in `raw`.
+/// Every attribute of `e`, in the `namespaces` resolved for each, located in
+/// `raw`.
 fn attributes<'a>(
-    reader: &'a NsReader<&[u8]>,
+    namespaces: &'a [Option<Cow<'_, str>>],
     raw: &'a str,
     e: &'a BytesStart<'_>,
 ) -> Result<Vec<Attribute<'a>>> {
     let mut out = Vec::new();
-    for attr in e.attributes() {
+    for (attr, namespace) in e.attributes().zip(namespaces) {
         let attr = attr.map_err(malformed_xml)?;
         let (range, value) = attribute_extent(raw, &attr)?;
-        let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
         out.push(Attribute {
             name: Name {
-                namespace: namespace_of(&resolved).map(transitional),
-                local: local.into_inner(),
+                namespace: namespace.as_deref().map(transitional),
+                local: attr.key.local_name().into_inner(),
             },
             value: &raw[value.clone()],
             range,
@@ -615,6 +673,116 @@ pub(crate) fn splice_with<S: AsRef<str>>(
     }
     keep(&mut out, &raw[cursor..]);
     out
+}
+
+/// The declarations in `carried` from `around` on that the element `e` does
+/// not make itself, each written with a space before it, the innermost
+/// binding of each name kept: what a child of an unwrapped frame must declare
+/// again.
+pub(crate) fn redeclared(
+    carried: &[(&str, &str)],
+    around: usize,
+    raw: &str,
+    e: &BytesStart<'_>,
+) -> Result<String> {
+    let mut missing = String::new();
+    if around >= carried.len() {
+        return Ok(missing);
+    }
+    let mut bound: HashSet<&str> = declarations(raw, e)?
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    let unbound: Vec<&str> = carried[around..]
+        .iter()
+        .rev()
+        .filter(|(key, _)| bound.insert(key))
+        .map(|(_, source)| *source)
+        .collect();
+    for source in unbound.into_iter().rev() {
+        missing.push(' ');
+        missing.push_str(source);
+    }
+    Ok(missing)
+}
+
+/// The namespace declarations of `e`, as (attribute name, source).
+pub(crate) fn declarations<'a>(
+    raw: &'a str,
+    e: &BytesStart<'_>,
+) -> Result<Vec<(&'a str, &'a str)>> {
+    let mut declarations = Vec::new();
+    for attr in e.attributes() {
+        let attr = attr.map_err(malformed_xml)?;
+        if attr.key.as_namespace_binding().is_some() {
+            let (extent, _) = attribute_extent(raw, &attr)?;
+            // From the name, past the whitespace before it.
+            let source = raw[extent].trim_start();
+            let key = source.split('=').next().unwrap_or(source).trim_end();
+            declarations.push((key, source));
+        }
+    }
+    Ok(declarations)
+}
+
+/// The size of a part as its cuts are made, held within a limit: each cut
+/// changes it by its text less its span, as no cut overlaps another.
+#[derive(Debug)]
+pub(crate) struct Growth {
+    size: usize,
+    /// How many cuts `size` counts.
+    counted: usize,
+    limit: u64,
+}
+
+impl Growth {
+    /// The size of `raw`, held within `limit`.
+    pub(crate) fn new(raw: &str, limit: u64) -> Self {
+        Self {
+            size: raw.len(),
+            counted: 0,
+            limit,
+        }
+    }
+
+    /// Count each of `cuts` past those already counted.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// once the part outgrows its limit.
+    pub(crate) fn count<S: AsRef<str>>(&mut self, cuts: &[(Range<usize>, S)]) -> Result<()> {
+        for (span, text) in &cuts[self.counted.min(cuts.len())..] {
+            self.size = (self.size + text.as_ref().len()).saturating_sub(span.len());
+        }
+        self.counted = cuts.len();
+        if self.size as u64 > self.limit {
+            return Err(malformed_xml(
+                "declaring namespaces again outgrows the part size limit",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Append the source span `kept` to `text`. A `]]>` is not allowed in text,
+/// so where a cut joins `]` to `]>` its `>` is written as a reference; no
+/// tag ends in `]`, so such a join is always in text.
+pub(crate) fn push_joined(text: &mut String, kept: &str) {
+    let before = text
+        .bytes()
+        .rev()
+        .take(2)
+        .take_while(|&b| b == b']')
+        .count();
+    let lead = kept.bytes().take_while(|&b| b == b']').count();
+    if before > 0 && before + lead >= 2 && kept.as_bytes().get(lead) == Some(&b'>') {
+        text.push_str(&kept[..lead]);
+        text.push_str("&gt;");
+        text.push_str(&kept[lead + 1..]);
+    } else {
+        text.push_str(kept);
+    }
 }
 
 /// [`splice`] for cuts that must not overlap, into the part `part`, checked

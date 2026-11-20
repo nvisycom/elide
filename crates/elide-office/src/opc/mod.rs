@@ -142,6 +142,7 @@ impl Package {
                     bytes.clone(),
                     attributes,
                 )
+                .with_content_type(index.content_type(path))
             })
             .collect();
         Ok(Self {
@@ -155,6 +156,14 @@ impl Package {
     /// format's required part (e.g. a Word document must have its main part).
     pub fn contains_kind(&self, kind: PartKind) -> bool {
         self.parts.iter().any(|p| p.kind() == kind)
+    }
+
+    /// The content type the manifest names for the part at `path`, if any.
+    pub(crate) fn content_type(&self, path: &PartPath) -> Option<&str> {
+        self.parts
+            .iter()
+            .find(|p| p.path() == path)
+            .and_then(StoredPart::content_type)
     }
 
     /// Whether the package contains a part at `path`.

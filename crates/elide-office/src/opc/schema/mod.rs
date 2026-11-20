@@ -62,7 +62,8 @@ use crate::opc::ns::{
     W16CEX, W16CID, X, XDR, transitional,
 };
 use crate::opc::xml_edit::{
-    Name, Skipped, SpannedReader, attribute_extent, namespace_of, splice_with,
+    Growth, Name, Skipped, SpannedReader, attribute_extent, declarations, namespace_of,
+    push_joined, redeclared, splice_with,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
@@ -325,8 +326,13 @@ impl Frame {
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// `raw` is not well-formed XML, or its root is not a whole `root`.
 pub(crate) fn rebuild(raw: &str, root: Root) -> Result<Option<Rebuilt>> {
+    rebuild_within(raw, root, MAX_PART_BYTES)
+}
+
+/// [`rebuild`], the rebuilt part held within `limit` bytes.
+fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> {
     let mut reader = SpannedReader::new_ns(raw);
-    let mut rebuild = Rebuild::new(raw);
+    let mut rebuild = Rebuild::new(raw, limit);
     let mut seen_root = false;
     let drawingml = namespace_index(Some(A));
 
@@ -435,13 +441,14 @@ struct Rebuild<'a> {
     carried: Vec<(&'a str, &'a str)>,
     /// An element being left out.
     removing: Option<Skipped>,
-    /// The bytes the rebuild adds, which must keep the part within the size a
-    /// package read allows.
-    added: usize,
+    /// The size of the part as cut so far, kept within its limit.
+    growth: Growth,
+    /// The size the rebuilt part must keep within.
+    limit: u64,
 }
 
 impl<'a> Rebuild<'a> {
-    fn new(raw: &'a str) -> Self {
+    fn new(raw: &'a str, limit: u64) -> Self {
         Self {
             raw,
             cuts: Vec::new(),
@@ -449,7 +456,8 @@ impl<'a> Rebuild<'a> {
             open: Vec::new(),
             carried: Vec::new(),
             removing: None,
-            added: 0,
+            growth: Growth::new(raw, limit),
+            limit,
         }
     }
 
@@ -502,9 +510,15 @@ impl<'a> Rebuild<'a> {
             }
             Frame::Vml => self.cut_attributes(reader, e, None)?,
             // The unwrapped tag goes whole, its declarations carried to the
-            // children it held.
+            // children it held and its other attributes recorded.
             Frame::Alternate(_) | Frame::Fallback(_) => {
                 self.cuts.push((span, String::new()));
+                for attr in e.attributes() {
+                    let attr = attr.map_err(malformed_xml)?;
+                    if attr.key.as_namespace_binding().is_none() {
+                        self.record(HiddenContent::ApplicationData);
+                    }
+                }
                 if is_start {
                     carried_from = around;
                     self.carried.extend(declarations(raw, e)?);
@@ -531,17 +545,11 @@ impl<'a> Rebuild<'a> {
         }
     }
 
-    /// Insert `text` at `at`, keeping the part within the size limit.
+    /// Insert `text` at `at`, keeping the part within the size limit, the
+    /// cuts made so far counted against it.
     fn insert(&mut self, at: usize, text: String) -> Result<()> {
-        self.added += text.len();
-        if (self.raw.len() + self.added) as u64 > MAX_PART_BYTES {
-            return Err(malformed_xml(
-                "declaring the namespaces of markup compatibility again outgrows the part size \
-                 limit",
-            ));
-        }
         self.cuts.push((at..at, text));
-        Ok(())
+        self.growth.count(&self.cuts)
     }
 
     /// Cut each attribute of `e` its type `ty` does not declare (every one
@@ -561,7 +569,7 @@ impl<'a> Rebuild<'a> {
             let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
             let local = local.into_inner();
             let declared = ty.is_some_and(|ty| {
-                namespace_index(namespace_of(&resolved))
+                namespace_index(namespace_of(&resolved).as_deref())
                     .is_some_and(|index| ty.declares(index, local))
             });
             if !declared {
@@ -583,7 +591,7 @@ impl<'a> Rebuild<'a> {
         let text = splice_with(self.raw, self.cuts, push_joined);
         // Escaped CDATA and carried declarations can grow the part past what
         // a package may hold.
-        if text.len() as u64 > MAX_PART_BYTES {
+        if text.len() as u64 > self.limit {
             return Err(malformed_xml(
                 "the rebuilt part outgrows the part size limit",
             ));
@@ -592,57 +600,6 @@ impl<'a> Rebuild<'a> {
             text,
             removed: self.removed,
         }))
-    }
-}
-
-/// The declarations in `carried` from `around` on that the element `e` does
-/// not make itself, each written with a space before it, the innermost
-/// binding of each name kept: what a child of an unwrapped frame must declare
-/// again.
-fn redeclared(
-    carried: &[(&str, &str)],
-    around: usize,
-    raw: &str,
-    e: &BytesStart<'_>,
-) -> Result<String> {
-    let mut missing = String::new();
-    if around >= carried.len() {
-        return Ok(missing);
-    }
-    let mut bound: HashSet<&str> = declarations(raw, e)?
-        .into_iter()
-        .map(|(key, _)| key)
-        .collect();
-    let unbound: Vec<&str> = carried[around..]
-        .iter()
-        .rev()
-        .filter(|(key, _)| bound.insert(key))
-        .map(|(_, source)| *source)
-        .collect();
-    for source in unbound.into_iter().rev() {
-        missing.push(' ');
-        missing.push_str(source);
-    }
-    Ok(missing)
-}
-
-/// Append the source span `kept` to `text`. A `]]>` is not allowed in text,
-/// so where a cut joins `]` to `]>` its `>` is written as a reference; no
-/// tag ends in `]`, so such a join is always in text.
-fn push_joined(text: &mut String, kept: &str) {
-    let before = text
-        .bytes()
-        .rev()
-        .take(2)
-        .take_while(|&b| b == b']')
-        .count();
-    let lead = kept.bytes().take_while(|&b| b == b']').count();
-    if before > 0 && before + lead >= 2 && kept.as_bytes().get(lead) == Some(&b'>') {
-        text.push_str(&kept[..lead]);
-        text.push_str("&gt;");
-        text.push_str(&kept[lead + 1..]);
-    } else {
-        text.push_str(kept);
     }
 }
 
@@ -770,22 +727,6 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
         Some(ty) if !TYPES[usize::from(ty)].only_wildcard() => Decision::Keep(Frame::Typed(ty)),
         _ => Decision::Drop(HiddenContent::ApplicationData),
     }
-}
-
-/// The namespace declarations of `e`, as (attribute name, source).
-fn declarations<'a>(raw: &'a str, e: &BytesStart<'_>) -> Result<Vec<(&'a str, &'a str)>> {
-    let mut declarations = Vec::new();
-    for attr in e.attributes() {
-        let attr = attr.map_err(malformed_xml)?;
-        if attr.key.as_namespace_binding().is_some() {
-            let (extent, _) = attribute_extent(raw, &attr)?;
-            // From the name, past the whitespace before it.
-            let source = raw[extent].trim_start();
-            let key = source.split('=').next().unwrap_or(source).trim_end();
-            declarations.push((key, source));
-        }
-    }
-    Ok(declarations)
 }
 
 #[cfg(test)]
