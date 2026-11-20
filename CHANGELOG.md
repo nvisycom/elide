@@ -142,9 +142,10 @@ and this project adheres to
   and search in a viewer give that text; glyphs are placed by their font's
   widths, a Type3 font's scaled by its `/FontMatrix`; a standard 14 font that
   embeds no program (or one named by an alias, such as `Arial`) is written
-  with every code's glyph and width (Adobe's metrics for its face), so every
-  viewer selects and places its glyphs as they were read, and its text reads
-  from those glyphs' names; a page whose content cannot be read,
+  with every code's glyph, and, without `/Widths` of its own, every code's
+  width from Adobe's metrics for its face, so every viewer selects and places
+  its glyphs as they were read; where its `/ToUnicode` maps no code, its text
+  reads from those glyphs' names; a page whose content cannot be read,
   text drawn before a font is selected, content nested too deep, and an
   encode naming a part the document never surfaced are refused rather than
   passed through. The output is untagged (its structure tree carried

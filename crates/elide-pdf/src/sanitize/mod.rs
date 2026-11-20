@@ -1463,6 +1463,70 @@ mod tests {
         assert_eq!(descriptor.get(b"CapHeight").unwrap(), &Object::Real(718.0));
     }
 
+    /// Fonts sharing one source descriptor each get flags of their own: a
+    /// pinned font's descriptor is its own, and a font that isn't pinned
+    /// keeps the source's flags.
+    #[test]
+    fn fonts_sharing_a_descriptor_each_get_their_own_flags() {
+        let mut pdf = DocBuilder::new();
+        let descriptor = pdf.add(dictionary! { "Type" => "FontDescriptor", "Flags" => 64 });
+        let font = |pdf: &mut DocBuilder, subtype: &str, base: &str| {
+            pdf.add(dictionary! {
+                "Type" => "Font", "Subtype" => subtype, "BaseFont" => base,
+                "FontDescriptor" => descriptor,
+            })
+        };
+        let arial = font(&mut pdf, "TrueType", "Arial");
+        let symbol = font(&mut pdf, "Type1", "Symbol");
+        let custom = font(&mut pdf, "Type1", "Custom");
+        pdf.page(
+            Page::new()
+                .font("F1", arial)
+                .font("F2", symbol)
+                .font("F3", custom)
+                .content(b"BT /F1 12 Tf (a) Tj /F2 12 Tf (a) Tj /F3 12 Tf (a) Tj ET".to_vec())
+                .size(200, 200),
+        );
+        let (out, _) = rebuilt(&pdf.finish().0);
+        let flags = |name: &[u8]| {
+            let Object::Dictionary(font) = resource(&out, b"Font", name) else {
+                panic!("font");
+            };
+            let descriptor = out
+                .resolve_dict(font.get(b"FontDescriptor").unwrap())
+                .unwrap();
+            descriptor.get(b"Flags").and_then(Object::as_i64).unwrap()
+        };
+        assert_eq!(flags(b"F1"), 64 | 32, "Arial: nonsymbolic");
+        assert_eq!(flags(b"F2"), 64 | 4, "Symbol: symbolic");
+        assert_eq!(flags(b"F3"), 64, "not pinned: as the source");
+    }
+
+    /// What pinning writes is charged to the copy budget: a budget that copies
+    /// a font that isn't pinned refuses the same font naming a standard face.
+    #[test]
+    fn pinning_is_charged() {
+        let mut doc = Document::with_version("1.7");
+        let custom = doc.add_object(type1("Custom1"));
+        let helvetica = doc.add_object(type1("Helvetica"));
+        let used = |doc: &Document, font: ObjectId, budget: usize| {
+            let mut builder = Builder::new(doc);
+            builder.copy_budget = budget;
+            builder
+                .copy(
+                    Kind::Font,
+                    &Object::Reference(font),
+                    At::top(&Scope::default()),
+                )
+                .map(|_| budget - builder.copy_budget)
+        };
+        let budget = used(&doc, custom, MAX_COPIED_BYTES).unwrap() + 64;
+        assert!(used(&doc, custom, budget).is_ok());
+        let error = used(&doc, helvetica, budget).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+        assert!(used(&doc, helvetica, MAX_COPIED_BYTES).is_ok());
+    }
+
     /// A font that embeds its program, or names no standard face, is copied
     /// as it is.
     #[test]

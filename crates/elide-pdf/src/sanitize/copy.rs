@@ -534,9 +534,12 @@ impl<'a> Builder<'a> {
     {
         let source = self.source;
         let subtype = dict.name(self.source, b"Subtype");
+        let standard = Standard::of(source, dict);
         let handled: &[&[u8]] = match subtype {
             Some(b"Type3") => &[b"CharProcs", b"Resources"],
             Some(b"Type0") => &[b"Encoding"],
+            // A pinned font's descriptor is its own (see `pin`).
+            _ if standard.is_some() => &[b"FontDescriptor"],
             _ => &[],
         };
         let mut out = self.keys(dict, FONT, handled, at)?;
@@ -549,7 +552,9 @@ impl<'a> Builder<'a> {
             return Ok(Object::Dictionary(out));
         }
         if subtype != Some(b"Type3") {
-            self.pin(dict, &mut out);
+            if let Some(standard) = standard {
+                self.pin(standard, dict, &mut out, at)?;
+            }
             return Ok(Object::Dictionary(out));
         }
         let inner = at.scope.inner(source, dict);
@@ -588,17 +593,41 @@ impl<'a> Builder<'a> {
         Ok(Object::Dictionary(out))
     }
 
-    /// Pin the glyphs and widths of `font`, copied as `out`, when it names a
-    /// standard face and embeds no program: an explicit `/Encoding` naming
-    /// every code's glyph (`.notdef` for none), `/Widths` for every code when
-    /// it has none of its own, and descriptor flags under which every reader
-    /// takes that encoding as it is. Every viewer then selects and places the
-    /// glyphs the reader does, where without them each supplies its own.
-    fn pin(&mut self, font: &Dictionary, out: &mut Dictionary) {
-        let Some(standard) = Standard::of(self.source, font) else {
-            return;
-        };
-        let names = standard.names(self.source, font);
+    /// Pin the glyphs and widths of `font`, which names the standard face
+    /// `standard` and embeds no program, copied as `out`: an explicit
+    /// `/Encoding` naming every code's glyph (`.notdef` for none), `/Widths`
+    /// for every code when it has none of its own, and a descriptor of its
+    /// own whose flags make every reader take that encoding as it is (a
+    /// TrueType font without one is given one). Every viewer then selects and
+    /// places the glyphs the reader does, where without them each supplies
+    /// its own. The descriptor is the font's own because its flags depend on
+    /// the font: another font sharing the source's keeps a copy of its own.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`] if what it writes is past the copy budget.
+    fn pin<'s>(
+        &mut self,
+        standard: Standard,
+        font: &'s Dictionary,
+        out: &mut Dictionary,
+        at: At<'_, 's>,
+    ) -> Result<()>
+    where
+        'a: 's,
+    {
+        let source = self.source;
+        let names = standard.names(source, font);
+        let own_widths = font
+            .get(b"FirstChar")
+            .is_ok_and(|first| first.as_i64().is_ok())
+            && font
+                .get(b"Widths")
+                .is_ok_and(|widths| source.resolve_array(widths).is_some());
+        let named: usize = names.iter().map(|name| name.map_or(7, str::len)).sum();
+        let values = names.len() + 1 + if own_widths { 0 } else { names.len() + 2 };
+        self.charge(values * VALUE_COST + named)?;
+
         let differences = [Object::Integer(0)]
             .into_iter()
             .chain(
@@ -611,40 +640,39 @@ impl<'a> Builder<'a> {
             "Encoding",
             dictionary! { "Type" => "Encoding", "Differences" => differences },
         );
-        let own_widths = font
-            .get(b"FirstChar")
-            .is_ok_and(|first| first.as_i64().is_ok())
-            && font
-                .get(b"Widths")
-                .is_ok_and(|widths| self.source.resolve_array(widths).is_some());
         if !own_widths {
-            let widths = standard.widths(self.source, font).map(number);
+            let widths = standard.widths(source, font).map(number);
             out.set("FirstChar", 0);
             out.set("LastChar", 255);
             out.set("Widths", widths.to_vec());
         }
-        let descriptor = match out.get(b"FontDescriptor") {
-            Ok(Object::Reference(id)) => self.out.get_dictionary_mut(*id).ok(),
-            Ok(Object::Dictionary(_)) => out
-                .get_mut(b"FontDescriptor")
-                .and_then(Object::as_dict_mut)
-                .ok(),
-            _ => None,
-        };
-        if let Some(descriptor) = descriptor {
-            let flags = descriptor
-                .get(b"Flags")
-                .and_then(Object::as_i64)
-                .unwrap_or(0);
-            descriptor.set("Flags", standard.flags(flags));
-        } else if font.is_subtype(self.source, b"TrueType") {
+
+        let descriptor = match font.get(b"FontDescriptor").ok().map(|d| source.resolve(d)) {
+            Some(Some(descriptor @ Object::Dictionary(_))) => {
+                match self.copy(Kind::FontDescriptor, descriptor, at.deeper())? {
+                    Some(Object::Dictionary(mut copy)) => {
+                        let flags = copy.get(b"Flags").and_then(Object::as_i64).unwrap_or(0);
+                        copy.set("Flags", standard.flags(flags));
+                        Some(copy)
+                    }
+                    _ => None,
+                }
+            }
             // A TrueType font with no descriptor reads as symbolic, which
             // ignores an `/Encoding` dictionary (9.6.5.4); give it one whose
             // flags make the encoding count.
-            let name = font.name(self.source, b"BaseFont").unwrap_or(b"Font");
-            let descriptor = standard.descriptor(name, standard.flags(0));
+            _ if font.is_subtype(source, b"TrueType") => {
+                let name = font.name(source, b"BaseFont").unwrap_or(b"Font");
+                let descriptor = standard.descriptor(name, standard.flags(0));
+                self.charge(descriptor.len() * VALUE_COST)?;
+                Some(descriptor)
+            }
+            _ => None,
+        };
+        if let Some(descriptor) = descriptor {
             out.set("FontDescriptor", self.out.add_object(descriptor));
         }
+        Ok(())
     }
 
     /// A form XObject or tiling pattern `stream` keeping `fields`, its content

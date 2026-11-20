@@ -1,7 +1,8 @@
 //! The text a glyph name stands for, by the Adobe Glyph List specification:
-//! its own entry in the Adobe Glyph List (`assets/agl/glyphlist.txt`), or in
-//! the ZapfDingbats list (`assets/agl/zapfdingbats.txt`) for that face, else
-//! the code points a `uniXXXX` or `uXXXX` name spells.
+//! for ZapfDingbats its entry in that face's list
+//! (`assets/agl/zapfdingbats.txt`), else its entry in the Adobe Glyph List
+//! (`assets/agl/glyphlist.txt`), else the code points a `uniXXXX` or `uXXXX`
+//! name spells.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -41,12 +42,12 @@ pub(super) fn text(name: &str, dingbats: bool) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// The text of one name component: its list entry, else the code points a
-/// `uni` name spells in groups of four upper-case hex digits, or a `u` name
-/// in four to six.
+/// The text of one name component: its ZapfDingbats entry when `dingbats`,
+/// else its AGL entry, else the code points a `uni` name spells in groups of
+/// four upper-case hex digits, or a `u` name in four to six.
 fn component_text(component: &str, dingbats: bool) -> Option<String> {
-    let list = if dingbats { &*DINGBATS } else { &*AGL };
-    if let Some(text) = list.get(component) {
+    let dingbat = dingbats.then(|| DINGBATS.get(component)).flatten();
+    if let Some(text) = dingbat.or_else(|| AGL.get(component)) {
         return Some(text.clone());
     }
     if let Some(hex) = component.strip_prefix("uni") {
@@ -97,6 +98,11 @@ mod tests {
         assert_eq!(text("quoteright", false).as_deref(), Some("\u{2019}"));
         assert_eq!(text("alpha", false).as_deref(), Some("α"));
         assert_eq!(text("a1", true).as_deref(), Some("\u{2701}"));
+        assert_eq!(
+            text("space", true).as_deref(),
+            Some(" "),
+            "AGL, after the dingbats list"
+        );
         assert_eq!(text("a1", false), None);
         assert_eq!(text("uni00410042", false).as_deref(), Some("AB"));
         assert_eq!(text("u1F600", false).as_deref(), Some("\u{1F600}"));
