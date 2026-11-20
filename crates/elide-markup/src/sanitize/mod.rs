@@ -431,15 +431,6 @@ impl<'a> Rebuild<'a> {
                         return Ok(Skip::Outside);
                     }
                 }
-                // In HTML, a start tag that closes the removed element ends it
-                // when nothing else is open in it.
-                if region.space == Space::Html
-                    && region.open.is_empty()
-                    && html::closes(&region.name, &name)
-                {
-                    self.dropping = None;
-                    return Ok(Skip::Outside);
-                }
                 // The vocabulary the element is in: HTML where the current
                 // element reads its content as HTML, but for an `svg` or
                 // `math` root; else the current element's, but for an `svg`
@@ -454,18 +445,32 @@ impl<'a> Rebuild<'a> {
                     _ if as_html => Space::Html,
                     _ => current_space,
                 };
-                // A browser ignores the self-closing flag on a non-void HTML
-                // element, and reads a `/` an unquoted value took as its own.
-                let void = VOID_ELEMENTS.contains(&name.as_str());
-                let is_start = matches!(event, Event::Start(_));
-                if !self_closing(raw, span, &tag.attributes, is_start)
-                    || (space == Space::Html && !void)
-                {
-                    if space == Space::Html {
-                        close_implied(&mut region.open, &name);
-                        if TEXT_ELEMENTS.contains(&name.as_str()) {
-                            region.text = Some(name.clone());
-                        }
+                if space == Space::Html {
+                    // An HTML start tag closes the elements open in the
+                    // removed one whose end it implies, void or self-closed
+                    // as it may be; if that leaves nothing open and it
+                    // implies the removed element's end too, it ends the
+                    // removal (`<p hidden>a<p>b`).
+                    close_implied(&mut region.open, &name);
+                    if region.space == Space::Html
+                        && region.open.is_empty()
+                        && html::closes(&region.name, &name)
+                    {
+                        self.dropping = None;
+                        return Ok(Skip::Outside);
+                    }
+                }
+                // A void HTML element never holds anything; a browser ignores
+                // the self-closing flag on any other HTML element, and reads
+                // a `/` an unquoted value took as its own.
+                let opens = if space == Space::Html {
+                    !VOID_ELEMENTS.contains(&name.as_str())
+                } else {
+                    !self_closing(raw, span, &tag.attributes, matches!(event, Event::Start(_)))
+                };
+                if opens {
+                    if space == Space::Html && TEXT_ELEMENTS.contains(&name.as_str()) {
+                        region.text = Some(name.clone());
                     }
                     region.open.push(name, space);
                 }

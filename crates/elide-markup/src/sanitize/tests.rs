@@ -621,6 +621,34 @@ fn unmatched_end_tags_under_deep_nesting_stay_linear() {
     assert!(started.elapsed() < std::time::Duration::from_secs(10));
 }
 
+/// A void element in a removed region holds nothing, and closes what it
+/// implies the end of, self-closed or not.
+#[test]
+fn a_void_element_in_a_removed_region_opens_nothing() {
+    let policy = HiddenContentPolicy::default();
+    for raw in [
+        "<math hidden><mi><p>x<hr><mglyph><title></math><p>Visible</p>",
+        "<math hidden><mi><p>x<hr/><mglyph><title></math><p>Visible</p>",
+        "<div hidden><br>Secret</div><p>Visible</p>",
+    ] {
+        assert_eq!(sanitize(html(policy), raw), "<p>Visible</p>", "{raw}");
+    }
+}
+
+/// A start tag that closes what is open in the removed element, and then the
+/// removed element itself, ends the removal.
+#[test]
+fn an_implied_close_through_a_removed_element_ends_it() {
+    let policy = HiddenContentPolicy::default();
+    let raw = r#"<select><optgroup hidden><option>Secret<optgroup label="Public"><option>Visible</select><p>After</p>"#;
+    let out = sanitize(html(policy), raw);
+    assert!(!out.contains("Secret"), "{out}");
+    assert!(
+        out.contains("Visible") && out.ends_with("<p>After</p>"),
+        "{out}"
+    );
+}
+
 #[test]
 fn mglyph_and_malignmark_stay_mathml() {
     let policy = HiddenContentPolicy::default();
