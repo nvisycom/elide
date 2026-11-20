@@ -20,6 +20,7 @@ use std::ops::Range;
 
 use elide_core::Result;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use super::SheetClassifier;
@@ -130,9 +131,11 @@ fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
                 let local = local.into_inner();
                 let in_ns = |ns: &str| namespace.as_deref() == Some(ns);
                 if in_ns(VML_EXCEL) && local == "ClientData" {
+                    // The kind as XML reads it, its references decoded; one
+                    // that does not decode may be a note.
                     let note = e.attributes().flatten().any(|attr| {
                         attr.key.local_name().as_ref() == "ObjectType"
-                            && attr.value.as_ref() == "Note"
+                            && unescape(&attr.value).map_or(true, |kind| kind == "Note")
                     });
                     if note && let Some(shape) = shapes.last_mut() {
                         shape.note = true;
@@ -373,6 +376,14 @@ mod tests {
             edited.text,
             r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:rect/></xml>"#
         );
+    }
+
+    /// A note's kind is read as XML reads it, its references decoded.
+    #[test]
+    fn an_escaped_note_kind_is_a_note() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><x:ClientData ObjectType="Not&#101;"/></v:shape></xml>"#;
+        let edited = expect_edit(raw, &CommentNotes);
+        assert!(!edited.text.contains("v:shape"), "{}", edited.text);
     }
 
     /// One note counts once, however its text is split.

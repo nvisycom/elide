@@ -380,9 +380,15 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
         let mut target: Option<Range<usize>> = None;
         for attr in elem.attributes() {
             let attr = attr.map_err(|_| ())?;
+            // As the relationships are read: unqualified attributes only, each
+            // value as XML reads it, its references decoded.
+            if attr.key.prefix().is_some() {
+                continue;
+            }
+            let value = || unescape(&attr.value).map_err(|_| ());
             match attr.key.local_name().as_ref() {
-                "Type" => is_hyperlink = transitional_type(&attr.value) == HYPERLINK,
-                "TargetMode" => is_external = attr.value.as_ref() == "External",
+                "Type" => is_hyperlink = transitional_type(&value()?) == HYPERLINK,
+                "TargetMode" => is_external = value()? == "External",
                 "Target" => target = Some(value_source(raw, &attr)?),
                 _ => {}
             }
@@ -882,6 +888,27 @@ mod tests {
             pairs(&relationship_spans(raw).unwrap()),
             vec![(start..end, BlockKind::Attribute)]
         );
+    }
+
+    /// A hyperlink's type and mode are read as XML reads them, references
+    /// decoded, and a qualified attribute does not shadow the unqualified one.
+    #[test]
+    fn a_hyperlink_target_is_surfaced_however_its_type_is_spelled() {
+        for attributes in [
+            r#"Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlin&#107;" TargetMode="Externa&#x6C;""#,
+            r#"Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" TargetMode="External" v:Type="t/other" v:TargetMode="Internal""#,
+        ] {
+            let raw = format!(
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:v="urn:vendor"><Relationship Id="rId1" {attributes} Target="mailto:jane@example.com"/></Relationships>"#
+            );
+            let start = raw.find("mailto:").unwrap();
+            let end = start + "mailto:jane@example.com".len();
+            assert_eq!(
+                pairs(&relationship_spans(&raw).unwrap()),
+                vec![(start..end, BlockKind::Attribute)],
+                "{attributes}"
+            );
+        }
     }
 
     #[test]

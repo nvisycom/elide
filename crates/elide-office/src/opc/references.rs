@@ -62,13 +62,13 @@ impl Rules for References<'_> {
         None
     }
 
-    fn element(&self, _name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
+    fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
         for attribute in attributes.iter().filter(|attribute| naming(attribute)) {
             match &self.ids {
-                // Only an attribute the schemas declare takes its element
-                // along; the rebuild cuts any other, so it goes alone.
+                // Only an attribute the element's type declares takes the
+                // element along; the rebuild cuts any other, so it goes alone.
                 Ids::Drop(ids) => {
-                    if declared(attribute) && dropped(ids, attribute) {
+                    if schema::declares_reference(name, attribute.name) && dropped(ids, attribute) {
                         return Action::Remove;
                     }
                 }
@@ -94,12 +94,6 @@ impl Rules for References<'_> {
 /// namespace, and VML's `o:relid`.
 fn naming(attribute: &Attribute<'_>) -> bool {
     attribute.name.namespace == Some(R) || is_relid(attribute)
-}
-
-/// Whether `attribute` is one the schemas declare as naming a relationship.
-fn declared(attribute: &Attribute<'_>) -> bool {
-    is_relid(attribute)
-        || (attribute.name.namespace == Some(R) && schema::names_relationship(attribute.name.local))
 }
 
 /// Whether `attribute` is VML's `o:relid`, by which a VML shape's fill,
@@ -171,6 +165,24 @@ mod tests {
         let edited = expect_edit(raw, &References::dropping(&dropped));
         assert!(!edited.text.contains("rId&#50;"));
         assert!(edited.text.contains(r#"r:id="rId1""#));
+    }
+
+    /// A relationship attribute its element's type does not declare goes
+    /// alone, though another type declares it; a declared one takes its
+    /// element along.
+    #[test]
+    fn a_reference_its_element_does_not_declare_goes_alone() {
+        let raw = r#"<w:body xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><w:p r:id="rId2"><w:r><w:t>kept</w:t></w:r></w:p><w:hyperlink r:id="rId2"><w:r><w:t>link</w:t></w:r></w:hyperlink><a:blip r:embed="rId2"/></w:body>"#;
+        let dropped: HashSet<String> = ["rId2".to_owned()].into_iter().collect();
+        let edited = expect_edit(raw, &References::dropping(&dropped));
+        assert!(
+            edited.text.contains("<w:p><w:r><w:t>kept"),
+            "{}",
+            edited.text
+        );
+        for gone in ["rId2", "link", "a:blip"] {
+            assert!(!edited.text.contains(gone), "{gone} in {}", edited.text);
+        }
     }
 
     /// An attribute no schema declares in the relationships namespace goes

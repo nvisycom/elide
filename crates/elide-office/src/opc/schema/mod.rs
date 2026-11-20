@@ -63,7 +63,7 @@ use crate::opc::ns::{
     A, C, CUSTOM_PROPERTIES, DGM, DOC_PROPS_VTYPES, EXTENDED_PROPERTIES, LC, MC, P, PIC, R, VML,
     VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15, W16CEX, W16CID, X, XDR, XMLNS,
 };
-use crate::opc::xml_edit::{Skipped, SpannedReader, attribute_source, bound, splice_with};
+use crate::opc::xml_edit::{Name, Skipped, SpannedReader, attribute_source, bound, splice_with};
 
 /// An element type of the schema.
 #[derive(Debug)]
@@ -177,21 +177,41 @@ fn namespace_index(namespace: Option<&str>) -> Option<u8> {
         .and_then(|at| u8::try_from(at + 1).ok())
 }
 
-/// Whether some type of the schemas declares the attribute `local` in the
-/// relationships namespace: an attribute that names a relationship.
-pub(crate) fn names_relationship(local: &str) -> bool {
-    static NAMES: OnceLock<HashSet<&'static str>> = OnceLock::new();
-    NAMES
-        .get_or_init(|| {
-            let r = namespace_index(Some(R));
-            TYPES
-                .iter()
-                .flat_map(|ty| ty.attributes)
-                .filter(|(namespace, _)| Some(*namespace) == r)
-                .map(|(_, local)| *local)
-                .collect()
-        })
-        .contains(local)
+/// Whether some type of an element named `element` declares the attribute
+/// `attribute` that names a relationship: one in the relationships namespace,
+/// or VML's `o:relid`. A type hangs on the element's parent, so this asks of
+/// every type an element of that name has.
+pub(crate) fn declares_reference(element: Name<'_>, attribute: Name<'_>) -> bool {
+    type Key<'a> = (u8, &'a str, u8, &'a str);
+    static DECLARED: OnceLock<HashSet<Key<'static>>> = OnceLock::new();
+    let declared = DECLARED.get_or_init(|| {
+        let r = namespace_index(Some(R));
+        let o = namespace_index(Some(VML_OFFICE));
+        TYPES
+            .iter()
+            .flat_map(|ty| ty.children)
+            .chain(&ROOTS)
+            .flat_map(|&Child(namespace, local, ty)| {
+                TYPES[usize::from(ty)]
+                    .attributes
+                    .iter()
+                    .filter(move |&&(n, l)| Some(n) == r || (Some(n) == o && l == "relid"))
+                    .map(move |&(n, l)| (namespace, local, n, l))
+            })
+            .collect()
+    });
+    let (Some(element_namespace), Some(attribute_namespace)) = (
+        namespace_index(element.namespace),
+        namespace_index(attribute.namespace),
+    ) else {
+        return false;
+    };
+    declared.contains(&(
+        element_namespace,
+        element.local,
+        attribute_namespace,
+        attribute.local,
+    ))
 }
 
 /// The root element a part must have.
