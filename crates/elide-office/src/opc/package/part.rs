@@ -6,11 +6,11 @@ use std::fmt;
 
 use hipstr::HipStr;
 
-use crate::opc::attributes::TextAttribute;
 use crate::opc::block::EmbeddingKind;
-use crate::opc::content_types::CONTENT_TYPES_PART;
-use crate::opc::kind::PartKind;
 use crate::opc::names::Names;
+use crate::opc::package::content_types::CONTENT_TYPES_PART;
+use crate::opc::package::kind::PartKind;
+use crate::opc::xml::attributes::TextAttribute;
 
 /// A package-part path within an OOXML zip (e.g. `word/document.xml`,
 /// `word/media/image1.png`).

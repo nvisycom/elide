@@ -13,9 +13,9 @@ use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 
 use super::{BODY_STREAM_ID, OoxmlAddress, OoxmlCodec, finish, part_replacements, replacements};
-use crate::codec::props::DocProps;
-use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::codec::ooxml::props::DocProps;
 use crate::opc::check::check;
+use crate::text_package::{OoxmlFormat, OoxmlPackage};
 
 /// A decoded OOXML document: its body text stream and document-property
 /// streams over the retained package.

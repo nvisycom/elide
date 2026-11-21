@@ -9,7 +9,7 @@ use bytes::Bytes;
 use elide_codec::extract::{ItemFlag, OffsetMap, Passage};
 use hipstr::HipStr;
 
-use crate::opc::part::PartPath;
+use crate::opc::package::part::PartPath;
 
 /// The result of extracting a package: the redactable text
 /// [`blocks`](Extraction::blocks) of every text-bearing part, the binary

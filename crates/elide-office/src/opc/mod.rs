@@ -9,27 +9,14 @@
 //! and an exact byte span) and rewrites those spans back into a byte-faithful
 //! package.
 
-pub(crate) mod archive;
-mod attributes;
 mod block;
 pub(crate) mod check;
-pub(crate) mod content_types;
-pub(crate) mod ct;
-pub(crate) mod index;
-pub(crate) mod kind;
 pub(crate) mod names;
-pub(crate) mod ns;
-pub(crate) mod package_xml;
-mod part;
+pub(crate) mod package;
 pub(crate) mod props;
-pub(crate) mod references;
-pub(crate) mod relationships;
 pub(crate) mod sanitize;
 pub(crate) mod schema;
-mod store;
-pub(crate) mod vocabulary;
-pub(crate) mod xml_edit;
-pub(crate) mod xml_span;
+pub(crate) mod xml;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -38,17 +25,17 @@ use bytes::Bytes;
 use elide_core::{Error, Result};
 use quick_xml::escape::{EscapeError, unescape};
 
-use self::archive::RawPart;
-pub(crate) use self::attributes::{
+pub(crate) use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
+pub(crate) use self::names::Names;
+use self::package::archive::{self, RawPart};
+use self::package::content_types::{ContentType, ContentTypes};
+use self::package::index::Index;
+pub(crate) use self::package::kind::PartKind;
+pub(crate) use self::package::part::{PartClassifier, PartPath, PartRole};
+use self::package::store::{Markup, StoredPart};
+pub(crate) use self::xml::attributes::{
     Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns, TextAttribute,
 };
-pub(crate) use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
-use self::content_types::{ContentType, ContentTypes};
-use self::index::Index;
-pub(crate) use self::kind::PartKind;
-pub(crate) use self::names::Names;
-pub(crate) use self::part::{PartClassifier, PartPath, PartRole};
-use self::store::{Markup, StoredPart};
 
 /// A part's XML failing to read, as `e` says.
 pub(crate) fn malformed_xml(e: impl std::fmt::Display) -> Error {

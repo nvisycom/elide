@@ -5,12 +5,11 @@
 //! (shared-string cells are not the element-text path). Each names its
 //! identity through `CodecIdentity` and builds its [`Format`] through
 //! `format_of`. The `docProps/*` document-property parts every OOXML
-//! container surfaces as metadata are handled once in `props`.
+//! container surfaces as metadata are handled once in `ooxml::props`.
 
 mod docx;
 pub(crate) mod ooxml;
 mod pptx;
-pub(crate) mod props;
 mod xlsx;
 
 use elide_codec::{DocumentLoader, Format, FormatId, LocalId};

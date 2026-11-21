@@ -12,9 +12,9 @@
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::SlideFormat;
-use crate::opc::ns::P14;
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::Declared;
+use crate::opc::xml::edit::Declared;
+use crate::opc::xml::ns::P14;
 use crate::opc::{Collaboration, HiddenAttributes, NEUTRAL_DATE, PartKind, TextAttribute};
 
 /// The creation id each slide carries.
@@ -74,9 +74,9 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{pack_typed, part_names, read_text_part};
-    use crate::ooxml::OoxmlPackage;
-    use crate::opc::ns::P;
     use crate::opc::sanitize::{Sanitized, sanitize};
+    use crate::opc::xml::ns::P;
+    use crate::text_package::OoxmlPackage;
 
     /// A modern comment and its authors, whose schema this crate does not
     /// hold.

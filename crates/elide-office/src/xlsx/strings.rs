@@ -11,7 +11,7 @@ use elide_core::{Error, Result};
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
-use crate::opc::xml_edit::SpannedReader;
+use crate::opc::xml::edit::SpannedReader;
 
 /// The decoded strings of a shared-string table, indexed as the cells reference
 /// them. Index `i` is the text of the `i`-th `<si>` in document order.

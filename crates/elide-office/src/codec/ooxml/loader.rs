@@ -11,8 +11,8 @@ use elide_core::redaction::HiddenContentPolicy;
 use super::addresser::OoxmlAddresser;
 use super::document::OoxmlDocument;
 use super::{OoxmlCodec, blobs, items, refuse_issues, sanitized};
-use crate::codec::props::DocProps;
-use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::codec::ooxml::props::DocProps;
+use crate::text_package::{OoxmlFormat, OoxmlPackage};
 
 /// A decoded OOXML package: its native document, its embedded blobs, and what
 /// decode stripped.

@@ -15,10 +15,10 @@ use std::ops::Range;
 
 use elide_core::{Error, Result};
 
-use crate::opc::attributes::TextAttribute;
 use crate::opc::block::Replacement;
-use crate::opc::part::PartPath;
-use crate::opc::xml_span::attribute_ranges;
+use crate::opc::package::part::PartPath;
+use crate::opc::xml::attributes::TextAttribute;
+use crate::opc::xml::span::attribute_ranges;
 use crate::opc::{attribute_value, malformed_part};
 
 /// A format's names and the attributes referring to them.

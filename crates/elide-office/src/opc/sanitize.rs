@@ -45,18 +45,18 @@ use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 
 use crate::opc::PartClassifier;
-use crate::opc::archive::{self, Entry, RawPart};
-use crate::opc::attributes::{ALTERNATIVE_TEXT, TOOLTIPS};
-use crate::opc::content_types;
-use crate::opc::index::{Index, text};
-use crate::opc::kind::PartKind;
-use crate::opc::package_xml::{self, PackageMarkup, PackageText, Vocabulary};
-use crate::opc::part::PartPath;
-use crate::opc::props::UnsurfacedProperties;
-use crate::opc::references::References;
-use crate::opc::relationships::{self, HYPERLINK};
+use crate::opc::package::archive::{self, Entry, RawPart};
+use crate::opc::package::content_types;
+use crate::opc::package::index::{Index, text};
+use crate::opc::package::kind::PartKind;
+use crate::opc::package::package_xml::{self, PackageMarkup, PackageText, Vocabulary};
+use crate::opc::package::part::PartPath;
+use crate::opc::package::relationships::{self, HYPERLINK};
+use crate::opc::props::strip::UnsurfacedProperties;
 use crate::opc::schema::{self, Root};
-use crate::opc::xml_edit::{self, Edit, XmlComments};
+use crate::opc::xml::attributes::{ALTERNATIVE_TEXT, TOOLTIPS};
+use crate::opc::xml::edit::{self, Edit, XmlComments};
+use crate::opc::xml::references::References;
 
 /// A list of element edits, each naming the hidden content it removes through
 /// [`Edit::content`].
@@ -95,17 +95,19 @@ pub(crate) fn sanitize(
     let index = Index::read(document)?;
     let mut stripped = StrippedContent::new();
 
-    // Decide each part's fate by its kind.
-    let kinds: HashMap<&PartPath, PartKind> = index
+    // Decide each part's fate by its kind, in package order, so a refusal
+    // names the same part every time.
+    let classified: Vec<(&PartPath, PartKind)> = index
         .parts
         .iter()
         .map(|part| &part.path)
         .filter(|path| !path.is_content_types() && !path.is_relationships())
         .map(|path| (path, index.kind(path)))
         .collect();
+    let kinds: HashMap<&PartPath, PartKind> = classified.iter().copied().collect();
     let mut gone: HashSet<PartPath> = HashSet::new();
     let mut roots: HashMap<PartPath, Root> = HashMap::new();
-    for (&path, &kind) in &kinds {
+    for &(path, kind) in &classified {
         match fate(kind, policy) {
             Fate::Keep => {}
             Fate::Remove(content) => {
@@ -324,7 +326,7 @@ impl<'a> Repack<'a> {
         let RawPart { path, bytes } = part;
         let xml = self.index.is_xml(path);
         if xml {
-            xml_edit::check(text(path, bytes)?)?;
+            edit::check(text(path, bytes)?)?;
         }
         let references = dropped
             .get(&relationships::rels_of(path))
@@ -440,4 +442,102 @@ fn rebuild_part(
 /// entry names.
 fn local_id(path: &PartPath) -> LocalId {
     LocalId::new(path.as_str().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use elide_core::redaction::{Disposition, HiddenContentPolicy};
+
+    use super::*;
+    use crate::docx::WordFormat;
+    use crate::fixtures::pack_typed;
+    use crate::opc::package::content_types::{ContentType, PML, SML, WML};
+    use crate::opc::package::kind::Reached;
+
+    /// Of two parts that are both refused, the error names the first in the
+    /// package, every time.
+    #[test]
+    fn a_refusal_names_the_first_refused_part() {
+        let package = pack_typed(&[
+            (
+                "vendor/first.xml",
+                "application/x-vendor-first+xml",
+                b"<a/>",
+            ),
+            (
+                "vendor/second.xml",
+                "application/x-vendor-second+xml",
+                b"<b/>",
+            ),
+        ]);
+        for _ in 0..32 {
+            let error = sanitize(&package, HiddenContentPolicy::default(), &WordFormat)
+                .expect_err("an unrecognized part is refused");
+            assert!(error.to_string().contains("first.xml"), "{error}");
+        }
+    }
+
+    /// Every content type the classifier names, read from its own source so a
+    /// new one cannot be missed: the `of_*` table each sits in, with the
+    /// prefix that table strips.
+    fn classified_content_types() -> Vec<String> {
+        let source = include_str!("package/kind.rs");
+        let tables = [
+            ("fn of_media", ""),
+            ("fn of_wordprocessing", WML),
+            ("fn of_presentation", PML),
+            ("fn of_spreadsheet", SML),
+            ("fn of_shared", ""),
+        ];
+        let mut found = Vec::new();
+        for (table, prefix) in tables {
+            let start = source.find(table).expect(table);
+            let body = &source[start..];
+            let body = &body[..body[1..]
+                .find("\n    fn ")
+                .map_or(body.len(), |end| end + 1)];
+            for literal in body.split('"').skip(1).step_by(2) {
+                if literal.contains("xml") || literal.contains('/') {
+                    found.push(format!("{prefix}{literal}"));
+                }
+            }
+        }
+        found
+    }
+
+    /// A part kept and rebuilt needs a schema root, or it is dropped whole as
+    /// application data. The few kept without one are listed: each is
+    /// dropped on purpose until its schema is reviewed.
+    #[test]
+    fn every_kept_xml_kind_has_a_schema_root() {
+        const DROPPED: &[&str] = &[
+            "application/vnd.ms-office.chartstyle+xml",
+            "application/vnd.ms-office.chartcolorstyle+xml",
+            "application/vnd.ms-office.chartex+xml",
+            "application/vnd.ms-office.drawingml.diagramdrawing+xml",
+            "application/vnd.ms-excel.threadedcomments+xml",
+            "application/vnd.ms-powerpoint.comments+xml",
+            "application/vnd.ms-excel.person+xml",
+            "application/vnd.ms-powerpoint.authors+xml",
+        ];
+        let policy = HiddenContentPolicy::default()
+            .with_metadata(Disposition::ScanAsContent)
+            .with_collaboration(Disposition::ScanAsContent);
+        let part = PartPath::from("word/part.xml");
+        let mut rootless = Vec::new();
+        for content_type in classified_content_types() {
+            let content_type = ContentType::new(&content_type);
+            let kind = PartKind::of(&part, Some(&content_type), Reached::default());
+            let kept = matches!(fate(kind, policy), Fate::Keep) && rebuilt(kind);
+            if kept && content_type.is_xml() && schema::root(&content_type).is_none() {
+                rootless.push(content_type.as_str().to_owned());
+            }
+        }
+        rootless.sort();
+        let mut dropped: Vec<String> = DROPPED.iter().map(|&ct| ct.to_owned()).collect();
+        dropped.sort();
+        // Both ways: a new kept type needs a root, and a listed one that gained
+        // a root (or stopped being kept) comes off the list.
+        assert_eq!(rootless, dropped);
+    }
 }

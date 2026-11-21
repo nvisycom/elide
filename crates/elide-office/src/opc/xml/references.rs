@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContent;
 
-use crate::opc::ns::{R, VML_OFFICE};
-use crate::opc::xml_edit::{Action, Attribute, FirstSeen, Name, Rules};
+use crate::opc::xml::edit::{Action, Attribute, FirstSeen, Name, Rules};
+use crate::opc::xml::ns::{R, VML_OFFICE};
 use crate::opc::{attribute_value, schema};
 
 /// Element rules over the relationship-naming attributes (`r:id`, `r:embed`,
@@ -27,8 +27,8 @@ pub(crate) struct References<'a> {
 enum Ids<'a> {
     /// The ids whose elements go.
     Drop(&'a HashSet<String>),
-    /// The ids that exist.
-    Present(&'a HashSet<String>),
+    /// The ids that exist, borrowed from the relationships that hold them.
+    Present(&'a HashSet<&'a str>),
 }
 
 impl<'a> References<'a> {
@@ -41,7 +41,7 @@ impl<'a> References<'a> {
     }
 
     /// Rules recording the first name that is not one of `ids`.
-    pub(crate) fn checking(ids: &'a HashSet<String>) -> Self {
+    pub(crate) fn checking(ids: &'a HashSet<&'a str>) -> Self {
         Self {
             ids: Ids::Present(ids),
             dangling: FirstSeen::default(),
@@ -115,7 +115,7 @@ fn dropped(ids: &HashSet<String>, attribute: &Attribute<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::xml_edit::{edit, expect_edit};
+    use crate::opc::xml::edit::{edit, expect_edit};
 
     const STRICT: &str = r#"<w:document xmlns:w="http://purl.oclc.org/ooxml/wordprocessingml/main" xmlns:r="http://purl.oclc.org/ooxml/officeDocument/relationships"><w:body><w:p><w:hyperlink r:id="rId1"/><w:hyperlink r:id="rId2"/></w:p></w:body></w:document>"#;
 
@@ -133,7 +133,7 @@ mod tests {
             edited.text
         );
 
-        let present: HashSet<String> = ["rId2".to_owned()].into_iter().collect();
+        let present: HashSet<&str> = ["rId2"].into_iter().collect();
         let references = References::checking(&present);
         edit(VML_RELID, &references).unwrap();
         assert_eq!(references.dangling().as_deref(), Some("rId1"));
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn a_strict_reference_to_a_missing_relationship_dangles() {
-        let ids: HashSet<String> = ["rId1".to_owned()].into_iter().collect();
+        let ids: HashSet<&str> = ["rId1"].into_iter().collect();
         let references = References::checking(&ids);
         edit(STRICT, &references).unwrap();
         assert_eq!(references.dangling().as_deref(), Some("rId2"));
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn an_escaped_reference_compares_decoded() {
         let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:hyperlink r:id="rId&#50;"/><w:hyperlink r:id="rId1"/></w:p>"#;
-        let present: HashSet<String> = ["rId1", "rId2"].map(str::to_owned).into();
+        let present: HashSet<&str> = ["rId1", "rId2"].into();
         let references = References::checking(&present);
         edit(raw, &references).unwrap();
         assert_eq!(references.dangling(), None);

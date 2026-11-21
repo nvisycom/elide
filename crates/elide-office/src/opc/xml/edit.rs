@@ -26,8 +26,8 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Reader};
 
-use crate::opc::archive::MAX_PART_BYTES;
-use crate::opc::ns::transitional;
+use crate::opc::package::archive::MAX_PART_BYTES;
+use crate::opc::xml::ns::transitional;
 use crate::opc::{attribute_value, malformed_xml};
 
 /// A namespace-qualified element or attribute name.
@@ -967,7 +967,7 @@ pub(crate) fn attribute_extent(raw: &str, attr: &XmlAttribute<'_>) -> Result<Att
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::ns::W;
+    use crate::opc::xml::ns::W;
 
     /// Remove `w:del`, unwrap `w:ins`, and drop `w:rsid*` attributes.
     struct Revisions;

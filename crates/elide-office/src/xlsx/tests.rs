@@ -2,7 +2,7 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::*;
 use crate::fixtures::{pack_parts, pack_typed, read_text_part};
-use crate::opc::ns::X;
+use crate::opc::xml::ns::X;
 
 /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
 /// and two data rows of PII (names, emails, phones, cards, IBANs, SSNs, IPs)
@@ -500,4 +500,30 @@ fn a_duplicate_cell_does_not_cover_an_edit_that_matched_nothing() {
         error.to_string().contains("1 of 2 cell edits matched no"),
         "{error}"
     );
+}
+
+/// A shared index written as a character reference still holds its pooled
+/// string: pruning must not blank an entry a cell still points to.
+#[test]
+fn an_entity_encoded_shared_index_keeps_its_string() {
+    let source = markup_workbook();
+    let source = crate::fixtures::read_text_part(&source, "xl/worksheets/sheet1.xml");
+    assert!(source.contains(r#"<c r="A1" t="s"><v>0</v></c>"#));
+    let sheet = source.replace(
+        r#"<c r="A1" t="s"><v>0</v></c>"#,
+        r#"<c r="A1" t="s"><v>&#48;</v></c>"#,
+    );
+    let package = crate::fixtures::pack_typed(&[
+        ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+        ("xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml", read_text_part(&markup_workbook(), "xl/workbook.xml").as_bytes()),
+        ("xl/_rels/workbook.xml.rels", "", read_text_part(&markup_workbook(), "xl/_rels/workbook.xml.rels").as_bytes()),
+        ("xl/worksheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", sheet.as_bytes()),
+        ("xl/worksheets/sheet2.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", read_text_part(&markup_workbook(), "xl/worksheets/sheet2.xml").as_bytes()),
+        ("xl/sharedStrings.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml", read_text_part(&markup_workbook(), SHARED_STRINGS_PART).as_bytes()),
+    ]);
+    let xlsx = Xlsx::open(&package).unwrap();
+    let edits = [CellEdit::new("Jane Roe", CellCoord::new(0, 1), "[EMAIL]")];
+    let out = xlsx.rewrite(&edits, &[], &[]).unwrap();
+    let pool = read_text_part(&out, SHARED_STRINGS_PART);
+    assert!(pool.contains("<t>Roe</t>"), "pruned a live entry: {pool}");
 }

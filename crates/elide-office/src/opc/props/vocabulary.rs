@@ -11,11 +11,11 @@
 
 use elide_core::redaction::HiddenContent;
 
-use crate::opc::ns::{
+use crate::opc::xml::edit::{Action, Attribute, FirstSeen, Name, Rules};
+use crate::opc::xml::ns::{
     CORE_PROPERTIES, CUSTOM_PROPERTIES, DC, DCMITYPE, DCTERMS, DOC_PROPS_VTYPES,
     EXTENDED_PROPERTIES, XML, XMLNS, XSI,
 };
-use crate::opc::xml_edit::{Action, Attribute, FirstSeen, Name, Rules};
 
 /// The reviewed namespaces: XML itself, the core properties with the Dublin
 /// Core they use, and the extended and custom properties with their variant
@@ -34,7 +34,7 @@ const VOCABULARIES: &[&str] = &[
 ];
 
 /// Whether `namespace`, a strict one already mapped by
-/// [`edit`](crate::opc::xml_edit::edit), is a reviewed vocabulary.
+/// [`edit`](crate::opc::xml::edit::edit), is a reviewed vocabulary.
 pub(crate) fn is_known(namespace: &str) -> bool {
     VOCABULARIES.contains(&namespace)
 }
@@ -87,7 +87,7 @@ impl Rules for UnreviewedNamespaces {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::xml_edit::edit;
+    use crate::opc::xml::edit::edit;
 
     #[test]
     fn records_the_first_unreviewed_namespace() {

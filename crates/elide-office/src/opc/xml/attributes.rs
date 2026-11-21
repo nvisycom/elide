@@ -13,8 +13,8 @@ use elide_codec::extract::ItemFlag;
 use elide_core::entity::builtins;
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
 
-use crate::opc::ns::{VML, VML_OFFICE};
-use crate::opc::xml_edit::{Attribute, Local, Name, Rules};
+use crate::opc::xml::edit::{Attribute, Local, Name, Rules};
+use crate::opc::xml::ns::{VML, VML_OFFICE};
 
 /// The namespace a [`TextAttribute`] part matches.
 #[derive(Debug, Clone, Copy)]
@@ -216,7 +216,7 @@ pub(crate) const TOOLTIPS: HiddenAttributes = HiddenAttributes::strip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opc::xml_edit::{edit, expect_edit};
+    use crate::opc::xml::edit::{edit, expect_edit};
 
     const DESCRIPTION: &[TextAttribute] = &[TextAttribute::unqualified("cNvPr", "descr")];
 

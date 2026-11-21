@@ -23,7 +23,7 @@ use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::{HiddenContentPolicy, Redactions};
 
-use super::local_id;
+use crate::codec::local_id;
 use crate::opc::{PartPath, PartReplacement, props};
 
 /// Stable [`FormatId`] for an OOXML property part's metadata stream.

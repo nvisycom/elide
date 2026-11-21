@@ -55,16 +55,15 @@ use quick_xml::escape::partial_escape;
 use quick_xml::events::{BytesStart, Event};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
-use crate::opc::archive::MAX_PART_BYTES;
-use crate::opc::content_types::ContentType;
-use crate::opc::ct::{self, DML, PML, SML, WML};
-use crate::opc::ns::{
-    A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
-    W16CEX, W16CID, X, XDR, transitional,
-};
-use crate::opc::xml_edit::{
+use crate::opc::package::archive::MAX_PART_BYTES;
+use crate::opc::package::content_types::{self, ContentType, DML, PML, SML, WML};
+use crate::opc::xml::edit::{
     Cut, Growth, Name, Skipped, SpannedReader, attribute_extent, declarations, namespace_of,
     push_joined, redeclared, refuse_doctype, splice_with,
+};
+use crate::opc::xml::ns::{
+    A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
+    W16CEX, W16CID, X, XDR, transitional,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
@@ -280,7 +279,7 @@ pub(crate) fn root(content_type: &ContentType) -> Option<Root> {
             element(A, "themeOverride")
         }
         "application/vnd.openxmlformats-officedocument.drawing+xml" => element(XDR, "wsDr"),
-        ct::VML_DRAWING => Some(Root::Vml),
+        content_types::VML_DRAWING => Some(Root::Vml),
         "application/vnd.ms-word.styleswitheffects+xml" => element(W, "styles"),
         "application/vnd.ms-word.commentsextended+xml" => element(W15, "commentsEx"),
         "application/vnd.ms-word.commentsids+xml" => element(W16CID, "commentsIds"),

@@ -8,7 +8,7 @@
 //! *de-shares* it: the cell becomes an inline string carrying the redacted text,
 //! so the pooled value other cells still reference is left untouched.
 
-mod cellref;
+mod coord;
 mod names;
 mod sanitize;
 mod sheet;
@@ -23,12 +23,12 @@ use elide_core::{Error, Result};
 use hipstr::HipStr;
 use quick_xml::escape::escape;
 
-pub(crate) use self::cellref::CellCoord;
+pub(crate) use self::coord::CellCoord;
 use self::sheet::{CellValue, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
-use crate::opc::index::text;
-use crate::opc::xml_edit::{Cut, splice, splice_checked};
+use crate::opc::package::index::text;
+use crate::opc::xml::edit::{Cut, splice, splice_checked};
 use crate::opc::{
     Extraction, Names, Package, PartClassifier, PartKind, PartPath, PartReplacement, PartRole,
     Replacement, TextAttribute, attribute_value,

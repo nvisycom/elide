@@ -15,9 +15,11 @@ use std::ops::Range;
 
 use elide_core::{Error, Result};
 
-use crate::opc::ns::transitional_type;
-use crate::opc::package_xml::{Entry, EntryAttribute, RELATIONSHIPS, entries, without_entries};
-use crate::opc::part::PartPath;
+use crate::opc::package::package_xml::{
+    Entry, EntryAttribute, RELATIONSHIPS, entries, without_entries,
+};
+use crate::opc::package::part::PartPath;
+use crate::opc::xml::ns::transitional_type;
 
 /// The relationship type of an external hyperlink, the one external target that
 /// is visible content (a link a reader follows) rather than a hidden reference.

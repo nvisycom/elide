@@ -10,10 +10,9 @@
 use elide_core::redaction::HiddenContent;
 
 use crate::opc::block::EmbeddingKind;
-use crate::opc::content_types::ContentType;
-use crate::opc::ct::{self, PML, SML, WML};
-use crate::opc::part::PartPath;
-use crate::opc::relationships::{IMPORTED_CHUNK, THUMBNAIL};
+use crate::opc::package::content_types::{self, ContentType, PML, SML, WML};
+use crate::opc::package::part::PartPath;
+use crate::opc::package::relationships::{IMPORTED_CHUNK, THUMBNAIL};
 
 /// What a package part is, decided by its content type and the relationship
 /// that reaches it.
@@ -63,21 +62,38 @@ pub(crate) enum PartKind {
     Unknown,
 }
 
+/// The relationships that reach a part, as far as they decide its kind: the
+/// two whose target's content type is a plain image or document type.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Reached {
+    /// Whether the package's thumbnail relationship targets the part.
+    pub(crate) thumbnail: bool,
+    /// Whether an imported-chunk (`altChunk`) relationship targets the part.
+    pub(crate) imported_chunk: bool,
+}
+
+impl Reached {
+    /// Note a relationship of type `rel_type` reaching the part.
+    pub(crate) fn record(&mut self, rel_type: &str) {
+        self.thumbnail |= rel_type == THUMBNAIL;
+        self.imported_chunk |= rel_type == IMPORTED_CHUNK;
+    }
+}
+
 impl PartKind {
-    /// Classify `part` from its `content_type` and the relationship types that
-    /// reach it.
+    /// Classify `part` from its `content_type` and the relationships that
+    /// `reached` it.
     pub(crate) fn of(
         part: &PartPath,
         content_type: Option<&ContentType>,
-        incoming: &[String],
+        reached: Reached,
     ) -> Self {
-        let reached_by = |rel_type: &str| incoming.iter().any(|incoming| incoming == rel_type);
         // The thumbnail and imported chunks are typed by the relationship that
         // reaches them: their content types are a plain image or document type.
-        if reached_by(THUMBNAIL) {
+        if reached.thumbnail {
             return Self::Hidden(HiddenContent::Thumbnail);
         }
-        if reached_by(IMPORTED_CHUNK) {
+        if reached.imported_chunk {
             return Self::Embedding(EmbeddingKind::Object);
         }
         // Custom XML items carry the generic XML content type; their place in the
@@ -215,9 +231,8 @@ impl PartKind {
             | "application/vnd.ms-office.chartex+xml" => Self::Chart,
             "application/vnd.openxmlformats-officedocument.drawingml.diagramdata+xml"
             | "application/vnd.ms-office.drawingml.diagramdrawing+xml" => Self::Diagram,
-            "application/vnd.openxmlformats-officedocument.drawing+xml" | ct::VML_DRAWING => {
-                Self::Drawing
-            }
+            "application/vnd.openxmlformats-officedocument.drawing+xml"
+            | content_types::VML_DRAWING => Self::Drawing,
             "application/vnd.ms-word.commentsextended+xml"
             | "application/vnd.ms-word.commentsids+xml"
             | "application/vnd.ms-word.commentsextensible+xml"
@@ -277,7 +292,7 @@ mod tests {
         PartKind::of(
             &PartPath::from(path),
             Some(&ContentType::new(content_type)),
-            &[],
+            Reached::default(),
         )
     }
 
@@ -314,7 +329,7 @@ mod tests {
             PartKind::Unknown
         );
         assert_eq!(
-            PartKind::of(&PartPath::from("word/x.bin"), None, &[]),
+            PartKind::of(&PartPath::from("word/x.bin"), None, Reached::default()),
             PartKind::Unknown
         );
     }
@@ -324,7 +339,10 @@ mod tests {
         let thumbnail = PartKind::of(
             &PartPath::from("docProps/thumbnail.jpeg"),
             Some(&ContentType::new("image/jpeg")),
-            &[THUMBNAIL.to_owned()],
+            Reached {
+                thumbnail: true,
+                ..Reached::default()
+            },
         );
         assert_eq!(thumbnail, PartKind::Hidden(HiddenContent::Thumbnail));
         assert_eq!(

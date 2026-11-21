@@ -9,7 +9,7 @@ use elide_core::{Error, Result};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::opc::part::PartPath;
+use crate::opc::package::part::PartPath;
 
 /// The largest a single package part may be. A zip entry may claim any
 /// uncompressed size, so extraction is capped and the read is bounded to this

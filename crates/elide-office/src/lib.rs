@@ -11,6 +11,6 @@ pub mod fixtures;
 pub(crate) mod opc;
 
 pub(crate) mod docx;
-pub(crate) mod ooxml;
 pub(crate) mod pptx;
+pub(crate) mod text_package;
 pub(crate) mod xlsx;

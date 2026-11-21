@@ -2,7 +2,7 @@
 //! adapters over this crate's package engine.
 //!
 //! The two text-only OOXML formats decode to the same
-//! [`OoxmlPackage`](crate::ooxml::OoxmlPackage) and build the same
+//! [`OoxmlPackage`](crate::text_package::OoxmlPackage) and build the same
 //! [`Document`](elide_codec::Document) the same way; this module holds the pieces
 //! that would otherwise be copy-pasted across them: extract element-text blocks
 //! addressed by `(part, span, OffsetMap)` into a body
@@ -19,6 +19,7 @@
 mod addresser;
 mod document;
 mod loader;
+pub(crate) mod props;
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -36,11 +37,11 @@ pub(crate) use self::document::OoxmlDocument;
 pub(crate) use self::loader::OoxmlLoader;
 #[cfg(test)]
 pub(crate) use self::loader::decode_native;
+use self::props::DocProps;
 use super::{CodecIdentity, format_of, local_id, part_path};
-use crate::codec::props::DocProps;
-use crate::ooxml::OoxmlFormat;
 use crate::opc::sanitize::{Sanitized, Sanitizer, remove_parts, sanitize};
 use crate::opc::{Block, Embedding, Issue, PartPath, PartReplacement, Replacement};
+use crate::text_package::OoxmlFormat;
 
 /// The document-local id of the body stream (not a zip entry), shared by every
 /// OOXML document.

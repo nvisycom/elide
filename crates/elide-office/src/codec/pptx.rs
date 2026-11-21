@@ -3,7 +3,7 @@
 //!
 //! Everything but the format identity lives in [`super::ooxml`]: the document is
 //! a body [`ExtractStream`](elide_codec::extract::ExtractStream) over the
-//! element-text blocks [`OoxmlPackage::extract`](crate::ooxml::OoxmlPackage::extract)
+//! element-text blocks [`OoxmlPackage::extract`](crate::text_package::OoxmlPackage::extract)
 //! recovers plus its embedding / document-property blobs, re-packed via the
 //! shared `OoxmlDocument`.
 

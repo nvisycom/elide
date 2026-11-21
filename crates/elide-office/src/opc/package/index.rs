@@ -5,17 +5,17 @@
 //! roles and the sanitizer's removals both read the kind from here, so the two
 //! can never disagree about what a part is.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::str;
 
 use elide_core::{Error, Result};
 
-use crate::opc::archive::{self, RawPart};
-use crate::opc::content_types::{CONTENT_TYPES_PART, ContentType, ContentTypes};
-use crate::opc::kind::PartKind;
-use crate::opc::part::PartPath;
-use crate::opc::relationships::{self, COMMENTS, Relationship};
+use crate::opc::package::archive::{self, RawPart};
+use crate::opc::package::content_types::{CONTENT_TYPES_PART, ContentType, ContentTypes};
+use crate::opc::package::kind::{PartKind, Reached};
+use crate::opc::package::part::PartPath;
+use crate::opc::package::relationships::{self, COMMENTS, Relationship};
 
 /// A relationships part as the index reads it.
 pub(crate) struct RelsPart {
@@ -27,8 +27,9 @@ pub(crate) struct RelsPart {
 /// What reaches a part through the package's relationships.
 #[derive(Default)]
 struct Incoming {
-    /// The type of each relationship that targets the part.
-    rel_types: Vec<String>,
+    /// The relationships that target the part, as far as they decide its
+    /// kind.
+    reached: Reached,
     /// Whether the source of one of them has comments.
     from_commented: bool,
 }
@@ -40,7 +41,7 @@ pub(crate) struct Index {
     pub(crate) content_types: ContentTypes,
     /// Each relationships part, keyed by its path.
     pub(crate) relationships: HashMap<PartPath, RelsPart>,
-    /// What reaches each part that a relationship targets.
+    /// What reaches each part of the package that a relationship targets.
     incoming: HashMap<PartPath, Incoming>,
 }
 
@@ -83,7 +84,12 @@ impl Index {
     }
 
     /// What reaches each part a relationship targets.
+    ///
+    /// Only parts the package holds get an entry: a target it lacks is no
+    /// part to classify, and keyed anyway it would grow the index past what
+    /// the archive's size caps bound.
     fn read_incoming(&self) -> HashMap<PartPath, Incoming> {
+        let present: HashSet<&PartPath> = self.parts.iter().map(|part| &part.path).collect();
         let mut incoming: HashMap<PartPath, Incoming> = HashMap::new();
         for RelsPart {
             source,
@@ -96,9 +102,12 @@ impl Index {
                     .any(|rel| rel.rel_type == COMMENTS)
             });
             for rel in relationships {
-                if let Some(target) = rel.target_part(source.as_ref()) {
+                if let Some(target) = rel
+                    .target_part(source.as_ref())
+                    .filter(|target| present.contains(target))
+                {
                     let reaching = incoming.entry(target).or_default();
-                    reaching.rel_types.push(rel.rel_type.clone());
+                    reaching.reached.record(&rel.rel_type);
                     reaching.from_commented |= from_commented;
                 }
             }
@@ -134,12 +143,12 @@ impl Index {
     pub(crate) fn kind(&self, part: &PartPath) -> PartKind {
         let incoming = self.incoming.get(part);
         let content_type = self.content_type(part);
-        let rel_types = incoming.map_or(&[][..], |incoming| incoming.rel_types.as_slice());
+        let reached = incoming.map_or_else(Reached::default, |incoming| incoming.reached);
         let is_vml = content_type.is_some_and(ContentType::is_vml_drawing);
         if is_vml && incoming.is_some_and(|incoming| incoming.from_commented) {
             PartKind::Comments
         } else {
-            PartKind::of(part, content_type, rel_types)
+            PartKind::of(part, content_type, reached)
         }
     }
 }
@@ -147,4 +156,25 @@ impl Index {
 /// The part `path`'s bytes as UTF-8 text.
 pub(crate) fn text(path: impl Display, bytes: &[u8]) -> Result<&str> {
     str::from_utf8(bytes).map_err(|_| Error::malformed(format!("part `{path}` is not UTF-8")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures::pack_parts;
+
+    /// A relationship to a part the package lacks adds nothing to classify.
+    #[test]
+    fn only_parts_the_package_holds_are_reached() {
+        let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t" Target="word/document.xml"/><Relationship Id="rId2" Type="t" Target="word/gone1.xml"/><Relationship Id="rId3" Type="t" Target="word/gone2.xml"/></Relationships>"#;
+        let manifest = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>"#;
+        let package = pack_parts(&[
+            ("[Content_Types].xml", manifest.as_bytes()),
+            ("_rels/.rels", rels.as_bytes()),
+            ("word/document.xml", b"<d/>"),
+        ]);
+        let index = Index::read(&package).unwrap();
+        let reached: Vec<&str> = index.incoming.keys().map(PartPath::as_str).collect();
+        assert_eq!(reached, ["word/document.xml"]);
+    }
 }

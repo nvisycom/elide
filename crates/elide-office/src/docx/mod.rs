@@ -7,8 +7,8 @@
 
 mod sanitize;
 
-use crate::ooxml::OoxmlFormat;
 use crate::opc::{Names, PartClassifier, PartKind, PartRole, TextAttribute};
+use crate::text_package::OoxmlFormat;
 
 /// The Word format seam: maps each kind of part to the neutral [`PartRole`] the
 /// engine acts on.

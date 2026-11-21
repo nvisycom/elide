@@ -14,8 +14,9 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use super::{WORKBOOK_PART, decoded_attribute};
-use crate::opc::ct::SML;
-use crate::opc::{PartPath, relationships};
+use crate::opc::PartPath;
+use crate::opc::package::content_types::SML;
+use crate::opc::package::relationships;
 
 /// One worksheet: its display name and the package part path holding its cells.
 #[derive(Debug, Clone, PartialEq, Eq)]

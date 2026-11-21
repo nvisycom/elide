@@ -10,15 +10,16 @@
 //! and the preceding cell, so a sparse or reference-less sheet is placed
 //! correctly.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::ops::Range;
 
 use elide_core::{Error, Result};
 use quick_xml::events::Event;
 
-use super::cellref::CellCoord;
+use super::coord::CellCoord;
 use super::decoded_attribute;
-use crate::opc::xml_edit::SpannedReader;
+use crate::opc::xml::edit::SpannedReader;
 
 /// One text-bearing cell of a worksheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,9 +266,11 @@ impl OpenCell {
     fn finish(self, raw: &str, end: usize) -> Result<Option<SheetCell>> {
         let value = match self.cell_type {
             CellType::Shared => {
-                let Some(index) = self
+                let decoded = self
                     .value
-                    .and_then(|value| raw[value].trim().parse::<usize>().ok())
+                    .map(|value| unescape_text(&raw[value]))
+                    .transpose()?;
+                let Some(index) = decoded.and_then(|value| value.trim().parse::<usize>().ok())
                 else {
                     // A shared cell with no parseable index is malformed but not
                     // fatal, it simply names no string to redact.
@@ -280,14 +283,14 @@ impl OpenCell {
                     return Ok(None);
                 }
                 // Concatenate every run's decoded text: the value a reader sees.
-                CellValue::Inline(self.decoded_runs(raw))
+                CellValue::Inline(self.decoded_runs(raw)?)
             }
             CellType::Formula => {
                 // `t="str"` caches the string result of a formula in `<v>`.
                 let Some(value) = self.value else {
                     return Ok(None);
                 };
-                CellValue::Inline(unescape_text(&raw[value]))
+                CellValue::Inline(unescape_text(&raw[value])?)
             }
             CellType::Other => return Ok(None),
         };
@@ -300,7 +303,7 @@ impl OpenCell {
     }
 
     /// The concatenated, entity-decoded text of every `<t>` run.
-    fn decoded_runs(&self, raw: &str) -> String {
+    fn decoded_runs(&self, raw: &str) -> Result<String> {
         self.text_runs
             .iter()
             .map(|run| unescape_text(&raw[run.clone()]))
@@ -309,11 +312,13 @@ impl OpenCell {
 }
 
 /// Decode XML entities in raw cell text.
-fn unescape_text(text: &str) -> String {
-    match quick_xml::escape::unescape(text) {
-        Ok(decoded) => decoded.into_owned(),
-        Err(_) => text.to_owned(),
-    }
+///
+/// Text that cannot be decoded is refused, as a shared string's is: read as
+/// written, it would reach detection as something a reader never sees.
+fn unescape_text(text: &str) -> Result<String> {
+    quick_xml::escape::unescape(text)
+        .map(Cow::into_owned)
+        .map_err(|e| Error::malformed(format!("cell text entity: {e}")))
 }
 
 /// Escape a literal `"` in an attribute value as `&quot;`, leaving existing
@@ -324,179 +329,4 @@ fn escape_attr_value(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const SHEET: &str = concat!(
-        r#"<?xml version="1.0"?><worksheet><sheetData>"#,
-        r#"<row r="1"><c r="A1" t="s"><v>0</v></c></row>"#,
-        r#"<row r="2"><c r="A2" t="s"><v>1</v></c>"#,
-        r#"<c r="B2" t="inlineStr"><is><t>123-45-6789</t></is></c></row>"#,
-        r#"<row r="3"><c r="C3"><v>42</v></c></row>"#,
-        r#"</sheetData></worksheet>"#,
-    );
-
-    #[test]
-    fn extracts_shared_and_inline_cells_skips_numbers() {
-        let cells = parse_cells(SHEET).unwrap();
-        assert_eq!(cells.len(), 3, "two shared + one inline, number skipped");
-
-        // A1 shared index 0.
-        assert_eq!(cells[0].coord, CellCoord::new(0, 0));
-        assert_eq!(cells[0].value.shared_index(), Some(0));
-
-        // A2 shared index 1.
-        assert_eq!(cells[1].coord, CellCoord::new(1, 0));
-        assert_eq!(cells[1].value.shared_index(), Some(1));
-
-        // B2 inline: its text is exactly the SSN.
-        assert_eq!(cells[2].coord, CellCoord::new(1, 1));
-        assert_eq!(cells[2].value.inline_text(), Some("123-45-6789"));
-    }
-
-    #[test]
-    fn shared_cell_span_covers_the_whole_element() {
-        let cells = parse_cells(SHEET).unwrap();
-        assert!(cells[0].value.shared_index().is_some(), "A1 is shared");
-        assert_eq!(
-            &SHEET[cells[0].span.clone()],
-            r#"<c r="A1" t="s"><v>0</v></c>"#
-        );
-    }
-
-    #[test]
-    fn preserves_non_type_attributes_for_de_share() {
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData>"#,
-            r#"<row r="1"><c r="A1" s="3" t="s"><v>0</v></c></row>"#,
-            r#"</sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert!(cells[0].value.shared_index().is_some(), "shared");
-        let attributes = &cells[0].attributes;
-        assert!(attributes.contains(r#"r="A1""#));
-        assert!(attributes.contains(r#"s="3""#));
-        assert!(
-            !attributes.contains("t="),
-            "the type attribute is not carried"
-        );
-    }
-
-    #[test]
-    fn handles_a_leading_bom() {
-        let sheet = format!("\u{feff}{SHEET}");
-        let cells = parse_cells(&sheet).unwrap();
-        assert_eq!(cells[2].value.inline_text(), Some("123-45-6789"));
-    }
-
-    #[test]
-    fn a_self_closing_cell_yields_nothing() {
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData>"#,
-            r#"<row r="1"><c r="A1"/></row></sheetData></worksheet>"#,
-        );
-        assert!(parse_cells(sheet).unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_multi_run_inline_string_keeps_every_run() {
-        // A rich-text inline value split across runs: all runs must be collected,
-        // not just the last, or the earlier text leaks unredacted.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
-            r#"<c r="A1" t="inlineStr"><is><r><t>alice@</t></r><r><t>example.com</t></r></is></c>"#,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert_eq!(cells[0].value.inline_text(), Some("alice@example.com"));
-    }
-
-    #[test]
-    fn a_cached_formula_string_is_text_bearing() {
-        // `t="str"` holds a formula's cached string result, user-visible text.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
-            r#"<c r="A1" t="str"><f>B1</f><v>bob@example.com</v></c>"#,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert_eq!(cells.len(), 1);
-        assert_eq!(cells[0].value.inline_text(), Some("bob@example.com"));
-    }
-
-    #[test]
-    fn a_cached_formula_string_keeps_the_text_around_an_entity() {
-        // quick-xml reports an entity as its own event, between two texts: the
-        // whole value is read, not only the text after the last entity.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
-            r#"<c r="A1" t="str"><f>B1</f><v>Smith &amp; Jones</v></c>"#,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert_eq!(cells[0].value.inline_text(), Some("Smith & Jones"));
-    }
-
-    #[test]
-    fn a_cell_without_a_reference_is_placed_by_position() {
-        // `r` is optional: the first cell defaults to column 0 of its row, the
-        // next to column 1, and so on.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="2">"#,
-            r#"<c t="inlineStr"><is><t>x</t></is></c>"#,
-            r#"<c t="inlineStr"><is><t>y</t></is></c>"#,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert_eq!(cells[0].coord, CellCoord::new(1, 0));
-        assert_eq!(cells[1].coord, CellCoord::new(1, 1));
-    }
-
-    #[test]
-    fn an_entity_encoded_type_attribute_is_still_classified() {
-        // `t="inline&#83;tr"` decodes to `inlineStr`; comparing the raw value
-        // would misclassify the cell as non-text and leak its content.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
-            r#"<c r="A1" t="inline&#83;tr"><is><t>alice@example.com</t></is></c>"#,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert_eq!(
-            cells.len(),
-            1,
-            "the cell must be recognized as text-bearing"
-        );
-        assert_eq!(cells[0].value.inline_text(), Some("alice@example.com"));
-    }
-
-    #[test]
-    fn an_entity_encoded_cell_reference_is_parsed() {
-        // A `&#65;` in the reference decodes to `A`, so `&#65;1` is `A1`.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
-            r#"<c r="&#65;1" t="inlineStr"><is><t>x</t></is></c>"#,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert_eq!(cells[0].coord, CellCoord::new(0, 0));
-    }
-
-    #[test]
-    fn a_single_quoted_attribute_value_is_quote_escaped() {
-        // A source attribute may be single-quoted and contain a literal `"`;
-        // carrying it verbatim into a double-quoted rewrite would break the tag.
-        let sheet = concat!(
-            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
-            r##"<c r="A1" foo='a"b' t="s"><v>0</v></c>"##,
-            r#"</row></sheetData></worksheet>"#,
-        );
-        let cells = parse_cells(sheet).unwrap();
-        assert!(cells[0].value.shared_index().is_some(), "shared");
-        let attributes = &cells[0].attributes;
-        assert!(
-            attributes.contains(r#"foo="a&quot;b""#),
-            "attributes: {attributes}"
-        );
-    }
-}
+mod tests;

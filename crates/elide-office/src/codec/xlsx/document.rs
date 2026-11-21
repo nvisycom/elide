@@ -14,8 +14,8 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::TEXT_STREAM_ID;
 use super::stream::XlsxStream;
+use crate::codec::ooxml::props::DocProps;
 use crate::codec::ooxml::{BODY_STREAM_ID, OoxmlAddress, finish, part_replacements, replacements};
-use crate::codec::props::DocProps;
 use crate::opc::check::check;
 use crate::xlsx::{SheetFormat, Xlsx};
 

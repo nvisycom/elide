@@ -6,17 +6,35 @@
 //! names and extensions compare ASCII case-insensitively, as OPC requires.
 //! The manifest is read as [`package_xml`](super::package_xml) cuts it down
 //! to its OPC vocabulary, so it types every part the same before and after.
+//! The content types named in more than one place sit here too, lowercased
+//! as a part's content type is compared.
 
 use std::collections::{HashMap, HashSet};
 
 use elide_core::Result;
 
-use crate::opc::ct;
-use crate::opc::package_xml::{CONTENT_TYPES, Entry, EntryAttribute, entries, without_entries};
-use crate::opc::part::PartPath;
+use crate::opc::package::package_xml::{
+    CONTENT_TYPES, Entry, EntryAttribute, entries, without_entries,
+};
+use crate::opc::package::part::PartPath;
 
 /// The manifest's own part path.
 pub(crate) const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
+
+// The content types named in more than one place, lowercased as a part's
+// content type is compared.
+
+/// The prefix of every WordprocessingML content type.
+pub(crate) const WML: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
+/// The prefix of every PresentationML content type.
+pub(crate) const PML: &str = "application/vnd.openxmlformats-officedocument.presentationml.";
+/// The prefix of every SpreadsheetML content type.
+pub(crate) const SML: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
+/// The prefix of the DrawingML part content types (charts, SmartArt).
+pub(crate) const DML: &str = "application/vnd.openxmlformats-officedocument.drawingml.";
+
+/// A legacy VML drawing: XML that predates the `+xml` naming.
+pub(crate) const VML_DRAWING: &str = "application/vnd.openxmlformats-officedocument.vmldrawing";
 
 /// A part's content type, lowercased, as every content type compares ASCII
 /// case-insensitively.
@@ -42,7 +60,7 @@ impl ContentType {
 
     /// Whether this is the legacy VML drawing type.
     pub(crate) fn is_vml_drawing(&self) -> bool {
-        self.0 == ct::VML_DRAWING
+        self.0 == VML_DRAWING
     }
 }
 

@@ -9,8 +9,8 @@
 
 mod sanitize;
 
-use crate::ooxml::OoxmlFormat;
 use crate::opc::{PartClassifier, PartKind, PartRole, TextAttribute};
+use crate::text_package::OoxmlFormat;
 
 /// The PresentationML format seam: maps each kind of part to the neutral
 /// [`PartRole`] the engine acts on.
@@ -45,8 +45,8 @@ impl OoxmlFormat for SlideFormat {
 mod tests {
     use super::*;
     use crate::fixtures::{pack_typed, read_text_part};
-    use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
+    use crate::text_package::OoxmlPackage;
 
     /// The opened PPTX package under test.
     type Pptx = OoxmlPackage<SlideFormat>;

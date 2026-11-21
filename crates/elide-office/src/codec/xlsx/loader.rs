@@ -11,8 +11,8 @@ use super::document::XlsxDocument;
 use super::state::XlsxState;
 use super::stream::XlsxStream;
 use crate::codec::CodecIdentity;
+use crate::codec::ooxml::props::DocProps;
 use crate::codec::ooxml::{OoxmlAddresser, blobs, items, refuse_issues, sanitized};
-use crate::codec::props::DocProps;
 use crate::xlsx::{SheetFormat, Xlsx};
 
 /// A [`DocumentLoader`] that decodes an XLSX workbook into a [`Document`]: an

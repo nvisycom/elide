@@ -1,5 +1,6 @@
-//! [`OoxmlPackage`]: the shared facade a text-only OOXML format (WordprocessingML,
-//! PresentationML) opens over the [`opc`](crate::opc) engine.
+//! The text package: [`OoxmlPackage`], the shared facade a text-only OOXML
+//! format (WordprocessingML, PresentationML), whose text is element text,
+//! opens over the [`opc`](crate::opc) engine.
 //!
 //! DOCX and PPTX are the same document to the engine: a bag of parts whose text
 //! lives as element text (with no shared-string indirection), extracted and
