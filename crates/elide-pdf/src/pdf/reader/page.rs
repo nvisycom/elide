@@ -17,6 +17,9 @@ pub(crate) struct GlyphRect {
     pub(crate) chars: Range<usize>,
     /// The glyph's box in default user space, bottom-left origin.
     pub(crate) rect: DeviceRect,
+    /// Where the glyph is drawn from in default user space: the pen, raised
+    /// by the text rise (9.4.4).
+    pub(crate) origin: (f64, f64),
 }
 
 /// An axis-aligned box in device (page) space, as the glyph quad projects to.

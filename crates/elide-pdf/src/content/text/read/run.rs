@@ -225,6 +225,7 @@ impl TextRun<'_> {
                 self.rects.push(GlyphRect {
                     chars: char_start..char_end,
                     rect: DeviceRect::of_corners(corners),
+                    origin: self.cursor.device_point(ctm, 0.0, self.state.rise),
                 });
             }
 

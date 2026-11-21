@@ -46,15 +46,24 @@ fn leaves_codes(doc: &Document, font: &Dictionary) -> bool {
 type Reach = fn(&Document, &Dictionary, &Program) -> [Option<GlyphId>; 256];
 
 /// The glyph each code of the Type1 `font` reaches in `program`: by the name
-/// its encoding gives the code, else, where the font names no base encoding,
-/// through the program's built-in one.
+/// its encoding gives the code, which an OpenType program that names the
+/// glyph otherwise reaches through its Unicode `cmap`, as PDFium reads it;
+/// else, where the font names no base encoding, through the program's
+/// built-in one.
 fn type1_glyphs(doc: &Document, font: &Dictionary, program: &Program) -> [Option<GlyphId>; 256] {
     let encoding = Encoding::of(doc, font);
     let base = encoding.base();
     let mut names = base.map_or([None; 256], BaseEncoding::names);
     encoding.apply(doc, &mut names);
+    let unicode = program.cmaps(|table| table.kind() == EncodingKind::Unicode);
+    let by_unicode = |name: &str| {
+        let char = encoding::unicode(name)?;
+        unicode
+            .iter()
+            .find_map(|&table| program.glyph(table, u32::from(char)))
+    };
     array::from_fn(|code| match names[code] {
-        Some(name) => program.by_name(name),
+        Some(name) => program.by_name(name).or_else(|| by_unicode(name)),
         None if base.is_none() => program.built_in(code as u8).flatten(),
         None => None,
     })
@@ -457,6 +466,22 @@ mod tests {
         let widths = type1c(&program, dictionary! { "Encoding" => "WinAnsiEncoding" }).unwrap();
         assert_eq!(widths[0x42], 600.0, "B, by name");
         assert_eq!(widths[0x43], 250.0, "C: no glyph");
+    }
+
+    /// A Type1 font with an OpenType program reaches a glyph its encoding
+    /// names that the program calls otherwise through the program's Unicode
+    /// `cmap`.
+    #[test]
+    fn an_opentype_program_reads_an_unnamed_glyph_by_unicode() {
+        let program = Sfnt::new(1000, &[(".notdef", 250), ("two.sups", 360), ("A", 600)])
+            .cmap(3, 1, 0x41, &[2])
+            .cmap(3, 1, 0xB2, &[1]);
+        let mut doc = Document::with_version("1.7");
+        let mut font = embedding(&mut doc, "Type1", FontFile::OpenType, program.build(), 32);
+        font.set("Encoding", "WinAnsiEncoding");
+        let widths = embedded_widths(&doc, &font).unwrap();
+        assert_eq!(widths[0xB2], 360.0, "twosuperior, by U+00B2");
+        assert_eq!(widths[0x41], 600.0, "A, by name");
     }
 
     /// A Type1 font with a Type 1 program reaches a code its encoding names

@@ -456,6 +456,7 @@ impl<'d> Walk<'_, 'd> {
                         Some(GlyphRect {
                             chars: glyph.chars.clone(),
                             rect: covered(glyph.rect.mapped(tile.transform), &tile.coverage)?,
+                            origin: tile.transform.apply(glyph.origin.0, glyph.origin.1),
                         })
                     }));
             }
