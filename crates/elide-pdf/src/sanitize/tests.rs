@@ -989,6 +989,52 @@ fn a_to_unicode_cmap_maps_to_readable_text() {
     );
 }
 
+/// A symbol font's `/ToUnicode` is written with the text the reader reads:
+/// a symbolic font's space as a space, a code the Symbol face draws as its
+/// glyph's text; a font that isn't symbolic keeps the symbol range as it is.
+#[test]
+fn a_symbol_fonts_text_is_written_as_read() {
+    let written = |base_font: &str, flags: i64| {
+        let mut pdf = DocBuilder::new();
+        let map = pdf.add(Stream::new(
+            Dictionary::new(),
+            to_unicode(&["<20> <F020>", "<6D> <F06D>"]),
+        ));
+        let font = pdf.add(dictionary! {
+            "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => base_font,
+            "FontDescriptor" => dictionary! { "Type" => "FontDescriptor", "Flags" => flags },
+            "ToUnicode" => map,
+        });
+        pdf.page(Page::new().font("F1", font).ops(shown(" m")).size(100, 100));
+        let (doc, _) = pdf.finish();
+        let (out, _) = rebuilt(&doc);
+        let pdf = Pdf::open(&saved(&doc).0).unwrap();
+        let text = pdf.read(Text).unwrap()[0].text.clone();
+        let font = out
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find(|dict| dict.has(b"ToUnicode"))
+            .unwrap();
+        let cmap = out.resolve(font.get(b"ToUnicode").unwrap()).unwrap();
+        let cmap =
+            String::from_utf8_lossy(&cmap.as_stream().unwrap().decompressed_content().unwrap())
+                .into_owned();
+        (text, cmap)
+    };
+    let (text, cmap) = written("SymbolMT", 4);
+    assert!(text.contains(" \u{B5}"), "{text:?}");
+    assert!(
+        cmap.contains("<20> <0020>") && cmap.contains("<6D> <00B5>"),
+        "{cmap}"
+    );
+    let (_, cmap) = written("Icons", 32);
+    assert!(
+        cmap.contains("<20> <F020>") && cmap.contains("<6D> <F06D>"),
+        "{cmap}"
+    );
+}
+
 /// A `/ToUnicode` CMap mapping one-byte codes by the `bfchar` entries
 /// `entries`.
 fn to_unicode(entries: &[&str]) -> Vec<u8> {

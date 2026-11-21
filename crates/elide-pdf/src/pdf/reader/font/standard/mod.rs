@@ -25,8 +25,8 @@ use std::sync::OnceLock;
 use lopdf::{Dictionary, Document, Object, dictionary};
 
 use super::encoding::{self, BaseEncoding, Encoding, GlyphNames, NONSYMBOLIC, SYMBOLIC};
-use super::subset_free;
-use crate::pdf::reader::{DictionaryExt, DocumentExt};
+use super::{font_file, subset_free};
+use crate::pdf::reader::DictionaryExt;
 
 /// One of the 14 standard faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +146,9 @@ impl Face {
             | b"Times,BoldItalic"
             | b"TimesNewRoman,BoldItalic"
             | b"TimesNewRomanPS-BoldItalicMT" => Face::TimesBoldItalic,
-            b"Symbol" | b"Symbol,Bold" | b"Symbol,Italic" | b"Symbol,BoldItalic" => Face::Symbol,
+            b"Symbol" | b"SymbolMT" | b"Symbol,Bold" | b"Symbol,Italic" | b"Symbol,BoldItalic" => {
+                Face::Symbol
+            }
             b"ZapfDingbats" => Face::ZapfDingbats,
             _ => return None,
         })
@@ -240,6 +242,22 @@ pub(crate) struct Standard {
     face: Face,
 }
 
+/// Whether `base_font` names the Symbol face, as a font with a program of
+/// its own may (Windows' `SymbolMT`).
+pub(crate) fn names_symbol(base_font: &[u8]) -> bool {
+    Face::named(base_font) == Some(Face::Symbol)
+}
+
+/// The text each code of the Symbol face stands for through its built-in
+/// encoding, `None` for a code whose glyph spells none.
+pub(crate) fn symbol_text() -> &'static [Option<String>; 256] {
+    static TEXT: OnceLock<[Option<String>; 256]> = OnceLock::new();
+    TEXT.get_or_init(|| {
+        let names = Face::Symbol.metrics().built_in;
+        array::from_fn(|code| encoding::text(names[code]?, false))
+    })
+}
+
 impl Standard {
     /// The standard face `font` names, when it is a Type1 or TrueType font
     /// that embeds no font program.
@@ -247,16 +265,7 @@ impl Standard {
         if !matches!(font.name(doc, b"Subtype"), Some(b"Type1" | b"TrueType")) {
             return None;
         }
-        let embeds = font
-            .get(b"FontDescriptor")
-            .ok()
-            .and_then(|descriptor| doc.resolve_dict(descriptor))
-            .is_some_and(|descriptor| {
-                [b"FontFile".as_slice(), b"FontFile2", b"FontFile3"]
-                    .iter()
-                    .any(|key| descriptor.has(key))
-            });
-        if embeds {
+        if font_file(doc, font).is_some() {
             return None;
         }
         let face = Face::named(font.name(doc, b"BaseFont")?)?;
@@ -361,9 +370,10 @@ fn glyph_names<'a>(doc: &'a Document, font: &'a Dictionary, face: Face) -> Glyph
 /// The base encoding `font` in `face` reads by when it names none it can: a
 /// symbolic face's built-in one; else, by its font descriptor's flags, the
 /// standard encoding (the face's built-in one) for a Type1 font or one flagged
-/// nonsymbolic, `WinAnsiEncoding` for a TrueType font flagged neither way, as
-/// PDFium and pdf.js read it, and the Mac OS Roman encoding for a TrueType
-/// font flagged symbolic only, as the spec reads it (9.6.5.4).
+/// nonsymbolic, `WinAnsiEncoding` for a TrueType font flagged neither way,
+/// which the spec leaves open and renderers read unlike (PDFium through its
+/// substitute font's own `cmap`), and the Mac OS Roman encoding for a
+/// TrueType font flagged symbolic only, as the spec reads it (9.6.5.4).
 fn default_encoding(doc: &Document, font: &Dictionary, face: Face) -> GlyphNames<'static> {
     let built_in = face.metrics().built_in;
     if face.is_symbolic() || !font.is_subtype(doc, b"TrueType") {
@@ -381,7 +391,7 @@ fn default_encoding(doc: &Document, font: &Dictionary, face: Face) -> GlyphNames
 
 #[cfg(test)]
 mod tests {
-    use lopdf::dictionary;
+    use lopdf::{Stream, dictionary};
 
     use super::*;
 
@@ -657,17 +667,21 @@ mod tests {
     }
 
     /// A font that embeds its program, or isn't a Type1 or TrueType font,
-    /// isn't given the standard metrics.
+    /// isn't given the standard metrics; one whose font file is null (as an
+    /// absent one, 7.3.9) embeds none.
     #[test]
     fn embedded_and_other_fonts_are_not_standard() {
-        let doc = Document::with_version("1.4");
-        let descriptor = dictionary! { "FontFile2" => Object::Null };
-        let embedded = font(
-            "TrueType",
-            "Arial",
-            dictionary! { "FontDescriptor" => descriptor },
-        );
-        assert!(Standard::of(&doc, &embedded).is_none());
+        let mut doc = Document::with_version("1.4");
+        let program = doc.add_object(Stream::new(Dictionary::new(), vec![0; 4]));
+        let embedding = |file: Object| {
+            font(
+                "TrueType",
+                "Arial",
+                dictionary! { "FontDescriptor" => dictionary! { "FontFile2" => file } },
+            )
+        };
+        assert!(Standard::of(&doc, &embedding(Object::Reference(program))).is_none());
+        assert!(Standard::of(&doc, &embedding(Object::Null)).is_some());
         let type3 = font("Type3", "Helvetica", Dictionary::new());
         assert!(Standard::of(&doc, &type3).is_none());
         let plain = font(

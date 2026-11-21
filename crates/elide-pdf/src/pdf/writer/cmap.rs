@@ -17,7 +17,7 @@ use std::fmt::Write;
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Encoding, Object, ObjectId, Stream};
 
-use crate::pdf::reader::font::{readable, to_unicode};
+use crate::pdf::reader::font::{SymbolText, readable, to_unicode};
 
 /// The most UTF-16 units a CMap's destinations hold together, so the map
 /// held while a CMap is written, and the CMap written, stay bounded.
@@ -80,19 +80,19 @@ impl UnicodeMap {
         Ok(Some(Self { codes }))
     }
 
-    /// Each destination written as [`readable`] text; one that is not UTF-16
-    /// stays as it is.
+    /// Each destination written as [`readable`] text, in a font whose symbol
+    /// range reads as `symbol` says; one that is not UTF-16 stays as it is.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the destinations, so written, hold more than [`MAX_UNITS`] UTF-16
     /// units together, so the map written would not be read again.
-    pub(crate) fn readable(mut self) -> Result<Self> {
+    pub(crate) fn readable(mut self, symbol: SymbolText) -> Result<Self> {
         let mut units_left = MAX_UNITS;
         for units in self.codes.values_mut() {
             if let Ok(text) = String::from_utf16(units) {
-                let written = readable(&text);
+                let written = readable(&symbol.read(&text));
                 if written != text {
                     *units = written.encode_utf16().collect();
                 }
@@ -387,7 +387,7 @@ mod tests {
     /// ideograph, a ligature as its letters.
     #[test]
     fn destinations_are_written_as_readable_text() {
-        let map = read(&source()).readable().unwrap();
+        let map = read(&source()).readable(SymbolText::Plain).unwrap();
         assert_eq!(text(&map, 2, 0x20).as_deref(), Some("山"));
         assert_eq!(text(&map, 2, 0x04).as_deref(), Some("fi"));
         assert_eq!(read(&map.write()), map);
@@ -472,7 +472,7 @@ mod tests {
         let map = read(&cmap(&format!(
             "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n{sections}"
         )));
-        let error = map.readable().unwrap_err();
+        let error = map.readable(SymbolText::Plain).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
 

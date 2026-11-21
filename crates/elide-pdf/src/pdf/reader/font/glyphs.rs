@@ -9,6 +9,7 @@
 //! glyph's text is what a viewer copies: its code's `/ToUnicode` mapping, else
 //! its encoding's character (9.10.2).
 
+use std::borrow::Cow;
 use std::{array, iter};
 
 use elide_core::{Error, ErrorKind, Result};
@@ -18,6 +19,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::cmap::{Codespace, mapped_codes};
 use super::encoding::{self, BaseEncoding, NONSYMBOLIC, SYMBOLIC};
+use super::standard::{names_symbol, symbol_text};
 use super::{Standard, descendant, subset_free};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 
@@ -73,6 +75,68 @@ pub(crate) fn readable(text: &str) -> String {
     out
 }
 
+/// How a font's text in the symbol range reads, which a font's own
+/// `/ToUnicode` may map its glyphs into: a symbol font's code `c` is the
+/// character `U+F000 + c` in its Windows `cmap` (9.6.5.4), and a producer may
+/// map a glyph to that rather than its text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SymbolText {
+    /// A font that is not symbolic: its text as written.
+    Plain,
+    /// A symbolic font: `U+F020`, its code 0x20, is a space, so reads as
+    /// one, or `Jane Roe` reads as one word.
+    Symbolic,
+    /// A font naming the Symbol face: as [`Symbolic`](Self::Symbolic), and
+    /// `U+F000 + c` reads as the text of the face's glyph at code `c`.
+    Symbol,
+}
+
+impl SymbolText {
+    /// How `font`'s text in the symbol range reads: by whether it names the
+    /// Symbol face, else whether its descriptor (a composite font's
+    /// descendant's) flags it symbolic only.
+    pub(crate) fn of(doc: &Document, font: &Dictionary) -> Self {
+        let descendant = font
+            .is_subtype(doc, b"Type0")
+            .then(|| descendant(doc, font))
+            .flatten();
+        let base_font = |font: &Dictionary| font.name(doc, b"BaseFont").map(<[u8]>::to_vec);
+        let names = base_font(font)
+            .into_iter()
+            .chain(descendant.and_then(base_font));
+        if names.into_iter().any(|name| names_symbol(&name)) {
+            return Self::Symbol;
+        }
+        let flags = encoding::flags(doc, descendant.unwrap_or(font));
+        if flags & SYMBOLIC != 0 && flags & NONSYMBOLIC == 0 {
+            Self::Symbolic
+        } else {
+            Self::Plain
+        }
+    }
+
+    /// `text` as it reads in such a font.
+    pub(crate) fn read<'t>(self, text: &'t str) -> Cow<'t, str> {
+        let symbol_range = |c: char| (0xF020..=0xF0FF).contains(&u32::from(c));
+        if self == Self::Plain || !text.chars().any(symbol_range) {
+            return Cow::Borrowed(text);
+        }
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            let code = u32::from(c).wrapping_sub(0xF000) as usize;
+            match c {
+                '\u{F020}' => out.push(' '),
+                _ if self == Self::Symbol && symbol_range(c) => match &symbol_text()[code] {
+                    Some(text) => out.push_str(text),
+                    None => out.push(c),
+                },
+                _ => out.push(c),
+            }
+        }
+        Cow::Owned(out)
+    }
+}
+
 /// The most UTF-16 units a CMap destination holds (9.10.3).
 const MAX_DESTINATION_UNITS: usize = 256;
 
@@ -92,6 +156,8 @@ pub(crate) struct Simple {
     /// text can't be known.
     codes: Box<[Option<String>; 256]>,
     to_unicode: Option<Encoding<'static>>,
+    /// How its text in the symbol range reads.
+    symbol: SymbolText,
 }
 
 /// How a composite (Type0) font's codes read: split by its encoding CMap,
@@ -111,6 +177,8 @@ pub(crate) struct Composite {
     /// The text of each CID in the font's character collection (Adobe's
     /// `-UCS2` CMap for it), when the collection has one.
     collection: Option<CMap>,
+    /// How its text in the symbol range reads.
+    symbol: SymbolText,
 }
 
 impl FontText {
@@ -126,6 +194,7 @@ impl FontText {
             Some(Object::Stream(stream)) => to_unicode(doc, stream)?,
             _ => None,
         };
+        let symbol = SymbolText::of(doc, font);
         if font.is_subtype(doc, b"Type0") {
             let unicode = font.name(doc, b"Encoding").is_some_and(is_unicode_cmap);
             let Some((encoding, codespace)) = encoding_cmap(doc, font)? else {
@@ -138,6 +207,7 @@ impl FontText {
                 to_unicode,
                 unicode,
                 collection,
+                symbol,
             }))));
         }
         // A composite encoding is no simple font's.
@@ -157,7 +227,11 @@ impl FontText {
             ),
             None => encoded_text(doc, font),
         };
-        Ok(Some(Self::Simple(Box::new(Simple { codes, to_unicode }))))
+        Ok(Some(Self::Simple(Box::new(Simple {
+            codes,
+            to_unicode,
+            symbol,
+        }))))
     }
 }
 
@@ -345,19 +419,20 @@ pub(crate) fn to_unicode(doc: &Document, stream: &Stream) -> Result<Option<Encod
     }
 }
 
-/// The text of a glyph whose code maps to the UTF-16 `units`.
+/// The text of a glyph whose code maps to the UTF-16 `units`, in a font
+/// whose text in the symbol range reads as `symbol` says.
 ///
 /// Fails closed on units that are not UTF-16 (an unpaired surrogate): a lossy
 /// `�` would misrepresent the source text and could make a PII character
 /// undetectable.
-fn mapped_text(units: &[u16]) -> Result<String> {
+fn mapped_text(units: &[u16], symbol: SymbolText) -> Result<String> {
     let decoded = String::from_utf16(units).map_err(|_| {
         Error::redaction(
             "text drawn with a code whose CMap mapping is not valid UTF-16; \
              its glyph cannot be reliably decoded for redaction",
         )
     })?;
-    Ok(readable(&decoded))
+    Ok(readable(&symbol.read(&decoded)))
 }
 
 /// Split `bytes` into glyphs under `font`.
@@ -377,6 +452,7 @@ pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>>
                 to_unicode,
                 unicode,
                 collection,
+                symbol,
             } = &**composite;
             let number = |code: &[u8]| code.iter().fold(0, |code, &b| code << 8 | u32::from(b));
             // A code is as long as the codespace range it falls in, mapped to
@@ -434,7 +510,7 @@ pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>>
                     byte_end: i + len,
                     code,
                     width_key: cid,
-                    text: mapped_text(&units)?,
+                    text: mapped_text(&units, *symbol)?,
                 });
                 i += len;
             }
@@ -444,7 +520,11 @@ pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>>
         // maps the byte, else the encoding; a byte neither decodes is likewise
         // an unmatchable glyph.
         FontText::Simple(simple) => {
-            let Simple { codes, to_unicode } = &**simple;
+            let Simple {
+                codes,
+                to_unicode,
+                symbol,
+            } = &**simple;
             bytes
                 .iter()
                 .enumerate()
@@ -454,7 +534,7 @@ pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>>
                         _ => None,
                     };
                     let text = match mapped {
-                        Some(units) => mapped_text(&units)?,
+                        Some(units) => mapped_text(&units, *symbol)?,
                         None => {
                             codes[usize::from(b)]
                                 .as_deref()
@@ -560,6 +640,43 @@ mod tests {
             .map(|glyph| (glyph.text.as_str(), glyph.code, glyph.width_key))
             .collect();
         assert_eq!(read, [("J", 0x41, 34), ("a", 0x8140, 0)]);
+    }
+
+    /// The text a simple font named `base_font`, its descriptor flagged
+    /// `flags`, reads `bytes` as, its `/ToUnicode` mapping `<20>` to `U+F020`
+    /// and `<6D>` to `U+F06D`, as a producer maps a symbol font's codes.
+    fn symbol_mapped(base_font: &str, flags: i64, bytes: &[u8]) -> Vec<String> {
+        let mut doc = Document::with_version("1.7");
+        let map = to_unicode_cmap(&["<00> <FF>"], &["<20> <F020>", "<6D> <F06D>"], &[]);
+        let font = dictionary! {
+            "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => base_font,
+            "FontDescriptor" => dictionary! { "Type" => "FontDescriptor", "Flags" => flags },
+            "ToUnicode" => doc.add_object(Stream::new(dictionary! {}, map)),
+        };
+        let text = FontText::of(&doc, &font).unwrap().unwrap();
+        decode_glyphs(&text, bytes)
+            .unwrap()
+            .into_iter()
+            .map(|glyph| glyph.text)
+            .collect()
+    }
+
+    /// A symbolic font's space reads as a space, and a code the Symbol face
+    /// draws, mapped into the symbol range, as its glyph's text in a font
+    /// naming the face; a font that isn't symbolic reads them as written.
+    #[test]
+    fn a_symbol_font_code_reads_as_its_text() {
+        assert_eq!(
+            symbol_mapped("ABCDEF+SymbolMT", 4, b" m"),
+            [" ", "\u{B5}"],
+            "mu"
+        );
+        assert_eq!(symbol_mapped("Wingdings", 4, b" m"), [" ", "\u{F06D}"]);
+        assert_eq!(
+            symbol_mapped("Icons", 32, b" m"),
+            ["\u{F020}", "\u{F06D}"],
+            "nonsymbolic"
+        );
     }
 
     /// An encoding whose base CMap is a stream (`/UseCMap`) is not followed,

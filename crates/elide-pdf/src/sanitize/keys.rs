@@ -3,6 +3,8 @@
 
 use lopdf::Object;
 
+use crate::pdf::reader::font::SymbolText;
+
 /// The kind of a value being copied, which decides the keys it keeps and how
 /// its children are copied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,8 +34,9 @@ pub(super) enum Kind {
     /// A CMap stream (a Type0 font's encoding, a `/UseCMap` base), or its
     /// name.
     CMap,
-    /// A font's `/ToUnicode` CMap stream: the text a viewer copies.
-    ToUnicode,
+    /// A font's `/ToUnicode` CMap stream: the text a viewer copies, its
+    /// destinations in the symbol range read as the font reads them.
+    ToUnicode(SymbolText),
     /// Opaque data, a stream or (an Indexed colour space's palette) a
     /// string: a palette, a CID set, a CID-to-glyph map, global JBIG2
     /// segments.
@@ -106,7 +109,7 @@ impl Kind {
                     | Kind::Label
                     | Kind::Encoding
                     | Kind::CMap
-                    | Kind::ToUnicode
+                    | Kind::ToUnicode(_)
                     | Kind::SoftMask
                     | Kind::ColorSpace
                     | Kind::Function
@@ -125,8 +128,7 @@ pub(super) const FUNCTIONS: Kind = Kind::Map(&Kind::Function);
 
 use Kind::{
     Associated, CMap, CidFont, CidSystemInfo, ColorSpace, Data, DecodeParms, Encoding, FileParams,
-    FontDescriptor, FontProgram, FontStyle, Form, Function, Image, Label, Mask, SoftMask,
-    ToUnicode, Value,
+    FontDescriptor, FontProgram, FontStyle, Form, Function, Image, Label, Mask, SoftMask, Value,
 };
 
 /// The keys every stream keeps beside its own: how its data is encoded. The
@@ -199,7 +201,7 @@ pub(super) fn fields(kind: Kind) -> Option<&'static [(&'static [u8], Kind)]> {
             (b"Length3", Value),
         ],
         Kind::CMap => CMAP,
-        Kind::ToUnicode => TO_UNICODE,
+        Kind::ToUnicode(_) => TO_UNICODE,
         Kind::Data => &[],
         Kind::Image => &[
             (b"Type", Value),
@@ -382,7 +384,6 @@ pub(super) const FONT: &[(&[u8], Kind)] = &[
     (b"Widths", Value),
     (b"FontDescriptor", FontDescriptor),
     (b"Encoding", Encoding),
-    (b"ToUnicode", ToUnicode),
     (b"DescendantFonts", CidFont),
     (b"FontBBox", Value),
     (b"FontMatrix", Value),

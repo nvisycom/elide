@@ -8,13 +8,25 @@ mod program;
 mod standard;
 mod widths;
 
-use lopdf::{Dictionary, Document};
+use lopdf::{Dictionary, Document, Stream};
 
-pub(crate) use self::glyphs::{FontText, Glyph, decode_glyphs, readable, to_unicode};
+pub(crate) use self::glyphs::{FontText, Glyph, SymbolText, decode_glyphs, readable, to_unicode};
 pub(crate) use self::program::Program;
 pub(crate) use self::standard::Standard;
 pub(crate) use self::widths::{GlyphMetrics, WidthSource, has_own_widths};
 use super::DocumentExt;
+
+/// The keys a font descriptor holds an embedded program under (9.9).
+const FONT_FILES: [&[u8]; 3] = [b"FontFile", b"FontFile2", b"FontFile3"];
+
+/// The program `font`'s descriptor embeds: the stream under one of its
+/// font file keys (9.9).
+pub(crate) fn font_file<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Stream> {
+    let descriptor = doc.resolve_dict(font.get(b"FontDescriptor").ok()?)?;
+    FONT_FILES
+        .iter()
+        .find_map(|key| doc.resolve(descriptor.get(key).ok()?)?.as_stream().ok())
+}
 
 /// The descendant CIDFont of the composite `font`: the one font its
 /// `/DescendantFonts` array holds (9.7.6.1).

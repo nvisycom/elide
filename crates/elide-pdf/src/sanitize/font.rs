@@ -9,7 +9,7 @@ use lopdf::{Dictionary, Object, dictionary};
 use super::copy::At;
 use super::keys::{FONT, Kind};
 use super::{Builder, VALUE_COST};
-use crate::pdf::reader::font::{Program, Standard, has_own_widths};
+use crate::pdf::reader::font::{Program, Standard, SymbolText, has_own_widths};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 use crate::pdf::writer::compressed;
 
@@ -28,13 +28,20 @@ impl<'a> Builder<'a> {
         let subtype = dict.name(self.source, b"Subtype");
         let standard = Standard::of(source, dict);
         let handled: &[&[u8]] = match subtype {
-            Some(b"Type3") => &[b"CharProcs", b"Resources"],
-            Some(b"Type0") => &[b"Encoding"],
+            Some(b"Type3") => &[b"CharProcs", b"Resources", b"ToUnicode"],
+            Some(b"Type0") => &[b"Encoding", b"ToUnicode"],
             // A pinned font's descriptor is its own (see `pin`).
-            _ if standard.is_some() => &[b"FontDescriptor"],
-            _ => &[],
+            _ if standard.is_some() => &[b"FontDescriptor", b"ToUnicode"],
+            _ => &[b"ToUnicode"],
         };
         let mut out = self.keys(dict, FONT, handled, at)?;
+        // The text a viewer copies is written as the reader reads the font's.
+        if let Ok(map) = dict.get(b"ToUnicode") {
+            let kind = Kind::ToUnicode(SymbolText::of(source, dict));
+            if let Some(map) = self.copy(kind, map, at.deeper())? {
+                out.set("ToUnicode", map);
+            }
+        }
         if subtype == Some(b"Type0") {
             if let Ok(encoding) = dict.get(b"Encoding")
                 && let Some(encoding) = self.copy(Kind::CMap, encoding, at.deeper())?

@@ -28,11 +28,8 @@ use read_fonts::ps::cff::CffFontRef;
 use read_fonts::types::{GlyphId, Tag};
 
 use super::encoding::{self, BaseEncoding, Encoding, NONSYMBOLIC, SYMBOLIC};
-use super::has_own_widths;
-use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
-
-/// The keys a font descriptor holds an embedded program under (9.9).
-const FONT_FILES: [&[u8]; 3] = [b"FontFile", b"FontFile2", b"FontFile3"];
+use super::{font_file, has_own_widths};
+use crate::pdf::reader::{DictionaryExt, StreamExt};
 
 /// Whether the simple `font` is a Type1 font whose encoding names no base,
 /// so leaves the codes its `/Differences` doesn't name to its program's
@@ -151,16 +148,7 @@ impl Program {
         font: &Dictionary,
         limit: usize,
     ) -> Result<Option<Self>> {
-        let Some(stream) = font
-            .get(b"FontDescriptor")
-            .ok()
-            .and_then(|descriptor| doc.resolve_dict(descriptor))
-            .and_then(|descriptor| {
-                FONT_FILES
-                    .iter()
-                    .find_map(|key| doc.resolve(descriptor.get(key).ok()?)?.as_stream().ok())
-            })
-        else {
+        let Some(stream) = font_file(doc, font) else {
             return Ok(None);
         };
         let data = match stream.decoded_within(limit) {

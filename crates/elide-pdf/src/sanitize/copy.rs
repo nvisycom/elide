@@ -10,6 +10,7 @@ use lopdf::{Dictionary, Object, ObjectId, Stream};
 use super::keys::{self, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
 use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST};
 use crate::content::image;
+use crate::pdf::reader::font::SymbolText;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 use crate::pdf::writer::{UnicodeMap, compressed};
 
@@ -257,7 +258,9 @@ impl<'a> Builder<'a> {
             (Kind::Form, Object::Stream(stream)) => self.form(stream, FORM, at),
             (Kind::Pattern, _) => self.pattern(value, at),
             (Kind::FileSpec, Object::Dictionary(dict)) => self.file_spec(dict),
-            (Kind::ToUnicode, Object::Stream(stream)) => self.unicode_map(stream, at),
+            (Kind::ToUnicode(symbol), Object::Stream(stream)) => {
+                self.unicode_map(stream, symbol, at)
+            }
             (Kind::Image | Kind::Mask, Object::Stream(stream))
                 if !image::is_surfaceable(self.source, stream) =>
             {
@@ -466,8 +469,9 @@ impl<'a> Builder<'a> {
 
     /// A `/ToUnicode` CMap `stream` written anew from what lopdf, which
     /// detection decodes text with, reads of it, its destinations written as
-    /// the text detection reads; dropped as unreadable when lopdf can't read
-    /// it, so a viewer reads no text detection did not.
+    /// the text detection reads in a font whose symbol range reads as
+    /// `symbol` says; dropped as unreadable when lopdf can't read it, so a
+    /// viewer reads no text detection did not.
     ///
     /// # Errors
     ///
@@ -475,7 +479,12 @@ impl<'a> Builder<'a> {
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the CMaps written across the document take more than
     /// [`MAX_CONTENT_BYTES`](crate::pdf::reader::MAX_CONTENT_BYTES).
-    fn unicode_map<'s>(&mut self, stream: &'s Stream, at: At<'_, 's>) -> Result<Option<Object>>
+    fn unicode_map<'s>(
+        &mut self,
+        stream: &'s Stream,
+        symbol: SymbolText,
+        at: At<'_, 's>,
+    ) -> Result<Option<Object>>
     where
         'a: 's,
     {
@@ -483,7 +492,7 @@ impl<'a> Builder<'a> {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
         };
-        let content = map.readable()?.write();
+        let content = map.readable(symbol)?.write();
         self.cmap_budget = self
             .cmap_budget
             .checked_sub(content.len())
