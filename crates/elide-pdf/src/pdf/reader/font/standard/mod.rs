@@ -2,7 +2,8 @@
 //! reader supplies for a simple font that names one and embeds no font
 //! program.
 //!
-//! The metrics are Adobe's Core14 AFM files (`assets/afm`). A font's codes
+//! The metrics are those of Adobe's Core14 AFM files, generated into
+//! [`metrics`] by `scripts/pdf/gen-metrics.mjs`. A font's codes
 //! reach its glyphs by name: its encoding names the glyph each code selects
 //! (9.6.5), and the AFM gives each glyph name its width. A font may name a
 //! face by an alternative name (`Arial`, `TimesNewRoman,Bold`, `CourierNew`),
@@ -17,9 +18,54 @@
 //! where they differ, the spec's reading is. Every glyph is as wide as its AFM
 //! says, and a code that selects no glyph the face has is 0 wide.
 
+/// A face's [`Metrics`] from what [`metrics`] lists of it: its name, its
+/// header values (a symbolic face declares no cap height, ascender or
+/// descender), and each glyph as `name code width`, in byte order of name,
+/// its code -1 where the built-in encoding gives it none.
+macro_rules! face {
+    (
+        $name:literal,
+        $(cap_height: $cap_height:literal,)?
+        $(ascender: $ascender:literal,)?
+        $(descender: $descender:literal,)?
+        bbox: [$($corner:literal),*],
+        italic_angle: $italic_angle:literal,
+        stem_v: $stem_v:literal,
+        glyphs: [$($glyph:ident $code:literal $width:literal,)*]
+    ) => {
+        Metrics {
+            #[cfg(test)]
+            name: $name,
+            built_in: {
+                let mut names = [None; 256];
+                $(
+                    let code: i16 = $code;
+                    if code >= 0 {
+                        names[code as usize] = Some(stringify!($glyph));
+                    }
+                )*
+                names
+            },
+            widths: &[$((stringify!($glyph), $width as f64)),*],
+            cap_height: face!(@optional $($cap_height)?),
+            ascender: face!(@optional $($ascender)?),
+            descender: face!(@optional $($descender)?),
+            bbox: [$($corner as f64),*],
+            italic_angle: $italic_angle as f64,
+            stem_v: $stem_v as f64,
+        }
+    };
+    (@optional) => {
+        None
+    };
+    (@optional $value:literal) => {
+        Some($value as f64)
+    };
+}
+
+mod metrics;
+
 use std::array;
-use std::collections::HashMap;
-use std::str::SplitWhitespace;
 use std::sync::OnceLock;
 
 use lopdf::{Dictionary, Document, Object, dictionary};
@@ -48,7 +94,8 @@ enum Face {
 }
 
 impl Face {
-    /// Every face, in declaration order (each one's index into the cache).
+    /// Every face, in declaration order (each one's index into
+    /// [`metrics::FACES`]).
     #[cfg(test)]
     const ALL: [Face; 14] = [
         Face::Courier,
@@ -67,44 +114,15 @@ impl Face {
         Face::ZapfDingbats,
     ];
 
-    /// The face's AFM file.
-    fn afm(self) -> &'static str {
-        match self {
-            Face::Courier => include_str!("../../../../../assets/afm/Courier.afm"),
-            Face::CourierBold => include_str!("../../../../../assets/afm/Courier-Bold.afm"),
-            Face::CourierOblique => include_str!("../../../../../assets/afm/Courier-Oblique.afm"),
-            Face::CourierBoldOblique => {
-                include_str!("../../../../../assets/afm/Courier-BoldOblique.afm")
-            }
-            Face::Helvetica => include_str!("../../../../../assets/afm/Helvetica.afm"),
-            Face::HelveticaBold => include_str!("../../../../../assets/afm/Helvetica-Bold.afm"),
-            Face::HelveticaOblique => {
-                include_str!("../../../../../assets/afm/Helvetica-Oblique.afm")
-            }
-            Face::HelveticaBoldOblique => {
-                include_str!("../../../../../assets/afm/Helvetica-BoldOblique.afm")
-            }
-            Face::TimesRoman => include_str!("../../../../../assets/afm/Times-Roman.afm"),
-            Face::TimesBold => include_str!("../../../../../assets/afm/Times-Bold.afm"),
-            Face::TimesItalic => include_str!("../../../../../assets/afm/Times-Italic.afm"),
-            Face::TimesBoldItalic => {
-                include_str!("../../../../../assets/afm/Times-BoldItalic.afm")
-            }
-            Face::Symbol => include_str!("../../../../../assets/afm/Symbol.afm"),
-            Face::ZapfDingbats => include_str!("../../../../../assets/afm/ZapfDingbats.afm"),
-        }
-    }
-
     /// Whether the face is Symbol or ZapfDingbats, whose glyphs no Latin
     /// encoding names.
     fn is_symbolic(self) -> bool {
         matches!(self, Face::Symbol | Face::ZapfDingbats)
     }
 
-    /// The face's metrics, read from its AFM on first use.
+    /// The face's metrics.
     fn metrics(self) -> &'static Metrics {
-        static FACES: [OnceLock<Metrics>; 14] = [const { OnceLock::new() }; 14];
-        FACES[self as usize].get_or_init(|| Metrics::parse(self.afm()))
+        &metrics::FACES[self as usize]
     }
 
     /// The face a `/BaseFont` names, by its own name or an alias. A subset
@@ -159,10 +177,13 @@ impl Face {
 /// its vertical extent, in thousandths of an em.
 #[derive(Debug)]
 struct Metrics {
+    /// The face's `FontName`, which tests check it is listed under.
+    #[cfg(test)]
+    name: &'static str,
     /// The glyph each code selects under the face's built-in encoding.
     built_in: GlyphNames<'static>,
-    /// Each glyph's advance width.
-    widths: HashMap<&'static str, f64>,
+    /// Each glyph's advance width, by glyph name in byte order.
+    widths: &'static [(&'static str, f64)],
     cap_height: Option<f64>,
     ascender: Option<f64>,
     descender: Option<f64>,
@@ -174,64 +195,13 @@ struct Metrics {
 }
 
 impl Metrics {
-    /// Read the AFM `afm`: each character metrics line (`C code ; WX width ;
-    /// N name ; …`), and the `CapHeight`, `Ascender` and `Descender`
-    /// header keys. Kerning and bounding boxes are not read.
-    fn parse(afm: &'static str) -> Metrics {
-        let mut built_in = [None; 256];
-        let mut widths = HashMap::new();
-        let (mut cap_height, mut ascender, mut descender) = (None, None, None);
-        let (mut bbox, mut italic_angle, mut stem_v) = ([0.0; 4], 0.0, 0.0);
-        for line in afm.lines() {
-            if let Some(fields) = line.strip_prefix("C ") {
-                let mut code = None;
-                let mut width = None;
-                let mut name = None;
-                for (i, field) in fields.split(';').map(str::trim).enumerate() {
-                    if i == 0 {
-                        code = field.parse::<i32>().ok();
-                    } else if let Some(value) = field.strip_prefix("WX ") {
-                        width = value.trim().parse::<f64>().ok();
-                    } else if let Some(value) = field.strip_prefix("N ") {
-                        name = Some(value.trim());
-                    }
-                }
-                let (Some(code), Some(width), Some(name)) = (code, width, name) else {
-                    continue;
-                };
-                widths.insert(name, width);
-                if let Some(slot) = usize::try_from(code).ok().and_then(|c| built_in.get_mut(c)) {
-                    *slot = Some(name);
-                }
-                continue;
-            }
-            let mut words = line.split_whitespace();
-            let value =
-                |words: &mut SplitWhitespace<'_>| words.next().and_then(|v| v.parse::<f64>().ok());
-            match words.next() {
-                Some("CapHeight") => cap_height = value(&mut words),
-                Some("Ascender") => ascender = value(&mut words),
-                Some("Descender") => descender = value(&mut words),
-                Some("FontBBox") => {
-                    for corner in &mut bbox {
-                        *corner = value(&mut words).unwrap_or_default();
-                    }
-                }
-                Some("ItalicAngle") => italic_angle = value(&mut words).unwrap_or_default(),
-                Some("StdVW") => stem_v = value(&mut words).unwrap_or_default(),
-                _ => {}
-            }
-        }
-        Metrics {
-            built_in,
-            widths,
-            cap_height,
-            ascender,
-            descender,
-            bbox,
-            italic_angle,
-            stem_v,
-        }
+    /// The advance width of the glyph `name`, if the face has it.
+    fn width(&self, name: &str) -> Option<f64> {
+        let at = self
+            .widths
+            .binary_search_by(|&(glyph, _)| glyph.cmp(name))
+            .ok()?;
+        Some(self.widths[at].1)
     }
 }
 
@@ -296,7 +266,7 @@ impl Standard {
         let names = glyph_names(doc, font, self.face);
         array::from_fn(|code| {
             names[code]
-                .and_then(|name| metrics.widths.get(name).copied())
+                .and_then(|name| metrics.width(name))
                 .unwrap_or(0.0)
         })
     }
@@ -422,27 +392,33 @@ mod tests {
         .unwrap()
     }
 
-    /// Every face's AFM reads whole: the glyph counts Adobe's files hold,
-    /// and the vertical extent the Latin faces declare (the symbolic ones
-    /// declare none).
+    /// The generated metrics hold every face in the order of [`Face`], each
+    /// with the glyph counts Adobe's files hold and its widths in byte order,
+    /// as a lookup needs, and the vertical extent the Latin faces declare
+    /// (the symbolic ones declare none).
     #[test]
-    fn every_afm_reads() {
+    fn every_face_has_its_metrics() {
         for face in Face::ALL {
             let metrics = face.metrics();
+            assert_eq!(Face::named(metrics.name.as_bytes()), Some(face));
             let (glyphs, extent) = match face {
                 Face::Symbol => (190, false),
                 Face::ZapfDingbats => (202, false),
                 _ => (315, true),
             };
             assert_eq!(metrics.widths.len(), glyphs, "{face:?}");
+            assert!(metrics.widths.is_sorted_by(|a, b| a.0 < b.0), "{face:?}");
             assert_eq!(metrics.cap_height.is_some(), extent, "{face:?}");
             assert_eq!(metrics.descender.is_some(), extent, "{face:?}");
         }
         let helvetica = Face::Helvetica.metrics();
         assert_eq!(
-            (helvetica.cap_height, helvetica.descender),
-            (Some(718.0), Some(-207.0))
+            (helvetica.cap_height, helvetica.descender, helvetica.stem_v),
+            (Some(718.0), Some(-207.0), 88.0)
         );
+        assert_eq!(helvetica.bbox, [-166.0, -225.0, 1000.0, 931.0]);
+        assert_eq!(helvetica.width("eacute"), Some(556.0));
+        assert_eq!(helvetica.width("zerooldstyle"), None);
     }
 
     /// The Latin faces' built-in encoding is the standard encoding.
