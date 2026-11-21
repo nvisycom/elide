@@ -246,6 +246,10 @@ fn apply_deletions(
     content: &mut Content,
     sites: &BTreeMap<Address, Vec<(usize, usize)>>,
 ) -> Result<()> {
+    // Each `TJ` array's strings that lose their first or last glyph, by
+    // index, for each array: its kerns are zeroed once every string is
+    // drained, in one pass however many lost glyphs.
+    let mut edges: BTreeMap<(usize, usize), Edges> = BTreeMap::new();
     for (address, ranges) in sites {
         let Address {
             op, operand, item, ..
@@ -288,35 +292,78 @@ fn apply_deletions(
             bytes.drain(s..e);
         }
 
-        if let Some(k) = item
-            && let Some(Object::Array(items)) = content.operations[op].operands.get_mut(operand)
-        {
-            let (before, after) = items.split_at_mut(k);
-            if lost_first {
-                zero_kerns(before.iter_mut().rev());
-            }
-            if lost_last {
-                zero_kerns(after.iter_mut().skip(1));
-            }
+        if let Some(k) = item {
+            let lost = edges
+                .entry((op, operand))
+                .or_default()
+                .entry(k)
+                .or_default();
+            lost.first |= lost_first;
+            lost.last |= lost_last;
+        }
+    }
+    for ((op, operand), edges) in &edges {
+        if let Some(Object::Array(items)) = content.operations[*op].operands.get_mut(*operand) {
+            zero_kerns(items, edges);
         }
     }
     Ok(())
 }
 
-/// Zero the numeric position adjustments `items` starts with, up to the
-/// first string element that draws a glyph: an empty one sets nothing apart.
+/// What a `TJ` string lost: its first glyph, its last, or both.
+#[derive(Debug, Default, Clone, Copy)]
+struct Lost {
+    first: bool,
+    last: bool,
+}
+
+/// What each string of one `TJ` array lost, by its index in the array.
+type Edges = BTreeMap<usize, Lost>;
+
+/// Zero the numeric position adjustments of the `TJ` array `items` beside a
+/// deleted glyph: those after a string that lost its last glyph, and those
+/// before one that lost its first, each up to the nearest string that drew a
+/// glyph before any deletion (one empty all along sets nothing apart).
+/// `edges` gives what each string lost. One pass each way, so every element
+/// is visited twice however many strings lost glyphs.
 ///
 /// The numbers are zeroed in place rather than removed: other [`Deletions`]
 /// entries for the same operation address array elements by index, so removing
 /// an element would invalidate those indices. A zero adjustment draws nothing
 /// and carries no position information.
-fn zero_kerns<'a>(items: impl Iterator<Item = &'a mut Object>) {
-    for item in items {
+fn zero_kerns(items: &mut [Object], edges: &Edges) {
+    let zero = |item: &mut Object| match item {
+        Object::Real(_) => *item = Object::Real(0.0),
+        Object::Integer(_) => *item = Object::Integer(0),
+        _ => {}
+    };
+    // Whether the string at `index` drew a glyph before any deletion: a
+    // string that lost one did.
+    let drew = |index: usize, item: &Object| {
+        edges.contains_key(&index) || matches!(item, Object::String(bytes, _) if !bytes.is_empty())
+    };
+    let mut zeroing = false;
+    for (index, item) in items.iter_mut().enumerate() {
         match item {
-            Object::Real(_) => *item = Object::Real(0.0),
-            Object::Integer(_) => *item = Object::Integer(0),
-            Object::String(bytes, _) if bytes.is_empty() => {}
-            _ => break,
+            Object::Integer(_) | Object::Real(_) if zeroing => zero(item),
+            Object::Integer(_) | Object::Real(_) => {}
+            Object::String(..) if drew(index, item) => {
+                zeroing = edges.get(&index).is_some_and(|lost| lost.last);
+            }
+            Object::String(..) => {}
+            _ => zeroing = false,
+        }
+    }
+    zeroing = false;
+    for (index, item) in items.iter_mut().enumerate().rev() {
+        match item {
+            Object::Integer(_) | Object::Real(_) if zeroing => zero(item),
+            Object::Integer(_) | Object::Real(_) => {}
+            Object::String(..) if drew(index, item) => {
+                zeroing = edges.get(&index).is_some_and(|lost| lost.first);
+            }
+            Object::String(..) => {}
+            _ => zeroing = false,
         }
     }
 }
@@ -446,6 +493,27 @@ mod tests {
             "the kern past the empty string survived"
         );
         assert_eq!(arr[3], Object::string_literal(" Doe"));
+    }
+
+    /// Deleting every glyph of a long `TJ` array zeroes every kern, each
+    /// element visited a fixed number of times rather than once per string.
+    #[test]
+    fn deleting_a_whole_long_array_is_linear() {
+        let count = 100_000;
+        let mut elements = Vec::with_capacity(2 * count);
+        for _ in 0..count {
+            elements.push(Object::string_literal("A"));
+            elements.push(1.into());
+        }
+        let mut content = tj(elements);
+        let to_delete = deletions((0..count).map(|item| (2 * item, vec![(0, 1)])));
+        apply_deletions(&mut content, &to_delete).unwrap();
+        assert!(
+            tj_array(&content)
+                .iter()
+                .all(|item| matches!(item, Object::Integer(0))
+                    || matches!(item, Object::String(b, _) if b.is_empty()))
+        );
     }
 
     /// Zeroing stops at the neighbouring string: a kern next to a different,
