@@ -7,11 +7,12 @@
 //! text runs, PDFium's origin within the glyph's box across it.
 //!
 //! That alone can't catch a width misread from a font program, which the
-//! rebuild would pin as misread, so PDFium reads the source document too: a
-//! program through FreeType, a standard face by its own metrics. Each glyph
-//! must advance as far as PDFium's does, but on the glyphs where PDFium
-//! departs from Adobe's metrics. Where PDFium reads a source unlike the
-//! reader, on what renderers disagree on and the rebuild pins, only the
+//! rebuild would pin as misread, so PDFium reads the source document too,
+//! each glyph advancing as far as PDFium's does, where the source gives
+//! widths every renderer reads alike: a program, through FreeType, or the
+//! font's own. A font naming a standard face and giving no widths is as
+//! wide as the renderer's substitute for the face makes it, which differs
+//! by renderer and platform; that is what the rebuild pins, so only its
 //! rebuilt document is compared.
 
 use std::ops::Range;
@@ -154,17 +155,21 @@ fn carries_no_text(c: char) -> bool {
 
 /// Whether PDFium's character `at` in `theirs`, which the reader places no
 /// glyph for, is no disagreement. In a source document it must read as a
-/// code that selects no glyph does. The rebuild pins such a code 0 wide, so
-/// in a rebuilt document it must start where the next character on its line
-/// does, whatever it reads as; the last on its line must read as such a code
-/// does, as how far it advances can't be told.
+/// code that selects no glyph does. In a rebuilt document it must read as
+/// `.notdef` does, as nothing, or advance nothing, as the rebuild pins such
+/// a code 0 wide where the font gives no width; the last on its line, how
+/// far it advances not told, must read as such a code does.
 fn unplaced(theirs: &[Theirs], at: usize, source: bool) -> bool {
     let c = &theirs[at];
     let next = theirs
         .get(at + 1)
         .filter(|next| (next.across - c.across).abs() <= TOLERANCE);
     match next {
-        Some(next) if !source => (next.start - c.start).abs() <= TOLERANCE,
+        Some(next) if !source => {
+            c.text.is_whitespace()
+                || c.text.is_control()
+                || (next.start - c.start).abs() <= TOLERANCE
+        }
         _ => carries_no_text(c.text),
     }
 }
@@ -212,28 +217,13 @@ fn unread(theirs: &[Theirs], skipped: Range<usize>, source: bool, errors: &mut V
     }
 }
 
-/// A case: a document, the direction its text runs, and where PDFium reads
-/// its source document differently.
+/// A case: a document, the direction its text runs, and whether its source
+/// document gives widths every renderer reads alike, so is compared too.
 struct Case {
     name: String,
     bytes: Vec<u8>,
     axis: Axis,
-    source: Source,
-}
-
-/// How PDFium reads a case's source document.
-enum Source {
-    /// Alike, but the advances of these glyphs.
-    Departs(&'static [char]),
-    /// Unlike: the rebuild pins the spec's reading where renderers differ.
-    Unlike,
-}
-
-impl Source {
-    /// Alike, but where PDFium departs from the standard faces' metrics.
-    fn metrics() -> Self {
-        Source::Departs(PDFIUM_METRICS)
-    }
+    source: bool,
 }
 
 impl Case {
@@ -243,13 +233,13 @@ impl Case {
             name: name.into(),
             bytes,
             axis: Axis::Right,
-            source: Source::Departs(&[]),
+            source: true,
         }
     }
 
-    /// The case with PDFium reading its source document as `source` says.
-    fn source(mut self, source: Source) -> Self {
-        self.source = source;
+    /// The case with only its rebuilt document compared.
+    fn rebuilt_only(mut self) -> Self {
+        self.source = false;
         self
     }
 
@@ -285,19 +275,14 @@ impl Case {
             return Err("the reader places no glyph".into());
         }
         let mut errors = Vec::new();
-        compare(&ours, &theirs(&rebuilt, self.axis)?, None, &mut errors);
+        compare(&ours, &theirs(&rebuilt, self.axis)?, false, &mut errors);
         let mut errors: Vec<String> = errors
             .into_iter()
             .map(|e| format!("(rebuilt) {e}"))
             .collect();
-        if let Source::Departs(departs) = self.source {
+        if self.source {
             let mut found = Vec::new();
-            compare(
-                &ours,
-                &theirs(&source, self.axis)?,
-                Some(departs),
-                &mut found,
-            );
+            compare(&ours, &theirs(&source, self.axis)?, true, &mut found);
             errors.extend(found.into_iter().map(|e| format!("(source) {e}")));
         }
         Ok(errors)
@@ -306,10 +291,9 @@ impl Case {
 
 /// Compare where the reader places the glyphs of the rebuilt document
 /// with where PDFium places them: in the rebuilt document, where each
-/// starts; in the source document, how far each advances, but the glyphs
-/// it `departs` on.
-fn compare(ours: &[Ours], theirs: &[Theirs], departs: Option<&[char]>, errors: &mut Vec<String>) {
-    let pairs = paired(ours, theirs, departs.is_some(), errors);
+/// starts; in the `source` document, how far each advances.
+fn compare(ours: &[Ours], theirs: &[Theirs], source: bool, errors: &mut Vec<String>) {
+    let pairs = paired(ours, theirs, source, errors);
     let mut advances = 0;
     for (i, &(glyph, c, _)) in pairs.iter().enumerate() {
         let (low, high) = glyph.across;
@@ -319,7 +303,7 @@ fn compare(ours: &[Ours], theirs: &[Theirs], departs: Option<&[char]>, errors: &
                 glyph.text, c.across
             ));
         }
-        let Some(departs) = departs else {
+        if !source {
             if (glyph.start - c.start).abs() > TOLERANCE {
                 errors.push(format!(
                     "{:?} starts at {}, PDFium's at {}",
@@ -327,7 +311,7 @@ fn compare(ours: &[Ours], theirs: &[Theirs], departs: Option<&[char]>, errors: &
                 ));
             }
             continue;
-        };
+        }
         let Some(&(next, next_c, adjacent)) = pairs.get(i + 1) else {
             continue;
         };
@@ -337,15 +321,14 @@ fn compare(ours: &[Ours], theirs: &[Theirs], departs: Option<&[char]>, errors: &
         advances += 1;
         let advance = next.start - glyph.start;
         let theirs = next_c.start - c.start;
-        let departed = glyph.text.chars().any(|c| departs.contains(&c));
-        if (advance - theirs).abs() > TOLERANCE && !departed {
+        if (advance - theirs).abs() > TOLERANCE {
             errors.push(format!(
                 "{:?} advances {advance}, PDFium's {theirs}",
                 glyph.text
             ));
         }
     }
-    if departs.is_some() && advances == 0 {
+    if source && advances == 0 {
         errors.push("no advance is compared".into());
     }
 }
@@ -397,13 +380,6 @@ fn helvetica(content: &str) -> Vec<u8> {
     })
 }
 
-/// The glyphs PDFium sizes unlike Adobe's metrics for the standard faces,
-/// and those Helvetica lacks, which PDFium sizes as its substitute does and
-/// the reader as no glyph; the rebuild pins Adobe's widths for each.
-const PDFIUM_METRICS: &[char] = &[
-    '¯', '±', 'µ', '·', '÷', '√', '∑', '◊', '∂', '∞', '∏', 'π', '∫', '\u{2126}', '≈', '\u{F8FF}',
-];
-
 /// The 14 standard faces.
 const FACES: [&str; 14] = [
     "Courier",
@@ -436,11 +412,12 @@ fn flagged(subtype: &str, base_font: &str, flags: i64) -> Dictionary {
 /// Fonts naming a standard face and embedding no program: each face, by
 /// its own name and by others, with each base encoding and with
 /// differences, and flagged in each way that picks the encoding a code
-/// reads by.
+/// reads by. Only their rebuilt documents are compared, as a renderer sizes
+/// and selects their glyphs by its own substitute for the face.
 fn standard() -> Vec<Case> {
     let mut cases = Vec::new();
     for face in FACES {
-        cases.push(Case::new(face, every_code(type1(face))).source(Source::metrics()));
+        cases.push(Case::new(face, every_code(type1(face))).rebuilt_only());
     }
     for name in [
         "Arial",
@@ -450,20 +427,13 @@ fn standard() -> Vec<Case> {
         "CourierNew,Bold",
         "ABCDEF+Arial",
     ] {
-        cases.push(Case::new(name, every_code(type1(name))).source(Source::metrics()));
+        cases.push(Case::new(name, every_code(type1(name))).rebuilt_only());
     }
     for encoding in ["WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding"] {
         let mut font = type1("Helvetica");
         font.set("Encoding", encoding);
-        cases.push(
-            Case::new(format!("Helvetica, {encoding}"), every_code(font)).source(Source::metrics()),
-        );
+        cases.push(Case::new(format!("Helvetica, {encoding}"), every_code(font)).rebuilt_only());
     }
-    // PDFium reads a font of MacExpertEncoding as WinAnsiEncoding.
-    let mut font = type1("Helvetica");
-    font.set("Encoding", "MacExpertEncoding");
-    cases.push(Case::new("Helvetica, MacExpertEncoding", every_code(font)).source(Source::Unlike));
-
     let differences = vec![
         65.into(),
         "B".into(),
@@ -481,64 +451,53 @@ fn standard() -> Vec<Case> {
         "Encoding",
         dictionary! { "BaseEncoding" => "WinAnsiEncoding", "Differences" => differences },
     );
-    cases.push(Case::new("Helvetica, differences", every_code(font)).source(Source::metrics()));
-    // An entry neither a code nor a name is passed over; PDFium reads a
-    // string as a name.
+    cases.push(Case::new("Helvetica, differences", every_code(font)).rebuilt_only());
+    // An entry neither a code nor a name is passed over.
     let mut font = type1("Helvetica");
     font.set(
         "Encoding",
         dictionary! { "Differences" => vec![65.into(), Object::string_literal("B"), "C".into()] },
     );
-    cases.push(
-        Case::new("Helvetica, an invalid difference", every_code(font)).source(Source::Unlike),
-    );
-    // Read by WinAnsiEncoding; PDFium reads the codes through its
-    // substitute's own cmap.
+    cases.push(Case::new("Helvetica, an invalid difference", every_code(font)).rebuilt_only());
     let mut font = type1("Arial");
     font.set("Subtype", "TrueType");
-    cases.push(Case::new("TrueType Arial", every_code(font)).source(Source::Unlike));
+    cases.push(Case::new("TrueType Arial", every_code(font)).rebuilt_only());
     cases.push(
         Case::new(
             "TrueType Arial, unflagged",
             every_code(flagged("TrueType", "Arial", 0)),
         )
-        .source(Source::Unlike),
+        .rebuilt_only(),
     );
     cases.push(
         Case::new(
             "TrueType Arial, nonsymbolic",
             every_code(flagged("TrueType", "Arial", 32)),
         )
-        .source(Source::metrics()),
+        .rebuilt_only(),
     );
-    // Read by Mac OS Roman, as the spec reads it; PDFium reads the codes
-    // through its substitute's own cmap.
     cases.push(
         Case::new(
             "TrueType Arial, symbolic",
             every_code(flagged("TrueType", "Arial", 4)),
         )
-        .source(Source::Unlike),
+        .rebuilt_only(),
     );
-    // Read by the face's built-in encoding, as the spec reads it; PDFium
-    // reads WinAnsiEncoding.
     cases.push(
         Case::new(
             "Helvetica, symbolic",
             every_code(flagged("Type1", "Helvetica", 4)),
         )
-        .source(Source::Unlike),
+        .rebuilt_only(),
     );
     cases
 }
 
 /// What text state, matrices and operators move glyphs by, drawn in
-/// Helvetica.
+/// Helvetica, so only their rebuilt documents are compared.
 fn placement() -> Vec<Case> {
     const SAMPLE: &str = "(Jane Roe, jane@roe.io 555 0100)";
-    // Drawn in Helvetica, read alike but where PDFium departs from its
-    // metrics.
-    let placed = |name: &str, bytes| Case::new(name, bytes).source(Source::metrics());
+    let placed = |name: &str, bytes| Case::new(name, bytes).rebuilt_only();
     vec![
         placed(
             "character and word spacing",
@@ -655,15 +614,15 @@ fn own_widths() -> Vec<Case> {
     };
     let mut helvetica = type1("Helvetica");
     helvetica.set("FirstChar", 32);
-    helvetica.set("LastChar", 126);
-    helvetica.set("Widths", widths(32, 126));
+    helvetica.set("LastChar", 255);
+    helvetica.set("Widths", widths(32, 255));
     let mut unknown = flagged("TrueType", "Unknown-Regular", 32);
     unknown.set("FirstChar", 40);
     unknown.set("LastChar", 250);
     unknown.set("Widths", widths(40, 250));
     unknown.set("Encoding", "WinAnsiEncoding");
     vec![
-        Case::new("Helvetica, its own widths", every_code(helvetica)).source(Source::metrics()),
+        Case::new("Helvetica, its own widths", every_code(helvetica)),
         Case::new(
             "a face no reader knows, its own widths",
             every_code(unknown),
