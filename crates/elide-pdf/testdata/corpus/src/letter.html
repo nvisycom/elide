@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Letter</title>
+<style>
+  @font-face { font-family: "Elide Test Sans"; src: url("../../fonts/ElideTestSans.ttf"); }
+  @font-face { font-family: "Elide Test Mono"; src: url("../../fonts/ElideTestMono.ttf"); }
+  @font-face { font-family: "Elide Test Sans CFF"; src: url("../../fonts/ElideTestSansCff.otf"); }
+  @page { size: A4; margin: 20mm; }
+  body { font-family: "Elide Test Sans"; font-size: 11pt; line-height: 1.45; }
+  h1 { font-family: "Elide Test Sans CFF"; font-size: 20pt; letter-spacing: 0.04em; }
+  .mono { font-family: "Elide Test Mono"; }
+  .wide { word-spacing: 0.4em; }
+  .tight { letter-spacing: -0.02em; }
+  .small { font-size: 7.5pt; }
+  .side { position: absolute; left: 6mm; top: 120mm; transform: rotate(-90deg); transform-origin: left top; font-size: 8pt; }
+  table { border-collapse: collapse; margin: 1em 0; }
+  td, th { border: 0.5pt solid #888; padding: 3pt 6pt; text-align: left; }
+  .page { page-break-after: always; }
+</style>
+</head>
+<body>
+<div class="side">Reference ELD-2026-00417 · Confidential</div>
+<section class="page">
+<h1>Account statement</h1>
+<p>Jane Roe<br>14 Fennimore Crescent, Flat 3B<br>Brookhaven, NY 11719</p>
+<p>Dear Ms Roe,</p>
+<p class="wide">Thank you for writing to us on 3 March 2026. We have reviewed the account held under the name
+<b>Jane Roe</b> (customer number <span class="mono">CX-0049-2213</span>) and the card ending
+<span class="mono">4111&nbsp;1111&nbsp;1111&nbsp;1111</span>.</p>
+<p class="tight">You can reach the case officer, Émile Fontaine, at <i>emile.fontaine@example.org</i> or on
++1&nbsp;(555)&nbsp;010-4477. Please quote your IBAN <span class="mono">GB82 WEST 1234 5698 7654 32</span> and
+your date of birth, 12/07/1984, when you call. The office's fiscal agent, Søren Ægidius, signs off
+refunds above $1,250.00 - typically within five working days.</p>
+<table>
+<tr><th>Date</th><th>Description</th><th>Amount</th></tr>
+<tr><td>2026-02-11</td><td>Transfer to J. Roe, sort code 40-12-76</td><td class="mono">-312.50</td></tr>
+<tr><td>2026-02-19</td><td>Refund: "office supplies", ref. #A-7781</td><td class="mono">+48.00</td></tr>
+<tr><td>2026-02-27</td><td>Card payment, terminal 0099-ZK</td><td class="mono">-19.99</td></tr>
+</table>
+<p class="small">Fine print: final figures are subject to reconciliation. Office hours are 9:00-17:30 EST.</p>
+</section>
+<section>
+<h1>Contact details</h1>
+<p>For questions about this statement, write to Jane Roe's adviser:</p>
+<p>Ahmed Al-Sayed<br>ahmed.alsayed@example.com · +44 20 7946 0958<br>
+Passport number 533401472 · National Insurance QQ 12 34 56 C</p>
+<p class="wide">This page also repeats the account holder's details for the reader's convenience: Jane Roe,
+born 12 July 1984, customer CX-0049-2213, at 14 Fennimore Crescent, Brookhaven.</p>
+</section>
+</body>
+</html>

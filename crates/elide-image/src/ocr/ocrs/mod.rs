@@ -60,7 +60,7 @@ impl OcrsBackend {
     }
 
     /// Load the models from `dir`, expecting `text-detection.onnx` and
-    /// `text-recognition.onnx` (as produced by `scripts/install-ocrs.sh`).
+    /// `text-recognition.onnx` (as produced by `scripts/install/ocrs.sh`).
     ///
     /// # Errors
     ///

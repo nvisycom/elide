@@ -6,7 +6,7 @@
 # unmodified from adobe-type-tools/agl-aglfn at a pinned commit and checked
 # against a pinned SHA-256.
 #
-# Usage: scripts/fetch-agl.sh
+# Usage: scripts/pdf/fetch-agl.sh
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ files=(
   "LICENSE.md 58147d341e7a34aa2196862395a34d2fd95716c41d5ed26efb59ab0e12f92089"
 )
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$root/crates/elide-pdf/assets/agl"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

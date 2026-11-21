@@ -173,17 +173,24 @@ jobs:
       # runtime; their tests are `#[ignore]`d so the default suite stays
       # native-dependency-free. Install PDFium and run them explicitly.
       - name: Install PDFium
-        run: sudo ./scripts/install-pdfium.sh
+        run: sudo ./scripts/install/pdfium.sh
 
       - name: Run render tests (ignored, need PDFium)
         run: >
           cargo test -p elide --features codec-pdf-render,mocks,engine
           --test format_pdf raster:: -- --ignored
 
-      - name: Run the glyph placement test against PDFium (ignored, needs PDFium)
-        run: >
-          cargo test -p elide-pdf --features render --lib
-          render::differential -- --ignored
+      # The placement test compares real documents too: the ones
+      # testdata/corpus/fetched.tsv pins, fetched once and cached, and the
+      # generated ones committed beside it.
+      - name: Cache the PDF corpus
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/pdf-corpus
+          key: pdf-corpus-${{ hashFiles('crates/elide-pdf/testdata/corpus/fetched.tsv') }}
+
+      - name: Run the glyph placement tests against PDFium (ignored, need PDFium)
+        run: make test-pdf-placement PDF_CORPUS=${{ runner.temp }}/pdf-corpus
 
   build:
     name: Build

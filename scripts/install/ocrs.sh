@@ -10,9 +10,9 @@
 # OcrsBackend::from_env() finds them. Pass a directory to override the default.
 #
 # Usage:
-#   ./scripts/install-ocrs.sh                    # default dir
-#   ./scripts/install-ocrs.sh /path/to/models    # custom dir
-#   ELIDE_OCRS_MODELS_DIR=/path ./scripts/install-ocrs.sh
+#   ./scripts/install/ocrs.sh                    # default dir
+#   ./scripts/install/ocrs.sh /path/to/models    # custom dir
+#   ELIDE_OCRS_MODELS_DIR=/path ./scripts/install/ocrs.sh
 
 set -euo pipefail
 

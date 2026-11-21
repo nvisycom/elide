@@ -10,9 +10,9 @@
 # architecture; pass an explicit platform to override.
 #
 # Usage:
-#   ./scripts/install-pdfium.sh                       # auto-detect host
-#   ./scripts/install-pdfium.sh linux-arm64           # override platform
-#   PDFIUM_PLATFORM=mac-arm64 ./scripts/install-pdfium.sh
+#   ./scripts/install/pdfium.sh                       # auto-detect host
+#   ./scripts/install/pdfium.sh linux-arm64           # override platform
+#   PDFIUM_PLATFORM=mac-arm64 ./scripts/install/pdfium.sh
 
 set -euo pipefail
 

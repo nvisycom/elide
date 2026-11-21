@@ -1,183 +1,23 @@
-//! Where the reader places each glyph, against where PDFium places it.
-//!
-//! Each case is a document drawing text in one kind of font, read as the
-//! codec reads every document: rebuilt, every font's widths and encoding
-//! pinned. Against PDFium reading the same rebuilt document, each glyph the
-//! reader places must be drawn from where PDFium's is, on the page.
-//!
-//! That alone can't catch a width misread from a font program, which the
-//! rebuild would pin as misread, so PDFium reads the source document too,
-//! each glyph moving the pen to the next as far as PDFium's does, where the
-//! source gives widths every renderer reads alike: a program, through
-//! FreeType, or the font's own. A font naming a standard face and giving no
-//! widths is as wide as the renderer's substitute for the face makes it,
-//! which differs by renderer and platform; that is what the rebuild pins,
-//! so only its rebuilt document is compared.
+//! Documents built for one kind of font or text state each.
 
-use std::ops::Range;
-
-use elide_core::Error;
 use lopdf::content::Operation;
 use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
-use pdfium_render::prelude::PdfiumError;
 use read_fonts::FontRef;
 use read_fonts::types::Tag;
 
-use super::pdfium::with_document;
+use super::{
+    Placed, compare_rebuilt, compare_source, hidden, placed, reads_programs, rebuilt, theirs,
+};
 use crate::content::text::Text;
 use crate::fixtures::{
     Cff, DocBuilder, FontFile, Page, Sfnt, Type1, embedding, to_unicode_cmap, type1,
 };
 use crate::pdf::Pdf;
-use crate::sanitize::Rebuild;
 
-/// How far apart two positions may be, in points: PDFium keeps them as
-/// `f32`s.
-const TOLERANCE: f64 = 1e-3;
-
-/// A point on the page.
-type Point = (f64, f64);
-
-/// Whether `a` and `b` are the same point, within [`TOLERANCE`].
-fn same(a: Point, b: Point) -> bool {
-    (a.0 - b.0).abs() <= TOLERANCE && (a.1 - b.1).abs() <= TOLERANCE
-}
-
-/// The move from `from` to `to`.
-fn step(from: Point, to: Point) -> Point {
-    (to.0 - from.0, to.1 - from.1)
-}
-
-/// A glyph the reader places, or a character PDFium reads: what it reads
-/// as, and where on the page it is drawn from.
-#[derive(Debug)]
-struct Placed<T> {
-    text: T,
-    origin: Point,
-}
-
-/// The glyphs the reader places on the first page of `pdf`.
-fn ours(pdf: &Pdf) -> Result<Vec<Placed<String>>, String> {
-    let blocks = pdf
-        .read(Text)
-        .map_err(|e| format!("the reader refuses it: {e}"))?;
-    let block = blocks.first().ok_or("the reader reads no page")?;
-    if block.unplaced {
-        return Err("the reader can't place its glyphs".into());
-    }
-    let chars: Vec<char> = block.text.chars().collect();
-    block
-        .rects
-        .iter()
-        .map(|glyph| {
-            let text = chars
-                .get(glyph.chars.clone())
-                .ok_or("a glyph's characters are past the page's text")?;
-            Ok(Placed {
-                text: text.iter().collect(),
-                origin: glyph.origin,
-            })
-        })
-        .collect()
-}
-
-/// The characters PDFium reads from the first page of `pdf`, but those it
-/// adds itself (between words and lines).
-fn theirs(pdf: &Pdf) -> Result<Vec<Placed<char>>, String> {
-    let read = with_document(pdf, |doc| {
-        let failed = |e: PdfiumError| Error::malformed(e.to_string());
-        let page = doc.pages().get(0).map_err(failed)?;
-        let text = page.text().map_err(failed)?;
-        let mut theirs = Vec::new();
-        for c in text.chars().iter() {
-            if c.is_generated().map_err(failed)? {
-                continue;
-            }
-            let (x, y) = c.origin().map_err(failed)?;
-            theirs.push(Placed {
-                text: c.unicode_char().unwrap_or(char::REPLACEMENT_CHARACTER),
-                origin: (f64::from(x.value), f64::from(y.value)),
-            });
-        }
-        Ok(theirs)
-    });
-    read.map_err(|e| format!("PDFium can't read it: {e}"))
-}
-
-/// Whether PDFium reading `c` where the reader places no glyph is no
-/// disagreement in a source document: `c` is what PDFium reads for a code
-/// that selects no glyph, a space for `.notdef`, else the code itself (a
-/// control character, or a Latin-1 one).
-fn carries_no_text(c: char) -> bool {
-    c.is_whitespace() || c.is_control() || ('\u{80}'..='\u{FF}').contains(&c)
-}
-
-/// Whether PDFium's character `at` in `theirs`, which the reader places no
-/// glyph for, is no disagreement. In a source document it must read as a
-/// code that selects no glyph does. In a rebuilt document it must read as
-/// `.notdef` does, as nothing, or advance nothing, as the rebuild pins such
-/// a code 0 wide where the font gives no width; the last on the page, how
-/// far it advances not told, must read as such a code does.
-fn unplaced(theirs: &[Placed<char>], at: usize, source: bool) -> bool {
-    let c = &theirs[at];
-    match theirs.get(at + 1) {
-        Some(next) if !source => {
-            c.text.is_whitespace() || c.text.is_control() || same(c.origin, next.origin)
-        }
-        _ => carries_no_text(c.text),
-    }
-}
-
-/// Pairs of the reader's glyphs and PDFium's characters, each glyph with
-/// the first of the next characters that read as it does (PDFium reads a
-/// ligature as its letters), in a rebuilt document the first drawn from
-/// where it is if one is, and whether PDFium read no code between it and
-/// the pair before. A glyph PDFium reads no character for is an error, and
-/// the glyphs after it are paired still; so is a character PDFium reads
-/// that the reader places no glyph for, but one [`unplaced`] allows.
-fn paired<'a>(
-    ours: &'a [Placed<String>],
-    theirs: &'a [Placed<char>],
-    source: bool,
-    errors: &mut Vec<String>,
-) -> Vec<(&'a Placed<String>, &'a Placed<char>, bool)> {
-    let reads = |at: usize, glyph: &Placed<String>| {
-        let len = glyph.text.chars().count();
-        let read: String = theirs[at..].iter().take(len).map(|c| c.text).collect();
-        read == glyph.text
-    };
-    let mut pairs = Vec::new();
-    let mut at = 0;
-    for glyph in ours {
-        // In a rebuilt document a glyph is drawn from where PDFium's is, so
-        // the character there is preferred over one that only reads alike.
-        let there = |i: &usize| source || same(theirs[*i].origin, glyph.origin);
-        let alike = (at..theirs.len()).filter(|&i| reads(i, glyph));
-        let Some(found) = alike.clone().find(there).or_else(|| alike.min()) else {
-            errors.push(format!("the reader places {:?} PDFium doesn't", glyph.text));
-            continue;
-        };
-        unread(theirs, at..found, source, errors);
-        pairs.push((glyph, &theirs[found], found == at));
-        at = found + glyph.text.chars().count();
-    }
-    unread(theirs, at..theirs.len(), source, errors);
-    pairs
-}
-
-/// Report each of PDFium's characters `skipped` in `theirs`, which the
-/// reader places no glyph for, but those [`unplaced`] allows.
-fn unread(theirs: &[Placed<char>], skipped: Range<usize>, source: bool, errors: &mut Vec<String>) {
-    for at in skipped {
-        if !unplaced(theirs, at, source) {
-            let text = theirs[at].text;
-            errors.push(format!("PDFium reads {text:?} the reader doesn't"));
-        }
-    }
-}
-
-/// A case: a document, and whether its source document gives widths every
-/// renderer reads alike, so is compared too.
+/// A case: a document, and whether its source document is compared too, as
+/// it is where a font gives no widths but embeds a program the rebuild reads
+/// them from ([`reads_programs`]), unless the case says the two read it
+/// unlike.
 struct Case {
     name: String,
     bytes: Vec<u8>,
@@ -194,7 +34,8 @@ impl Case {
         }
     }
 
-    /// The case with only its rebuilt document compared.
+    /// The case with only its rebuilt document compared, as PDFium reads its
+    /// program unlike the reader.
     fn rebuilt_only(mut self) -> Self {
         self.source = false;
         self
@@ -217,68 +58,36 @@ impl Case {
     /// compared.
     fn compared(&self) -> Result<Vec<String>, String> {
         let source = Pdf::open(&self.bytes).map_err(|e| format!("it can't be opened: {e}"))?;
-        let rebuilt = source
-            .read(Rebuild)
-            .map_err(|e| format!("the rebuild refuses it: {e}"))?
-            .pdf;
-        let ours = ours(&rebuilt)?;
+        let rebuilt = rebuilt(&source)?;
+        let blocks = rebuilt
+            .read(Text)
+            .map_err(|e| format!("the reader refuses it: {e}"))?;
+        let block = blocks.first().ok_or("the reader reads no page")?;
+        if block.unplaced {
+            return Err("the reader can't place its glyphs".into());
+        }
+        let ours = placed(block)?;
         if ours.is_empty() {
             return Err("the reader places no glyph".into());
         }
-        let mut errors = Vec::new();
-        compare(&ours, &theirs(&rebuilt)?, false, &mut errors);
-        let mut errors: Vec<String> = errors
-            .into_iter()
-            .map(|e| format!("(rebuilt) {e}"))
-            .collect();
-        if self.source {
-            let mut found = Vec::new();
-            compare(&ours, &theirs(&source)?, true, &mut found);
+        let first =
+            |pages: Vec<Vec<Placed<char>>>| pages.into_iter().next().ok_or("PDFium reads no page");
+        let mut found = Vec::new();
+        let mut readings = Vec::new();
+        compare_rebuilt(
+            &ours,
+            &first(theirs(&rebuilt)?)?,
+            &mut found,
+            &mut readings,
+            hidden(block),
+        );
+        found.append(&mut readings);
+        let mut errors: Vec<String> = found.drain(..).map(|e| format!("(rebuilt) {e}")).collect();
+        if self.source && reads_programs(source.doc()) {
+            compare_source(&ours, &first(theirs(&source)?)?, hidden(block), &mut found);
             errors.extend(found.into_iter().map(|e| format!("(source) {e}")));
         }
         Ok(errors)
-    }
-}
-
-/// Compare where the reader draws the glyphs of the rebuilt document from
-/// with where PDFium does: in the rebuilt document, each glyph's origin; in
-/// the `source` document, the move from each glyph's to the next's.
-fn compare(
-    ours: &[Placed<String>],
-    theirs: &[Placed<char>],
-    source: bool,
-    errors: &mut Vec<String>,
-) {
-    let pairs = paired(ours, theirs, source, errors);
-    let mut steps = 0;
-    for (i, &(glyph, c, _)) in pairs.iter().enumerate() {
-        if !source {
-            if !same(glyph.origin, c.origin) {
-                errors.push(format!(
-                    "{:?} is drawn from {:?}, PDFium's from {:?}",
-                    glyph.text, glyph.origin, c.origin
-                ));
-            }
-            continue;
-        }
-        let Some(&(next, next_c, adjacent)) = pairs.get(i + 1) else {
-            continue;
-        };
-        if !adjacent {
-            continue;
-        }
-        steps += 1;
-        let ours = step(glyph.origin, next.origin);
-        let theirs = step(c.origin, next_c.origin);
-        if !same(ours, theirs) {
-            errors.push(format!(
-                "{:?} moves the pen {ours:?}, PDFium's {theirs:?}",
-                glyph.text
-            ));
-        }
-    }
-    if source && steps == 0 {
-        errors.push("no move of the pen is compared".into());
     }
 }
 
@@ -363,12 +172,13 @@ fn flagged(subtype: &str, base_font: &str, flags: i64) -> Dictionary {
 /// Fonts naming a standard face and embedding no program: each face, by
 /// its own name and by others, with each base encoding and with
 /// differences, and flagged in each way that picks the encoding a code
-/// reads by. Only their rebuilt documents are compared, as a renderer sizes
-/// and selects their glyphs by its own substitute for the face.
+/// reads by. Only their rebuilt documents are compared, as they embed no
+/// program: a renderer sizes and selects their glyphs by its own substitute
+/// for the face.
 fn standard() -> Vec<Case> {
     let mut cases = Vec::new();
     for face in FACES {
-        cases.push(Case::new(face, every_code(type1(face))).rebuilt_only());
+        cases.push(Case::new(face, every_code(type1(face))));
     }
     for name in [
         "Arial",
@@ -378,12 +188,15 @@ fn standard() -> Vec<Case> {
         "CourierNew,Bold",
         "ABCDEF+Arial",
     ] {
-        cases.push(Case::new(name, every_code(type1(name))).rebuilt_only());
+        cases.push(Case::new(name, every_code(type1(name))));
     }
     for encoding in ["WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding"] {
         let mut font = type1("Helvetica");
         font.set("Encoding", encoding);
-        cases.push(Case::new(format!("Helvetica, {encoding}"), every_code(font)).rebuilt_only());
+        cases.push(Case::new(
+            format!("Helvetica, {encoding}"),
+            every_code(font),
+        ));
     }
     let differences = vec![
         65.into(),
@@ -402,45 +215,36 @@ fn standard() -> Vec<Case> {
         "Encoding",
         dictionary! { "BaseEncoding" => "WinAnsiEncoding", "Differences" => differences },
     );
-    cases.push(Case::new("Helvetica, differences", every_code(font)).rebuilt_only());
+    cases.push(Case::new("Helvetica, differences", every_code(font)));
     // An entry neither a code nor a name is passed over.
     let mut font = type1("Helvetica");
     font.set(
         "Encoding",
         dictionary! { "Differences" => vec![65.into(), Object::string_literal("B"), "C".into()] },
     );
-    cases.push(Case::new("Helvetica, an invalid difference", every_code(font)).rebuilt_only());
+    cases.push(Case::new(
+        "Helvetica, an invalid difference",
+        every_code(font),
+    ));
     let mut font = type1("Arial");
     font.set("Subtype", "TrueType");
-    cases.push(Case::new("TrueType Arial", every_code(font)).rebuilt_only());
-    cases.push(
-        Case::new(
-            "TrueType Arial, unflagged",
-            every_code(flagged("TrueType", "Arial", 0)),
-        )
-        .rebuilt_only(),
-    );
-    cases.push(
-        Case::new(
-            "TrueType Arial, nonsymbolic",
-            every_code(flagged("TrueType", "Arial", 32)),
-        )
-        .rebuilt_only(),
-    );
-    cases.push(
-        Case::new(
-            "TrueType Arial, symbolic",
-            every_code(flagged("TrueType", "Arial", 4)),
-        )
-        .rebuilt_only(),
-    );
-    cases.push(
-        Case::new(
-            "Helvetica, symbolic",
-            every_code(flagged("Type1", "Helvetica", 4)),
-        )
-        .rebuilt_only(),
-    );
+    cases.push(Case::new("TrueType Arial", every_code(font)));
+    cases.push(Case::new(
+        "TrueType Arial, unflagged",
+        every_code(flagged("TrueType", "Arial", 0)),
+    ));
+    cases.push(Case::new(
+        "TrueType Arial, nonsymbolic",
+        every_code(flagged("TrueType", "Arial", 32)),
+    ));
+    cases.push(Case::new(
+        "TrueType Arial, symbolic",
+        every_code(flagged("TrueType", "Arial", 4)),
+    ));
+    cases.push(Case::new(
+        "Helvetica, symbolic",
+        every_code(flagged("Type1", "Helvetica", 4)),
+    ));
     cases
 }
 
@@ -448,81 +252,80 @@ fn standard() -> Vec<Case> {
 /// Helvetica, so only their rebuilt documents are compared.
 fn placement() -> Vec<Case> {
     const SAMPLE: &str = "(Jane Roe, jane@roe.io 555 0100)";
-    let placed = |name: &str, bytes| Case::new(name, bytes).rebuilt_only();
     vec![
-        placed(
+        Case::new(
             "character and word spacing",
             helvetica(&format!(
                 "BT /F1 12 Tf 2.5 Tc 6 Tw 20 700 Td {SAMPLE} Tj ET"
             )),
         ),
-        placed(
+        Case::new(
             "negative spacing",
             helvetica(&format!(
                 "BT /F1 12 Tf -0.5 Tc -2 Tw 20 700 Td {SAMPLE} Tj ET"
             )),
         ),
-        placed(
+        Case::new(
             "horizontal scaling",
             helvetica(&format!(
                 "BT /F1 12 Tf 150 Tz 20 700 Td {SAMPLE} Tj 60 Tz 0 -20 Td {SAMPLE} Tj ET"
             )),
         ),
-        placed(
+        Case::new(
             "spacing, scaled",
             helvetica(&format!(
                 "BT /F1 12 Tf 2 Tc 4 Tw 130 Tz 20 700 Td {SAMPLE} Tj ET"
             )),
         ),
-        placed(
+        Case::new(
             "rise",
             helvetica("BT /F1 12 Tf 20 700 Td (Jane ) Tj 4 Ts (Roe) Tj -3 Ts (, jane) Tj ET"),
         ),
-        placed(
+        Case::new(
             "positioning in TJ",
             helvetica(
                 "BT /F1 12 Tf 20 700 Td [(J) -120 (ane) 250 (R) 80.5 (oe) -1000 (jane@roe.io)] TJ ET",
             ),
         ),
-        placed(
+        Case::new(
             "line operators",
             helvetica(
                 "BT /F1 12 Tf 14 TL 20 700 Td (Jane) Tj T* (Roe) Tj (jane) ' 3 1 (roe.io) \" ET",
             ),
         ),
-        placed(
+        Case::new(
             "sizes",
             helvetica("BT /F1 7.5 Tf 20 700 Td (Jane Roe) Tj /F1 31 Tf (jane) Tj ET"),
         ),
-        placed(
+        Case::new(
             "a scaled text matrix",
             helvetica(&format!("BT /F1 12 Tf 2 0 0 3 50 600 Tm {SAMPLE} Tj ET")),
         ),
-        placed(
+        Case::new(
             "a quarter turn",
             helvetica(&format!("BT /F1 12 Tf 0 1 -1 0 300 200 Tm {SAMPLE} Tj ET")),
         ),
-        placed(
+        Case::new(
             "a half turn",
             helvetica(&format!("BT /F1 12 Tf -1 0 0 -1 500 500 Tm {SAMPLE} Tj ET")),
         ),
-        placed(
+        Case::new(
             "three quarter turns",
             helvetica(&format!("BT /F1 12 Tf 0 -1 1 0 300 600 Tm {SAMPLE} Tj ET")),
         ),
-        placed(
+        Case::new(
             "a scaling CTM",
             helvetica(&format!(
                 "q 0.5 0 0 0.75 100 100 cm BT /F1 12 Tf 20 700 Td {SAMPLE} Tj ET Q"
             )),
         ),
-        placed(
+        Case::new(
             "a turning CTM",
             helvetica(&format!(
                 "q 0 1 -1 0 400 100 cm BT /F1 12 Tf 20 20 Td {SAMPLE} Tj ET Q"
             )),
         ),
-        placed(
+        Case::new(
             "a turned page",
             document(|pdf| {
                 Page::new()
@@ -531,7 +334,7 @@ fn placement() -> Vec<Case> {
                     .set("Rotate", 90)
             }),
         ),
-        placed(
+        Case::new(
             "a form",
             document(|pdf| {
                 let font = pdf.add(type1("Helvetica"));
@@ -804,13 +607,13 @@ fn composite() -> Vec<Case> {
 /// with several `cmap` subtables, one with fewer horizontal metrics than
 /// glyphs and one with a format 12 subtable past the BMP, a CFF program with
 /// subroutines, as OpenType and bare, and a Type 1 program from its PFB
-/// segments. Each is in `testdata/fonts`, from `scripts/fetch-test-fonts.sh`.
+/// segments. Each is in `testdata/fonts`, from `scripts/pdf/fetch-test-fonts.sh`.
 fn real() -> Vec<Case> {
-    const SANS: &[u8] = include_bytes!("../../../testdata/fonts/ElideTestSans.ttf");
-    const MONO: &[u8] = include_bytes!("../../../testdata/fonts/ElideTestMono.ttf");
-    const SANS_CFF: &[u8] = include_bytes!("../../../testdata/fonts/ElideTestSansCff.otf");
-    const MATH: &[u8] = include_bytes!("../../../testdata/fonts/ElideTestMath.ttf");
-    const CMR10: &[u8] = include_bytes!("../../../testdata/fonts/cmr10.pfb");
+    const SANS: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSans.ttf");
+    const MONO: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestMono.ttf");
+    const SANS_CFF: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSansCff.otf");
+    const MATH: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestMath.ttf");
+    const CMR10: &[u8] = include_bytes!("../../../../testdata/fonts/cmr10.pfb");
 
     let font = |subtype: &str, file: FontFile, program: &[u8], flags: i64, extra: Dictionary| {
         document(|pdf| {
@@ -864,19 +667,7 @@ fn real() -> Vec<Case> {
         Case::new(
             "Computer Modern, Type 1",
             document(|pdf| {
-                let (program, lengths) = pfb(CMR10);
-                let font = embedding(pdf.doc(), "Type1", FontFile::Type1, program, 4);
-                let descriptor = font.get(b"FontDescriptor").and_then(Object::as_dict);
-                let file = descriptor
-                    .and_then(|d| d.get(b"FontFile"))
-                    .and_then(Object::as_reference);
-                if let Ok(Object::Stream(stream)) = file.and_then(|id| pdf.doc().get_object_mut(id))
-                {
-                    for (key, length) in ["Length1", "Length2", "Length3"].into_iter().zip(lengths)
-                    {
-                        stream.dict.set(key, length as i64);
-                    }
-                }
+                let font = embedding(pdf.doc(), "Type1", FontFile::Type1, CMR10.to_vec(), 4);
                 // The codes TeX's text fonts draw; 0x20 names `suppress`,
                 // whose text no reader knows.
                 Page::new()
@@ -885,29 +676,6 @@ fn real() -> Vec<Case> {
             }),
         ),
     ]
-}
-
-/// The Type 1 program a PFB file holds, its segments joined, and the
-/// lengths of its clear, encrypted and trailing parts.
-fn pfb(file: &[u8]) -> (Vec<u8>, [usize; 3]) {
-    let mut program = Vec::new();
-    let mut lengths = [0; 3];
-    let mut at = 0;
-    let mut part = 0;
-    while let [0x80, kind @ (1 | 2), a, b, c, d, ..] = file[at..] {
-        let len = u32::from_le_bytes([a, b, c, d]) as usize;
-        let segment = &file[at + 6..at + 6 + len];
-        // ASCII and binary segments alternate: clear, encrypted, trailer.
-        if kind == 2 {
-            part = 1;
-        } else if part == 1 {
-            part = 2;
-        }
-        lengths[part] += len;
-        program.extend(segment);
-        at += 6 + len;
-    }
-    (program, lengths)
 }
 
 /// Every case.

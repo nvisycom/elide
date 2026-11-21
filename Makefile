@@ -18,8 +18,8 @@ install-deps: ## Installs system build dependencies (C toolchain for the mp3 cod
 .PHONY: install-pdfium
 install-pdfium: ## Installs the shared libraries
 	@$(call log,Installing PDFium shared library...)
-	@chmod +x scripts/*.sh
-	@./scripts/install-pdfium.sh
+	@chmod +x scripts/install/*.sh
+	@./scripts/install/pdfium.sh
 	@$(call log,PDFium installed.)
 
 .PHONY: install-tools
@@ -56,7 +56,7 @@ wasm-pkg: ## Builds @nvisy/elide into packages/wasm/dist via wasm-pack.
 	@$(call log,Generating Label constants from the builtin catalog...)
 	@# Emits packages/wasm/label.{js,d.ts} from `cargo run --example labels`,
 	@# so the JS `Label` set stays in sync with the Rust label catalog.
-	@node scripts/gen-labels.mjs
+	@node scripts/wasm/gen-labels.mjs
 	@$(call log,Copying logo from the master asset...)
 	@mkdir -p packages/demo/public
 	@cp .github/assets/logo.svg packages/demo/public/logo.svg
@@ -93,6 +93,16 @@ ci: lint ## Runs all CI checks locally.
 	@cargo test --workspace
 	@cargo build --workspace --release
 	@$(call log,All CI checks passed!)
+
+PDF_CORPUS ?= $(CURDIR)/target/pdf-corpus
+
+.PHONY: test-pdf-placement
+test-pdf-placement: ## Compares elide-pdf's glyph placement with PDFium's (needs PDFium).
+	@$(call log,Fetching the PDF corpus into $(PDF_CORPUS)...)
+	@python3 scripts/pdf/fetch-corpus.py "$(PDF_CORPUS)"
+	@$(call log,Comparing glyph placement with PDFium...)
+	@ELIDE_PDF_CORPUS="$(PDF_CORPUS)" cargo test -p elide-pdf --features render --lib render::differential -- --ignored
+	@$(call log,Glyph placement matches PDFium.)
 
 .PHONY: clean-testdata
 clean-testdata: ## Removes generated e2e artifacts (testdata/audits, testdata/results).

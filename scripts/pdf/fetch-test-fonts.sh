@@ -8,11 +8,11 @@
 # its licence beside it. cmr10.pfb is copied unmodified. Subsetting runs
 # fontTools through uv.
 #
-# Usage: scripts/fetch-test-fonts.sh
+# Usage: scripts/pdf/fetch-test-fonts.sh
 
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$root/crates/elide-pdf/testdata/fonts"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

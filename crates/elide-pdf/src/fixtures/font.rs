@@ -329,6 +329,29 @@ fn type1_lengths(program: &[u8]) -> Option<[usize; 3]> {
         .then_some([clear, encrypted, trailer])
 }
 
+/// The Type 1 program a PFB file holds, its segments joined, and the
+/// lengths of its clear, encrypted and trailing parts.
+fn pfb(file: &[u8]) -> (Vec<u8>, [usize; 3]) {
+    let mut program = Vec::new();
+    let mut lengths = [0; 3];
+    let mut at = 0;
+    let mut part = 0;
+    while let [0x80, kind @ (1 | 2), a, b, c, d, ..] = file[at..] {
+        let len = u32::from_le_bytes([a, b, c, d]) as usize;
+        let segment = &file[at + 6..at + 6 + len];
+        // ASCII and binary segments alternate: clear, encrypted, trailer.
+        if kind == 2 {
+            part = 1;
+        } else if part == 1 {
+            part = 2;
+        }
+        lengths[part] += len;
+        program.extend(segment);
+        at += 6 + len;
+    }
+    (program, lengths)
+}
+
 /// A Type 1 charstring number.
 fn type1_number(value: i32) -> Vec<u8> {
     match value {
@@ -403,7 +426,8 @@ impl FontFile {
 }
 
 /// A simple font of `subtype` whose descriptor, flagged `flags`, embeds
-/// `program` in `doc` as `file`.
+/// `program` in `doc` as `file`. A Type 1 program, as built here or from a
+/// PFB file's segments, is given the lengths of its three parts.
 pub(crate) fn embedding(
     doc: &mut Document,
     subtype: &str,
@@ -416,12 +440,22 @@ pub(crate) fn embedding(
     if let Some(kind) = kind {
         dict.set("Subtype", kind);
     }
-    if let FontFile::Type1 = file
-        && let Some(lengths) = type1_lengths(&program)
-    {
-        for (key, length) in ["Length1", "Length2", "Length3"].into_iter().zip(lengths) {
-            dict.set(key, length as i64);
+    let (program, lengths) = match file {
+        FontFile::Type1 if program.first() == Some(&0x80) => {
+            let (program, lengths) = pfb(&program);
+            (program, Some(lengths))
         }
+        FontFile::Type1 => {
+            let lengths = type1_lengths(&program);
+            (program, lengths)
+        }
+        _ => (program, None),
+    };
+    for (key, length) in ["Length1", "Length2", "Length3"]
+        .into_iter()
+        .zip(lengths.into_iter().flatten())
+    {
+        dict.set(key, length as i64);
     }
     let program = doc.add_object(Stream::new(dict, program));
     let mut descriptor = dictionary! {

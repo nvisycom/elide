@@ -1,6 +1,6 @@
 # Test fonts
 
-Real font programs that the PDFium placement test (`src/pdf/render/differential.rs`) embeds. They are test data only and are never compiled into a binary. `scripts/fetch-test-fonts.sh` fetches them again, checking each download against a pinned SHA-256.
+Real font programs that the PDFium placement test (`src/pdf/render/differential/cases.rs`) embeds. They are test data only and are never compiled into a binary. `scripts/pdf/fetch-test-fonts.sh` fetches them again, checking each download against a pinned SHA-256.
 
 | File | From | What it exercises |
 |---|---|---|
