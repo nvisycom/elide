@@ -290,7 +290,7 @@ mod tests {
     use lopdf::{Document, Object, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::{DocBuilder, Page, type1};
+    use crate::fixtures::{DocBuilder, Page, to_unicode_cmap, type1};
     use crate::pdf::reader::GlyphRect;
     use crate::sanitize::{Check, Rebuild};
 
@@ -804,13 +804,7 @@ mod tests {
         let mut pdf = DocBuilder::with_version("1.5");
         let cmap = pdf.add(Stream::new(
             dictionary! {},
-            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
-              /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
-              /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
-              1 begincodespacerange\n<00> <FF>\nendcodespacerange\n\
-              1 beginbfchar\n<4A> <004A>\nendbfchar\n\
-              endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
-                .to_vec(),
+            to_unicode_cmap(&["<00> <FF>"], &["<4A> <004A>"], &[]),
         ));
         let mut font = type1("Helvetica");
         font.set("ToUnicode", cmap);

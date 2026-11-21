@@ -34,3 +34,6 @@ impl Read for Renders {
         pdfium::render_pages(pdf, &self.pages, self.scale)
     }
 }
+
+#[cfg(test)]
+mod differential;

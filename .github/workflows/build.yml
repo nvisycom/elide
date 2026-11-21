@@ -180,6 +180,11 @@ jobs:
           cargo test -p elide --features codec-pdf-render,mocks,engine
           --test format_pdf raster:: -- --ignored
 
+      - name: Run the glyph placement test against PDFium (ignored, needs PDFium)
+        run: >
+          cargo test -p elide-pdf --features render --lib
+          render::differential -- --ignored
+
   build:
     name: Build
     runs-on: ubuntu-latest

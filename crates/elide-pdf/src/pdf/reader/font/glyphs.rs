@@ -483,15 +483,17 @@ pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::to_unicode_cmap;
 
     /// A one-byte-and-two-byte `/ToUnicode` CMap mapping `<41>` to `J`,
     /// `<8140>` to `a` (as a Shift-JIS font's would), and `<5C71>` to `x`.
-    const TO_UNICODE: &[u8] = b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
-        /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
-        /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
-        2 begincodespacerange\n<00> <80>\n<8140> <9FFC>\nendcodespacerange\n\
-        3 beginbfchar\n<41> <004A>\n<8140> <0061>\n<5C71> <0078>\nendbfchar\n\
-        endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+    fn to_unicode_map() -> Vec<u8> {
+        to_unicode_cmap(
+            &["<00> <80>", "<8140> <9FFC>"],
+            &["<41> <004A>", "<8140> <0061>", "<5C71> <0078>"],
+            &[],
+        )
+    }
 
     /// The glyphs `bytes` draw in a composite font of `encoding`, with the
     /// `/ToUnicode` above when `mapped`.
@@ -503,7 +505,7 @@ mod tests {
         if mapped {
             font.set(
                 "ToUnicode",
-                doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec())),
+                doc.add_object(Stream::new(dictionary! {}, to_unicode_map())),
             );
         }
         let text = FontText::of(&doc, &font).unwrap()?;
@@ -546,7 +548,7 @@ mod tests {
               endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
                 .to_vec(),
         ));
-        let to_unicode = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
+        let to_unicode = doc.add_object(Stream::new(dictionary! {}, to_unicode_map()));
         let font = dictionary! {
             "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X",
             "Encoding" => encoding, "ToUnicode" => to_unicode,
@@ -641,7 +643,7 @@ mod tests {
     /// parses bytes that went uncounted.
     #[test]
     fn a_cmap_under_a_filter_that_is_none_is_unreadable() {
-        let stream = Stream::new(dictionary! { "Filter" => 5 }, TO_UNICODE.to_vec());
+        let stream = Stream::new(dictionary! { "Filter" => 5 }, to_unicode_map());
         assert!(to_unicode(&Document::new(), &stream).unwrap().is_none());
     }
 
@@ -724,7 +726,7 @@ mod tests {
     #[test]
     fn a_simple_font_without_an_encoding_falls_back_per_byte() {
         let mut doc = Document::with_version("1.7");
-        let map = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
+        let map = doc.add_object(Stream::new(dictionary! {}, to_unicode_map()));
         let font = dictionary! {
             "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "X", "ToUnicode" => map,
         };
@@ -816,7 +818,7 @@ mod tests {
     #[test]
     fn a_symbolic_font_refuses_a_byte_its_map_lacks() {
         let mut doc = Document::with_version("1.7");
-        let map = doc.add_object(Stream::new(dictionary! {}, TO_UNICODE.to_vec()));
+        let map = doc.add_object(Stream::new(dictionary! {}, to_unicode_map()));
         let descriptor = doc.add_object(dictionary! { "Type" => "FontDescriptor", "Flags" => 4 });
         let program = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
         let embedded = doc.add_object(dictionary! {
