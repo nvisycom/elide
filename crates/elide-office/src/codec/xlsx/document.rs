@@ -12,12 +12,12 @@ use elide_core::modality::tabular::Tabular;
 use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::TEXT_PART_ID;
+use super::TEXT_STREAM_ID;
 use super::stream::XlsxStream;
-use crate::codec::ooxml::{BODY_PART_ID, OoxmlAddress, finish, part_replacements, replacements};
+use crate::codec::ooxml::{BODY_STREAM_ID, OoxmlAddress, finish, part_replacements, replacements};
 use crate::codec::props::DocProps;
 use crate::opc::check::check;
-use crate::xlsx::{SheetClassifier, Xlsx};
+use crate::xlsx::{SheetFormat, Xlsx};
 
 /// A decoded workbook: its cells, its text outside the cells (comments,
 /// drawings, charts, external hyperlink targets), and its document-property
@@ -44,11 +44,11 @@ pub(super) struct XlsxDocument {
 impl Native for XlsxDocument {
     fn streams(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
         let cells = (
-            LocalId::new(BODY_PART_ID),
+            LocalId::new(BODY_STREAM_ID),
             StreamMut::new::<Tabular, _>(&mut self.cells),
         );
         let text = (
-            LocalId::new(TEXT_PART_ID),
+            LocalId::new(TEXT_STREAM_ID),
             StreamMut::new::<Text, _>(&mut self.text),
         );
         iter::once(cells)
@@ -66,6 +66,6 @@ impl Native for XlsxDocument {
     }
 
     fn validate(&self, output: &ContentData) -> Result<()> {
-        check(output.as_bytes(), self.policy, &SheetClassifier)
+        check(output.as_bytes(), self.policy, &SheetFormat)
     }
 }

@@ -10,14 +10,15 @@
 use elide_core::redaction::HiddenContent;
 
 use crate::opc::block::EmbeddingKind;
+use crate::opc::content_types::ContentType;
 use crate::opc::ct::{self, PML, SML, WML};
 use crate::opc::part::PartPath;
+use crate::opc::relationships::{IMPORTED_CHUNK, THUMBNAIL};
 
 /// What a package part is, decided by its content type and the relationship
 /// that reaches it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PartKind {
+pub(crate) enum PartKind {
     /// A format's main part: the document body, the presentation, the workbook.
     Main,
     /// A part whose text is the document's visible content: a header, footer,
@@ -62,24 +63,21 @@ pub enum PartKind {
     Unknown,
 }
 
-/// The relationship type that names the package thumbnail.
-const THUMBNAIL: &str =
-    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail";
-
-/// The relationship type of a WordprocessingML imported chunk (`w:altChunk`).
-const IMPORTED_CHUNK: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk";
-
 impl PartKind {
     /// Classify `part` from its `content_type` and the relationship types that
     /// reach it.
-    pub(crate) fn of(part: &PartPath, content_type: Option<&str>, incoming: &[&str]) -> Self {
+    pub(crate) fn of(
+        part: &PartPath,
+        content_type: Option<&ContentType>,
+        incoming: &[String],
+    ) -> Self {
+        let reached_by = |rel_type: &str| incoming.iter().any(|incoming| incoming == rel_type);
         // The thumbnail and imported chunks are typed by the relationship that
         // reaches them: their content types are a plain image or document type.
-        if incoming.contains(&THUMBNAIL) {
+        if reached_by(THUMBNAIL) {
             return Self::Hidden(HiddenContent::Thumbnail);
         }
-        if incoming.contains(&IMPORTED_CHUNK) {
+        if reached_by(IMPORTED_CHUNK) {
             return Self::Embedding(EmbeddingKind::Object);
         }
         // Custom XML items carry the generic XML content type; their place in the
@@ -94,8 +92,8 @@ impl PartKind {
         let Some(content_type) = content_type else {
             return Self::Unknown;
         };
-        let content_type = content_type.to_ascii_lowercase();
-        if let Some(kind) = Self::of_media(&content_type) {
+        let content_type = content_type.as_str();
+        if let Some(kind) = Self::of_media(content_type) {
             return kind;
         }
         if let Some(name) = content_type.strip_prefix(WML) {
@@ -107,7 +105,7 @@ impl PartKind {
         if let Some(name) = content_type.strip_prefix(SML) {
             return Self::of_spreadsheet(name);
         }
-        Self::of_shared(&content_type)
+        Self::of_shared(content_type)
     }
 
     /// The kind of an image, media, font, or embedded-object content type.
@@ -276,7 +274,11 @@ mod tests {
     use super::*;
 
     fn kind(path: &str, content_type: &str) -> PartKind {
-        PartKind::of(&PartPath::from(path), Some(content_type), &[])
+        PartKind::of(
+            &PartPath::from(path),
+            Some(&ContentType::new(content_type)),
+            &[],
+        )
     }
 
     #[test]
@@ -321,8 +323,8 @@ mod tests {
     fn the_thumbnail_and_custom_xml_are_known_by_their_place() {
         let thumbnail = PartKind::of(
             &PartPath::from("docProps/thumbnail.jpeg"),
-            Some("image/jpeg"),
-            &[THUMBNAIL],
+            Some(&ContentType::new("image/jpeg")),
+            &[THUMBNAIL.to_owned()],
         );
         assert_eq!(thumbnail, PartKind::Hidden(HiddenContent::Thumbnail));
         assert_eq!(

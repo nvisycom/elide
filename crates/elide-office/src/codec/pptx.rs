@@ -9,6 +9,7 @@
 
 use elide_codec::{Format, FormatId};
 
+use super::CodecIdentity;
 use super::ooxml::{self, OoxmlCodec};
 use crate::pptx::SlideFormat;
 
@@ -16,14 +17,15 @@ use crate::pptx::SlideFormat;
 #[derive(Debug)]
 pub(crate) struct PptxCodec;
 
-impl OoxmlCodec for PptxCodec {
-    type Format = SlideFormat;
-
+impl CodecIdentity for PptxCodec {
     const CONTENT_TYPE: &'static str =
         "application/vnd.openxmlformats-officedocument.presentationml.presentation";
     const EXTENSION: &'static str = "pptx";
     const FORMAT_ID: FormatId = FormatId::new("elide.document.pptx");
-    const LABEL: &'static str = "pptx";
+}
+
+impl OoxmlCodec for PptxCodec {
+    type Format = SlideFormat;
 }
 
 /// The PPTX [`Format`]: PowerPoint presentations, resolved by `.pptx`.

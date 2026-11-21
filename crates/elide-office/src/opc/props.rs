@@ -16,14 +16,15 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::{io, mem};
 
 use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::redaction::HiddenContent;
 use quick_xml::NsReader;
-use quick_xml::escape::unescape;
-use quick_xml::events::{BytesStart, BytesText, Event};
+use quick_xml::escape::{resolve_predefined_entity, unescape};
+use quick_xml::events::{BytesRef, BytesStart, BytesText, Event};
 use quick_xml::name::QName;
 use quick_xml::writer::Writer;
 
@@ -33,14 +34,14 @@ use crate::opc::ns::{
 };
 use crate::opc::vocabulary::is_known;
 use crate::opc::xml_edit::{
-    Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, bom_len, bound,
-    local_name, namespace_of,
+    AttributeExtent, Cut, Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source,
+    bom_len, bound, local_name, namespace_of, refuse_doctype,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
 /// The core and extended property elements surfaced as fields, each holding
 /// its value as text.
-const ELEMENT_FIELDS: [&str; 13] = [
+const ELEMENT_FIELDS: &[&str] = &[
     "creator",
     "lastModifiedBy",
     "Manager",
@@ -58,20 +59,23 @@ const ELEMENT_FIELDS: [&str; 13] = [
 
 /// The element fields that hold a typed W3CDTF timestamp, which is cleared
 /// rather than overwritten with arbitrary text.
-const TIMESTAMPS: [&str; 2] = ["created", "modified"];
+const TIMESTAMPS: &[&str] = &["created", "modified"];
 
 /// The variant types (`vt:`) that hold free text: a list entry, or a custom
 /// property that can be overwritten. A custom property of any other type (a
 /// number, a date, a flag, a list) is removed instead.
-const TEXT_TYPES: [&str; 3] = ["lpwstr", "lpstr", "bstr"];
+const TEXT_TYPES: &[&str] = &["lpwstr", "lpstr", "bstr"];
 
 /// The extended properties that list the document's parts: `TitlesOfParts`
 /// names each part (a sheet, a slide title), and `HeadingPairs` says how those
 /// names group (`Worksheets`, 3). Kept together, since each describes the other.
-const LISTS: [&str; 2] = ["TitlesOfParts", "HeadingPairs"];
+const LISTS: &[&str] = &["TitlesOfParts", "HeadingPairs"];
 
 /// A custom property's element, named by its `name` attribute.
 const CUSTOM_PROPERTY: &str = "property";
+
+/// The pid of the first custom property: the pids below it are reserved.
+const FIRST_PID: usize = 2;
 
 /// Where a field's value sits in its part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,10 +90,11 @@ enum Place {
 }
 
 impl Place {
-    /// What the field `key` in this place is: an element field by the schema's
-    /// meaning for it, any other field free content.
-    fn label(self, key: &str) -> LabelRef {
-        let label = match (self, key) {
+    /// What a field in this place, held by the element `local`, is: an
+    /// element field by the schema's meaning for it, any other field free
+    /// content.
+    fn label(self, local: &str) -> LabelRef {
+        let label = match (self, local) {
             (Self::Element, "creator" | "lastModifiedBy" | "Manager") => &builtins::PERSON_NAME,
             (Self::Element, "created" | "modified") => &builtins::DATE_TIME,
             (Self::Element, "Company") => &builtins::ORGANIZATION_NAME,
@@ -101,14 +106,14 @@ impl Place {
 
 /// A property field: its key, its value, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Field {
+pub(crate) struct Field {
     /// The field's key: an element's local name, `<list>/<n>`, or a custom
     /// property's `property/<n>` (its name `property/<n>/name`).
-    pub key: String,
+    pub(crate) key: String,
     /// The field's value, trimmed.
-    pub value: String,
+    pub(crate) value: String,
     /// What the field is.
-    pub label: LabelRef,
+    pub(crate) label: LabelRef,
 }
 
 /// The edit that strips from a property part everything no [`fields`] reads,
@@ -136,196 +141,333 @@ impl Edit for UnsurfacedProperties {
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
         let mut reader = SpannedReader::new_ns(raw);
-        let mut walk = Walk::default();
-        let mut cuts: Vec<(Range<usize>, Cut)> = Vec::new();
-        // The kept elements that are not fields: the root, and the list
-        // containers, vectors, and variants, kept only when an entry is.
-        let mut frames: Vec<Frame> = Vec::new();
-        // The vectors open inside the field being read, each keeping its
-        // `size` to the entries it holds.
-        let mut vectors: Vec<Frame> = Vec::new();
-        // The depth of the surfaced field being read, everything inside kept
-        // but an array.
-        let mut reading: Option<usize> = None;
-        // An element being removed, left out of the walk.
-        let mut removing: Option<Skipped> = None;
-        // How many custom properties are kept, which numbers each.
-        let mut properties = 0usize;
-        // The heading counts, written once the titles they group are known.
-        let mut counts: Vec<Count<'_>> = Vec::new();
-        // A heading count being read: where its content begins, how many
-        // elements are open inside it, itself included, and its character
-        // data as XML reads it (none once an element or a reference that
-        // does not decode is met).
-        let mut counting: Option<(usize, usize, Option<String>)> = None;
-        // How many titles of parts are kept.
-        let mut titles = 0usize;
-
+        let mut stripping = Stripping::new(raw);
         loop {
             let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
-            if let Some((start, depth, text)) = &mut counting {
-                match event {
-                    Event::Start(_) => {
-                        *depth += 1;
-                        *text = None;
-                    }
-                    Event::Empty(_) => *text = None,
-                    Event::End(_) => *depth -= 1,
-                    Event::Eof => return Err(malformed_xml("unclosed element")),
-                    Event::Text(ref t) => {
-                        let decoded = unescape(t.as_ref()).ok();
-                        *text = text.take().zip(decoded).map(|(text, t)| text + &t);
-                    }
-                    Event::CData(ref t) => {
-                        if let Some(text) = text {
-                            text.push_str(t.as_ref());
-                        }
-                    }
-                    Event::GeneralRef(ref r) => {
-                        let resolved = resolve_ref(r);
-                        if resolved.is_empty() {
-                            *text = None;
-                        } else if let Some(text) = text {
-                            text.push_str(&resolved);
-                        }
-                    }
-                    _ => {}
-                }
-                if *depth == 0 {
-                    let said = text.as_deref().and_then(|text| text.trim().parse().ok());
-                    counts.push(Count {
-                        range: *start..span.start,
-                        close: None,
-                        said,
-                    });
-                    counting = None;
-                    walk.leave();
-                }
-                continue;
-            }
-            if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
-                continue;
-            }
-            match event {
-                Event::Eof => break,
-                Event::Start(ref e) | Event::Empty(ref e) => {
-                    let is_start = matches!(event, Event::Start(_));
-                    let depth = walk.depth();
-                    let field = walk.enter(namespace.as_deref(), e);
-                    let local = e.local_name().into_inner();
-                    // A heading's count is kept, its value written from the
-                    // titles it groups.
-                    if reading.is_none() && walk.is_count() {
-                        keep_child(&mut frames);
-                        let element = Element {
-                            namespace: namespace.as_deref().map(transitional),
-                            local,
-                            sized: false,
-                            pid: None,
-                        };
-                        cut_attributes(&reader.reader, raw, e, &element, &mut cuts)?;
-                        if is_start {
-                            counting = Some((span.end, 1, Some(String::new())));
-                        } else {
-                            walk.leave();
-                            counts.push(Count {
-                                range: span.end - 2..span.end,
-                                close: Some(&raw[span.start + 1..][..e.name().as_ref().len()]),
-                                said: None,
-                            });
-                        }
-                        continue;
-                    }
-                    let mut pid = None;
-                    let kept = if reading.is_some() {
-                        // An array's bounds are numbers nothing reads, and
-                        // nothing reads an unreviewed vocabulary.
-                        local != "array" && !walk.is_foreign()
-                    } else if depth == 0 {
-                        true
-                    } else if let Some(field) = field {
-                        // A custom property's name is read only when it
-                        // holds a value, so an empty one is never surfaced.
-                        let read = is_start || field.place != Place::Custom;
-                        if read {
-                            keep_child(&mut frames);
-                            if field.place == Place::Custom {
-                                properties += 1;
-                                pid = Some(properties + 1);
-                            }
-                            if field.place == Place::Entry && walk.open[1] == "TitlesOfParts" {
-                                titles += 1;
-                            }
-                            if is_start {
-                                reading = Some(depth);
-                            }
-                        }
-                        read
-                    } else {
-                        is_start && walk.is_list_path()
-                    };
-                    if !kept {
-                        walk.leave();
-                        removing = Skipped::begin(span, is_start, &mut cuts);
-                        continue;
-                    }
-                    if let Some(vector) = vectors.last_mut()
-                        && vector.depth + 1 == depth
-                    {
-                        vector.children += 1;
-                    }
-                    let sized = local == "vector";
-                    if !is_start {
-                        walk.leave();
-                    } else if reading.is_some_and(|field| field < depth) {
-                        if sized {
-                            vectors.push(Frame::new(depth, span.start, cuts.len(), size(raw, e)?));
-                        }
-                    } else if reading.is_none() {
-                        let size = if sized { size(raw, e)? } else { None };
-                        frames.push(Frame::new(depth, span.start, cuts.len(), size));
-                    }
-                    let element = Element {
-                        namespace: namespace.as_deref().map(transitional),
-                        local,
-                        sized: sized && is_start,
-                        pid,
-                    };
-                    cut_attributes(&reader.reader, raw, e, &element, &mut cuts)?;
-                }
-                Event::End(_) => {
-                    walk.leave();
-                    let depth = walk.depth();
-                    if reading == Some(depth) {
-                        reading = None;
-                    } else if reading.is_some() {
-                        if let Some(vector) = vectors.pop_if(|vector| vector.depth == depth) {
-                            vector.resize(&mut cuts);
-                        }
-                    } else if let Some(frame) = frames.pop_if(|frame| frame.depth == depth) {
-                        if frame.children == 0 && depth > 0 {
-                            cuts.truncate(frame.cuts);
-                            cuts.push((frame.start..span.end, Cut::Removed));
-                        } else {
-                            frame.resize(&mut cuts);
-                            keep_child(&mut frames);
-                        }
-                    }
-                }
-                Event::Text(ref text) if reading.is_none() && !is_blank(text) => {
-                    cuts.push((span, Cut::Removed));
-                }
-                Event::CData(_) if reading.is_none() => cuts.push((span, Cut::Removed)),
-                Event::GeneralRef(ref r) if reading.is_none() || resolve_ref(r).is_empty() => {
-                    cuts.push((span, Cut::Removed));
-                }
-                Event::PI(_) => cuts.push((span, Cut::Removed)),
-                _ => {}
+            if !stripping.read(&reader.reader, namespace.as_deref(), &event, span)? {
+                break;
             }
         }
-        write_counts(raw, &counts, titles, &mut cuts);
-        let count = cuts.iter().filter(|(_, cut)| cut.counted()).count();
-        Ok(Edited::from_cuts(raw, cuts, count))
+        Ok(stripping.finish())
+    }
+}
+
+/// An [`UnsurfacedProperties`] edit in progress over a part.
+struct Stripping<'a> {
+    /// The part's text.
+    raw: &'a str,
+    /// The open elements, which say what field an element is.
+    walk: Walk,
+    /// Each byte range cut, and what takes its place.
+    cuts: Vec<Cut<Fill>>,
+    /// The kept elements that are not fields: the root, and the list
+    /// containers, vectors, and variants, kept only when an entry is.
+    frames: Vec<Frame>,
+    /// The vectors open inside the field being read, each keeping its
+    /// `size` to the entries it holds.
+    vectors: Vec<Frame>,
+    /// The depth of the surfaced field being read, everything inside kept
+    /// but an array.
+    reading: Option<usize>,
+    /// An element being removed, left out of the walk.
+    removing: Option<Skipped>,
+    /// How many custom properties are kept, which numbers each.
+    properties: usize,
+    /// The heading counts, written once the titles they group are known.
+    counts: Vec<Count<'a>>,
+    /// A heading count being read.
+    counting: Option<Counting>,
+    /// How many titles of parts are kept.
+    titles: usize,
+}
+
+impl<'a> Stripping<'a> {
+    /// An edit of `raw`, nothing read yet.
+    fn new(raw: &'a str) -> Self {
+        Self {
+            raw,
+            walk: Walk::default(),
+            cuts: Vec::new(),
+            frames: Vec::new(),
+            vectors: Vec::new(),
+            reading: None,
+            removing: None,
+            properties: 0,
+            counts: Vec::new(),
+            counting: None,
+            titles: 0,
+        }
+    }
+
+    /// Read `event`, spanning `span`, its name bound to `namespace` as
+    /// `reader` resolves it: `false` once the part ends.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// the part is not well-formed XML or declares a document type.
+    fn read(
+        &mut self,
+        reader: &NsReader<&[u8]>,
+        namespace: Option<&str>,
+        event: &Event<'_>,
+        span: Range<usize>,
+    ) -> Result<bool> {
+        if let Some(counting) = &mut self.counting {
+            if counting.read(event)?
+                && let Some(counting) = self.counting.take()
+            {
+                self.counts.push(counting.into_count(span.start));
+                self.walk.leave();
+            }
+            return Ok(true);
+        }
+        refuse_doctype(event)?;
+        if Skipped::skip(&mut self.removing, event, span.end, &mut self.cuts)? {
+            return Ok(true);
+        }
+        match event {
+            Event::Eof => return Ok(false),
+            Event::Start(e) => self.on_start(reader, namespace, e, span, true)?,
+            Event::Empty(e) => self.on_start(reader, namespace, e, span, false)?,
+            Event::End(_) => self.on_end(span),
+            Event::Text(text) if self.reading.is_none() && !is_blank(text) => self.remove(span),
+            Event::CData(_) if self.reading.is_none() => self.remove(span),
+            Event::GeneralRef(r) if self.reading.is_none() || resolve_ref(r).is_empty() => {
+                self.remove(span);
+            }
+            Event::PI(_) => self.remove(span),
+            _ => {}
+        }
+        Ok(true)
+    }
+
+    /// Cut `span` out of the part.
+    fn remove(&mut self, span: Range<usize>) {
+        self.cuts.push(Cut::remove(span));
+    }
+
+    /// Read the start tag `e` spanning `span`, of an element that holds
+    /// content (`is_start`) or an empty one.
+    fn on_start(
+        &mut self,
+        reader: &NsReader<&[u8]>,
+        namespace: Option<&str>,
+        e: &BytesStart<'_>,
+        span: Range<usize>,
+        is_start: bool,
+    ) -> Result<()> {
+        let depth = self.walk.depth();
+        let field = self.walk.enter(namespace, e);
+        let local = e.local_name().into_inner();
+        let namespace = namespace.map(transitional);
+        // A heading's count is kept, its value written from the titles it
+        // groups.
+        if self.reading.is_none() && self.walk.is_count() {
+            keep_child(&mut self.frames);
+            let element = Element {
+                namespace,
+                local,
+                role: Role::Other,
+            };
+            cut_attributes(reader, self.raw, e, &element, &mut self.cuts)?;
+            self.on_count(e, span, is_start);
+            return Ok(());
+        }
+        let Some(role) = self.role(depth, field, local, is_start) else {
+            self.walk.leave();
+            self.removing = Skipped::begin(span, is_start, &mut self.cuts);
+            return Ok(());
+        };
+        if let Some(vector) = self.vectors.last_mut()
+            && vector.depth + 1 == depth
+        {
+            vector.children += 1;
+        }
+        let sized = local == "vector";
+        if !is_start {
+            self.walk.leave();
+        } else if self.reading.is_some_and(|field| field < depth) {
+            if sized {
+                let size = size(self.raw, e)?;
+                self.vectors
+                    .push(Frame::new(depth, span.start, self.cuts.len(), size));
+            }
+        } else if self.reading.is_none() {
+            let size = if sized { size(self.raw, e)? } else { None };
+            self.frames
+                .push(Frame::new(depth, span.start, self.cuts.len(), size));
+        }
+        let role = if sized && is_start {
+            Role::Vector
+        } else {
+            role
+        };
+        let element = Element {
+            namespace,
+            local,
+            role,
+        };
+        cut_attributes(reader, self.raw, e, &element, &mut self.cuts)
+    }
+
+    /// Begin reading the heading count `e` spanning `span`: a started one is
+    /// read to its end tag, an empty one is a count of none, closed once it
+    /// holds a value.
+    fn on_count(&mut self, e: &BytesStart<'_>, span: Range<usize>, is_start: bool) {
+        if is_start {
+            self.counting = Some(Counting::new(span.end));
+        } else {
+            self.walk.leave();
+            self.counts.push(Count {
+                range: span.end - 2..span.end,
+                close: Some(&self.raw[span.start + 1..][..e.name().as_ref().len()]),
+                said: None,
+            });
+        }
+    }
+
+    /// How the element `local`, opening at `depth` and holding `field`, is
+    /// kept, or `None` when it goes.
+    fn role(
+        &mut self,
+        depth: usize,
+        field: Option<Entered>,
+        local: &str,
+        is_start: bool,
+    ) -> Option<Role> {
+        if self.reading.is_some() {
+            // An array's bounds are numbers nothing reads, and nothing reads
+            // an unreviewed vocabulary.
+            return (local != "array" && !self.walk.is_foreign()).then_some(Role::Other);
+        }
+        if depth == 0 {
+            return Some(Role::Other);
+        }
+        let Some(field) = field else {
+            return (is_start && self.walk.is_list_path()).then_some(Role::Other);
+        };
+        // A custom property's name is read only when it holds a value, so an
+        // empty one is never surfaced.
+        if !is_start && field.place == Place::Custom {
+            return None;
+        }
+        keep_child(&mut self.frames);
+        if is_start {
+            self.reading = Some(depth);
+        }
+        match field.place {
+            Place::Custom => {
+                let pid = FIRST_PID + self.properties;
+                self.properties += 1;
+                Some(Role::Property(pid))
+            }
+            Place::Entry => {
+                if self.walk.list() == Some("TitlesOfParts") {
+                    self.titles += 1;
+                }
+                Some(Role::Other)
+            }
+            Place::Element => Some(Role::Other),
+        }
+    }
+
+    /// Read an end tag spanning `span`.
+    fn on_end(&mut self, span: Range<usize>) {
+        self.walk.leave();
+        let depth = self.walk.depth();
+        if self.reading == Some(depth) {
+            self.reading = None;
+        } else if self.reading.is_some() {
+            if let Some(vector) = self.vectors.pop_if(|vector| vector.depth == depth) {
+                vector.resize(&mut self.cuts);
+            }
+        } else if let Some(frame) = self.frames.pop_if(|frame| frame.depth == depth) {
+            if frame.children == 0 && depth > 0 {
+                self.cuts.truncate(frame.cuts);
+                self.cuts.push(Cut::remove(frame.start..span.end));
+            } else {
+                frame.resize(&mut self.cuts);
+                keep_child(&mut self.frames);
+            }
+        }
+    }
+
+    /// The part as edited, the heading counts written, or `None` when the
+    /// edit changes nothing.
+    fn finish(mut self) -> Option<Edited> {
+        write_counts(self.raw, &self.counts, self.titles, &mut self.cuts);
+        let count = self.cuts.iter().filter(|cut| cut.with.counted()).count();
+        Edited::from_cuts(self.raw, self.cuts, count)
+    }
+}
+
+/// A heading's count being read: where its content begins, how many elements
+/// are open inside it, itself included, and its character data as XML reads
+/// it (none once an element or a reference that does not decode is met).
+struct Counting {
+    start: usize,
+    depth: usize,
+    text: Option<String>,
+}
+
+impl Counting {
+    /// A count whose content begins at `start`.
+    fn new(start: usize) -> Self {
+        Self {
+            start,
+            depth: 1,
+            text: Some(String::new()),
+        }
+    }
+
+    /// Read `event` inside the count: `true` once it closes.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// the part ends inside it.
+    fn read(&mut self, event: &Event<'_>) -> Result<bool> {
+        match event {
+            Event::Start(_) => {
+                self.depth += 1;
+                self.text = None;
+            }
+            Event::Empty(_) => self.text = None,
+            Event::End(_) => self.depth -= 1,
+            Event::Eof => return Err(malformed_xml("unclosed element")),
+            Event::Text(t) => {
+                let decoded = unescape(t.as_ref()).ok();
+                self.text = self.text.take().zip(decoded).map(|(text, t)| text + &t);
+            }
+            Event::CData(t) => {
+                if let Some(text) = &mut self.text {
+                    text.push_str(t.as_ref());
+                }
+            }
+            Event::GeneralRef(r) => {
+                let resolved = resolve_ref(r);
+                if resolved.is_empty() {
+                    self.text = None;
+                } else if let Some(text) = &mut self.text {
+                    text.push_str(&resolved);
+                }
+            }
+            _ => {}
+        }
+        Ok(self.depth == 0)
+    }
+
+    /// The count read, its content ending at `end`.
+    fn into_count<'a>(self, end: usize) -> Count<'a> {
+        Count {
+            range: self.start..end,
+            close: None,
+            said: self
+                .text
+                .as_deref()
+                .and_then(|text| text.trim().parse().ok()),
+        }
     }
 }
 
@@ -342,12 +484,7 @@ struct Count<'a> {
 /// Write each of `counts` as the titles of parts its heading groups: of the
 /// `titles` kept, in order, as many as it says, the last heading taking the
 /// rest. A count that is no number groups none, so none carries data.
-fn write_counts(
-    raw: &str,
-    counts: &[Count<'_>],
-    titles: usize,
-    cuts: &mut Vec<(Range<usize>, Cut)>,
-) {
+fn write_counts(raw: &str, counts: &[Count<'_>], titles: usize, cuts: &mut Vec<Cut<Fill>>) {
     let mut rest = titles;
     for (at, count) in counts.iter().enumerate() {
         let written = &raw[count.range.clone()];
@@ -360,10 +497,10 @@ fn write_counts(
         let value = value.to_string();
         match count.close {
             None if written == value => {}
-            None => cuts.push((count.range.clone(), Cut::Replaced(value))),
-            Some(name) => cuts.push((
+            None => cuts.push(Cut::new(count.range.clone(), Fill::Replaced(value))),
+            Some(name) => cuts.push(Cut::new(
                 count.range.clone(),
-                Cut::Replaced(format!(">{value}</{name}>")),
+                Fill::Replaced(format!(">{value}</{name}>")),
             )),
         }
     }
@@ -374,10 +511,19 @@ struct Element<'a> {
     /// Its namespace, a strict one as its transitional twin.
     namespace: Option<&'a str>,
     local: &'a str,
-    /// Whether it is a vector whose `size` is kept to its entries.
-    sized: bool,
-    /// For a kept custom property, the number it is given.
-    pid: Option<usize>,
+    /// What its attributes are kept for.
+    role: Role,
+}
+
+/// What a kept element of a property part is, for its attributes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// A vector whose `size` is kept to its entries.
+    Vector,
+    /// A kept custom property, and the pid it is given.
+    Property(usize),
+    /// Any other element.
+    Other,
 }
 
 /// The format id every custom property a person adds carries
@@ -390,14 +536,14 @@ const BASE_TYPES: &[&str] = &[
     "decimal", "lpstr", "lpwstr", "bstr", "date", "filetime", "bool", "cy", "error", "clsid",
 ];
 
-/// What a property part keeps of an attribute.
-enum Kept {
-    /// The attribute as it is.
-    As,
-    /// The attribute with this value, in place of one that could carry text.
-    With(String),
-    /// Nothing.
-    No,
+/// What a property part does with an attribute of a kept element.
+enum AttributeEdit {
+    /// Keep the attribute as it is.
+    Keep,
+    /// Give the attribute this value, in place of one that could carry text.
+    Replace(String),
+    /// Remove the attribute.
+    Remove,
 }
 
 /// Cut from the kept `element` (its start tag `e`) each attribute no reader
@@ -415,17 +561,24 @@ fn cut_attributes(
     raw: &str,
     e: &BytesStart<'_>,
     element: &Element<'_>,
-    cuts: &mut Vec<(Range<usize>, Cut)>,
+    cuts: &mut Vec<Cut<Fill>>,
 ) -> Result<()> {
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
-        let (extent, value_range) = attribute_extent(raw, &attr)?;
+        let AttributeExtent {
+            whole: extent,
+            value: value_range,
+        } = attribute_extent(raw, &attr)?;
         let written = &raw[value_range.clone()];
         let value = attribute_value(written).ok();
         let value = value.as_deref();
-        let kept = if attr.key.as_namespace_binding().is_some() {
+        let edit = if attr.key.as_namespace_binding().is_some() {
             let reviewed = value.is_some_and(|uri| uri.is_empty() || is_known(transitional(uri)));
-            if reviewed { Kept::As } else { Kept::No }
+            if reviewed {
+                AttributeEdit::Keep
+            } else {
+                AttributeEdit::Remove
+            }
         } else {
             let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
             let qualified = namespace_of(&resolved);
@@ -433,33 +586,37 @@ fn cut_attributes(
                 (_, Some(XSI), "type")
                     if element.namespace == Some(DCTERMS) && is_w3cdtf(reader, value) =>
                 {
-                    Kept::As
+                    AttributeEdit::Keep
                 }
-                (_, None, "name") if element.pid.is_some() => Kept::As,
-                (_, None, "pid") => match element.pid {
-                    Some(pid) if written == pid.to_string() => Kept::As,
-                    Some(pid) => Kept::With(pid.to_string()),
-                    None => Kept::No,
+                (_, None, "name") if matches!(element.role, Role::Property(_)) => {
+                    AttributeEdit::Keep
+                }
+                (_, None, "pid") => match element.role {
+                    Role::Property(pid) if written == pid.to_string() => AttributeEdit::Keep,
+                    Role::Property(pid) => AttributeEdit::Replace(pid.to_string()),
+                    _ => AttributeEdit::Remove,
                 },
-                (_, None, "fmtid") if element.pid.is_some() => {
+                (_, None, "fmtid") if matches!(element.role, Role::Property(_)) => {
                     if written == USER_DEFINED {
-                        Kept::As
+                        AttributeEdit::Keep
                     } else {
-                        Kept::With(USER_DEFINED.to_owned())
+                        AttributeEdit::Replace(USER_DEFINED.to_owned())
                     }
                 }
                 // Kept to the vector's entries when it closes.
-                (_, None, "size") if element.sized => Kept::As,
+                (_, None, "size") if element.role == Role::Vector => AttributeEdit::Keep,
                 ("vector", None, "baseType") if value.is_some_and(|t| BASE_TYPES.contains(&t)) => {
-                    Kept::As
+                    AttributeEdit::Keep
                 }
-                _ => Kept::No,
+                _ => AttributeEdit::Remove,
             }
         };
-        match kept {
-            Kept::As => {}
-            Kept::With(value) => cuts.push((value_range, Cut::Replaced(value))),
-            Kept::No => cuts.push((extent, Cut::Removed)),
+        match edit {
+            AttributeEdit::Keep => {}
+            AttributeEdit::Replace(value) => {
+                cuts.push(Cut::new(value_range, Fill::Replaced(value)))
+            }
+            AttributeEdit::Remove => cuts.push(Cut::remove(extent)),
         }
     }
     Ok(())
@@ -471,16 +628,13 @@ fn is_w3cdtf(reader: &NsReader<&[u8]>, value: Option<&str>) -> bool {
     let Some(value) = value else {
         return false;
     };
-    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
-    if local != "W3CDTF" {
+    let (local, prefix) = QName(value).decompose();
+    if local.into_inner() != "W3CDTF" {
         return false;
     }
-    let name = if prefix.is_empty() {
-        "x".to_owned()
-    } else {
-        format!("{prefix}:x")
-    };
-    let (resolved, _) = reader.resolver().resolve_element(QName(&name));
+    // An empty prefix (`:W3CDTF`) is no prefix, resolved as the default.
+    let prefix = prefix.filter(|prefix| !prefix.as_ref().is_empty());
+    let resolved = reader.resolver().resolve_prefix(prefix, true);
     namespace_of(&resolved).as_deref() == Some(DCTERMS)
 }
 
@@ -488,21 +642,21 @@ fn is_w3cdtf(reader: &NsReader<&[u8]>, value: Option<&str>) -> bool {
 /// for what it removes, a value in place of one that could carry text (both
 /// counted), or a vector's new `size` (not counted).
 #[derive(Default)]
-enum Cut {
+enum Fill {
     #[default]
     Removed,
     Replaced(String),
     Written(String),
 }
 
-impl Cut {
+impl Fill {
     /// Whether this cut removes content.
     fn counted(&self) -> bool {
         !matches!(self, Self::Written(_))
     }
 }
 
-impl AsRef<str> for Cut {
+impl AsRef<str> for Fill {
     fn as_ref(&self) -> &str {
         match self {
             Self::Removed => "",
@@ -521,14 +675,14 @@ struct Frame {
     start: usize,
     /// How many cuts were made before it opened.
     cuts: usize,
-    /// For a vector, its `size` value's range and text.
-    size: Option<(Range<usize>, String)>,
+    /// For a vector, its `size` as written.
+    size: Option<Size>,
     /// How many of its children are kept.
     children: usize,
 }
 
 impl Frame {
-    fn new(depth: usize, start: usize, cuts: usize, size: Option<(Range<usize>, String)>) -> Self {
+    fn new(depth: usize, start: usize, cuts: usize, size: Option<Size>) -> Self {
         Self {
             depth,
             start,
@@ -537,17 +691,24 @@ impl Frame {
             children: 0,
         }
     }
-}
 
-impl Frame {
     /// Set the `size` this vector was written with to the children it keeps.
-    fn resize(self, cuts: &mut Vec<(Range<usize>, Cut)>) {
-        if let Some((value, written)) = self.size
-            && written != self.children.to_string()
+    fn resize(self, cuts: &mut Vec<Cut<Fill>>) {
+        if let Some(size) = self.size
+            && size.written != self.children.to_string()
         {
-            cuts.push((value, Cut::Written(self.children.to_string())));
+            cuts.push(Cut::new(
+                size.range,
+                Fill::Written(self.children.to_string()),
+            ));
         }
     }
+}
+
+/// A vector's `size` attribute as written: its value's range and text.
+struct Size {
+    range: Range<usize>,
+    written: String,
 }
 
 /// Count a kept child of the innermost open frame.
@@ -557,13 +718,14 @@ fn keep_child(frames: &mut [Frame]) {
     }
 }
 
-/// The range and text of `e`'s unqualified `size` attribute, if it has one.
-fn size(raw: &str, e: &BytesStart<'_>) -> Result<Option<(Range<usize>, String)>> {
+/// `e`'s unqualified `size` attribute, if it has one.
+fn size(raw: &str, e: &BytesStart<'_>) -> Result<Option<Size>> {
     for attribute in e.attributes() {
         let attribute = attribute.map_err(malformed_xml)?;
         if attribute.key.as_ref() == "size" {
-            let (_, value) = attribute_source(raw, &attribute)?;
-            return Ok(Some((value.clone(), raw[value].to_owned())));
+            let range = attribute_source(raw, &attribute)?.value;
+            let written = raw[range.clone()].to_owned();
+            return Ok(Some(Size { range, written }));
         }
     }
     Ok(None)
@@ -575,26 +737,71 @@ fn is_blank(text: &BytesText<'_>) -> bool {
 }
 
 /// A field an element holds: its key in the part, where its value sits, what
-/// it is, and for a custom property, its name.
+/// it is, whether it holds a typed timestamp, and for a custom property, its
+/// name.
 struct Entered {
     key: String,
     place: Place,
     label: LabelRef,
+    timestamp: bool,
     name: Option<String>,
 }
 
 impl Entered {
+    /// The field `key` in `place`, held by the element `local`.
+    fn new(key: String, place: Place, local: &str) -> Self {
+        Self {
+            key,
+            place,
+            label: place.label(local),
+            timestamp: place == Place::Element && TIMESTAMPS.contains(&local),
+            name: None,
+        }
+    }
+
     /// The key of the field holding a custom property's name.
     fn name_key(&self) -> String {
         format!("{}/name", self.key)
     }
 }
 
+/// An open element of a property part, as a [`Walk`] matches it.
+#[derive(Debug)]
+enum Open {
+    /// An element in an unreviewed namespace, or inside one.
+    Foreign,
+    /// An element out of the vocabulary its local name belongs to, which
+    /// matches no name.
+    Misplaced,
+    /// An element in its vocabulary, by its local name.
+    Known(String),
+}
+
+impl Open {
+    /// Whether this is the element `local`.
+    fn is(&self, local: &str) -> bool {
+        matches!(self, Self::Known(known) if known == local)
+    }
+
+    /// Whether this is a list of the document's parts.
+    fn is_list(&self) -> bool {
+        self.list().is_some()
+    }
+
+    /// The list of the document's parts this is, if it is one.
+    fn list(&self) -> Option<&str> {
+        match self {
+            Self::Known(local) if LISTS.contains(&local.as_str()) => Some(local),
+            _ => None,
+        }
+    }
+}
+
 /// The open elements of a property part, which say what field an element is.
 #[derive(Debug, Default)]
 struct Walk {
-    /// The local names of the open elements, the root first.
-    open: Vec<String>,
+    /// The open elements, the root first.
+    open: Vec<Open>,
     /// How many text entries of the current list have been entered.
     entries: usize,
     /// How many named custom properties have been entered.
@@ -640,67 +847,64 @@ impl Walk {
         let namespace = namespace.map(transitional);
         if self.outside.is_some() || namespace.is_none_or(|namespace| !is_known(namespace)) {
             self.outside.get_or_insert(self.open.len());
-            self.open.push(String::new());
+            self.open.push(Open::Foreign);
             return None;
         }
         let local = local_name(elem);
-        // A name out of its vocabulary is kept marked, so it matches none.
-        let local = match vocabulary(&local) {
-            Some(expected) if namespace != Some(expected) => format!("?{local}"),
-            _ => local,
+        let (entered, open) = match vocabulary(&local) {
+            Some(expected) if namespace != Some(expected) => (None, Open::Misplaced),
+            _ => (self.field(&local, elem), Open::Known(local)),
         };
-        let entered = match self.open.len() {
-            1 if ELEMENT_FIELDS.contains(&local.as_str()) => {
-                let count = self.seen.entry(local.clone()).or_default();
-                *count += 1;
-                let key = match *count {
-                    1 => local.clone(),
-                    n => format!("{local}#{n}"),
-                };
-                Some(Entered {
-                    key,
-                    place: Place::Element,
-                    label: Place::Element.label(&local),
-                    name: None,
-                })
-            }
-            1 if local == CUSTOM_PROPERTY => elem
+        self.open.push(open);
+        entered
+    }
+
+    /// The field the element `local` (`elem`), opening in its vocabulary,
+    /// holds, if any.
+    fn field(&mut self, local: &str, elem: &BytesStart<'_>) -> Option<Entered> {
+        if self.open.len() == 1 {
+            return self.property(local, elem);
+        }
+        // A list's entries sit in its vector, a heading's in a variant.
+        let in_list = matches!(self.open.len(), 3 | 4) && self.is_list_path();
+        if !in_list || !TEXT_TYPES.contains(&local) {
+            return None;
+        }
+        let key = format!("{}/{}", self.list()?, self.entries);
+        self.entries += 1;
+        Some(Entered::new(key, Place::Entry, local))
+    }
+
+    /// The field the element `local` (`elem`), opening as a child of the
+    /// root, holds, if any: an element field or a named custom property. A
+    /// list starts its entries.
+    fn property(&mut self, local: &str, elem: &BytesStart<'_>) -> Option<Entered> {
+        if ELEMENT_FIELDS.contains(&local) {
+            let count = self.seen.entry(local.to_owned()).or_default();
+            *count += 1;
+            let key = match *count {
+                1 => local.to_owned(),
+                n => format!("{local}#{n}"),
+            };
+            return Some(Entered::new(key, Place::Element, local));
+        }
+        if local == CUSTOM_PROPERTY {
+            let name = elem
                 .try_get_attribute("name")
                 .ok()
                 .flatten()
-                .and_then(|name| attribute_value(&name.value).ok().map(Cow::into_owned))
-                .map(|name| {
-                    self.properties += 1;
-                    Entered {
-                        key: format!("{CUSTOM_PROPERTY}/{}", self.properties - 1),
-                        place: Place::Custom,
-                        label: Place::Custom.label(&local),
-                        name: Some(name),
-                    }
-                }),
-            1 if LISTS.contains(&local.as_str()) => {
-                self.entries = 0;
-                None
-            }
-            // A list's entries sit in its vector, a heading's in a variant.
-            depth @ (3 | 4)
-                if LISTS.contains(&self.open[1].as_str())
-                    && self.open[2] == "vector"
-                    && (depth == 3 || self.open[3] == "variant")
-                    && TEXT_TYPES.contains(&local.as_str()) =>
-            {
-                self.entries += 1;
-                Some(Entered {
-                    key: format!("{}/{}", self.open[1], self.entries - 1),
-                    place: Place::Entry,
-                    label: Place::Entry.label(&local),
-                    name: None,
-                })
-            }
-            _ => None,
-        };
-        self.open.push(local);
-        entered
+                .and_then(|name| attribute_value(&name.value).ok().map(Cow::into_owned))?;
+            let key = format!("{CUSTOM_PROPERTY}/{}", self.properties);
+            self.properties += 1;
+            return Some(Entered {
+                name: Some(name),
+                ..Entered::new(key, Place::Custom, local)
+            });
+        }
+        if LISTS.contains(&local) {
+            self.entries = 0;
+        }
+        None
     }
 
     /// Leave the innermost open element.
@@ -721,29 +925,41 @@ impl Walk {
         self.open.len()
     }
 
+    /// The list of the document's parts an open element is, if any.
+    fn list(&self) -> Option<&str> {
+        match self.open.as_slice() {
+            [_, list, ..] => list.list(),
+            _ => None,
+        }
+    }
+
     /// Whether the innermost open element is a custom property.
     fn is_property(&self) -> bool {
-        self.open.len() == 2 && self.open[1] == CUSTOM_PROPERTY
+        matches!(self.open.as_slice(), [_, property] if property.is(CUSTOM_PROPERTY))
     }
 
     /// Whether the innermost open element is a heading's count: an `i4`
     /// variant of the heading pairs' vector.
     fn is_count(&self) -> bool {
-        self.open.len() == 5
-            && self.open[1] == "HeadingPairs"
-            && self.open[2] == "vector"
-            && self.open[3] == "variant"
-            && self.open[4] == "i4"
+        matches!(
+            self.open.as_slice(),
+            [_, pairs, vector, variant, count]
+                if pairs.is("HeadingPairs")
+                    && vector.is("vector")
+                    && variant.is("variant")
+                    && count.is("i4")
+        )
     }
 
     /// Whether the innermost open element is a list container, its vector,
     /// or a variant of that vector: the path to a list entry.
     fn is_list_path(&self) -> bool {
-        let is_list = || LISTS.contains(&self.open[1].as_str());
-        match self.open.len() {
-            2 => is_list(),
-            3 => is_list() && self.open[2] == "vector",
-            4 => is_list() && self.open[2] == "vector" && self.open[3] == "variant",
+        match self.open.as_slice() {
+            [_, list] => list.is_list(),
+            [_, list, vector] => list.is_list() && vector.is("vector"),
+            [_, list, vector, variant] => {
+                list.is_list() && vector.is("vector") && variant.is("variant")
+            }
             _ => false,
         }
     }
@@ -760,7 +976,7 @@ struct Reading {
 /// non-empty value are returned, so an already-empty `<dc:creator/>` is not
 /// surfaced as a redaction subject.
 #[must_use]
-pub fn fields(xml: &[u8]) -> Vec<Field> {
+pub(crate) fn fields(xml: &[u8]) -> Vec<Field> {
     // Not valid UTF-8: no fields are readable (a property part is always UTF-8).
     let Some((_, text)) = split_bom(xml) else {
         return Vec::new();
@@ -875,174 +1091,253 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
 /// bytes are returned unchanged rather than a blank or truncated part, since a
 /// metadata part that cannot be rewritten is better left intact than corrupted.
 #[must_use]
-pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
+pub(crate) fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
     // Not valid UTF-8: fail closed by preserving the original bytes rather than
     // emitting a blank part. A property part is always UTF-8 XML in practice.
     let Some((bom, text)) = split_bom(xml) else {
         return Bytes::copy_from_slice(xml);
     };
-    let value_of = |key: &str| {
-        fields
+    match rewritten(bom, text, fields) {
+        Some(rewritten) => Bytes::from(rewritten),
+        None => Bytes::copy_from_slice(xml),
+    }
+}
+
+/// The part `text`, after its byte-order mark `bom`, with `fields` written as
+/// [`rewrite`] writes them, or `None` when it does not read or write.
+fn rewritten(bom: &str, text: &str, fields: &[(&str, &str)]) -> Option<Vec<u8>> {
+    let mut reader = NsReader::from_str(text);
+    reader.config_mut().trim_text(false);
+    let mut rewriting = Rewriting {
+        fields,
+        // The output keeps the part's BOM, written ahead of everything else.
+        writer: Writer::new(bom.as_bytes().to_vec()),
+        walk: Walk::default(),
+        mode: Mode::Copy,
+        pids: Pids::default(),
+    };
+    loop {
+        let (resolved, event) = reader.read_resolved_event().ok()?;
+        if matches!(event, Event::Eof) {
+            break;
+        }
+        let namespace = bound(&resolved);
+        rewriting.event(namespace.as_deref(), event).ok()?;
+    }
+    Some(rewriting.writer.into_inner())
+}
+
+/// A [`rewrite`] in progress over a part.
+struct Rewriting<'v> {
+    /// The new value of each field, by key.
+    fields: &'v [(&'v str, &'v str)],
+    writer: Writer<Vec<u8>>,
+    walk: Walk,
+    mode: Mode<'v>,
+    /// The pids of the custom properties written.
+    pids: Pids,
+}
+
+/// What a [`rewrite`] does with the events it reads.
+enum Mode<'v> {
+    /// Write each as it is.
+    Copy,
+    /// Clear a field, this many elements open in it, itself included: its
+    /// text is dropped and its elements are written empty.
+    Clearing(usize),
+    /// Drop a custom property, this many elements open in it, itself
+    /// included: nothing of it is written.
+    Dropping(usize),
+    /// Hold back a custom property being given this value until its typed
+    /// child says whether the value fits.
+    Held(BytesStart<'static>, &'v str),
+}
+
+impl<'v> Rewriting<'v> {
+    /// The new value of the field `key`, trimmed, if it is given one.
+    fn value_of(&self, key: &str) -> Option<&'v str> {
+        self.fields
             .iter()
             .find(|(name, _)| *name == key)
             .map(|(_, value)| value.trim())
-    };
-    let mut reader = NsReader::from_str(text);
-    reader.config_mut().trim_text(false);
-    // The output keeps the part's BOM, written ahead of everything else.
-    let mut writer = Writer::new(bom.as_bytes().to_vec());
-    let mut walk = Walk::default();
-    // Depth inside a field being cleared, so nested text is dropped and the
-    // elements re-emit empty.
-    let mut clearing = 0u32;
-    // Depth inside a custom property being dropped, so nothing of it is emitted.
-    let mut dropping = 0u32;
-    // A custom property being overwritten, held back until its typed child
-    // says whether the new value fits.
-    let mut held: Option<(BytesStart<'static>, &str)> = None;
-    // The pids of the custom properties written.
-    let mut pids = Pids::default();
+    }
 
-    loop {
-        let (namespace, event) = match reader.read_resolved_event() {
-            Ok((_, Event::Eof)) => break,
-            Ok((resolved, event)) => (bound(&resolved), event),
-            Err(_) => return Bytes::copy_from_slice(xml),
-        };
-        if dropping > 0 {
-            match event {
-                Event::Start(elem) => {
-                    walk.enter(namespace.as_deref(), &elem);
-                    dropping += 1;
-                }
-                Event::End(_) => {
-                    walk.leave();
-                    dropping -= 1;
-                }
-                _ => {}
+    /// Write `event`.
+    fn write(&mut self, event: Event<'_>) -> io::Result<()> {
+        self.writer.write_event(event)
+    }
+
+    /// Rewrite `event`, its name bound to `namespace`.
+    fn event(&mut self, namespace: Option<&str>, event: Event<'_>) -> io::Result<()> {
+        match mem::replace(&mut self.mode, Mode::Copy) {
+            Mode::Dropping(depth) => {
+                self.dropping(depth, namespace, &event);
+                Ok(())
             }
-            continue;
-        }
-        if let Some((property, value)) = held.take() {
-            match event {
-                Event::Start(elem) if is_text_type(&elem) => {
-                    walk.enter(namespace.as_deref(), &elem);
-                    let property = pids.number(property);
-                    let _ = writer.write_event(Event::Start(property));
-                    let _ = writer.write_event(Event::Start(elem));
-                    let _ = writer.write_event(Event::Text(BytesText::new(value)));
-                    clearing = 2;
-                }
-                Event::Start(elem) => {
-                    walk.enter(namespace.as_deref(), &elem);
-                    dropping = 2;
-                    pids.dropped = true;
-                }
-                Event::Empty(_) => {
-                    dropping = 1;
-                    pids.dropped = true;
-                }
-                // A property with no typed value goes.
-                Event::End(_) => {
-                    walk.leave();
-                    pids.dropped = true;
-                }
-                // Text before the typed value is whitespace; keep waiting.
-                _ => held = Some((property, value)),
-            }
-            continue;
-        }
-        match event {
-            Event::Start(elem) => {
-                let field = walk.enter(namespace.as_deref(), &elem);
-                if clearing > 0 {
-                    clearing += 1;
-                    let _ = writer.write_event(Event::Start(elem));
-                    continue;
-                }
-                // A custom property written as it is takes its number now;
-                // one edited, once it is known to stay.
-                let as_is = |elem: BytesStart<'_>, pids: &mut Pids| {
-                    if walk.is_property() {
-                        pids.number(elem.into_owned())
-                    } else {
-                        elem.into_owned()
-                    }
-                };
-                let Some(field) = field else {
-                    let _ = writer.write_event(Event::Start(as_is(elem, &mut pids)));
-                    continue;
-                };
-                let value = value_of(&field.key);
-                let name = (field.place == Place::Custom)
-                    .then(|| value_of(&field.name_key()))
-                    .flatten();
-                if value.is_none() && name.is_none() {
-                    let _ = writer.write_event(Event::Start(as_is(elem, &mut pids)));
-                    continue;
-                }
-                match field.place {
-                    // A custom property needs a name and a value: a blank one
-                    // drops it whole.
-                    Place::Custom if value == Some("") || name == Some("") => {
-                        dropping = 1;
-                        pids.dropped = true;
-                    }
-                    Place::Custom => {
-                        let elem = match name {
-                            Some(name) => renamed(&elem, name),
-                            None => elem.into_owned(),
-                        };
-                        match value {
-                            Some(value) => held = Some((elem, value)),
-                            None => {
-                                let elem = pids.number(elem);
-                                let _ = writer.write_event(Event::Start(elem));
-                            }
-                        }
-                    }
-                    Place::Element | Place::Entry => {
-                        let value = value.unwrap_or_default();
-                        let _ = writer.write_event(Event::Start(elem));
-                        clearing = 1;
-                        let typed = field.place == Place::Element
-                            && field
-                                .key
-                                .split('#')
-                                .next()
-                                .is_some_and(|name| TIMESTAMPS.contains(&name));
-                        if !value.is_empty() && !typed {
-                            let _ = writer.write_event(Event::Text(BytesText::new(value)));
-                        }
-                    }
-                }
-            }
-            Event::Empty(elem) => {
-                walk.enter(namespace.as_deref(), &elem);
-                let elem = if walk.is_property() {
-                    pids.number(elem.into_owned())
-                } else {
-                    elem
-                };
-                walk.leave();
-                let _ = writer.write_event(Event::Empty(elem));
-            }
-            Event::End(elem) => {
-                walk.leave();
-                clearing = clearing.saturating_sub(1);
-                let _ = writer.write_event(Event::End(elem));
-            }
-            // Text, CDATA, and entity references are field text: kept outside a
-            // field being cleared and dropped inside one, so no part of a
-            // cleared value (a CDATA section, a `Jos&#233;`) is left behind.
-            Event::Text(_) | Event::CData(_) | Event::GeneralRef(_) if clearing > 0 => {}
-            other => {
-                let _ = writer.write_event(other);
+            Mode::Held(property, value) => self.held(property, value, namespace, event),
+            mode @ (Mode::Copy | Mode::Clearing(_)) => {
+                self.mode = mode;
+                self.copy(namespace, event)
             }
         }
     }
 
-    Bytes::from(writer.into_inner())
+    /// Read `event` inside a custom property being dropped, `depth` elements
+    /// open in it.
+    fn dropping(&mut self, depth: usize, namespace: Option<&str>, event: &Event<'_>) {
+        let depth = match event {
+            Event::Start(elem) => {
+                self.walk.enter(namespace, elem);
+                depth + 1
+            }
+            Event::End(_) => {
+                self.walk.leave();
+                depth - 1
+            }
+            _ => depth,
+        };
+        if depth > 0 {
+            self.mode = Mode::Dropping(depth);
+        }
+    }
+
+    /// Drop the custom property open, `depth` elements of it open.
+    fn drop_property(&mut self, depth: usize) {
+        self.mode = Mode::Dropping(depth);
+        self.pids.dropped = true;
+    }
+
+    /// Read `event` after the start of the custom property `property`, held
+    /// back to take `value`: a typed child holding text takes it, any other
+    /// drops the property.
+    fn held(
+        &mut self,
+        property: BytesStart<'static>,
+        value: &'v str,
+        namespace: Option<&str>,
+        event: Event<'_>,
+    ) -> io::Result<()> {
+        match event {
+            Event::Start(elem) if is_text_type(&elem) => {
+                self.walk.enter(namespace, &elem);
+                let property = self.pids.number(property);
+                self.write(Event::Start(property))?;
+                self.write(Event::Start(elem))?;
+                self.write(Event::Text(BytesText::new(value)))?;
+                self.mode = Mode::Clearing(2);
+            }
+            Event::Start(elem) => {
+                self.walk.enter(namespace, &elem);
+                self.drop_property(2);
+            }
+            Event::Empty(_) => self.drop_property(1),
+            // A property with no typed value goes.
+            Event::End(_) => {
+                self.walk.leave();
+                self.pids.dropped = true;
+            }
+            // Text before the typed value is whitespace; keep waiting.
+            _ => self.mode = Mode::Held(property, value),
+        }
+        Ok(())
+    }
+
+    /// Read `event` outside a custom property dropped or held, inside a field
+    /// being cleared or not.
+    fn copy(&mut self, namespace: Option<&str>, event: Event<'_>) -> io::Result<()> {
+        match event {
+            Event::Start(elem) => {
+                let field = self.walk.enter(namespace, &elem);
+                if let Mode::Clearing(depth) = &mut self.mode {
+                    *depth += 1;
+                    return self.write(Event::Start(elem));
+                }
+                self.start(field, elem)
+            }
+            Event::Empty(elem) => {
+                self.walk.enter(namespace, &elem);
+                let elem = if self.walk.is_property() {
+                    self.pids.number(elem.into_owned())
+                } else {
+                    elem
+                };
+                self.walk.leave();
+                self.write(Event::Empty(elem))
+            }
+            Event::End(elem) => {
+                self.walk.leave();
+                if let Mode::Clearing(depth) = &mut self.mode {
+                    *depth -= 1;
+                    if *depth == 0 {
+                        self.mode = Mode::Copy;
+                    }
+                }
+                self.write(Event::End(elem))
+            }
+            // Text, CDATA, and entity references are field text: kept outside a
+            // field being cleared and dropped inside one, so no part of a
+            // cleared value (a CDATA section, a `Jos&#233;`) is left behind.
+            Event::Text(_) | Event::CData(_) | Event::GeneralRef(_)
+                if matches!(self.mode, Mode::Clearing(_)) =>
+            {
+                Ok(())
+            }
+            other => self.write(other),
+        }
+    }
+
+    /// Write the start tag `elem` of an element holding `field`, outside a
+    /// field being cleared.
+    fn start(&mut self, field: Option<Entered>, elem: BytesStart<'_>) -> io::Result<()> {
+        let Some(field) = field else {
+            return self.start_as_is(elem);
+        };
+        let value = self.value_of(&field.key);
+        let name = (field.place == Place::Custom)
+            .then(|| self.value_of(&field.name_key()))
+            .flatten();
+        if value.is_none() && name.is_none() {
+            return self.start_as_is(elem);
+        }
+        match field.place {
+            // A custom property needs a name and a value: a blank one drops
+            // it whole.
+            Place::Custom if value == Some("") || name == Some("") => self.drop_property(1),
+            Place::Custom => {
+                let elem = match name {
+                    Some(name) => renamed(&elem, name),
+                    None => elem.into_owned(),
+                };
+                match value {
+                    Some(value) => self.mode = Mode::Held(elem, value),
+                    None => {
+                        let elem = self.pids.number(elem);
+                        self.write(Event::Start(elem))?;
+                    }
+                }
+            }
+            Place::Element | Place::Entry => {
+                let value = value.unwrap_or_default();
+                self.write(Event::Start(elem))?;
+                self.mode = Mode::Clearing(1);
+                if !value.is_empty() && !field.timestamp {
+                    self.write(Event::Text(BytesText::new(value)))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Write the start tag `elem` as it is: a custom property written as it
+    /// is takes its number now; one edited, once it is known to stay.
+    fn start_as_is(&mut self, elem: BytesStart<'_>) -> io::Result<()> {
+        let elem = if self.walk.is_property() {
+            self.pids.number(elem.into_owned())
+        } else {
+            elem
+        };
+        self.write(Event::Start(elem))
+    }
 }
 
 /// `elem` with its `name` attribute set to `name`, every other attribute as it
@@ -1075,8 +1370,7 @@ impl Pids {
             self.highest = self.highest.max(written.unwrap_or(0));
             return elem;
         }
-        // The first pid of a custom property is 2.
-        self.highest = self.highest.max(1) + 1;
+        self.highest = self.highest.max(FIRST_PID - 1) + 1;
         if written == Some(self.highest) {
             elem
         } else {
@@ -1118,26 +1412,25 @@ fn is_text_type(elem: &BytesStart<'_>) -> bool {
 /// field value is read as the character a reader would see.
 ///
 /// A numeric reference (`&#233;`, `&#xE9;`) resolves directly to its code point.
-/// A named reference resolves through quick-xml's unescaper, which knows the five
-/// XML predefined entities (`amp`, `lt`, `gt`, `quot`, `apos`). An unknown named
-/// entity (a DTD-defined one, which OOXML property parts do not declare) has no
-/// value here and contributes nothing, which is the safe reading: it cannot
-/// smuggle text past detection.
-fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
+/// A named reference resolves as quick-xml's unescaper resolves it, which knows
+/// the five XML predefined entities (`amp`, `lt`, `gt`, `quot`, `apos`). An
+/// unknown named entity (a DTD-defined one, which OOXML property parts do not
+/// declare) has no value here and contributes nothing, which is the safe
+/// reading: it cannot smuggle text past detection.
+fn resolve_ref(r: &BytesRef<'_>) -> String {
     if let Ok(Some(ch)) = r.resolve_char_ref() {
         return ch.to_string();
     }
-    let name = r.clone().into_inner();
-    unescape(&format!("&{name};"))
-        .map(|c| c.into_owned())
+    resolve_predefined_entity(r.as_ref())
         .unwrap_or_default()
+        .to_owned()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fixtures::property_fields as pairs;
-    use crate::opc::vocabulary::Vocabulary;
+    use crate::opc::vocabulary::UnreviewedNamespaces;
     use crate::opc::xml_edit::{edit, expect_edit};
 
     const CORE: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
@@ -1191,6 +1484,16 @@ mod tests {
         let edited = expect_edit(unnamed, &UnsurfacedProperties);
         assert_eq!(edited.count, 1);
         assert!(!edited.text.contains("Jane Roe"));
+    }
+
+    /// A document type declaration is refused before the root and inside an
+    /// element being removed alike.
+    #[test]
+    fn stripping_refuses_a_document_type() {
+        let declared = r#"<!DOCTYPE d [<!ENTITY x "Jane">]><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"/>"#;
+        assert!(UnsurfacedProperties.apply(declared).is_err());
+        let nested = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"><cp:revision><!DOCTYPE d></cp:revision></cp:coreProperties>"#;
+        assert!(UnsurfacedProperties.apply(nested).is_err());
     }
 
     #[test]
@@ -1258,7 +1561,7 @@ mod tests {
             .unwrap()
             .map_or_else(|| raw.to_owned(), |edited| edited.text);
         assert_eq!(unread(&text), Vec::<String>::new(), "{text}");
-        let vocabulary = Vocabulary::default();
+        let vocabulary = UnreviewedNamespaces::default();
         edit(&text, &vocabulary).unwrap();
         assert_eq!(vocabulary.unknown(), None, "{text}");
         assert!(

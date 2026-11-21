@@ -29,8 +29,8 @@ use quick_xml::events::Event;
 
 use crate::opc::attribute_value;
 use crate::opc::attributes::{Collaboration, TextAttribute};
-use crate::opc::block::Replacement;
 use crate::opc::ns::{W, X, XML, transitional};
+use crate::opc::part::PartPath;
 use crate::opc::relationships::{self, HYPERLINK};
 use crate::opc::xml_edit::{
     Action, Attribute, Name, Rules, SpannedReader, edit, local_name, namespace_of,
@@ -38,7 +38,11 @@ use crate::opc::xml_edit::{
 
 /// A read of a part's spans, which fails (with nothing more to say) on
 /// malformed XML; the caller reports the part as an issue.
-pub(crate) type Readable<T> = std::result::Result<T, ()>;
+pub(crate) type Readable<T> = std::result::Result<T, Unreadable>;
+
+/// A part's XML failing to read, with nothing more to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Unreadable;
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -50,8 +54,9 @@ pub(crate) enum BlockKind {
     Comment,
     /// Body of a `<![CDATA[ ... ]]>` section: reject `]]>`.
     Cdata,
-    /// A double-quoted attribute value (a relationship `Target`): escape `&`,
-    /// `<`, and `"` so the replacement cannot break out of the quotes.
+    /// An attribute value (a text attribute a format names, or a
+    /// relationship `Target`): escape `&`, `<`, and the quotes so the
+    /// replacement cannot break out of them.
     Attribute,
     /// An element standing for a character of its passage (a run's tab, a line
     /// break), which reads as that character and is never replaced.
@@ -84,12 +89,12 @@ impl Span {
         }
     }
 
-    /// The span in `spans` that wholly covers `start..end`, if any. Used to
+    /// The span in `spans` that wholly covers `range`, if any. Used to
     /// recover a replacement's framing before splicing.
-    pub(crate) fn covering(spans: &[Span], start: usize, end: usize) -> Option<&Span> {
+    pub(crate) fn covering<'s>(spans: &'s [Span], range: &Range<usize>) -> Option<&'s Span> {
         spans
             .iter()
-            .find(|s| s.range.start <= start && end <= s.range.end)
+            .find(|s| s.range.start <= range.start && range.end <= s.range.end)
     }
 
     /// Decode this span's slice of `raw` into its logical text (XML entities
@@ -109,13 +114,13 @@ impl Span {
             // XML refuses a reference it cannot decode, so the slice must
             // decode whole before it is mapped reference by reference.
             BlockKind::Text => {
-                unescape(slice).map_err(|_| ())?;
+                unescape(slice).map_err(|_| Unreadable)?;
                 let (text, offsets) =
                     decode_references(slice, self.range.start, CharacterReferences::Xml);
                 Ok((Cow::Owned(text), offsets))
             }
             BlockKind::Attribute => {
-                attribute_value(slice).map_err(|_| ())?;
+                attribute_value(slice).map_err(|_| Unreadable)?;
                 let (text, offsets) = decode_attribute(slice, self.range.start);
                 Ok((Cow::Owned(text), offsets))
             }
@@ -134,18 +139,17 @@ impl Span {
     /// escaped; a comment or CDATA replacement that would break its framing, and
     /// any replacement of a separator, is a fail-closed
     /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) error naming
-    /// `r`'s part.
-    pub(crate) fn escape<'a>(&self, text: &'a str, r: &Replacement) -> Result<Cow<'a, str>> {
+    /// `part`.
+    pub(crate) fn escape<'a>(&self, text: &'a str, part: &PartPath) -> Result<Cow<'a, str>> {
         match self.kind {
             BlockKind::Text => Ok(partial_escape(text)),
-            // A double-quoted attribute value: fully escape so `"`, `<`, and `&`
-            // cannot terminate the value or the element early.
+            // An attribute value: fully escape so a quote, `<`, or `&` cannot
+            // terminate the value or the element early.
             BlockKind::Attribute => Ok(escape(text)),
             BlockKind::Comment => {
                 if text.contains("--") || text.ends_with('-') {
                     return Err(Error::processing(format!(
-                        "replacement `{}` breaks comment framing in `{}`",
-                        text, r.part
+                        "replacement `{text}` breaks comment framing in `{part}`"
                     )));
                 }
                 Ok(Cow::Borrowed(text))
@@ -153,15 +157,13 @@ impl Span {
             BlockKind::Cdata => {
                 if text.contains("]]>") {
                     return Err(Error::processing(format!(
-                        "replacement `{}` breaks CDATA framing in `{}`",
-                        text, r.part
+                        "replacement `{text}` breaks CDATA framing in `{part}`"
                     )));
                 }
                 Ok(Cow::Borrowed(text))
             }
             BlockKind::Separator(_) => Err(Error::processing(format!(
-                "a separator in `{}` is not replaceable",
-                r.part
+                "a separator in `{part}` is not replaceable"
             ))),
         }
     }
@@ -248,64 +250,135 @@ fn is_cell_text(open: &[String]) -> bool {
 /// the open elements' local names, outermost first.
 fn text_spans_where(raw: &str, keep: impl Fn(&[String]) -> bool) -> Readable<Vec<Span>> {
     let mut reader = SpannedReader::new(raw);
-    let mut spans = Vec::new();
-    let mut run: Option<Range<usize>> = None;
-    let mut open: Vec<String> = Vec::new();
-    let mut passages = Passages::default();
+    let mut text = TextSpans::new(raw);
 
     loop {
-        let (event, span) = reader.read_event().map_err(|_| ())?;
-
-        match event {
-            // Extend (or open) the current text run across text and entities.
-            Event::Text(_) | Event::GeneralRef(_) => {
-                run = Some(run.map_or(span.clone(), |r| r.start..span.end));
-                continue;
-            }
-            // Any other event ends the run; flush it before handling this event.
-            _ if keep(&open) => flush_text_run(raw, &open, &mut passages, &mut run, &mut spans),
-            _ => run = None,
+        let (event, span) = reader.read_event().map_err(|_| Unreadable)?;
+        // Extend (or open) the current text run across text and entities.
+        if let Event::Text(_) | Event::GeneralRef(_) = event {
+            text.extend_run(span);
+            continue;
         }
-
-        let found = match event {
-            Event::Start(ref e) => {
-                let local = local_name(e);
-                passages.open(&local, &open);
-                let found = keep(&open)
-                    .then(|| separator_span(&local, &open, &passages, span))
-                    .flatten();
-                open.push(local);
-                found
-            }
-            Event::End(_) => {
-                if let Some(local) = open.pop() {
-                    passages.close(&local, &open);
-                }
-                None
-            }
+        // Any other event ends the run; flush it before handling this event.
+        let kept = keep(&text.open);
+        if kept {
+            text.flush_run();
+        } else {
+            text.run = None;
+        }
+        match event {
+            Event::Start(ref e) => text.start(local_name(e), span, kept),
+            Event::End(_) => text.end(),
             Event::Eof => break,
-            _ if !keep(&open) => None,
-            Event::Empty(ref e) => {
-                let local = local_name(e);
-                passages.open(&local, &open);
-                passages.close(&local, &open);
-                separator_span(&local, &open, &passages, span)
-            }
-            Event::Comment(_) => {
-                passages.interrupt();
-                strip(span, "<!--", "-->").map(|s| Span::new(s, BlockKind::Comment))
-            }
-            Event::CData(_) => {
-                passages.interrupt();
-                strip(span, "<![CDATA[", "]]>").map(|s| Span::new(s, BlockKind::Cdata))
-            }
-            _ => None,
-        };
-        if let Some(found) = found {
-            spans.push(found);
+            _ if !kept => {}
+            Event::Empty(ref e) => text.empty(&local_name(e), span),
+            Event::Comment(_) => text.framed(span, "<!--", "-->", BlockKind::Comment),
+            Event::CData(_) => text.framed(span, "<![CDATA[", "]]>", BlockKind::Cdata),
+            _ => {}
         }
     }
-    Ok(spans)
+    Ok(text.spans)
+}
+
+/// The text spans of a part being read by [`text_spans_where`].
+struct TextSpans<'r> {
+    /// The part's XML.
+    raw: &'r str,
+    /// The spans found so far.
+    spans: Vec<Span>,
+    /// The text run being read: text and entity references, read on until
+    /// any other event.
+    run: Option<Range<usize>>,
+    /// The local names of the open elements, outermost first.
+    open: Vec<String>,
+    /// The passage the next span falls in.
+    passages: Passages,
+}
+
+impl<'r> TextSpans<'r> {
+    /// The spans of `raw`, none read yet.
+    fn new(raw: &'r str) -> Self {
+        Self {
+            raw,
+            spans: Vec::new(),
+            run: None,
+            open: Vec::new(),
+            passages: Passages::default(),
+        }
+    }
+
+    /// Extend the text run over `span`, or open one.
+    fn extend_run(&mut self, span: Range<usize>) {
+        self.run = Some(match self.run.take() {
+            Some(run) => run.start..span.end,
+            None => span,
+        });
+    }
+
+    /// Emit the pending text run as a `Text` span in its passage, then clear
+    /// it. A whitespace-only run is dropped unless it is the text of a run
+    /// element reading on from the span before it: the space between two
+    /// words a document stores in separate runs.
+    fn flush_run(&mut self) {
+        let Some(range) = self.run.take() else {
+            return;
+        };
+        let in_run_text = self
+            .open
+            .last()
+            .is_some_and(|local| RUN_TEXT_ELEMENTS.contains(&local.as_str()));
+        let continues = in_run_text && self.passages.continues();
+        if self.raw[range.clone()].trim().is_empty() && !continues {
+            return;
+        }
+        self.spans.push(Span {
+            range,
+            kind: BlockKind::Text,
+            passage: self.passages.text(),
+            collaboration: collaboration(&self.open),
+        });
+    }
+
+    /// Open the element `local`, its start tag spanning `span`, inside
+    /// elements whose text is `kept` or not.
+    fn start(&mut self, local: String, span: Range<usize>, kept: bool) {
+        self.passages.open(&local, &self.open);
+        if kept {
+            self.separator(&local, span);
+        }
+        self.open.push(local);
+    }
+
+    /// Close the innermost open element.
+    fn end(&mut self) {
+        if let Some(local) = self.open.pop() {
+            self.passages.close(&local, &self.open);
+        }
+    }
+
+    /// Read the empty element `local`, spanning `span`.
+    fn empty(&mut self, local: &str, span: Range<usize>) {
+        self.passages.open(local, &self.open);
+        self.passages.close(local, &self.open);
+        self.separator(local, span);
+    }
+
+    /// Emit the separator span of the element `local` opening at `span`, if
+    /// it stands for a character of its passage.
+    fn separator(&mut self, local: &str, span: Range<usize>) {
+        if let Some(found) = separator_span(local, &self.open, &self.passages, span) {
+            self.spans.push(found);
+        }
+    }
+
+    /// Emit the body of a comment or CDATA section spanning `span`, framed by
+    /// `open` and `close`, as a span of `kind`, interrupting the passage.
+    fn framed(&mut self, span: Range<usize>, open: &str, close: &str, kind: BlockKind) {
+        self.passages.interrupt();
+        if let Some(body) = strip(span, open, close) {
+            self.spans.push(Span::new(body, kind));
+        }
+    }
 }
 
 /// The value spans of the attributes of `raw` that `attributes` names, each
@@ -353,7 +426,7 @@ fn named_values(raw: &str, attributes: &[TextAttribute]) -> Readable<Vec<(usize,
         attributes,
         found: RefCell::new(Vec::new()),
     };
-    edit(raw, &named).map_err(|_| ())?;
+    edit(raw, &named).map_err(|_| Unreadable)?;
     Ok(named.found.into_inner())
 }
 
@@ -397,49 +470,20 @@ impl Rules for Named<'_> {
 /// reads.
 pub(crate) fn relationship_spans(raw: &str) -> Readable<Vec<Span>> {
     Ok(relationships::parse_spanned(raw)
-        .map_err(|_| ())?
+        .map_err(|_| Unreadable)?
         .into_iter()
-        .filter(|(relationship, _)| relationship.external && relationship.kind == HYPERLINK)
+        .filter(|(relationship, _)| {
+            relationship.is_external() && relationship.rel_type == HYPERLINK
+        })
         .filter_map(|(_, target)| target)
         .map(|range| Span::new(range, BlockKind::Attribute))
         .collect())
 }
 
-/// Emit the pending text run as a `Text` span in its passage, then clear it. A
-/// whitespace-only run is dropped unless it is the text of a run element
-/// (`open`, outermost first) reading on from the span before it: the space
-/// between two words a document stores in separate runs.
-fn flush_text_run(
-    raw: &str,
-    open: &[String],
-    passages: &mut Passages,
-    run: &mut Option<Range<usize>>,
-    spans: &mut Vec<Span>,
-) {
-    let Some(range) = run.take() else {
-        return;
-    };
-    let in_run_text = open
-        .last()
-        .is_some_and(|local| RUN_TEXT_ELEMENTS.contains(&local.as_str()));
-    if raw[range.clone()].trim().is_empty() && !(in_run_text && passages.continues()) {
-        return;
-    }
-    spans.push(Span {
-        range,
-        kind: BlockKind::Text,
-        passage: passages.text(),
-        collaboration: collaboration(open),
-    });
-}
-
 /// The collaboration item text inside the elements `open` is: a tracked
 /// deletion's text, or a legacy comment's author.
 fn collaboration(open: &[String]) -> Option<Collaboration> {
-    if open
-        .iter()
-        .any(|local| local == "del" || local == "moveFrom")
-    {
+    if open.iter().any(|local| DELETIONS.contains(&local.as_str())) {
         Some(Collaboration::Text)
     } else if open.last().is_some_and(|local| local == "author") {
         Some(Collaboration::Author)
@@ -476,7 +520,7 @@ impl CollapsingRuns {
         let mut reader = SpannedReader::new_ns(raw);
         let mut ends = HashSet::new();
         loop {
-            let (namespace, event, span) = reader.read_resolved_event().map_err(|_| ())?;
+            let (namespace, event, span) = reader.read_resolved_event().map_err(|_| Unreadable)?;
             let e = match event {
                 Event::Eof => break,
                 Event::Start(ref e) => e,
@@ -490,7 +534,7 @@ impl CollapsingRuns {
             }
             let mut says_space = false;
             for attr in e.attributes() {
-                let attr = attr.map_err(|_| ())?;
+                let attr = attr.map_err(|_| Unreadable)?;
                 let (resolved, local) = reader.reader.resolver().resolve_attribute(attr.key);
                 says_space |= namespace_of(&resolved).as_deref() == Some(XML)
                     && local.into_inner() == "space";
@@ -513,16 +557,22 @@ impl CollapsingRuns {
     }
 }
 
-/// The local names of the elements whose start and end end the passage before
-/// them: a tracked deletion or the source of a move, so text no longer in the
-/// document never reads as one with the text around it, and a field
-/// character, so a field's instruction is a passage of its own. Inserted and
-/// moved-in text is live text and reads on with its neighbours.
-const PASSAGE_BREAKS: &[&str] = &["del", "moveFrom", "fldChar"];
+/// The local names of the elements holding text no longer in the document: a
+/// tracked deletion and the source of a move.
+const DELETIONS: &[&str] = &["del", "moveFrom"];
+
+/// Whether the start and end of the element `local` end the passage before
+/// them: a [deletion](DELETIONS), so text no longer in the document never
+/// reads as one with the text around it, and a field character, so a field's
+/// instruction is a passage of its own. Inserted and moved-in text is live
+/// text and reads on with its neighbours.
+fn is_passage_break(local: &str) -> bool {
+    DELETIONS.contains(&local) || local == "fldChar"
+}
 
 /// Which passage the text spans of a part fall in: the text of one paragraph
 /// (`w:p`, `a:p`, a spreadsheet comment's `text`) reads as one passage, until
-/// a nested paragraph, a [passage break](PASSAGE_BREAKS), or a comment or CDATA
+/// a nested paragraph, a [passage break](is_passage_break), or a comment or CDATA
 /// section interrupts it.
 #[derive(Debug, Default)]
 struct Passages {
@@ -542,7 +592,7 @@ impl Passages {
             self.opened += 1;
             self.paragraphs.push(self.opened);
         }
-        if PASSAGE_BREAKS.contains(&local) {
+        if is_passage_break(local) {
             self.interrupt();
         }
     }
@@ -552,7 +602,7 @@ impl Passages {
         if is_paragraph(local, open) {
             self.paragraphs.pop();
         }
-        if PASSAGE_BREAKS.contains(&local) {
+        if is_passage_break(local) {
             self.interrupt();
         }
     }
@@ -584,7 +634,7 @@ impl Passages {
 /// paragraph: a WordprocessingML or DrawingML `p`, or the `text` of a
 /// spreadsheet comment.
 fn is_paragraph(local: &str, open: &[String]) -> bool {
-    local == "p" || local == "text" && open.last().is_some_and(|parent| parent == "comment")
+    local == "p" || (local == "text" && open.last().is_some_and(|parent| parent == "comment"))
 }
 
 /// The separator span of the element `local` opening at `span` inside the
@@ -974,14 +1024,14 @@ mod tests {
             Span::new(10..20, BlockKind::Attribute),
         ];
         assert_eq!(
-            Span::covering(&spans, 12, 18).map(|s| s.kind),
+            Span::covering(&spans, &(12..18)).map(|s| s.kind),
             Some(BlockKind::Attribute)
         );
         assert_eq!(
-            Span::covering(&spans, 0, 5).map(|s| s.kind),
+            Span::covering(&spans, &(0..5)).map(|s| s.kind),
             Some(BlockKind::Text)
         );
         // A range not wholly inside any span has no covering span.
-        assert!(Span::covering(&spans, 4, 11).is_none());
+        assert!(Span::covering(&spans, &(4..11)).is_none());
     }
 }

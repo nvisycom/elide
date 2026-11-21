@@ -8,6 +8,7 @@ use hipstr::HipStr;
 
 use crate::opc::attributes::TextAttribute;
 use crate::opc::block::EmbeddingKind;
+use crate::opc::content_types::CONTENT_TYPES_PART;
 use crate::opc::kind::PartKind;
 use crate::opc::names::Names;
 
@@ -19,16 +20,16 @@ use crate::opc::names::Names;
 /// [`Replacement`](crate::opc::Replacement) targets one. Held as a [`HipStr`]
 /// so a path clones cheaply (short paths inline; longer ones share).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PartPath(HipStr<'static>);
+pub(crate) struct PartPath(HipStr<'static>);
 
 impl PartPath {
     /// The part at `path` within the package.
-    pub fn new(path: impl Into<HipStr<'static>>) -> Self {
+    pub(crate) fn new(path: impl Into<HipStr<'static>>) -> Self {
         Self(path.into())
     }
 
     /// The path as a string slice.
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         self.0.as_str()
     }
 
@@ -39,7 +40,8 @@ impl PartPath {
     /// The OPC content-types manifest keys on this extension, and it treats a
     /// leading-dot name as extension-only: `_rels/.rels` has extension `rels`
     /// (matching `<Default Extension="rels">`), so this does too.
-    pub fn extension(&self) -> Option<&str> {
+    #[must_use]
+    pub(crate) fn extension(&self) -> Option<&str> {
         self.as_str()
             .rsplit('/')
             .next()
@@ -50,7 +52,8 @@ impl PartPath {
 
     /// Whether the final path segment has extension `ext`, compared
     /// case-insensitively (e.g. `has_extension("xml")` for `document.xml`).
-    pub fn has_extension(&self, ext: &str) -> bool {
+    #[must_use]
+    pub(crate) fn has_extension(&self, ext: &str) -> bool {
         self.extension()
             .is_some_and(|e| e.eq_ignore_ascii_case(ext))
     }
@@ -58,7 +61,8 @@ impl PartPath {
     /// Whether the path lies within the directory `dir` (a `/`-terminated or bare
     /// prefix), i.e. `dir/...`. `in_dir("xl/media")` matches `xl/media/image1.png`
     /// but not `xl/media.xml`.
-    pub fn in_dir(&self, dir: &str) -> bool {
+    #[must_use]
+    pub(crate) fn in_dir(&self, dir: &str) -> bool {
         let dir = dir.strip_suffix('/').unwrap_or(dir);
         self.as_str()
             .strip_prefix(dir)
@@ -69,9 +73,22 @@ impl PartPath {
     /// or a `<dir>/_rels/<name>.rels` sidecar. Both live in a `_rels/` directory
     /// and end in `.rels`, which uniquely identifies the OPC relationships parts
     /// across every OOXML format.
-    pub fn is_relationships(&self) -> bool {
+    #[must_use]
+    pub(crate) fn is_relationships(&self) -> bool {
         self.has_extension("rels")
             && (self.as_str() == "_rels/.rels" || self.as_str().contains("/_rels/"))
+    }
+
+    /// Whether this is the OPC content-types manifest, `[Content_Types].xml`.
+    #[must_use]
+    pub(crate) fn is_content_types(&self) -> bool {
+        self.as_str() == CONTENT_TYPES_PART
+    }
+}
+
+impl AsRef<str> for PartPath {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 
@@ -104,7 +121,7 @@ impl From<String> for PartPath {
 /// Whatever its role, an XML part's [text
 /// attributes](PartClassifier::text_attributes) are redacted as well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PartRole {
+pub(crate) enum PartRole {
     /// Redact the element text (text/comment/CDATA events) of this XML part.
     ElementText,
     /// Redact the external-hyperlink `Target` attribute values of this
@@ -159,7 +176,7 @@ impl PartRole {
 /// A format supplies this so the engine acts on parts without knowing the
 /// format's schema: it maps what a part is ([`PartKind`], decided once from the
 /// part's content type) to how the engine treats it.
-pub trait PartClassifier {
+pub(crate) trait PartClassifier {
     /// The role the engine applies to a part of `kind`.
     fn role(&self, kind: PartKind) -> PartRole;
 

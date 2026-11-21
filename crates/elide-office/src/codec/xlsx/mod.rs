@@ -23,17 +23,25 @@ mod stream;
 use elide_codec::{Format, FormatId};
 
 use self::loader::XlsxDocumentLoader;
+use super::{CodecIdentity, format_of};
 
-/// Stable [`FormatId`] for the XLSX codec.
-pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
+/// The XLSX codec's identity: SpreadsheetML workbooks.
+#[derive(Debug)]
+struct XlsxCodec;
+
+impl CodecIdentity for XlsxCodec {
+    const CONTENT_TYPE: &'static str =
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const EXTENSION: &'static str = "xlsx";
+    const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
+}
 
 /// The non-cell text stream's document-local id (not a zip entry), beside the
-/// cell body stream's shared [`BODY_PART_ID`](crate::codec::ooxml::BODY_PART_ID).
-const TEXT_PART_ID: &str = "text";
+/// cell body stream's shared
+/// [`BODY_STREAM_ID`](crate::codec::ooxml::BODY_STREAM_ID).
+const TEXT_STREAM_ID: &str = "text";
 
 /// The XLSX [`Format`]: Excel workbooks, resolved by `.xlsx`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID, XlsxDocumentLoader)
-        .with_extensions(["xlsx"])
-        .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
+    format_of::<XlsxCodec>(XlsxDocumentLoader)
 }

@@ -9,6 +9,7 @@
 
 use elide_codec::{Format, FormatId};
 
+use super::CodecIdentity;
 use super::ooxml::{self, OoxmlCodec};
 use crate::docx::WordFormat;
 
@@ -16,14 +17,15 @@ use crate::docx::WordFormat;
 #[derive(Debug)]
 pub(crate) struct DocxCodec;
 
-impl OoxmlCodec for DocxCodec {
-    type Format = WordFormat;
-
+impl CodecIdentity for DocxCodec {
     const CONTENT_TYPE: &'static str =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     const EXTENSION: &'static str = "docx";
     const FORMAT_ID: FormatId = FormatId::new("elide.document.docx");
-    const LABEL: &'static str = "docx";
+}
+
+impl OoxmlCodec for DocxCodec {
+    type Format = WordFormat;
 }
 
 /// The DOCX [`Format`]: Word documents, resolved by `.docx`.

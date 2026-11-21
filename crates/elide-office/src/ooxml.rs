@@ -59,7 +59,7 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     ///
     /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a package;
     /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the format's main part is missing.
-    pub fn open(document: &[u8]) -> Result<Self> {
+    pub(crate) fn open(document: &[u8]) -> Result<Self> {
         let package = Package::open(document, &F::classifier())?;
         // Without a main part the bytes are a package but not a usable document
         // of this format.
@@ -80,7 +80,7 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     /// Extraction is partial-success: a text part that cannot be parsed is
     /// recorded in [`issues`](Extraction::issues) rather than failing the whole
     /// document.
-    pub fn extract(&self) -> Extraction {
+    pub(crate) fn extract(&self) -> Extraction {
         self.package.extract()
     }
 
@@ -90,7 +90,7 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     /// For a caller (the codec's docProps handler) that parses a property part's
     /// own XML to decide what to redact, then feeds the edited bytes back through
     /// [`rewrite_with_parts`](Self::rewrite_with_parts).
-    pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
+    pub(crate) fn part_bytes(&self, path: &str) -> Option<Bytes> {
         self.package.part_bytes(path)
     }
 
@@ -106,7 +106,7 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     ///
     /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if a
     /// replacement can't be applied.
-    pub fn rewrite_with_parts(
+    pub(crate) fn rewrite_with_parts(
         &self,
         replacements: &[Replacement],
         parts: &[PartReplacement],

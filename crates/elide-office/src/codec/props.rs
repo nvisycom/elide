@@ -21,12 +21,13 @@ use elide_codec::{FlaggedItem, FormatId, LocalId, Stream, StreamMut};
 use elide_core::Result;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::{Disposition, HiddenContentPolicy, Redactions};
+use elide_core::redaction::{HiddenContentPolicy, Redactions};
 
+use super::local_id;
 use crate::opc::{PartPath, PartReplacement, props};
 
 /// Stable [`FormatId`] for an OOXML property part's metadata stream.
-pub const FORMAT_ID: FormatId = FormatId::new("elide.office.docprops");
+pub(crate) const FORMAT_ID: FormatId = FormatId::new("elide.office.docprops");
 
 /// The document-property parts an OOXML package surfaces as metadata.
 const DOCPROPS_PARTS: &[&str] = &[
@@ -35,10 +36,14 @@ const DOCPROPS_PARTS: &[&str] = &[
     "docProps/custom.xml",
 ];
 
-/// A package's document-property parts, each a metadata stream keyed by its
-/// zip entry path. Shared by every OOXML document (docx, pptx, xlsx).
+/// A package's document-property parts, each a metadata stream keyed by the
+/// part it was read from. Shared by every OOXML document (docx, pptx, xlsx).
 #[derive(Debug, Default)]
-pub(crate) struct DocProps(Vec<(LocalId, DocPropsStream)>);
+pub(crate) struct DocProps {
+    /// Each property part the package carries, with its stream, in
+    /// [`DOCPROPS_PARTS`] order.
+    parts: Vec<(PartPath, DocPropsStream)>,
+}
 
 impl DocProps {
     /// The property parts a package carries when `policy` treats metadata as
@@ -48,40 +53,41 @@ impl DocProps {
         policy: HiddenContentPolicy,
         part_bytes: impl FnMut(&str) -> Option<Bytes>,
     ) -> Self {
-        match policy.metadata {
-            Disposition::ScanAsContent | Disposition::FlagEverything => Self::read(part_bytes),
-            Disposition::KeepOnlyEssential => Self::default(),
+        if policy.metadata.treats_as_content() {
+            Self::read(part_bytes)
+        } else {
+            Self::default()
         }
     }
 
     /// The property parts a package carries, read through its `part_bytes`
     /// accessor. A part the package lacks is skipped.
     fn read(mut part_bytes: impl FnMut(&str) -> Option<Bytes>) -> Self {
-        Self(
-            DOCPROPS_PARTS
-                .iter()
-                .filter_map(|path| {
-                    Some((LocalId::new(*path), DocPropsStream::new(part_bytes(path)?)))
-                })
-                .collect(),
-        )
+        let parts = DOCPROPS_PARTS
+            .iter()
+            .filter_map(|path| {
+                Some((
+                    PartPath::from(*path),
+                    DocPropsStream::new(part_bytes(path)?),
+                ))
+            })
+            .collect();
+        Self { parts }
     }
 
-    /// Lend each property stream, with its id.
+    /// Lend each property stream, with its id: the path of its part.
     pub(crate) fn streams(&mut self) -> impl Iterator<Item = (LocalId, StreamMut<'_>)> {
-        self.0
+        self.parts
             .iter_mut()
-            .map(|(id, stream)| (id.clone(), StreamMut::new::<Metadata, _>(stream)))
+            .map(|(path, stream)| (local_id(path), StreamMut::new::<Metadata, _>(stream)))
     }
 
     /// Each property part's (possibly redacted) XML, as a replacement for the
     /// package part it was read from.
     pub(crate) fn replacements(&self) -> Vec<PartReplacement> {
-        self.0
+        self.parts
             .iter()
-            .map(|(id, stream)| {
-                PartReplacement::new(PartPath::from(id.as_str()), stream.xml.clone())
-            })
+            .map(|(path, stream)| PartReplacement::new(path.clone(), stream.xml.clone()))
             .collect()
     }
 }

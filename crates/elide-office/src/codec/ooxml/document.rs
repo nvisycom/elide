@@ -12,7 +12,7 @@ use elide_core::Result;
 use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::{BODY_PART_ID, OoxmlAddress, OoxmlCodec, finish, part_replacements, replacements};
+use super::{BODY_STREAM_ID, OoxmlAddress, OoxmlCodec, finish, part_replacements, replacements};
 use crate::codec::props::DocProps;
 use crate::ooxml::{OoxmlFormat, OoxmlPackage};
 use crate::opc::check::check;
@@ -39,7 +39,7 @@ pub(crate) struct OoxmlDocument<C: OoxmlCodec> {
 impl<C: OoxmlCodec> Native for OoxmlDocument<C> {
     fn streams(&mut self) -> Vec<(LocalId, StreamMut<'_>)> {
         let body = (
-            LocalId::new(BODY_PART_ID),
+            LocalId::new(BODY_STREAM_ID),
             StreamMut::new::<Text, _>(&mut self.body),
         );
         iter::once(body).chain(self.properties.streams()).collect()

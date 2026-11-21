@@ -10,51 +10,62 @@
 //! and the preceding cell, so a sparse or reference-less sheet is placed
 //! correctly.
 
-use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::ops::Range;
 
 use elide_core::{Error, Result};
 use quick_xml::events::Event;
-use quick_xml::events::attributes::Attribute;
 
-use crate::opc::attribute_value;
+use super::cellref::CellCoord;
+use super::decoded_attribute;
 use crate::opc::xml_edit::SpannedReader;
-use crate::xlsx::cellref::parse_cell_ref;
-
-/// The entity-decoded value of an attribute, for comparison or parsing.
-///
-/// `Attribute::value` is the raw on-the-wire bytes, so an attribute written with
-/// character references, e.g. `t="inline&#83;tr"`, would not compare equal to
-/// `inlineStr`. Normalizing resolves those references so a cell's type and
-/// reference are read correctly regardless of how they were escaped. The raw
-/// value is still used where an attribute is re-emitted verbatim.
-fn normalized(attr: &Attribute<'_>) -> Result<String> {
-    attribute_value(&attr.value).map(Cow::into_owned)
-}
 
 /// One text-bearing cell of a worksheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SheetCell {
-    /// Zero-based row index (from the cell's `r` reference).
-    pub(crate) row: u32,
-    /// Zero-based column index (from the cell's `r` reference).
-    pub(crate) column: u32,
-    /// The shared-string index for a `t="s"` cell, so extraction can resolve
-    /// the text; `None` for an inline or formula cell.
-    pub(crate) shared_index: Option<usize>,
-    /// The cell's own text (inline or cached-formula), already concatenated
-    /// across every run; `None` for a shared cell whose text is in the table.
-    pub(crate) inline_text: Option<String>,
+    /// The cell's zero-based coordinates (from its `r` reference, or its
+    /// position when the reference is omitted).
+    pub(crate) coord: CellCoord,
+    /// Where the cell's text is: in the shared-string table or in the cell.
+    pub(crate) value: CellValue,
     /// Byte range of the whole `<c …>…</c>` element in the sheet's bytes.
     ///
     /// A rewrite replaces the whole element with a fresh inline string: a
     /// shared cell is de-shared, and an inline cell (which may hold several
     /// rich-text runs) is collapsed to one run so no run's text is left behind.
-    pub(crate) cell: Range<usize>,
+    pub(crate) span: Range<usize>,
     /// The cell's attributes other than `t` (e.g. `r`, `s`), verbatim, so a
     /// rewrite preserves them and only swaps the type and body.
     pub(crate) attributes: String,
+}
+
+/// The text a [`SheetCell`] carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CellValue {
+    /// A `t="s"` cell: the index of its string in the shared-string table.
+    Shared(usize),
+    /// An inline or cached-formula cell: its own text, already decoded and
+    /// concatenated across every run.
+    Inline(String),
+}
+
+impl CellValue {
+    /// The shared-string index of a [`Shared`](Self::Shared) value.
+    pub(crate) fn shared_index(&self) -> Option<usize> {
+        match self {
+            Self::Shared(index) => Some(*index),
+            Self::Inline(_) => None,
+        }
+    }
+
+    /// The text of an [`Inline`](Self::Inline) value.
+    #[cfg(test)]
+    fn inline_text(&self) -> Option<&str> {
+        match self {
+            Self::Shared(_) => None,
+            Self::Inline(text) => Some(text),
+        }
+    }
 }
 
 /// The text-bearing cells of a worksheet part `raw`, in document order.
@@ -86,14 +97,14 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
                 row = row.saturating_add(1);
             }
             Event::Start(e) if e.local_name().as_ref() == "c" => {
-                let cell = OpenCell::parse(&e, span.start, row, next_column)?;
-                next_column = cell.column + 1;
+                let cell = OpenCell::parse(&e, span.start, CellCoord::new(row, next_column))?;
+                next_column = cell.coord.column + 1;
                 open = Some(cell);
             }
             // A self-closing `<c r=".." />` holds no value; advance the column.
             Event::Empty(e) if e.local_name().as_ref() == "c" => {
-                let cell = OpenCell::parse(&e, span.start, row, next_column)?;
-                next_column = cell.column + 1;
+                let cell = OpenCell::parse(&e, span.start, CellCoord::new(row, next_column))?;
+                next_column = cell.coord.column + 1;
                 open = None;
             }
             Event::Start(e) if e.local_name().as_ref() == "t" => {
@@ -110,20 +121,20 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
                     cell.text_runs.push(text_start..span.start);
                 }
             }
-            Event::Text(t) if open.as_ref().and_then(|c| c.value_open).is_some() => {
-                // The `<v>` of a shared cell holds the shared-string index.
-                if let Some(cell) = open.as_mut() {
-                    cell.value_text = Some(t.as_ref().to_owned());
-                }
-            }
             Event::Start(e) if e.local_name().as_ref() == "v" => {
                 if let Some(cell) = open.as_mut() {
                     cell.value_open = Some(span.end);
                 }
             }
             Event::End(e) if e.local_name().as_ref() == "v" => {
-                if let Some(cell) = open.as_mut() {
-                    cell.value_open = None;
+                // Captured by span, as a `<t>` run is: quick-xml reports an
+                // entity as its own event, so no single text event holds the
+                // whole value.
+                if let Some(cell) = open.as_mut()
+                    && let Some(value_start) = cell.value_open.take()
+                    && value_start < span.start
+                {
+                    cell.value = Some(value_start..span.start);
                 }
             }
             Event::End(e) if e.local_name().as_ref() == "c" => {
@@ -145,7 +156,7 @@ fn row_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>> {
     for attr in e.attributes() {
         let attr = attr.map_err(|err| Error::malformed(format!("row attribute: {err}")))?;
         if attr.key.local_name().as_ref() == "r" {
-            let text = normalized(&attr)?;
+            let text = decoded_attribute(&attr.value)?;
             let one_based: u32 = text
                 .trim()
                 .parse()
@@ -158,8 +169,7 @@ fn row_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>> {
 
 /// A cell being assembled as its child events stream in.
 struct OpenCell {
-    row: u32,
-    column: u32,
+    coord: CellCoord,
     cell_type: CellType,
     /// Byte offset where the `<c …>` element begins.
     start: usize,
@@ -172,8 +182,9 @@ struct OpenCell {
     text_runs: Vec<Range<usize>>,
     /// Byte offset just past a `<v>` open, while inside it.
     value_open: Option<usize>,
-    /// The `<v>` text (a shared-string index for a `t="s"` cell).
-    value_text: Option<String>,
+    /// The inner byte range of a non-empty `<v>`: a shared-string index for
+    /// a `t="s"` cell, a cached string for a `t="str"` one.
+    value: Option<Range<usize>>,
 }
 
 /// The declared type of a cell's `t` attribute, narrowed to what carries text.
@@ -191,13 +202,12 @@ enum CellType {
 
 impl OpenCell {
     /// Read a `<c>` start tag's `r`, `t`, and other attributes. When `r` is
-    /// omitted the cell is placed at `default_row` / `default_column` (the
-    /// enclosing row and the column after the previous cell).
+    /// omitted the cell is placed at `default` (the enclosing row and the
+    /// column after the previous cell).
     fn parse(
         e: &quick_xml::events::BytesStart<'_>,
         start: usize,
-        default_row: u32,
-        default_column: u32,
+        default: CellCoord,
     ) -> Result<Self> {
         let mut reference = None;
         let mut cell_type = CellType::Other;
@@ -208,7 +218,7 @@ impl OpenCell {
             if local.as_ref() == "t" {
                 // Compare the decoded value: `t` may be written with character
                 // references and must still classify the cell correctly.
-                cell_type = match normalized(&attr)?.as_str() {
+                cell_type = match decoded_attribute(&attr.value)?.as_str() {
                     "s" => CellType::Shared,
                     "inlineStr" => CellType::Inline,
                     "str" => CellType::Formula,
@@ -218,7 +228,7 @@ impl OpenCell {
                 continue;
             }
             if local.as_ref() == "r" {
-                reference = Some(normalized(&attr)?);
+                reference = Some(decoded_attribute(&attr.value)?);
             }
             // Every non-`t` attribute (including `r` and any style `s`) is carried
             // verbatim, using the full qualified name so a namespaced attribute
@@ -231,22 +241,21 @@ impl OpenCell {
             let _ = write!(attributes, r#" {name}="{value}""#);
         }
         // A cell may omit `r`; when present it must be a valid reference.
-        let (row, column) = match reference.as_deref() {
-            Some(reference) => parse_cell_ref(reference).ok_or_else(|| {
+        let coord = match reference.as_deref() {
+            Some(reference) => reference.parse().map_err(|_| {
                 Error::malformed(format!("cell reference `{reference}` is malformed"))
             })?,
-            None => (default_row, default_column),
+            None => default,
         };
         Ok(Self {
-            row,
-            column,
+            coord,
             cell_type,
             start,
             attributes,
             text_open: None,
             text_runs: Vec::new(),
             value_open: None,
-            value_text: None,
+            value: None,
         })
     }
 
@@ -254,57 +263,40 @@ impl OpenCell {
     /// carries redactable text (a resolvable shared index, inline text, or a
     /// cached formula string).
     fn finish(self, raw: &str, end: usize) -> Result<Option<SheetCell>> {
-        match self.cell_type {
+        let value = match self.cell_type {
             CellType::Shared => {
                 let Some(index) = self
-                    .value_text
-                    .as_deref()
-                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .value
+                    .and_then(|value| raw[value].trim().parse::<usize>().ok())
                 else {
                     // A shared cell with no parseable index is malformed but not
                     // fatal, it simply names no string to redact.
                     return Ok(None);
                 };
-                Ok(Some(SheetCell {
-                    row: self.row,
-                    column: self.column,
-                    shared_index: Some(index),
-                    inline_text: None,
-                    cell: self.start..end,
-                    attributes: self.attributes,
-                }))
+                CellValue::Shared(index)
             }
             CellType::Inline => {
                 if self.text_runs.is_empty() {
                     return Ok(None);
                 }
                 // Concatenate every run's decoded text: the value a reader sees.
-                let text = self.decoded_runs(raw);
-                Ok(Some(SheetCell {
-                    row: self.row,
-                    column: self.column,
-                    shared_index: None,
-                    inline_text: Some(text),
-                    cell: self.start..end,
-                    attributes: self.attributes,
-                }))
+                CellValue::Inline(self.decoded_runs(raw))
             }
             CellType::Formula => {
                 // `t="str"` caches the string result of a formula in `<v>`.
-                let Some(text) = self.value_text else {
+                let Some(value) = self.value else {
                     return Ok(None);
                 };
-                Ok(Some(SheetCell {
-                    row: self.row,
-                    column: self.column,
-                    shared_index: None,
-                    inline_text: Some(unescape_text(&text)),
-                    cell: self.start..end,
-                    attributes: self.attributes,
-                }))
+                CellValue::Inline(unescape_text(&raw[value]))
             }
-            CellType::Other => Ok(None),
-        }
+            CellType::Other => return Ok(None),
+        };
+        Ok(Some(SheetCell {
+            coord: self.coord,
+            value,
+            span: self.start..end,
+            attributes: self.attributes,
+        }))
     }
 
     /// The concatenated, entity-decoded text of every `<t>` run.
@@ -350,24 +342,24 @@ mod tests {
         assert_eq!(cells.len(), 3, "two shared + one inline, number skipped");
 
         // A1 shared index 0.
-        assert_eq!((cells[0].row, cells[0].column), (0, 0));
-        assert_eq!(cells[0].shared_index, Some(0));
+        assert_eq!(cells[0].coord, CellCoord::new(0, 0));
+        assert_eq!(cells[0].value.shared_index(), Some(0));
 
         // A2 shared index 1.
-        assert_eq!((cells[1].row, cells[1].column), (1, 0));
-        assert_eq!(cells[1].shared_index, Some(1));
+        assert_eq!(cells[1].coord, CellCoord::new(1, 0));
+        assert_eq!(cells[1].value.shared_index(), Some(1));
 
         // B2 inline: its text is exactly the SSN.
-        assert_eq!((cells[2].row, cells[2].column), (1, 1));
-        assert_eq!(cells[2].inline_text.as_deref(), Some("123-45-6789"));
+        assert_eq!(cells[2].coord, CellCoord::new(1, 1));
+        assert_eq!(cells[2].value.inline_text(), Some("123-45-6789"));
     }
 
     #[test]
     fn shared_cell_span_covers_the_whole_element() {
         let cells = parse_cells(SHEET).unwrap();
-        assert!(cells[0].shared_index.is_some(), "A1 is shared");
+        assert!(cells[0].value.shared_index().is_some(), "A1 is shared");
         assert_eq!(
-            &SHEET[cells[0].cell.clone()],
+            &SHEET[cells[0].span.clone()],
             r#"<c r="A1" t="s"><v>0</v></c>"#
         );
     }
@@ -380,7 +372,7 @@ mod tests {
             r#"</sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        assert!(cells[0].shared_index.is_some(), "shared");
+        assert!(cells[0].value.shared_index().is_some(), "shared");
         let attributes = &cells[0].attributes;
         assert!(attributes.contains(r#"r="A1""#));
         assert!(attributes.contains(r#"s="3""#));
@@ -394,7 +386,7 @@ mod tests {
     fn handles_a_leading_bom() {
         let sheet = format!("\u{feff}{SHEET}");
         let cells = parse_cells(&sheet).unwrap();
-        assert_eq!(cells[2].inline_text.as_deref(), Some("123-45-6789"));
+        assert_eq!(cells[2].value.inline_text(), Some("123-45-6789"));
     }
 
     #[test]
@@ -416,7 +408,7 @@ mod tests {
             r#"</row></sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        assert_eq!(cells[0].inline_text.as_deref(), Some("alice@example.com"));
+        assert_eq!(cells[0].value.inline_text(), Some("alice@example.com"));
     }
 
     #[test]
@@ -429,7 +421,20 @@ mod tests {
         );
         let cells = parse_cells(sheet).unwrap();
         assert_eq!(cells.len(), 1);
-        assert_eq!(cells[0].inline_text.as_deref(), Some("bob@example.com"));
+        assert_eq!(cells[0].value.inline_text(), Some("bob@example.com"));
+    }
+
+    #[test]
+    fn a_cached_formula_string_keeps_the_text_around_an_entity() {
+        // quick-xml reports an entity as its own event, between two texts: the
+        // whole value is read, not only the text after the last entity.
+        let sheet = concat!(
+            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
+            r#"<c r="A1" t="str"><f>B1</f><v>Smith &amp; Jones</v></c>"#,
+            r#"</row></sheetData></worksheet>"#,
+        );
+        let cells = parse_cells(sheet).unwrap();
+        assert_eq!(cells[0].value.inline_text(), Some("Smith & Jones"));
     }
 
     #[test]
@@ -443,8 +448,8 @@ mod tests {
             r#"</row></sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        assert_eq!((cells[0].row, cells[0].column), (1, 0));
-        assert_eq!((cells[1].row, cells[1].column), (1, 1));
+        assert_eq!(cells[0].coord, CellCoord::new(1, 0));
+        assert_eq!(cells[1].coord, CellCoord::new(1, 1));
     }
 
     #[test]
@@ -462,7 +467,7 @@ mod tests {
             1,
             "the cell must be recognized as text-bearing"
         );
-        assert_eq!(cells[0].inline_text.as_deref(), Some("alice@example.com"));
+        assert_eq!(cells[0].value.inline_text(), Some("alice@example.com"));
     }
 
     #[test]
@@ -474,7 +479,7 @@ mod tests {
             r#"</row></sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        assert_eq!((cells[0].row, cells[0].column), (0, 0));
+        assert_eq!(cells[0].coord, CellCoord::new(0, 0));
     }
 
     #[test]
@@ -487,7 +492,7 @@ mod tests {
             r#"</row></sheetData></worksheet>"#,
         );
         let cells = parse_cells(sheet).unwrap();
-        assert!(cells[0].shared_index.is_some(), "shared");
+        assert!(cells[0].value.shared_index().is_some(), "shared");
         let attributes = &cells[0].attributes;
         assert!(
             attributes.contains(r#"foo="a&quot;b""#),

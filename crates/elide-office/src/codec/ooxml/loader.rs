@@ -43,7 +43,7 @@ fn decode_package<C: OoxmlCodec>(
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
     let properties = DocProps::under(policy, |path| pkg.part_bytes(path));
     let extraction = pkg.extract();
-    refuse_issues(C::LABEL, &extraction.issues)?;
+    refuse_issues(C::EXTENSION, &extraction.issues)?;
 
     let body = ExtractStream::new(C::FORMAT_ID, items(extraction.blocks), OoxmlAddresser);
     let blobs = blobs(extraction.embeddings);

@@ -57,8 +57,27 @@ pub(crate) const W16CID: &str = "http://schemas.microsoft.com/office/word/2016/w
 pub(crate) const W16CEX: &str = "http://schemas.microsoft.com/office/word/2018/wordml/cex";
 /// PresentationML (`p:`).
 pub(crate) const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+/// The PowerPoint 2010 extensions (`p14:`), whose slide creation ids name an
+/// editing session.
+pub(crate) const P14: &str = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 /// SpreadsheetML (`x:`, or the default namespace of a workbook's parts).
 pub(crate) const X: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+/// The Excel 2010 application compatibility (`x15ac:`), which holds the path a
+/// workbook was saved to.
+pub(crate) const X15AC: &str = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac";
+/// The Excel 2014 revision ids (`xr:`).
+pub(crate) const XR: &str = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision";
+/// The Excel 2015 revision ids (`xr2:`).
+pub(crate) const XR2: &str = "http://schemas.microsoft.com/office/spreadsheetml/2015/revision2";
+/// The Excel 2016 revision ids (`xr3:`).
+pub(crate) const XR3: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3";
+/// The Excel 2016 revision ids (`xr6:`).
+pub(crate) const XR6: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision6";
+/// The Excel 2016 revision ids (`xr10:`).
+pub(crate) const XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
+/// Excel's threaded comments.
+pub(crate) const THREADED: &str =
+    "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 
 /// DrawingML (`a:`).
 pub(crate) const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";

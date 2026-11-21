@@ -11,19 +11,48 @@ use std::collections::{HashMap, HashSet};
 
 use elide_core::Result;
 
-use crate::opc::package_xml::{CONTENT_TYPES, entries, without_entries};
+use crate::opc::ct;
+use crate::opc::package_xml::{CONTENT_TYPES, Entry, EntryAttribute, entries, without_entries};
 use crate::opc::part::PartPath;
 
 /// The manifest's own part path.
 pub(crate) const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
 
+/// A part's content type, lowercased, as every content type compares ASCII
+/// case-insensitively.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContentType(String);
+
+impl ContentType {
+    /// The content type written `raw`.
+    pub(crate) fn new(raw: &str) -> Self {
+        Self(raw.to_ascii_lowercase())
+    }
+
+    /// The content type, lowercased.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether a part of this type holds XML: an XML type, or the legacy VML
+    /// drawing type (XML that predates the `+xml` naming).
+    pub(crate) fn is_xml(&self) -> bool {
+        self.0.ends_with("xml") || self.is_vml_drawing()
+    }
+
+    /// Whether this is the legacy VML drawing type.
+    pub(crate) fn is_vml_drawing(&self) -> bool {
+        self.0 == ct::VML_DRAWING
+    }
+}
+
 /// The parsed content-types manifest.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ContentTypes {
     /// Lowercased extension → content type.
-    defaults: HashMap<String, String>,
+    defaults: HashMap<String, ContentType>,
     /// Lowercased part path (no leading `/`) → content type.
-    overrides: HashMap<String, String>,
+    overrides: HashMap<String, ContentType>,
 }
 
 impl ContentTypes {
@@ -34,30 +63,41 @@ impl ContentTypes {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the manifest is not well-formed.
     pub(crate) fn parse(xml: &str) -> Result<Self> {
         let mut types = Self::default();
-        for (name, attributes) in entries(xml, &CONTENT_TYPES, CONTENT_TYPES_PART)? {
-            let value = |key: &str| {
-                attributes
-                    .iter()
-                    .find(|(name, _)| *name == key)
-                    .map(|(_, value)| value.clone())
-            };
-            let Some(content_type) = value("ContentType") else {
+        for Entry {
+            name, attributes, ..
+        } in entries(xml, &CONTENT_TYPES)?
+        {
+            let mut content_type = None;
+            let mut extension = None;
+            let mut part_name = None;
+            for EntryAttribute { key, value, .. } in attributes {
+                let slot = match key {
+                    "ContentType" => &mut content_type,
+                    "Extension" => &mut extension,
+                    "PartName" => &mut part_name,
+                    _ => continue,
+                };
+                slot.get_or_insert(value);
+            }
+            let Some(content_type) = content_type else {
                 continue;
             };
+            let content_type = ContentType::new(&content_type);
             match name {
                 "Default" => {
-                    if let Some(extension) = value("Extension") {
+                    if let Some(extension) = extension {
                         types
                             .defaults
                             .insert(extension.to_ascii_lowercase(), content_type);
                     }
                 }
-                _ => {
-                    if let Some(part) = value("PartName") {
+                "Override" => {
+                    if let Some(part) = part_name {
                         let path = part.trim_start_matches('/').to_ascii_lowercase();
                         types.overrides.insert(path, content_type);
                     }
                 }
+                _ => {}
             }
         }
         Ok(types)
@@ -65,14 +105,13 @@ impl ContentTypes {
 
     /// The content type of `part`: its override, else its extension's default,
     /// else `None`.
-    pub(crate) fn of(&self, part: &PartPath) -> Option<&str> {
+    pub(crate) fn of(&self, part: &PartPath) -> Option<&ContentType> {
         self.overrides
             .get(&part.as_str().to_ascii_lowercase())
             .or_else(|| {
                 part.extension()
                     .and_then(|ext| self.defaults.get(&ext.to_ascii_lowercase()))
             })
-            .map(String::as_str)
     }
 }
 
@@ -87,13 +126,9 @@ pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<St
         .iter()
         .map(|part| part.as_str().to_ascii_lowercase())
         .collect();
-    without_entries(
-        xml,
-        &CONTENT_TYPES,
-        CONTENT_TYPES_PART,
-        "PartName",
-        |name| removed.contains(name.to_ascii_lowercase().trim_start_matches('/')),
-    )
+    without_entries(xml, &CONTENT_TYPES, "PartName", |name| {
+        removed.contains(name.to_ascii_lowercase().trim_start_matches('/'))
+    })
 }
 
 #[cfg(test)]
@@ -114,25 +149,27 @@ mod tests {
         assert_eq!(out, manifest.replace(removed_override, ""));
     }
 
+    /// The content type `types` names for the part at `path`.
+    fn type_of<'a>(types: &'a ContentTypes, path: &str) -> Option<&'a str> {
+        types.of(&PartPath::from(path)).map(ContentType::as_str)
+    }
+
     #[test]
     fn an_override_wins_over_the_extension_default() {
         let types = ContentTypes::parse(MANIFEST).unwrap();
-        assert_eq!(types.of(&PartPath::from("word/document.xml")), Some("main"));
+        assert_eq!(type_of(&types, "word/document.xml"), Some("main"));
         assert_eq!(
-            types.of(&PartPath::from("customXml/item1.xml")),
+            type_of(&types, "customXml/item1.xml"),
             Some("application/xml")
         );
-        assert_eq!(
-            types.of(&PartPath::from("word/media/image1.png")),
-            Some("image/png")
-        );
-        assert_eq!(types.of(&PartPath::from("word/media/image1.emf")), None);
+        assert_eq!(type_of(&types, "word/media/image1.png"), Some("image/png"));
+        assert_eq!(type_of(&types, "word/media/image1.emf"), None);
     }
 
     #[test]
     fn part_names_compare_case_insensitively() {
         let types = ContentTypes::parse(MANIFEST).unwrap();
-        assert_eq!(types.of(&PartPath::from("Word/Document.xml")), Some("main"));
+        assert_eq!(type_of(&types, "Word/Document.xml"), Some("main"));
     }
 
     #[test]

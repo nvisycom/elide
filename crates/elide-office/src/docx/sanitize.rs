@@ -27,7 +27,7 @@
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::WordFormat;
-use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
+use crate::opc::names::{NameGroup, NameReference, NameRule, Numbering, ReferenceForm, Unique};
 use crate::opc::ns::{W, W14, W15};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
@@ -165,6 +165,9 @@ const BOOKMARK_NAME: TextAttribute =
 const HYPERLINK_ANCHOR: TextAttribute =
     TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::Any, "anchor"));
 
+/// The bookmark names.
+const BOOKMARKS: NameGroup = NameGroup::new("bookmark");
+
 /// The longest bookmark name Word accepts, in characters.
 const MAX_BOOKMARK_NAME: usize = 40;
 
@@ -174,15 +177,15 @@ const MAX_BOOKMARK_NAME: usize = 40;
 pub(super) static NAMES: Names = Names {
     rules: &[NameRule {
         attribute: BOOKMARK_NAME,
-        group: "bookmark",
-        per_part: false,
+        group: BOOKMARKS,
+        unique: Unique::InPackage,
         fit: fit_bookmark_name,
         max: Some(MAX_BOOKMARK_NAME),
         numbering: Numbering::Underscored,
     }],
     references: &[NameReference {
         attribute: HYPERLINK_ANCHOR,
-        group: "bookmark",
+        group: BOOKMARKS,
         form: ReferenceForm::Exact,
     }],
 };
@@ -266,7 +269,7 @@ mod tests {
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
     use crate::opc::check::check;
-    use crate::opc::sanitize::sanitize;
+    use crate::opc::sanitize::{Sanitized, sanitize};
 
     /// The content type of a Word document's body.
     const DOCUMENT: &str =
@@ -307,8 +310,10 @@ mod tests {
             ("word/_rels/document.xml.rels", "", rels.as_bytes()),
             ("word/media/logo.svg", "image/svg+xml", svg.as_bytes()),
         ]);
-        let (out, stripped) =
-            sanitize(&package, HiddenContentPolicy::default(), &WordFormat).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&package, HiddenContentPolicy::default(), &WordFormat).unwrap();
         let out = out.unwrap_or(package);
         let document = read_text_part(&out, "word/document.xml");
         assert!(
@@ -341,14 +346,13 @@ mod tests {
             .extract()
             .blocks
             .into_iter()
-            .find(|block| block.start == bookmark)
+            .find(|block| block.span.start == bookmark)
             .expect("the bookmark name is surfaced");
         let out = package
             .rewrite_with_parts(
                 &[Replacement {
                     part: block.part.clone(),
-                    start: block.start,
-                    end: block.end,
+                    span: block.span.clone(),
                     text: "[PERSON]".into(),
                 }],
                 &[],
@@ -361,8 +365,10 @@ mod tests {
 
     #[test]
     fn hidden_labels_and_alternative_text_are_stripped() {
-        let (out, stripped) =
-            sanitize(&document(), HiddenContentPolicy::default(), &WordFormat).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&document(), HiddenContentPolicy::default(), &WordFormat).unwrap();
         let out = out.unwrap();
         let body = read_text_part(&out, "word/document.xml");
         for hidden in [
@@ -389,7 +395,7 @@ mod tests {
     #[test]
     fn redacted_collaboration_surfaces_its_authors_and_drops_its_dates() {
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, _) = sanitize(&document(), policy, &WordFormat).unwrap();
+        let Sanitized { bytes: out, .. } = sanitize(&document(), policy, &WordFormat).unwrap();
         let out = out.unwrap();
         for name in ["word/document.xml", "word/comments.xml"] {
             assert!(
@@ -420,7 +426,7 @@ mod tests {
         );
         let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
         let policy = HiddenContentPolicy::default();
-        let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
+        let Sanitized { bytes: out, .. } = sanitize(&package, policy, &WordFormat).unwrap();
         let out = out.unwrap();
         let body = read_text_part(&out, "word/document.xml");
         for hidden in ["deleted", "w:del ", "w:ins ", "commentRangeStart", "w:date"] {
@@ -440,7 +446,7 @@ mod tests {
         );
         let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
         let policy = HiddenContentPolicy::default();
-        let (out, _) = sanitize(&package, policy, &WordFormat).unwrap();
+        let Sanitized { bytes: out, .. } = sanitize(&package, policy, &WordFormat).unwrap();
         let out = out.unwrap();
         let body = read_text_part(&out, "word/document.xml");
         assert!(
@@ -450,7 +456,7 @@ mod tests {
             "{body}"
         );
         check(&out, policy, &WordFormat).unwrap();
-        let (again, _) = sanitize(&out, policy, &WordFormat).unwrap();
+        let Sanitized { bytes: again, .. } = sanitize(&out, policy, &WordFormat).unwrap();
         assert!(again.is_none_or(|again| again == out));
     }
 
@@ -466,7 +472,10 @@ mod tests {
             ("word/_rels/document.xml.rels", "", rels.as_bytes()),
         ]);
         let policy = HiddenContentPolicy::default();
-        let (out, stripped) = sanitize(&package, policy, &WordFormat).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&package, policy, &WordFormat).unwrap();
         let out = out.unwrap_or(package);
         let body = read_text_part(&out, "word/document.xml");
         assert!(body.contains(r#"<w:hyperlink r:id="rId1">"#), "{body}");

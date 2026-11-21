@@ -22,25 +22,16 @@ use elide_core::Result;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 use quick_xml::events::Event;
 
-use super::SheetClassifier;
+use super::SheetFormat;
 use super::names::{
     DEFINED_NAME, HYPERLINK_LOCATION, SHEET_NAME, TABLE_COLUMN_NAME, TABLE_DISPLAY_NAME, TABLE_NAME,
 };
-use crate::opc::ns::{VML, VML_EXCEL, X};
+use crate::opc::ns::{THREADED, VML, VML_EXCEL, X, X15AC, XR, XR2, XR3, XR6, XR10};
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Edit, Edited, Local, SpannedReader};
+use crate::opc::xml_edit::{Cut, Declared, Edit, Edited, Local, SpannedReader};
 use crate::opc::{
     Collaboration, HiddenAttributes, Ns, PartKind, TextAttribute, attribute_value, malformed_xml,
 };
-
-/// The Excel 2010 application-compatibility namespace (the saved-to path).
-const X15AC: &str = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac";
-/// The Excel revision-id namespaces.
-const XR: &str = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision";
-const XR2: &str = "http://schemas.microsoft.com/office/spreadsheetml/2015/revision2";
-const XR3: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3";
-const XR6: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision6";
-const XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
 
 /// The revision ids Excel stamps on the workbook, sheets, and tables.
 const EDITING_SESSION_IDS: Declared =
@@ -62,15 +53,12 @@ const CREDENTIALS: Declared = Declared::removing(HiddenContent::Credential, &[(X
 const EXTERNAL_WORKBOOKS: Declared =
     Declared::removing(HiddenContent::Link, &[(X, "externalReferences")]);
 
-/// The threaded-comments namespace.
-const THREADED: &str = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
-
 /// When a threaded comment was written.
 const COMMENT_DATES: HiddenAttributes = HiddenAttributes::strip(
     HiddenContent::Comment,
     &[TextAttribute::new(
         (Ns::In(THREADED), Local::Exact("threadedComment")),
-        (Ns::None, "dT"),
+        (Ns::Unqualified, "dT"),
     )],
 );
 
@@ -208,7 +196,7 @@ fn cut_notes(raw: &str, cut: NoteCut) -> Result<Option<Edited>> {
         }
     }
     // The cuts may nest: a crafted drawing can put a shape inside another.
-    let cuts = cuts.into_iter().map(|cut| (cut, "")).collect();
+    let cuts: Vec<Cut<&str>> = cuts.into_iter().map(Cut::remove).collect();
     Ok(Edited::from_cuts(raw, cuts, count))
 }
 
@@ -239,7 +227,7 @@ pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
     TextAttribute::unqualified("person", "userId").of(Collaboration::Author),
 ];
 
-impl Sanitizer for SheetClassifier {
+impl Sanitizer for SheetFormat {
     fn edits(&self, kind: PartKind, policy: HiddenContentPolicy) -> Edits<'static> {
         match kind {
             PartKind::Comments => vec![&EDITING_SESSION_IDS, &COMMENT_DATES, &MENTIONS],
@@ -269,7 +257,7 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{pack_typed, part_names, read_text_part};
-    use crate::opc::sanitize::sanitize;
+    use crate::opc::sanitize::{Sanitized, sanitize};
     use crate::opc::xml_edit::expect_edit;
 
     /// A workbook with a revision log and a legacy drawing holding one comment
@@ -343,7 +331,10 @@ mod tests {
             ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, stripped) = sanitize(&package, policy, &SheetClassifier).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&package, policy, &SheetFormat).unwrap();
         let out = out.unwrap();
         // No schema describes a threaded comment or its people, so neither
         // can be rebuilt, and both go.
@@ -355,13 +346,16 @@ mod tests {
             "{names:?}"
         );
         assert_eq!(count(&stripped, HiddenContent::ApplicationData), 2);
-        crate::opc::check::check(&out, policy, &SheetClassifier).unwrap();
+        crate::opc::check::check(&out, policy, &SheetFormat).unwrap();
     }
 
     #[test]
     fn the_revision_log_is_stripped_even_when_collaboration_is_redacted() {
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&workbook(), policy, &SheetFormat).unwrap();
         let names = part_names(&out.unwrap());
         assert!(
             !names.iter().any(|name| name.contains("revisions")),
@@ -372,19 +366,17 @@ mod tests {
 
     #[test]
     fn comment_notes_go_with_stripped_comments() {
-        let (out, stripped) = sanitize(
-            &workbook(),
-            HiddenContentPolicy::default(),
-            &SheetClassifier,
-        )
-        .unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&workbook(), HiddenContentPolicy::default(), &SheetFormat).unwrap();
         let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(!vml.contains("Note") && vml.contains("Button"), "{vml}");
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
 
         // Redacted comments keep their notes.
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, _) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
+        let Sanitized { bytes: out, .. } = sanitize(&workbook(), policy, &SheetFormat).unwrap();
         let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(vml.contains("Note"), "{vml}");
     }
@@ -436,7 +428,10 @@ mod tests {
     #[test]
     fn flagging_every_comment_empties_each_note_and_keeps_its_shape() {
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
-        let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&workbook(), policy, &SheetFormat).unwrap();
         let vml = read_text_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml");
         assert!(!vml.contains("<div>Note</div>"), "{vml}");
         assert!(vml.contains(r#"ObjectType="Note""#), "{vml}");

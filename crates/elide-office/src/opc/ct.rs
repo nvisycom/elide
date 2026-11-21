@@ -12,9 +12,3 @@ pub(crate) const DML: &str = "application/vnd.openxmlformats-officedocument.draw
 
 /// A legacy VML drawing: XML that predates the `+xml` naming.
 pub(crate) const VML_DRAWING: &str = "application/vnd.openxmlformats-officedocument.vmldrawing";
-
-/// Whether `content_type` is [`VML_DRAWING`], compared ASCII
-/// case-insensitively.
-pub(crate) fn is_vml_drawing(content_type: &str) -> bool {
-    content_type.eq_ignore_ascii_case(VML_DRAWING)
-}

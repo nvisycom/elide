@@ -14,6 +14,7 @@
 //! transitional one: every [`Name`] a [`Rules`] sees is already mapped.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::ops::Range;
@@ -58,7 +59,7 @@ pub(crate) struct Attribute<'a> {
     pub(crate) name: Name<'a>,
     pub(crate) value: &'a str,
     /// The attribute's byte range in the part, its leading whitespace included.
-    range: Range<usize>,
+    extent: Range<usize>,
     /// The byte range of its value, inside the quotes.
     pub(crate) value_range: Range<usize>,
 }
@@ -82,8 +83,11 @@ pub(crate) trait Rules {
     /// that follows another removal, or a check that removes nothing).
     fn content(&self) -> Option<HiddenContent>;
 
-    /// What to do with the element `name` carrying `attributes`.
-    fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action;
+    /// What to do with the element `name` carrying `attributes`: by default,
+    /// keep it.
+    fn element(&self, _name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
+        Action::Keep
+    }
 
     /// Whether to remove `attribute` from a kept element `element`.
     fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
@@ -99,6 +103,24 @@ pub(crate) trait Rules {
         _attribute: &Attribute<'_>,
     ) -> Option<&'static str> {
         None
+    }
+}
+
+/// The first of what a [`Rules`] looks for, recorded through the shared
+/// reference its methods take: a check reports the first offence it meets.
+#[derive(Debug, Default)]
+pub(crate) struct FirstSeen(RefCell<Option<String>>);
+
+impl FirstSeen {
+    /// Record the value `value` makes, unless one already is; `value` is
+    /// called only then.
+    pub(crate) fn record(&self, value: impl FnOnce() -> String) {
+        self.0.borrow_mut().get_or_insert_with(value);
+    }
+
+    /// The value recorded first, if any.
+    pub(crate) fn get(&self) -> Option<String> {
+        self.0.borrow().clone()
     }
 }
 
@@ -144,14 +166,14 @@ impl Edit for XmlComments {
 /// `raw` is not well-formed XML.
 pub(crate) fn cut_events(raw: &str, cuts: impl Fn(&Event<'_>) -> bool) -> Result<Option<Edited>> {
     let mut reader = SpannedReader::new(raw);
-    let mut spans = Vec::new();
+    let mut spans: Vec<Cut<&str>> = Vec::new();
     loop {
         let (event, span) = reader.read_event().map_err(malformed_xml)?;
         if matches!(event, Event::Eof) {
             break;
         }
         if cuts(&event) {
-            spans.push((span, ""));
+            spans.push(Cut::remove(span));
         }
     }
     let count = spans.len();
@@ -171,7 +193,7 @@ impl<R: Rules> Edit for R {
 /// A namespace-qualified name to match: `(namespace URI, local name)`.
 type QName = (&'static str, &'static str);
 
-/// How an attribute's local name is matched.
+/// How the local name of an element or an attribute is matched.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Local {
     /// Exactly this local name.
@@ -274,14 +296,39 @@ impl Rules for Unchanged {
     fn content(&self) -> Option<HiddenContent> {
         None
     }
+}
 
-    fn element(&self, _name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
-        Action::Keep
+/// One change to a part's text: the byte range `range` replaced with `with`
+/// (nothing for a removal, text for an insertion where the range is empty).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Cut<S = String> {
+    pub(crate) range: Range<usize>,
+    pub(crate) with: S,
+}
+
+impl<S> Cut<S> {
+    /// `range` replaced with `with`.
+    pub(crate) fn new(range: Range<usize>, with: S) -> Self {
+        Self { range, with }
+    }
+
+    /// The order cuts are applied in: by where they start, an insertion ahead
+    /// of a cut starting where it does.
+    fn order(&self) -> (usize, usize) {
+        (self.range.start, self.range.end)
     }
 }
 
-/// A part edited by [`edit`]: its new text, and how many elements and
-/// attributes the edit removed or unwrapped.
+impl<S: Default> Cut<S> {
+    /// `range` removed, replaced with nothing.
+    pub(crate) fn remove(range: Range<usize>) -> Self {
+        Self::new(range, S::default())
+    }
+}
+
+/// A part as an [`Edit`] changed it: its new text, and how many items the
+/// edit changed (an element removed or unwrapped, an attribute removed or
+/// given a neutral value, an event cut, as the edit counts them).
 #[derive(Debug)]
 pub(crate) struct Edited {
     pub(crate) text: String,
@@ -293,7 +340,7 @@ impl Edited {
     /// `count` items changed, or `None` when there are no cuts.
     pub(crate) fn from_cuts<S: AsRef<str>>(
         raw: &str,
-        cuts: Vec<(Range<usize>, S)>,
+        cuts: Vec<Cut<S>>,
         count: usize,
     ) -> Option<Self> {
         (!cuts.is_empty()).then(|| Self {
@@ -326,7 +373,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     let mut reader = SpannedReader::new_ns(raw);
     // Each byte range cut, and what takes its place (nothing, a neutral
     // attribute value, or the namespaces an unwrapped element declared).
-    let mut cuts: Vec<(Range<usize>, Cow<'_, str>)> = Vec::new();
+    let mut cuts: Vec<Cut<Cow<'_, str>>> = Vec::new();
     let mut growth = Growth::new(raw, MAX_PART_BYTES);
     // Elements and attributes removed, unwrapped, or neutralized; an unwrapped
     // element's end tag is cut too, but it is one element.
@@ -342,6 +389,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
 
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
+        refuse_doctype(&event)?;
         if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
             continue;
         }
@@ -376,7 +424,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                     // The tags go, the namespaces they declare carried to the
                     // children they held.
                     Action::Unwrap => {
-                        cuts.push((span.clone(), Cow::Borrowed("")));
+                        cuts.push(Cut::remove(span.clone()));
                         count += 1;
                         if is_start {
                             carried_from = around;
@@ -387,18 +435,21 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                         let missing = redeclared(&carried, around, raw, e)?;
                         if !missing.is_empty() {
                             let at = span.start + 1 + e.name().as_ref().len();
-                            cuts.push((at..at, Cow::Owned(missing)));
+                            cuts.push(Cut::new(at..at, Cow::Owned(missing)));
                             growth.count(&cuts)?;
                         }
                         for attribute in &attributes {
                             if rules.removes_attribute(name, attribute) {
-                                cuts.push((attribute.range.clone(), Cow::Borrowed("")));
+                                cuts.push(Cut::remove(attribute.extent.clone()));
                                 count += 1;
                             } else if let Some(neutral) =
                                 rules.neutralizes_attribute(name, attribute)
                                 && attribute.value != neutral
                             {
-                                cuts.push((attribute.value_range.clone(), Cow::Borrowed(neutral)));
+                                cuts.push(Cut::new(
+                                    attribute.value_range.clone(),
+                                    Cow::Borrowed(neutral),
+                                ));
                                 count += 1;
                             }
                         }
@@ -416,7 +467,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                 if let Some(closed) = open.pop() {
                     carried.truncate(closed.own_from);
                     if closed.action == Action::Unwrap {
-                        cuts.push((span, Cow::Borrowed("")));
+                        cuts.push(Cut::remove(span));
                     }
                 }
             }
@@ -480,14 +531,14 @@ fn attributes<'a>(
     let mut out = Vec::new();
     for (attr, namespace) in e.attributes().zip(namespaces) {
         let attr = attr.map_err(malformed_xml)?;
-        let (range, value) = attribute_extent(raw, &attr)?;
+        let AttributeExtent { whole, value } = attribute_extent(raw, &attr)?;
         out.push(Attribute {
             name: Name {
                 namespace: namespace.as_deref().map(transitional),
                 local: attr.key.local_name().into_inner(),
             },
             value: &raw[value.clone()],
-            range,
+            extent: whole,
             value_range: value,
         });
     }
@@ -504,7 +555,12 @@ pub(crate) fn local_name(e: &BytesStart<'_>) -> String {
 /// skips it and reports positions past it, so spans over the original bytes must
 /// add it back.
 pub(crate) fn bom_len(raw: &str) -> usize {
-    if raw.starts_with('\u{feff}') { 3 } else { 0 }
+    const BOM: char = '\u{feff}';
+    if raw.starts_with(BOM) {
+        BOM.len_utf8()
+    } else {
+        0
+    }
 }
 
 /// A quick-xml reader over a part that gives each event with its byte span in
@@ -588,39 +644,36 @@ impl Skipped {
     pub(crate) fn begin<S: Default>(
         span: Range<usize>,
         is_start: bool,
-        cuts: &mut Vec<(Range<usize>, S)>,
+        cuts: &mut Vec<Cut<S>>,
     ) -> Option<Self> {
         if is_start {
             Some(Self::new(span.start))
         } else {
-            cuts.push((span, S::default()));
+            cuts.push(Cut::remove(span));
             None
         }
     }
 
-    /// What a reader that removes elements does first with each `event`,
-    /// ending at `end`: refuse a document type declaration, and read an event
-    /// inside the element `removing` skips, cutting the element whole into
-    /// `cuts` once its end tag is read. `true` when the event was inside it.
+    /// What a reader that removes elements does with each `event`, ending at
+    /// `end`, once [`refuse_doctype`] has seen it: read an event inside the
+    /// element `removing` skips, cutting the element whole into `cuts` once
+    /// its end tag is read. `true` when the event was inside it.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) on
-    /// a document type declaration, or a part ending inside the element.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+    /// the part ends inside the element.
     pub(crate) fn skip<S: Default>(
         removing: &mut Option<Self>,
         event: &Event<'_>,
         end: usize,
-        cuts: &mut Vec<(Range<usize>, S)>,
+        cuts: &mut Vec<Cut<S>>,
     ) -> Result<bool> {
-        if matches!(event, Event::DocType(_)) {
-            return Err(malformed_xml("a document type declaration"));
-        }
         let Some(skipped) = removing else {
             return Ok(false);
         };
         if let Some(whole) = skipped.read(event, end)? {
-            cuts.push((whole, S::default()));
+            cuts.push(Cut::remove(whole));
             *removing = None;
         }
         Ok(true)
@@ -649,27 +702,42 @@ impl Skipped {
     }
 }
 
+/// Refuse `event` if it is a document type declaration, which every reader
+/// that rewrites a part checks each event for: a DTD's entities expand into
+/// text no extraction reads, and OOXML never uses one.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) on
+/// a document type declaration.
+pub(crate) fn refuse_doctype(event: &Event<'_>) -> Result<()> {
+    if matches!(event, Event::DocType(_)) {
+        return Err(malformed_xml("a document type declaration"));
+    }
+    Ok(())
+}
+
 /// `raw` with each of `cuts` replaced by its text, cuts applied in order of
 /// where they start (an insertion ahead of a cut starting where it does). A
 /// cut may nest in or overlap one before it: only the part past what is
 /// already cut goes, and its text is still written.
-pub(crate) fn splice<S: AsRef<str>>(raw: &str, cuts: Vec<(Range<usize>, S)>) -> String {
+pub(crate) fn splice<S: AsRef<str>>(raw: &str, cuts: Vec<Cut<S>>) -> String {
     splice_with(raw, cuts, String::push_str)
 }
 
 /// [`splice`], writing each kept span of `raw` with `keep`.
 pub(crate) fn splice_with<S: AsRef<str>>(
     raw: &str,
-    mut cuts: Vec<(Range<usize>, S)>,
+    mut cuts: Vec<Cut<S>>,
     mut keep: impl FnMut(&mut String, &str),
 ) -> String {
-    cuts.sort_by_key(|(range, _)| (range.start, range.end));
+    cuts.sort_by_key(Cut::order);
     let mut out = String::with_capacity(raw.len());
     let mut cursor = 0;
-    for (cut, with) in cuts {
-        keep(&mut out, &raw[cursor..cut.start.max(cursor)]);
+    for Cut { range, with } in cuts {
+        keep(&mut out, &raw[cursor..range.start.max(cursor)]);
         out.push_str(with.as_ref());
-        cursor = cursor.max(cut.end);
+        cursor = cursor.max(range.end);
     }
     keep(&mut out, &raw[cursor..]);
     out
@@ -715,9 +783,9 @@ pub(crate) fn declarations<'a>(
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
         if attr.key.as_namespace_binding().is_some() {
-            let (extent, _) = attribute_extent(raw, &attr)?;
+            let extent = attribute_extent(raw, &attr)?;
             // From the name, past the whitespace before it.
-            let source = raw[extent].trim_start();
+            let source = raw[extent.whole].trim_start();
             let key = source.split('=').next().unwrap_or(source).trim_end();
             declarations.push((key, source));
         }
@@ -751,9 +819,9 @@ impl Growth {
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
     /// once the part outgrows its limit.
-    pub(crate) fn count<S: AsRef<str>>(&mut self, cuts: &[(Range<usize>, S)]) -> Result<()> {
-        for (span, text) in &cuts[self.counted.min(cuts.len())..] {
-            self.size = (self.size + text.as_ref().len()).saturating_sub(span.len());
+    pub(crate) fn count<S: AsRef<str>>(&mut self, cuts: &[Cut<S>]) -> Result<()> {
+        for cut in &cuts[self.counted.min(cuts.len())..] {
+            self.size = (self.size + cut.with.as_ref().len()).saturating_sub(cut.range.len());
         }
         self.counted = cuts.len();
         if self.size as u64 > self.limit {
@@ -794,10 +862,10 @@ pub(crate) fn push_joined(text: &mut String, kept: &str) {
 pub(crate) fn splice_checked<S: AsRef<str>>(
     raw: &str,
     part: impl Display,
-    mut cuts: Vec<(Range<usize>, S)>,
+    mut cuts: Vec<Cut<S>>,
 ) -> Result<String> {
-    cuts.sort_by_key(|(range, _)| (range.start, range.end));
-    check_cuts(raw, part, cuts.iter().map(|(range, _)| range.clone()))?;
+    cuts.sort_by_key(Cut::order);
+    check_cuts(raw, part, cuts.iter().map(|cut| cut.range.clone()))?;
     Ok(splice(raw, cuts))
 }
 
@@ -837,17 +905,32 @@ pub(crate) fn check_cuts(
     Ok(())
 }
 
-/// Where the attribute `attr`, read from `raw`, is written in it: its name,
-/// and its value inside the quotes.
+/// Where an attribute's name and value are written in a part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttributeSource {
+    /// Its name, prefix included.
+    pub(crate) key: Range<usize>,
+    /// Its value inside the quotes.
+    pub(crate) value: Range<usize>,
+}
+
+/// Where a whole attribute and its value are written in a part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttributeExtent {
+    /// From the whitespace before its name to past its closing quote: what
+    /// goes when the attribute is removed.
+    pub(crate) whole: Range<usize>,
+    /// Its value inside the quotes.
+    pub(crate) value: Range<usize>,
+}
+
+/// Where the attribute `attr`, read from `raw`, is written in it.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// `attr` was not read straight out of `raw`.
-pub(crate) fn attribute_source(
-    raw: &str,
-    attr: &XmlAttribute<'_>,
-) -> Result<(Range<usize>, Range<usize>)> {
+pub(crate) fn attribute_source(raw: &str, attr: &XmlAttribute<'_>) -> Result<AttributeSource> {
     let outside = || malformed_xml("attribute outside the part");
     let key = raw
         .substr_range(attr.key.into_inner())
@@ -856,25 +939,29 @@ pub(crate) fn attribute_source(
         return Err(malformed_xml("attribute without a source"));
     };
     let value = raw.substr_range(value).ok_or_else(outside)?;
-    Ok((Range::from(key), Range::from(value)))
+    Ok(AttributeSource {
+        key: Range::from(key),
+        value: Range::from(value),
+    })
 }
 
-/// Where the attribute `attr`, read from `raw`, is written in it: from the
-/// whitespace before its name to past its closing quote, and its value inside
-/// the quotes.
+/// Where the attribute `attr`, read from `raw`, is written in it, whole.
 ///
 /// # Errors
 ///
 /// As [`attribute_source`].
-pub(crate) fn attribute_extent(
-    raw: &str,
-    attr: &XmlAttribute<'_>,
-) -> Result<(Range<usize>, Range<usize>)> {
-    let (key, value) = attribute_source(raw, attr)?;
+pub(crate) fn attribute_extent(raw: &str, attr: &XmlAttribute<'_>) -> Result<AttributeExtent> {
+    /// The closing quote after a value, `"` or `'`: one byte, and always
+    /// there, as quick-xml reads no unquoted value.
+    const CLOSING_QUOTE: usize = 1;
+    let AttributeSource { key, value } = attribute_source(raw, attr)?;
     let start = raw[..key.start]
         .trim_end_matches(|c: char| c.is_ascii_whitespace())
         .len();
-    Ok((start..value.end + 1, value))
+    Ok(AttributeExtent {
+        whole: start..value.end + CLOSING_QUOTE,
+        value,
+    })
 }
 
 #[cfg(test)]
@@ -988,7 +1075,12 @@ mod tests {
         assert_eq!(
             splice(
                 "abcdef",
-                vec![(1..5, ""), (2..3, ""), (1..1, "X"), (5..6, "Y")]
+                vec![
+                    Cut::remove(1..5),
+                    Cut::remove(2..3),
+                    Cut::new(1..1, "X"),
+                    Cut::new(5..6, "Y"),
+                ]
             ),
             "aXY"
         );
@@ -997,11 +1089,17 @@ mod tests {
     #[test]
     fn a_checked_splice_refuses_overlaps_and_split_characters() {
         assert_eq!(
-            splice_checked("abcdef", "p", vec![(4..5, "Y"), (0..1, "X")]).unwrap(),
+            splice_checked(
+                "abcdef",
+                "p",
+                vec![Cut::new(4..5, "Y"), Cut::new(0..1, "X")]
+            )
+            .unwrap(),
             "XbcdYf"
         );
-        assert!(splice_checked("abcdef", "p", vec![(0..3, ""), (2..4, "")]).is_err());
-        assert!(splice_checked("é", "p", vec![(1..2, "")]).is_err());
-        assert!(splice_checked("ab", "p", vec![(1..3, "")]).is_err());
+        let overlapping: Vec<Cut<&str>> = vec![Cut::remove(0..3), Cut::remove(2..4)];
+        assert!(splice_checked("abcdef", "p", overlapping).is_err());
+        assert!(splice_checked("é", "p", vec![Cut::<&str>::remove(1..2)]).is_err());
+        assert!(splice_checked("ab", "p", vec![Cut::<&str>::remove(1..3)]).is_err());
     }
 }

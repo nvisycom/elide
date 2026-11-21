@@ -3,13 +3,12 @@
 //! relationships, in the transitional relationships namespace or its strict
 //! twin.
 
-use std::cell::RefCell;
 use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContent;
 
 use crate::opc::ns::{R, VML_OFFICE};
-use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
+use crate::opc::xml_edit::{Action, Attribute, FirstSeen, Name, Rules};
 use crate::opc::{attribute_value, schema};
 
 /// Element rules over the relationship-naming attributes (`r:id`, `r:embed`,
@@ -17,10 +16,11 @@ use crate::opc::{attribute_value, schema};
 /// attribute the schemas declare, and any other such attribute alone, or
 /// record the first name that resolves to no relationship.
 pub(crate) struct References<'a> {
-    /// Under `drop`: the ids to remove. Under `check`: the ids that exist.
+    /// The ids to remove, when [`dropping`](Self::dropping), or the ids that
+    /// exist, when [`checking`](Self::checking).
     ids: Ids<'a>,
     /// The first name met that resolves to no relationship.
-    dangling: RefCell<Option<String>>,
+    dangling: FirstSeen,
 }
 
 /// The id set [`References`] matches against.
@@ -28,7 +28,7 @@ enum Ids<'a> {
     /// The ids whose elements go.
     Drop(&'a HashSet<String>),
     /// The ids that exist.
-    Present(&'a HashSet<&'a str>),
+    Present(&'a HashSet<String>),
 }
 
 impl<'a> References<'a> {
@@ -36,21 +36,21 @@ impl<'a> References<'a> {
     pub(crate) fn dropping(ids: &'a HashSet<String>) -> Self {
         Self {
             ids: Ids::Drop(ids),
-            dangling: RefCell::new(None),
+            dangling: FirstSeen::default(),
         }
     }
 
     /// Rules recording the first name that is not one of `ids`.
-    pub(crate) fn checking(ids: &'a HashSet<&'a str>) -> Self {
+    pub(crate) fn checking(ids: &'a HashSet<String>) -> Self {
         Self {
             ids: Ids::Present(ids),
-            dangling: RefCell::new(None),
+            dangling: FirstSeen::default(),
         }
     }
 
     /// The first name met that resolves to no relationship, if any.
     pub(crate) fn dangling(&self) -> Option<String> {
-        self.dangling.borrow().clone()
+        self.dangling.get()
     }
 }
 
@@ -62,19 +62,22 @@ impl Rules for References<'_> {
     }
 
     fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
-        for attribute in attributes.iter().filter(|attribute| naming(attribute)) {
-            match &self.ids {
-                // Only an attribute the element's type declares takes the
-                // element along; the rebuild cuts any other, so it goes alone.
-                Ids::Drop(ids) => {
-                    if schema::declares_reference(name, attribute.name) && dropped(ids, attribute) {
-                        return Action::Remove;
-                    }
+        let mut references = attributes.iter().filter(|attribute| naming(attribute));
+        match &self.ids {
+            // Only an attribute the element's type declares takes the element
+            // along; the rebuild cuts any other, so it goes alone.
+            Ids::Drop(ids) => {
+                if references.any(|attribute| {
+                    schema::declares_reference(name, attribute.name) && dropped(ids, attribute)
+                }) {
+                    return Action::Remove;
                 }
-                Ids::Present(ids) => {
+            }
+            Ids::Present(ids) => {
+                for attribute in references {
                     let id = attribute_value(attribute.value).ok();
                     if !id.as_deref().is_some_and(|id| ids.contains(id)) {
-                        self.dangling.borrow_mut().get_or_insert_with(|| {
+                        self.dangling.record(|| {
                             id.map_or_else(|| attribute.value.to_owned(), |id| id.into_owned())
                         });
                     }
@@ -103,7 +106,8 @@ fn is_relid(attribute: &Attribute<'_>) -> bool {
 
 /// Whether `attribute` names one of the dropped `ids`. The id compares as the
 /// value XML reads, its references decoded; one that does not decode names no
-/// relationship, so it goes under `drop` and dangles under `check`.
+/// relationship, so it goes when [dropping](References::dropping) and
+/// dangles when [checking](References::checking).
 fn dropped(ids: &HashSet<String>, attribute: &Attribute<'_>) -> bool {
     attribute_value(attribute.value).map_or(true, |id| ids.contains(id.as_ref()))
 }
@@ -129,7 +133,7 @@ mod tests {
             edited.text
         );
 
-        let present: HashSet<&str> = ["rId2"].into_iter().collect();
+        let present: HashSet<String> = ["rId2".to_owned()].into_iter().collect();
         let references = References::checking(&present);
         edit(VML_RELID, &references).unwrap();
         assert_eq!(references.dangling().as_deref(), Some("rId1"));
@@ -137,7 +141,7 @@ mod tests {
 
     #[test]
     fn a_strict_reference_to_a_missing_relationship_dangles() {
-        let ids: HashSet<&str> = ["rId1"].into_iter().collect();
+        let ids: HashSet<String> = ["rId1".to_owned()].into_iter().collect();
         let references = References::checking(&ids);
         edit(STRICT, &references).unwrap();
         assert_eq!(references.dangling().as_deref(), Some("rId2"));
@@ -155,7 +159,7 @@ mod tests {
     #[test]
     fn an_escaped_reference_compares_decoded() {
         let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:hyperlink r:id="rId&#50;"/><w:hyperlink r:id="rId1"/></w:p>"#;
-        let present: HashSet<&str> = ["rId1", "rId2"].into_iter().collect();
+        let present: HashSet<String> = ["rId1", "rId2"].map(str::to_owned).into();
         let references = References::checking(&present);
         edit(raw, &references).unwrap();
         assert_eq!(references.dangling(), None);
@@ -194,7 +198,7 @@ mod tests {
         assert!(edited.text.contains("kept"), "{}", edited.text);
         assert!(!edited.text.contains("rId2"), "{}", edited.text);
 
-        // It still dangles under `check`.
+        // It still dangles when checking.
         let present = HashSet::new();
         let references = References::checking(&present);
         edit(raw, &references).unwrap();

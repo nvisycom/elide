@@ -16,11 +16,12 @@ use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
+use crate::opc::archive::RawPart;
 use crate::opc::index::{Index, text};
 use crate::opc::part::PartPath;
 use crate::opc::references::References;
-use crate::opc::sanitize::{Sanitizer, rebuilt, sanitize};
-use crate::opc::vocabulary::Vocabulary;
+use crate::opc::sanitize::{Sanitized, Sanitizer, rebuilt, sanitize};
+use crate::opc::vocabulary::UnreviewedNamespaces;
 use crate::opc::{PartKind, PartRole, malformed_xml, package_xml, xml_edit};
 
 /// Check that the package `document` carries no hidden content `policy` and
@@ -37,8 +38,30 @@ pub(crate) fn check(
     policy: HiddenContentPolicy,
     sanitizer: &dyn Sanitizer,
 ) -> Result<()> {
-    let (changed, survived) = sanitize(document, policy, sanitizer)?;
-    if let Some(entry) = survived.iter().next() {
+    check_sanitized(document, policy, sanitizer)?;
+    let index = Index::read(document)?;
+    check_relationships(&index)?;
+    for part in &index.parts {
+        // The manifest and the relationships parts: the sanitize above cuts
+        // them to their OPC vocabulary and records every cut, so what it left
+        // is all there is.
+        if package_xml::vocabulary_of(&part.path).is_some() || !index.is_xml(&part.path) {
+            continue;
+        }
+        check_xml_part(&index, part, sanitizer)?;
+    }
+    Ok(())
+}
+
+/// Check that sanitizing `document` again removes nothing and changes
+/// nothing.
+fn check_sanitized(
+    document: &[u8],
+    policy: HiddenContentPolicy,
+    sanitizer: &dyn Sanitizer,
+) -> Result<()> {
+    let Sanitized { bytes, stripped } = sanitize(document, policy, sanitizer)?;
+    if let Some(entry) = stripped.iter().next() {
         let place = entry.at.as_ref().map_or("the package", |at| at.as_str());
         return Err(Error::sanitization(format!(
             "encoded package still carries hidden content: {:?} in {place}",
@@ -47,16 +70,21 @@ pub(crate) fn check(
     }
     // A rewrite that removes nothing still changes the package, which is then
     // not what a sanitize writes.
-    if changed.is_some_and(|changed| changed != document) {
+    if bytes.is_some_and(|changed| changed != document) {
         return Err(Error::sanitization(
             "encoded package is not what a sanitize writes: sanitizing it again changes it",
         ));
     }
-    let index = Index::read(document)?;
-    let present: HashSet<&PartPath> = index.parts.iter().map(|(path, _)| path).collect();
-    for (rels_path, (source, rels)) in &index.relationships {
-        for rel in rels {
-            if let Some(target) = rel.target_part(source.as_ref())
+    Ok(())
+}
+
+/// Check that every relationship of the package `index` reads targets a part
+/// it holds.
+fn check_relationships(index: &Index) -> Result<()> {
+    let present: HashSet<&PartPath> = index.parts.iter().map(|part| &part.path).collect();
+    for (rels_path, rels) in &index.relationships {
+        for rel in &rels.relationships {
+            if let Some(target) = rel.target_part(rels.source.as_ref())
                 && !present.contains(&target)
             {
                 return Err(Error::sanitization(format!(
@@ -67,57 +95,54 @@ pub(crate) fn check(
             }
         }
     }
-    for (path, bytes) in &index.parts {
-        // The manifest and the relationships parts: the sanitize above cuts
-        // them to their OPC vocabulary and records every cut, so what it left
-        // is all there is.
-        if package_xml::vocabulary_of(path).is_some() {
-            continue;
-        }
-        if !index.is_xml(path) {
-            continue;
-        }
-        let raw = text(path, bytes)?;
-        let ids: HashSet<&str> = index
-            .relationships_of(path)
-            .iter()
-            .map(|rel| rel.id.as_str())
-            .collect();
-        let references = References::checking(&ids);
-        xml_edit::edit(raw, &references)?;
-        if let Some(id) = references.dangling() {
-            return Err(Error::sanitization(format!(
-                "encoded package has a dangling reference: `{path}` names missing \
-                 relationship `{id}`"
-            )));
-        }
-        let kind = index.kind(path);
-        // A structure part is never extracted, so it must carry no text: any
-        // text in one would ship unread.
-        if sanitizer.role(kind) == PartRole::Structure
-            && let Some(stray) = stray_text(raw)?
-        {
-            return Err(Error::sanitization(format!(
-                "`{path}` carries text no extraction reads: `{stray}`"
-            )));
-        }
-        // An embedding (an SVG image) is its own format, not Office XML.
-        if matches!(kind, PartKind::Embedding(_) | PartKind::Font) {
-            continue;
-        }
-        // A part rebuilt from its schema holds only the schema's namespaces:
-        // the fixed point above already vouches for it. What is left is the
-        // property parts (custom XML never ships).
-        if rebuilt(kind) {
-            continue;
-        }
-        let vocabulary = Vocabulary::default();
-        xml_edit::edit(raw, &vocabulary)?;
-        if let Some(namespace) = vocabulary.unknown() {
-            return Err(Error::sanitization(format!(
-                "`{path}` uses the unreviewed XML namespace `{namespace}`"
-            )));
-        }
+    Ok(())
+}
+
+/// Check the XML `part` of the package `index`: every relationship it names
+/// resolves, it carries no text if the format never extracts it, and, if it
+/// is not rebuilt from its schema, it speaks only reviewed vocabularies.
+fn check_xml_part(index: &Index, part: &RawPart, sanitizer: &dyn Sanitizer) -> Result<()> {
+    let RawPart { path, bytes } = part;
+    let raw = text(path, bytes)?;
+    let ids: HashSet<String> = index
+        .relationships_of(path)
+        .iter()
+        .map(|rel| rel.id.clone())
+        .collect();
+    let references = References::checking(&ids);
+    xml_edit::edit(raw, &references)?;
+    if let Some(id) = references.dangling() {
+        return Err(Error::sanitization(format!(
+            "encoded package has a dangling reference: `{path}` names missing \
+             relationship `{id}`"
+        )));
+    }
+    let kind = index.kind(path);
+    // A structure part is never extracted, so it must carry no text: any
+    // text in one would ship unread.
+    if sanitizer.role(kind) == PartRole::Structure
+        && let Some(stray) = stray_text(raw)?
+    {
+        return Err(Error::sanitization(format!(
+            "`{path}` carries text no extraction reads: `{stray}`"
+        )));
+    }
+    // An embedding (an SVG image) is its own format, not Office XML.
+    if matches!(kind, PartKind::Embedding(_) | PartKind::Font) {
+        return Ok(());
+    }
+    // A part rebuilt from its schema holds only the schema's namespaces:
+    // the fixed point above already vouches for it. What is left is the
+    // property parts (custom XML never ships).
+    if rebuilt(kind) {
+        return Ok(());
+    }
+    let vocabulary = UnreviewedNamespaces::default();
+    xml_edit::edit(raw, &vocabulary)?;
+    if let Some(namespace) = vocabulary.unknown() {
+        return Err(Error::sanitization(format!(
+            "`{path}` uses the unreviewed XML namespace `{namespace}`"
+        )));
     }
     Ok(())
 }
@@ -131,15 +156,15 @@ fn stray_text(raw: &str) -> Result<Option<String>> {
     let mut reader = Reader::from_str(raw);
     loop {
         let event = reader.read_event().map_err(malformed_xml)?;
-        match event {
+        let text: &str = match &event {
             Event::Eof => return Ok(None),
-            Event::Text(text) if !text.trim().is_empty() => {
-                return Ok(Some(text.trim().chars().take(40).collect()));
-            }
-            Event::CData(text) if !text.trim().is_empty() => {
-                return Ok(Some(text.trim().chars().take(40).collect()));
-            }
-            _ => {}
+            Event::Text(text) => text,
+            Event::CData(text) => text,
+            _ => continue,
+        };
+        let text = text.trim();
+        if !text.is_empty() {
+            return Ok(Some(text.chars().take(40).collect()));
         }
     }
 }
@@ -152,7 +177,7 @@ mod tests {
     use crate::docx::WordFormat;
     use crate::fixtures::{pack_parts, part_names, read_part};
     use crate::pptx::SlideFormat;
-    use crate::xlsx::SheetClassifier;
+    use crate::xlsx::SheetFormat;
 
     const SAMPLE_DOCX: &[u8] = include_bytes!("../../testdata/docx/body_header_hyperlink.docx");
     const SAMPLE_PPTX: &[u8] = include_bytes!("../../testdata/pptx/slide_text.pptx");
@@ -168,7 +193,7 @@ mod tests {
                 .with_metadata(Disposition::ScanAsContent)
                 .with_collaboration(Disposition::ScanAsContent),
         ] {
-            let (sanitized, _) = sanitize(document, policy, sanitizer).unwrap();
+            let sanitized = sanitize(document, policy, sanitizer).unwrap().bytes;
             let sanitized = sanitized.unwrap_or_else(|| document.to_vec());
             if let Err(e) = check(&sanitized, policy, sanitizer) {
                 panic!("{policy:?}: {e}");
@@ -180,8 +205,8 @@ mod tests {
     fn fixtures_sanitize_to_clean_packages() {
         sanitizes_to_a_clean_package(SAMPLE_DOCX, &WordFormat);
         sanitizes_to_a_clean_package(SAMPLE_PPTX, &SlideFormat);
-        sanitizes_to_a_clean_package(SAMPLE_XLSX, &SheetClassifier);
-        sanitizes_to_a_clean_package(SAMPLE2_XLSX, &SheetClassifier);
+        sanitizes_to_a_clean_package(SAMPLE_XLSX, &SheetFormat);
+        sanitizes_to_a_clean_package(SAMPLE2_XLSX, &SheetFormat);
     }
 
     /// `package` with the part `name` rewritten by `edit`.
@@ -210,7 +235,7 @@ mod tests {
     #[test]
     fn an_unsurfaced_property_fails_the_check() {
         let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
-        let (sanitized, _) = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap();
+        let sanitized = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap().bytes;
         let sanitized = replacing(&sanitized.unwrap(), "docProps/core.xml", |core| {
             core.replace(
                 "</coreProperties>",
@@ -251,7 +276,10 @@ mod tests {
     fn package_parts_are_cut_to_their_vocabulary() {
         let document = with_vendor_package_markup();
         let policy = HiddenContentPolicy::default();
-        let (sanitized, stripped) = sanitize(&document, policy, &WordFormat).unwrap();
+        let Sanitized {
+            bytes: sanitized,
+            stripped,
+        } = sanitize(&document, policy, &WordFormat).unwrap();
         let sanitized = sanitized.unwrap();
         for part in ["[Content_Types].xml", "word/_rels/document.xml.rels"] {
             let text = String::from_utf8(read_part(&sanitized, part).unwrap()).unwrap();
@@ -278,9 +306,10 @@ mod tests {
 
     #[test]
     fn clean_package_parts_ship_byte_for_byte() {
-        let (sanitized, _) =
-            sanitize(SAMPLE_DOCX, HiddenContentPolicy::default(), &WordFormat).unwrap();
-        let sanitized = sanitized.unwrap();
+        let sanitized = sanitize(SAMPLE_DOCX, HiddenContentPolicy::default(), &WordFormat)
+            .unwrap()
+            .bytes
+            .unwrap();
         assert_eq!(
             read_part(&sanitized, "word/_rels/header3.xml.rels"),
             read_part(SAMPLE_DOCX, "word/_rels/header3.xml.rels")
@@ -290,7 +319,7 @@ mod tests {
     #[test]
     fn a_vendor_attribute_in_a_package_part_fails_the_check() {
         let policy = HiddenContentPolicy::default();
-        let (sanitized, _) = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap();
+        let sanitized = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap().bytes;
         let sanitized = replacing(&sanitized.unwrap(), "_rels/.rels", |rels| {
             rels.replace("<Relationship ", "<Relationship Author=\"Jane Roe\" ")
         });
@@ -303,7 +332,7 @@ mod tests {
     #[test]
     fn a_dangling_strict_reference_fails_the_check() {
         let policy = HiddenContentPolicy::default();
-        let (sanitized, _) = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap();
+        let sanitized = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap().bytes;
         let sanitized = replacing(&sanitized.unwrap(), "word/document.xml", |document| {
             document.replace(
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -334,8 +363,10 @@ mod tests {
                 r#"<vt:lpwstr xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">Jane Roe</vt:lpwstr></coreProperties>"#,
             )
         });
-        let (sanitized, _) = sanitize(&document, policy, &WordFormat).unwrap();
-        let sanitized = sanitized.unwrap();
+        let sanitized = sanitize(&document, policy, &WordFormat)
+            .unwrap()
+            .bytes
+            .unwrap();
         for part in ["docProps/app.xml", "docProps/core.xml"] {
             let text = String::from_utf8(read_part(&sanitized, part).unwrap()).unwrap();
             for gone in ["Jane Roe", "Stray", "Secret"] {
@@ -345,7 +376,7 @@ mod tests {
         let app = String::from_utf8(read_part(&sanitized, "docProps/app.xml").unwrap()).unwrap();
         assert!(app.contains("Acme") && app.contains("Pages"), "{app}");
         check(&sanitized, policy, &WordFormat).unwrap();
-        let (again, _) = sanitize(&sanitized, policy, &WordFormat).unwrap();
+        let again = sanitize(&sanitized, policy, &WordFormat).unwrap().bytes;
         assert!(again.is_none_or(|again| again == sanitized));
     }
 
@@ -362,13 +393,15 @@ mod tests {
                     r#"<coreProperties xmlns:v="urn:Jane-Roe" "#,
                 )
         });
-        let (sanitized, _) = sanitize(&document, policy, &WordFormat).unwrap();
-        let sanitized = sanitized.unwrap();
+        let sanitized = sanitize(&document, policy, &WordFormat)
+            .unwrap()
+            .bytes
+            .unwrap();
         let core = String::from_utf8(read_part(&sanitized, "docProps/core.xml").unwrap()).unwrap();
         assert!(!core.contains("Jane") && !core.contains("Roe"), "{core}");
         assert!(core.contains(r#"xsi:type="dcterms:W3CDTF""#), "{core}");
         check(&sanitized, policy, &WordFormat).unwrap();
-        let (again, _) = sanitize(&sanitized, policy, &WordFormat).unwrap();
+        let again = sanitize(&sanitized, policy, &WordFormat).unwrap().bytes;
         assert!(again.is_none_or(|again| again == sanitized));
     }
 
@@ -380,8 +413,10 @@ mod tests {
         let document = replacing(SAMPLE_DOCX, "docProps/app.xml", |_| {
             r#"<?xml version="1.0"?><Properties xmlns="http://purl.oclc.org/ooxml/officeDocument/extendedProperties" xmlns:vt="http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes"><Company>Acme</Company><Application>Vendor Writer</Application></Properties>"#.to_owned()
         });
-        let (sanitized, _) = sanitize(&document, policy, &WordFormat).unwrap();
-        let sanitized = sanitized.unwrap();
+        let sanitized = sanitize(&document, policy, &WordFormat)
+            .unwrap()
+            .bytes
+            .unwrap();
         let app = String::from_utf8(read_part(&sanitized, "docProps/app.xml").unwrap()).unwrap();
         assert!(app.contains("Acme"));
         assert!(!app.contains("Vendor Writer"));

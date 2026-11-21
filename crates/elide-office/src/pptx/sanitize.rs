@@ -12,12 +12,10 @@
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::SlideFormat;
+use crate::opc::ns::P14;
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::Declared;
 use crate::opc::{Collaboration, HiddenAttributes, NEUTRAL_DATE, PartKind, TextAttribute};
-
-/// The PowerPoint 2010 extension namespace (slide creation ids).
-const P14: &str = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 
 /// The creation id each slide carries.
 const EDITING_SESSION_IDS: Declared =
@@ -78,7 +76,7 @@ mod tests {
     use crate::fixtures::{pack_typed, part_names, read_text_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::ns::P;
-    use crate::opc::sanitize::sanitize;
+    use crate::opc::sanitize::{Sanitized, sanitize};
 
     /// A modern comment and its authors, whose schema this crate does not
     /// hold.
@@ -111,7 +109,10 @@ mod tests {
             ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, stripped) = sanitize(&package, policy, &SlideFormat).unwrap();
+        let Sanitized {
+            bytes: out,
+            stripped,
+        } = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
         // No schema describes a modern comment or its authors, so neither
         // can be rebuilt, and both go.
@@ -158,7 +159,7 @@ mod tests {
             ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
-        let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
+        let Sanitized { bytes: out, .. } = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
         let comments = read_text_part(&out, "ppt/comments/comment1.xml");
         assert!(!comments.contains("dt="), "{comments}");

@@ -9,7 +9,6 @@ use hipstr::HipStr;
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::{Block, IssueKind, Replacement};
-use crate::opc::index;
 use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
 use crate::opc::xml_edit::check_cuts;
@@ -17,6 +16,16 @@ use crate::opc::xml_span::{
     BlockKind, CollapsingRuns, PRESERVE_SPACE, Readable, Span, attribute_spans, cell_markup_spans,
     relationship_spans, text_spans,
 };
+use crate::opc::{index, malformed_part};
+
+/// What a part's bytes are.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Markup {
+    /// XML, with the text attributes redacted in it.
+    Xml(&'static [TextAttribute]),
+    /// Anything but XML.
+    Opaque,
+}
 
 /// One package part: its path, its role, and its bytes, retained for extraction
 /// and a byte-faithful re-pack.
@@ -26,27 +35,25 @@ pub(crate) struct StoredPart {
     kind: PartKind,
     role: PartRole,
     bytes: Bytes,
-    /// For an XML part, the text attributes redacted in it; `None` for a part
-    /// that is not XML.
-    attributes: Option<&'static [TextAttribute]>,
+    markup: Markup,
 }
 
 impl StoredPart {
-    /// The part at `path` of `kind`, tagged with `role`, holding `bytes`; an XML
-    /// part carries the text `attributes` redacted in it.
+    /// The part at `path` of `kind`, tagged with `role`, holding `bytes` of
+    /// `markup`.
     pub(crate) fn new(
         path: PartPath,
         kind: PartKind,
         role: PartRole,
         bytes: Bytes,
-        attributes: Option<&'static [TextAttribute]>,
+        markup: Markup,
     ) -> Self {
         Self {
             path,
             kind,
             role,
             bytes,
-            attributes,
+            markup,
         }
     }
 
@@ -54,8 +61,20 @@ impl StoredPart {
     /// but a property part, which is redacted whole. A relationships part is
     /// one, its text the external hyperlink targets.
     pub(crate) fn is_text(&self) -> bool {
-        self.attributes.is_some() && self.role != PartRole::Property
-            || self.role == PartRole::RelationshipTargets
+        match self.role {
+            PartRole::RelationshipTargets => true,
+            PartRole::Property => false,
+            _ => matches!(self.markup, Markup::Xml(_)),
+        }
+    }
+
+    /// The text attributes redacted in the part: none for a part that is not
+    /// XML.
+    fn text_attributes(&self) -> &'static [TextAttribute] {
+        match self.markup {
+            Markup::Xml(attributes) => attributes,
+            Markup::Opaque => &[],
+        }
     }
 
     /// What the part is.
@@ -79,7 +98,7 @@ impl StoredPart {
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// they are not UTF-8.
-    pub(crate) fn utf8(&self) -> Result<&str> {
+    pub(crate) fn utf8_or_malformed(&self) -> Result<&str> {
         index::text(&self.path, &self.bytes)
     }
 
@@ -90,7 +109,7 @@ impl StoredPart {
 
     /// The part's bytes decoded as UTF-8, or [`IssueKind::NotUtf8`] if they are
     /// not valid UTF-8.
-    fn as_text(&self) -> std::result::Result<&str, IssueKind> {
+    fn utf8_or_issue(&self) -> std::result::Result<&str, IssueKind> {
         std::str::from_utf8(&self.bytes).map_err(|_| IssueKind::NotUtf8)
     }
 
@@ -105,7 +124,7 @@ impl StoredPart {
     /// the decoded logical text (entities like `&amp;` resolved) while its span
     /// stays raw, so splicing lands on the original bytes.
     pub(crate) fn text_blocks(&self) -> std::result::Result<Vec<Block>, IssueKind> {
-        let raw = self.as_text()?;
+        let raw = self.utf8_or_issue()?;
         let mut blocks = Vec::new();
         for span in self.spans(raw).map_err(|_| IssueKind::MalformedXml)? {
             let (text, offsets) = span.decode(raw).map_err(|_| IssueKind::MalformedXml)?;
@@ -117,8 +136,7 @@ impl StoredPart {
             blocks.push(Block {
                 part: self.path.clone(),
                 text: HipStr::from(text).into_owned(),
-                start: span.range.start,
-                end: span.range.end,
+                span: span.range.clone(),
                 offsets,
                 passage: span.passage,
                 flag: collaboration.map(Collaboration::flag),
@@ -151,7 +169,7 @@ impl StoredPart {
             }
             anchored.push((anchor, span));
         }
-        for span in attribute_spans(raw, self.attributes.unwrap_or_default())? {
+        for span in attribute_spans(raw, self.text_attributes())? {
             anchored.push((span.range.start, span));
         }
         anchored.sort_by_key(|(anchor, span)| (*anchor, span.range.start));
@@ -166,8 +184,7 @@ impl StoredPart {
         read: &'c mut Option<CollapsingRuns>,
     ) -> Result<&'c CollapsingRuns> {
         if read.is_none() {
-            let runs = CollapsingRuns::read(raw)
-                .map_err(|_| Error::malformed(format!("part `{}` malformed XML", self.path)))?;
+            let runs = CollapsingRuns::read(raw).map_err(|_| malformed_part(&self.path))?;
             *read = Some(runs);
         }
         Ok(read.get_or_insert_default())
@@ -176,44 +193,42 @@ impl StoredPart {
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
     pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
-        let raw = self.utf8()?;
+        let raw = self.utf8_or_malformed()?;
         let mut ordered = replacements.to_vec();
-        ordered.sort_by_key(|r| (r.start, r.end));
-        check_cuts(raw, &self.path, ordered.iter().map(|r| r.start..r.end))?;
+        ordered.sort_by_key(|r| (r.span.start, r.span.end));
+        check_cuts(raw, &self.path, ordered.iter().map(|r| r.span.clone()))?;
 
         // Recover each span's event kind so the replacement text is escaped for
         // its context (text content, attribute value) or validated against
         // comment/CDATA framing, before it enters the byte stream.
-        let spans = self
-            .spans(raw)
-            .map_err(|_| Error::malformed(format!("part `{}` malformed XML", self.path)))?;
+        let spans = self.spans(raw).map_err(|_| malformed_part(&self.path))?;
 
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
         // Read once a replacement needs it.
         let mut collapsing: Option<CollapsingRuns> = None;
         for r in ordered {
-            let span = Span::covering(&spans, r.start, r.end).ok_or_else(|| {
+            let span = Span::covering(&spans, &r.span).ok_or_else(|| {
                 Error::processing(format!(
                     "span {}..{} is not a text span in `{}`",
-                    r.start, r.end, r.part
+                    r.span.start, r.span.end, r.part
                 ))
             })?;
-            let safe = span.escape(&r.text, r)?;
+            let safe = span.escape(&r.text, &r.part)?;
             // A run whose new text starts or ends with whitespace keeps it.
             if span.kind == BlockKind::Text
                 && let Some(at) = self
                     .collapsing_runs(raw, &mut collapsing)?
-                    .preserve_space_at(r.start, &safe)
+                    .preserve_space_at(r.span.start, &safe)
                 && at >= cursor
             {
                 out.push_str(&raw[cursor..at]);
                 out.push_str(PRESERVE_SPACE);
                 cursor = at;
             }
-            out.push_str(&raw[cursor..r.start]);
+            out.push_str(&raw[cursor..r.span.start]);
             out.push_str(&safe);
-            cursor = r.end;
+            cursor = r.span.end;
         }
         out.push_str(&raw[cursor..]);
         Ok(out)
@@ -231,7 +246,7 @@ mod tests {
             PartKind::Main,
             PartRole::ElementText,
             Bytes::from(xml),
-            Some(&[]),
+            Markup::Xml(&[]),
         )
     }
 
@@ -242,7 +257,7 @@ mod tests {
             PartKind::Relationships,
             PartRole::RelationshipTargets,
             xml.into(),
-            Some(&[]),
+            Markup::Xml(&[]),
         )
     }
 
@@ -251,12 +266,11 @@ mod tests {
         let part = element(
             r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Roe and</w:t></w:r></w:p>"#,
         );
-        let raw = part.utf8().unwrap();
+        let raw = part.utf8_or_malformed().unwrap();
         let start = raw.find("Roe and").unwrap();
         let replacement = Replacement {
             part: part.path().clone(),
-            start,
-            end: start + "Roe and".len(),
+            span: start..start + "Roe and".len(),
             text: " and".into(),
         };
         assert_eq!(
@@ -280,8 +294,8 @@ mod tests {
             .expect("the decoded text run is present");
         // The raw slice `a &amp; b` (9 bytes) starts after `<w:document><w:t>`.
         let raw_start = xml.find("a &amp; b").unwrap();
-        assert_eq!(block.start, raw_start);
-        assert_eq!(block.end, raw_start + "a &amp; b".len());
+        assert_eq!(block.span.start, raw_start);
+        assert_eq!(block.span.end, raw_start + "a &amp; b".len());
         // The whole decoded span maps back to the whole raw slice, entity and
         // all, one contiguous range.
         assert_eq!(
@@ -305,7 +319,7 @@ mod tests {
             .find(|b| b.text == "alice@example.com")
             .expect("the text run is extracted intact despite the BOM");
         // The span indexes the original (BOM-prefixed) bytes exactly.
-        assert_eq!(&xml[block.start..block.end], "alice@example.com");
+        assert_eq!(&xml[block.span.clone()], "alice@example.com");
     }
 
     /// A relationships part with one external hyperlink and several internal
@@ -329,7 +343,7 @@ mod tests {
         let block = &blocks[0];
         assert_eq!(block.text, "mailto:alice@example.com");
         // The span covers the value between the quotes, exclusive of them.
-        assert_eq!(&RELS[block.start..block.end], "mailto:alice@example.com");
+        assert_eq!(&RELS[block.span.clone()], "mailto:alice@example.com");
     }
 
     #[test]
@@ -351,8 +365,7 @@ mod tests {
         let block = &part.text_blocks().expect("decodes")[0];
         let replacement = Replacement {
             part: block.part.clone(),
-            start: block.start,
-            end: block.end,
+            span: block.span.clone(),
             text: "mailto:[EMAIL]".into(),
         };
         let out = part.splice(&[&replacement]).expect("splices");
@@ -377,7 +390,7 @@ mod tests {
         let xml = format!("\u{feff}{RELS}");
         let part = rels(Bytes::from(xml.clone()));
         let block = &part.text_blocks().expect("decodes")[0];
-        assert_eq!(&xml[block.start..block.end], "mailto:alice@example.com");
+        assert_eq!(&xml[block.span.clone()], "mailto:alice@example.com");
     }
 
     #[test]
@@ -395,10 +408,7 @@ mod tests {
         let blocks = part.text_blocks().expect("decodes");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].text, "mailto:carol@example.com");
-        assert_eq!(
-            &xml[blocks[0].start..blocks[0].end],
-            "mailto:carol@example.com"
-        );
+        assert_eq!(&xml[blocks[0].span.clone()], "mailto:carol@example.com");
     }
 
     #[test]
@@ -416,9 +426,6 @@ mod tests {
         // Decoded logical text has the literal `&`.
         assert_eq!(block.text, "https://x.example/?a=1&b=2");
         // The raw span covers the still-escaped bytes, entity and all.
-        assert_eq!(
-            &xml[block.start..block.end],
-            "https://x.example/?a=1&amp;b=2"
-        );
+        assert_eq!(&xml[block.span.clone()], "https://x.example/?a=1&amp;b=2");
     }
 }

@@ -18,7 +18,8 @@ use quick_xml::events::{BytesStart, Event};
 use crate::opc::content_types::CONTENT_TYPES_PART;
 use crate::opc::part::PartPath;
 use crate::opc::xml_edit::{
-    Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, cut_events, splice,
+    Cut, Edit, Edited, Skipped, SpannedReader, attribute_extent, attribute_source, cut_events,
+    refuse_doctype, splice,
 };
 use crate::opc::{attribute_value, malformed_xml, ns};
 
@@ -26,35 +27,57 @@ use crate::opc::{attribute_value, malformed_xml, ns};
 /// hold with the unqualified attributes it may carry.
 #[derive(Debug)]
 pub(crate) struct Vocabulary {
+    /// What the part is called in an error.
+    part: &'static str,
     /// The namespace of the root and its entries.
     namespace: &'static str,
     /// The root's local name.
     root: &'static str,
-    /// Each entry's local name and attributes.
-    entries: &'static [(&'static str, &'static [&'static str])],
+    /// Each entry the root may hold.
+    entries: &'static [EntryRule],
+}
+
+/// An entry a [`Vocabulary`]'s root may hold.
+#[derive(Debug)]
+pub(crate) struct EntryRule {
+    /// The entry's local name.
+    name: &'static str,
+    /// The unqualified attributes it may carry.
+    attributes: &'static [&'static str],
 }
 
 /// The vocabulary of `[Content_Types].xml`.
 pub(crate) static CONTENT_TYPES: Vocabulary = Vocabulary {
+    part: CONTENT_TYPES_PART,
     namespace: ns::CONTENT_TYPES,
     root: "Types",
     entries: &[
-        ("Default", &["Extension", "ContentType"]),
-        ("Override", &["PartName", "ContentType"]),
+        EntryRule {
+            name: "Default",
+            attributes: &["Extension", "ContentType"],
+        },
+        EntryRule {
+            name: "Override",
+            attributes: &["PartName", "ContentType"],
+        },
     ],
 };
 
 /// The vocabulary of a relationships part.
 pub(crate) static RELATIONSHIPS: Vocabulary = Vocabulary {
+    part: "relationships part",
     namespace: ns::RELATIONSHIPS,
     root: "Relationships",
-    entries: &[("Relationship", &["Id", "Type", "Target", "TargetMode"])],
+    entries: &[EntryRule {
+        name: "Relationship",
+        attributes: &["Id", "Type", "Target", "TargetMode"],
+    }],
 };
 
 /// The vocabulary of the package part `path`, or `None` when it is neither
 /// the manifest nor a relationships part.
 pub(crate) fn vocabulary_of(path: &PartPath) -> Option<&'static Vocabulary> {
-    if path.as_str() == CONTENT_TYPES_PART {
+    if path.is_content_types() {
         Some(&CONTENT_TYPES)
     } else if path.is_relationships() {
         Some(&RELATIONSHIPS)
@@ -63,35 +86,27 @@ pub(crate) fn vocabulary_of(path: &PartPath) -> Option<&'static Vocabulary> {
     }
 }
 
-/// An entry the package part's readers take: its local name and its
-/// allowed attributes with their decoded values.
-pub(crate) type Entry = (&'static str, Vec<(&'static str, String)>);
-
-/// The entries of the package part `xml` as [`PackageMarkup`] keeps them:
-/// the root's children in `vocabulary`'s namespace (or none), with their
-/// unqualified allowed attributes. Anything the allowlist cuts is not read,
-/// so the part reads the same before and after it.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
-/// `xml` is not well-formed, naming the part as `what`.
-pub(crate) fn entries(xml: &str, vocabulary: &Vocabulary, what: &str) -> Result<Vec<Entry>> {
-    Ok(spanned_entries(xml, vocabulary, what)?
-        .into_iter()
-        .map(|spanned| spanned.entry)
-        .collect())
-}
-
-/// An entry as [`entries`] reads it, with where it is written.
+/// An entry the package part's readers take: its local name, where it is
+/// written, and its allowed attributes.
 #[derive(Debug)]
-pub(crate) struct SpannedEntry {
-    pub(crate) entry: Entry,
+pub(crate) struct Entry {
+    /// The entry's local name.
+    pub(crate) name: &'static str,
     /// The span of its whole element.
     pub(crate) span: Range<usize>,
-    /// The range of each of its attributes' values inside the quotes, in the
-    /// order of the entry's attributes.
-    pub(crate) values: Vec<Range<usize>>,
+    /// Its allowed attributes, in the order they are written.
+    pub(crate) attributes: Vec<EntryAttribute>,
+}
+
+/// An allowed attribute of an [`Entry`].
+#[derive(Debug)]
+pub(crate) struct EntryAttribute {
+    /// The attribute's local name.
+    pub(crate) key: &'static str,
+    /// Its decoded value.
+    pub(crate) value: String,
+    /// The range of its value inside the quotes.
+    pub(crate) range: Range<usize>,
 }
 
 /// The package part `xml` without each entry whose `attribute`, read as
@@ -103,50 +118,46 @@ pub(crate) struct SpannedEntry {
 pub(crate) fn without_entries(
     xml: &str,
     vocabulary: &Vocabulary,
-    what: &str,
     attribute: &str,
     drops: impl Fn(&str) -> bool,
 ) -> Result<String> {
-    let cuts = spanned_entries(xml, vocabulary, what)?
+    let cuts = entries(xml, vocabulary)?
         .into_iter()
-        .filter(|spanned| {
-            spanned
-                .entry
-                .1
+        .filter(|entry| {
+            entry
+                .attributes
                 .iter()
-                .any(|(key, value)| *key == attribute && drops(value))
+                .any(|attr| attr.key == attribute && drops(&attr.value))
         })
-        .map(|spanned| (spanned.span, ""))
-        .collect();
+        .map(|entry| Cut::remove(entry.span))
+        .collect::<Vec<Cut<&str>>>();
     Ok(splice(xml, cuts))
 }
 
-/// [`entries`], each with where it is written.
+/// The entries of the package part `xml` as [`PackageMarkup`] keeps them:
+/// the root's children in `vocabulary`'s namespace (or none), with their
+/// unqualified allowed attributes. Anything the allowlist cuts is not read,
+/// so the part reads the same before and after it.
 ///
 /// # Errors
 ///
-/// As [`entries`].
-pub(crate) fn spanned_entries(
-    xml: &str,
-    vocabulary: &Vocabulary,
-    what: &str,
-) -> Result<Vec<SpannedEntry>> {
-    let malformed = |e: &dyn std::fmt::Display| Error::malformed(format!("{what} malformed: {e}"));
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// `xml` is not well-formed, naming the part as `vocabulary` calls it.
+pub(crate) fn entries(xml: &str, vocabulary: &Vocabulary) -> Result<Vec<Entry>> {
+    let malformed =
+        |e: &dyn std::fmt::Display| Error::malformed(format!("{} malformed: {e}", vocabulary.part));
     let mut reader = SpannedReader::new_ns(xml);
     let mut entries = Vec::new();
     // An entry whose element is still open, read to its end tag.
-    let mut open: Option<(Entry, Vec<Range<usize>>, Skipped)> = None;
+    let mut open: Option<(Entry, Skipped)> = None;
     let mut depth = 0usize;
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(|e| malformed(&e))?;
-        if let Some((.., skipped)) = &mut open {
+        if let Some((_, skipped)) = &mut open {
             if let Some(whole) = skipped.read(&event, span.end)? {
-                let (entry, values, _) = open.take().expect("an open entry");
-                entries.push(SpannedEntry {
-                    entry,
-                    span: whole,
-                    values,
-                });
+                let (mut entry, _) = open.take().expect("an open entry");
+                entry.span = whole;
+                entries.push(entry);
                 depth -= 1;
             }
             continue;
@@ -162,37 +173,39 @@ pub(crate) fn spanned_entries(
             _ => continue,
         };
         if depth == 1
-            && let Some((name, allowed)) =
-                vocabulary.entry(namespace.as_deref(), e.local_name().into_inner())
+            && let Some(rule) = vocabulary.entry(namespace.as_deref(), e.local_name().into_inner())
         {
             let mut attributes = Vec::new();
-            let mut values = Vec::new();
             for attr in e.attributes() {
                 let attr = attr.map_err(|e| malformed(&e))?;
                 if attr.key.prefix().is_some() {
                     continue;
                 }
-                let Some(key) = allowed
+                let Some(key) = rule
+                    .attributes
                     .iter()
                     .find(|key| **key == attr.key.local_name().into_inner())
                 else {
                     continue;
                 };
                 let value = attribute_value(&attr.value).map_err(|e| malformed(&e))?;
-                let (_, range) = attribute_source(xml, &attr)?;
-                attributes.push((*key, value.into_owned()));
-                values.push(range);
+                let range = attribute_source(xml, &attr)?.value;
+                attributes.push(EntryAttribute {
+                    key,
+                    value: value.into_owned(),
+                    range,
+                });
             }
-            let entry = (*name, attributes);
+            let entry = Entry {
+                name: rule.name,
+                span: span.clone(),
+                attributes,
+            };
             if is_start {
-                open = Some((entry, values, Skipped::new(span.start)));
+                open = Some((entry, Skipped::new(span.start)));
                 depth += 1;
             } else {
-                entries.push(SpannedEntry {
-                    entry,
-                    span,
-                    values,
-                });
+                entries.push(entry);
             }
             continue;
         }
@@ -212,15 +225,11 @@ impl Vocabulary {
 
     /// The entry `local` in `namespace` with the attributes it may carry, or
     /// `None` when the root holds no such entry.
-    fn entry(
-        &self,
-        namespace: Option<&str>,
-        local: &str,
-    ) -> Option<&'static (&'static str, &'static [&'static str])> {
+    fn entry(&self, namespace: Option<&str>, local: &str) -> Option<&'static EntryRule> {
         if !self.owns(namespace) {
             return None;
         }
-        self.entries.iter().find(|(name, _)| *name == local)
+        self.entries.iter().find(|rule| rule.name == local)
     }
 }
 
@@ -244,12 +253,13 @@ impl Edit for PackageMarkup {
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
         let vocabulary = self.0;
         let mut reader = SpannedReader::new_ns(raw);
-        let mut cuts: Vec<(Range<usize>, &str)> = Vec::new();
+        let mut cuts: Vec<Cut<&str>> = Vec::new();
         let mut open: Vec<Kept> = Vec::new();
         let mut removing: Option<Skipped> = None;
         let mut seen_root = false;
         loop {
             let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
+            refuse_doctype(&event)?;
             if Skipped::skip(&mut removing, &event, span.end, &mut cuts)? {
                 continue;
             }
@@ -260,7 +270,7 @@ impl Edit for PackageMarkup {
                 }
                 Event::Eof if !open.is_empty() => return Err(malformed_xml("unclosed element")),
                 Event::Eof => break,
-                Event::PI(_) => cuts.push((span, "")),
+                Event::PI(_) => cuts.push(Cut::remove(span)),
                 Event::Start(ref e) | Event::Empty(ref e) => {
                     let is_start = matches!(event, Event::Start(_));
                     let local = e.local_name().into_inner();
@@ -281,7 +291,7 @@ impl Edit for PackageMarkup {
                             )));
                         }
                         Some(Kept::Root) => match vocabulary.entry(namespace.as_deref(), local) {
-                            Some(&(_, attributes)) => Kept::Entry(attributes),
+                            Some(rule) => Kept::Entry(rule.attributes),
                             None => {
                                 removing = Skipped::begin(span, is_start, &mut cuts);
                                 continue;
@@ -319,7 +329,7 @@ fn cut_attributes(
     raw: &str,
     e: &BytesStart<'_>,
     allowed: &[&str],
-    cuts: &mut Vec<(Range<usize>, &str)>,
+    cuts: &mut Vec<Cut<&str>>,
 ) -> Result<()> {
     for attr in e.attributes() {
         let attr = attr.map_err(malformed_xml)?;
@@ -332,8 +342,7 @@ fn cut_attributes(
         if kept {
             continue;
         }
-        let (extent, _) = attribute_extent(raw, &attr)?;
-        cuts.push((extent, ""));
+        cuts.push(Cut::remove(attribute_extent(raw, &attr)?.whole));
     }
     Ok(())
 }
@@ -364,6 +373,23 @@ mod tests {
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="main"/></Types>"#;
 
     const RELS: &str = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t/styles" Target="styles.xml"/><Relationship Id="rId2" Type="t/link" Target="https://example.com" TargetMode="External"/></Relationships>"#;
+
+    /// The entries of the manifest `xml`, each as its name and its attributes'
+    /// keys and values.
+    fn read(xml: &str) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
+        entries(xml, &CONTENT_TYPES)
+            .unwrap()
+            .into_iter()
+            .map(|entry| {
+                let attributes = entry
+                    .attributes
+                    .into_iter()
+                    .map(|attr| (attr.key, attr.value))
+                    .collect();
+                (entry.name, attributes)
+            })
+            .collect()
+    }
 
     /// `raw` with the markup edit, then the text edit, applied.
     fn allowlisted(raw: &str, vocabulary: &'static Vocabulary) -> String {
@@ -443,6 +469,16 @@ mod tests {
         assert!(PackageMarkup(&CONTENT_TYPES).apply(twice).is_err());
     }
 
+    /// A document type declaration is refused before the root and inside an
+    /// entry being cut alike.
+    #[test]
+    fn a_document_type_is_refused() {
+        let declared = r#"<!DOCTYPE Types [<!ENTITY x "Jane">]><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+        assert!(PackageMarkup(&CONTENT_TYPES).apply(declared).is_err());
+        let nested = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Vendor><!DOCTYPE d></Vendor></Types>"#;
+        assert!(PackageMarkup(&CONTENT_TYPES).apply(nested).is_err());
+    }
+
     #[test]
     fn a_foreign_root_is_refused() {
         assert!(
@@ -459,9 +495,9 @@ mod tests {
     #[test]
     fn the_readers_take_only_what_the_allowlist_keeps() {
         let manifest = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types" xmlns:v="urn:vendor"><Default Extension="xml" ContentType="application/xml"/><v:Override PartName="/word/vendor.xml" ContentType="application/vnd.vendor"/><v:x><Override PartName="/word/nested.xml" ContentType="application/vnd.vendor"/></v:x><Override PartName="/word/document.xml" v:ContentType="application/vnd.vendor"/></Types>"#;
-        let read = entries(manifest, &CONTENT_TYPES, "manifest").unwrap();
+        let manifest_entries = read(manifest);
         assert_eq!(
-            read,
+            manifest_entries,
             [
                 (
                     "Default",
@@ -477,11 +513,7 @@ mod tests {
             ]
         );
         let kept = allowlisted(manifest, &CONTENT_TYPES);
-        assert_eq!(
-            entries(&kept, &CONTENT_TYPES, "manifest").unwrap(),
-            read,
-            "{kept}"
-        );
+        assert_eq!(read(&kept), manifest_entries, "{kept}");
     }
 
     #[test]

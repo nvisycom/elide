@@ -25,6 +25,13 @@ pub(crate) const MAX_PART_BYTES: u64 = 512 * 1024 * 1024;
 /// OOXML document while staying well within process memory.
 pub(crate) const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 
+/// One part as the archive holds it: its path and its uncompressed bytes.
+#[derive(Debug)]
+pub(crate) struct RawPart {
+    pub(crate) path: PartPath,
+    pub(crate) bytes: Bytes,
+}
+
 /// Read every part of the zip `document`, in archive order, refusing a part
 /// past `part_cap` bytes or a package past `package_cap` in total.
 ///
@@ -32,11 +39,7 @@ pub(crate) const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable zip, a part is
 /// unreadable, or a size cap is exceeded.
-pub(crate) fn read(
-    document: &[u8],
-    part_cap: u64,
-    package_cap: u64,
-) -> Result<Vec<(PartPath, Bytes)>> {
+pub(crate) fn read(document: &[u8], part_cap: u64, package_cap: u64) -> Result<Vec<RawPart>> {
     let mut zip = ZipArchive::new(Cursor::new(document))
         .map_err(|e| Error::malformed(format!("not a zip: {e}")))?;
     let mut parts = Vec::with_capacity(zip.len());
@@ -70,7 +73,10 @@ pub(crate) fn read(
             )));
         }
         budget -= read as u64;
-        parts.push((path, Bytes::from(buf)));
+        parts.push(RawPart {
+            path,
+            bytes: Bytes::from(buf),
+        });
     }
     Ok(parts)
 }
@@ -100,19 +106,17 @@ pub(crate) fn write<'a>(
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for entry in entries {
-        let (path, bytes) = match entry {
-            Entry::Unchanged(path) => match source.by_name(path.as_str()) {
-                Ok(raw) => {
-                    zip.raw_copy_file(raw).map_err(|e| repack(path, e))?;
-                    continue;
-                }
-                Err(e) => return Err(repack(path, e)),
-            },
-            Entry::Changed(path, bytes) => (path, bytes),
-        };
-        zip.start_file(path.as_str(), options)
-            .map_err(|e| repack(path, e))?;
-        zip.write_all(bytes).map_err(|e| repack(path, e))?;
+        match entry {
+            Entry::Unchanged(path) => {
+                let raw = source.by_name(path.as_str()).map_err(|e| repack(path, e))?;
+                zip.raw_copy_file(raw).map_err(|e| repack(path, e))?;
+            }
+            Entry::Changed(path, bytes) => {
+                zip.start_file(path.as_str(), options)
+                    .map_err(|e| repack(path, e))?;
+                zip.write_all(bytes).map_err(|e| repack(path, e))?;
+            }
+        }
     }
     let cursor = zip
         .finish()
@@ -163,7 +167,7 @@ mod tests {
         let b = PartPath::from("b.xml");
         let out = write(&bytes, [Entry::Unchanged(&a), Entry::Changed(&b, b"<B/>")]).unwrap();
         let parts = read(&out, 100, 1000).unwrap();
-        assert_eq!(parts[0].1.as_ref(), b"<a/>");
-        assert_eq!(parts[1].1.as_ref(), b"<B/>");
+        assert_eq!(parts[0].bytes.as_ref(), b"<a/>");
+        assert_eq!(parts[1].bytes.as_ref(), b"<B/>");
     }
 }

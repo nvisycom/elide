@@ -6,13 +6,14 @@ use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::FORMAT_ID;
+use super::XlsxCodec;
 use super::document::XlsxDocument;
 use super::state::XlsxState;
 use super::stream::XlsxStream;
+use crate::codec::CodecIdentity;
 use crate::codec::ooxml::{OoxmlAddresser, blobs, items, refuse_issues, sanitized};
 use crate::codec::props::DocProps;
-use crate::xlsx::{SheetClassifier, Xlsx};
+use crate::xlsx::{SheetFormat, Xlsx};
 
 /// A [`DocumentLoader`] that decodes an XLSX workbook into a [`Document`]: an
 /// [`XlsxDocument`] (the cell stream, a text stream over the workbook's content
@@ -29,23 +30,23 @@ pub(crate) struct XlsxDocumentLoader;
 #[async_trait::async_trait]
 impl DocumentLoader for XlsxDocumentLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
-        let (archive, stripped) = sanitized(&content, policy, &SheetClassifier)?;
+        let (archive, stripped) = sanitized(&content, policy, &SheetFormat)?;
         let workbook = Xlsx::open(&archive)?;
-        let state = XlsxState::new(workbook.extract()?);
+        let state = XlsxState::new(workbook.cells()?);
 
-        let markup = workbook.markup();
-        refuse_issues("xlsx", &markup.issues)?;
+        let markup = workbook.extract();
+        refuse_issues(XlsxCodec::EXTENSION, &markup.issues)?;
 
         // One blob per embedding, each decoded through its own format's pipeline.
         let blobs = blobs(markup.embeddings);
         let properties = DocProps::under(policy, |path| workbook.part_bytes(path));
         let native = XlsxDocument {
             cells: XlsxStream { state },
-            text: ExtractStream::new(FORMAT_ID, items(markup.blocks), OoxmlAddresser),
+            text: ExtractStream::new(XlsxCodec::FORMAT_ID, items(markup.blocks), OoxmlAddresser),
             properties,
             archive,
             policy,
         };
-        Ok(Document::new(FORMAT_ID, native, blobs).with_stripped(stripped))
+        Ok(Document::new(XlsxCodec::FORMAT_ID, native, blobs).with_stripped(stripped))
     }
 }

@@ -14,7 +14,7 @@ use elide_core::entity::builtins;
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
 
 use crate::opc::ns::{VML, VML_OFFICE};
-use crate::opc::xml_edit::{Action, Attribute, Local, Name, Rules};
+use crate::opc::xml_edit::{Attribute, Local, Name, Rules};
 
 /// The namespace a [`TextAttribute`] part matches.
 #[derive(Debug, Clone, Copy)]
@@ -24,7 +24,7 @@ pub(crate) enum Ns {
     /// Exactly this namespace.
     In(&'static str),
     /// No namespace: an unqualified attribute.
-    None,
+    Unqualified,
 }
 
 impl Ns {
@@ -32,7 +32,7 @@ impl Ns {
         match self {
             Self::Any => true,
             Self::In(expected) => namespace == Some(expected),
-            Self::None => namespace.is_none(),
+            Self::Unqualified => namespace.is_none(),
         }
     }
 }
@@ -40,7 +40,7 @@ impl Ns {
 /// An attribute that carries text a person wrote: the element it sits on and
 /// its own name, each matched by namespace and local name.
 #[derive(Debug, Clone, Copy)]
-pub struct TextAttribute {
+pub(crate) struct TextAttribute {
     pub(crate) element: (Ns, Local),
     pub(crate) attribute: (Ns, &'static str),
     /// The collaboration item the value is, for an attribute of a comment or a
@@ -61,7 +61,10 @@ impl TextAttribute {
     /// The unqualified attribute `attribute` on the element `element` in any
     /// namespace.
     pub(crate) const fn unqualified(element: &'static str, attribute: &'static str) -> Self {
-        Self::new((Ns::Any, Local::Exact(element)), (Ns::None, attribute))
+        Self::new(
+            (Ns::Any, Local::Exact(element)),
+            (Ns::Unqualified, attribute),
+        )
     }
 
     /// This attribute, its value the collaboration item `collaboration`.
@@ -107,10 +110,18 @@ impl Collaboration {
 /// `value`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HiddenAttributes {
-    pub(crate) content: HiddenContent,
-    pub(crate) attributes: &'static [TextAttribute],
-    /// The neutral value each attribute is given, or `None` to remove it.
-    pub(crate) value: Option<&'static str>,
+    content: HiddenContent,
+    attributes: &'static [TextAttribute],
+    treatment: Treatment,
+}
+
+/// What [`HiddenAttributes`] does with each attribute it matches.
+#[derive(Debug, Clone, Copy)]
+enum Treatment {
+    /// Remove it.
+    Strip,
+    /// Give it this neutral value, for an attribute a format requires.
+    Neutralize(&'static str),
 }
 
 impl HiddenAttributes {
@@ -122,7 +133,7 @@ impl HiddenAttributes {
         Self {
             content,
             attributes,
-            value: None,
+            treatment: Treatment::Strip,
         }
     }
 
@@ -136,7 +147,7 @@ impl HiddenAttributes {
         Self {
             content,
             attributes,
-            value: Some(value),
+            treatment: Treatment::Neutralize(value),
         }
     }
 
@@ -153,12 +164,8 @@ impl Rules for HiddenAttributes {
         Some(self.content)
     }
 
-    fn element(&self, _name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
-        Action::Keep
-    }
-
     fn removes_attribute(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool {
-        self.value.is_none() && self.matches(element, attribute)
+        matches!(self.treatment, Treatment::Strip) && self.matches(element, attribute)
     }
 
     fn neutralizes_attribute(
@@ -166,7 +173,10 @@ impl Rules for HiddenAttributes {
         element: Name<'_>,
         attribute: &Attribute<'_>,
     ) -> Option<&'static str> {
-        self.value.filter(|_| self.matches(element, attribute))
+        match self.treatment {
+            Treatment::Neutralize(value) if self.matches(element, attribute) => Some(value),
+            _ => None,
+        }
     }
 }
 
@@ -184,8 +194,8 @@ pub(crate) const ALTERNATIVE_TEXT: HiddenAttributes = HiddenAttributes::strip(
         TextAttribute::unqualified("docPr", "title"),
         TextAttribute::unqualified("cNvPr", "descr"),
         TextAttribute::unqualified("cNvPr", "title"),
-        TextAttribute::new((Ns::In(VML), Local::Any), (Ns::None, "alt")),
-        TextAttribute::new((Ns::In(VML), Local::Any), (Ns::None, "title")),
+        TextAttribute::new((Ns::In(VML), Local::Any), (Ns::Unqualified, "alt")),
+        TextAttribute::new((Ns::In(VML), Local::Any), (Ns::Unqualified, "title")),
         TextAttribute::new(
             (Ns::In(VML), Local::Exact("imagedata")),
             (Ns::In(VML_OFFICE), "title"),

@@ -16,7 +16,7 @@ use std::ops::Range;
 use elide_core::{Error, Result};
 
 use crate::opc::ns::transitional_type;
-use crate::opc::package_xml::{RELATIONSHIPS, SpannedEntry, spanned_entries, without_entries};
+use crate::opc::package_xml::{Entry, EntryAttribute, RELATIONSHIPS, entries, without_entries};
 use crate::opc::part::PartPath;
 
 /// The relationship type of an external hyperlink, the one external target that
@@ -24,22 +24,48 @@ use crate::opc::part::PartPath;
 pub(crate) const HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
+/// The relationship type of a part's comments.
+pub(crate) const COMMENTS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+
+/// The relationship type that names the package thumbnail.
+pub(crate) const THUMBNAIL: &str =
+    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail";
+
+/// The relationship type of a WordprocessingML imported chunk (`w:altChunk`).
+pub(crate) const IMPORTED_CHUNK: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk";
+
+/// Where a relationship's target lies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TargetMode {
+    /// A part of the package.
+    Internal,
+    /// A URL outside the package (`TargetMode="External"`).
+    External,
+}
+
 /// One relationship: its id, its type URI (a strict one as its transitional
 /// twin), its raw target, and whether the target lies outside the package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Relationship {
     pub(crate) id: String,
-    pub(crate) kind: String,
+    pub(crate) rel_type: String,
     pub(crate) target: String,
-    pub(crate) external: bool,
+    pub(crate) target_mode: TargetMode,
 }
 
 impl Relationship {
+    /// Whether the target lies outside the package.
+    pub(crate) fn is_external(&self) -> bool {
+        self.target_mode == TargetMode::External
+    }
+
     /// The package part this relationship's target names, resolved against the
     /// `source` part (`None` for the package's own relationships), or `None` for
     /// an external target.
     pub(crate) fn target_part(&self, source: Option<&PartPath>) -> Option<PartPath> {
-        (!self.external).then(|| resolve(source, &self.target))
+        (!self.is_external()).then(|| resolve(source, &self.target))
     }
 }
 
@@ -63,23 +89,29 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
 ///
 /// As [`parse`].
 pub(crate) fn parse_spanned(xml: &str) -> Result<Vec<(Relationship, Option<Range<usize>>)>> {
-    spanned_entries(xml, &RELATIONSHIPS, "relationships part")?
+    entries(xml, &RELATIONSHIPS)?
         .into_iter()
-        .map(|SpannedEntry { entry, values, .. }| {
+        .map(|Entry { attributes, .. }| {
             let mut id = None;
-            let mut kind = String::new();
+            let mut rel_type = String::new();
             let mut target = String::new();
             let mut target_range = None;
-            let mut external = false;
-            for ((key, value), range) in entry.1.into_iter().zip(values) {
+            let mut target_mode = TargetMode::Internal;
+            for EntryAttribute { key, value, range } in attributes {
                 match key {
                     "Id" => id = Some(value),
-                    "Type" => kind = transitional_type(&value).into_owned(),
+                    "Type" => rel_type = transitional_type(&value).into_owned(),
                     "Target" => {
                         target = value;
                         target_range = Some(range);
                     }
-                    "TargetMode" => external = value == "External",
+                    "TargetMode" => {
+                        target_mode = if value == "External" {
+                            TargetMode::External
+                        } else {
+                            TargetMode::Internal
+                        };
+                    }
                     _ => {}
                 }
             }
@@ -92,9 +124,9 @@ pub(crate) fn parse_spanned(xml: &str) -> Result<Vec<(Relationship, Option<Range
             };
             let relationship = Relationship {
                 id,
-                kind,
+                rel_type,
                 target,
-                external,
+                target_mode,
             };
             Ok((relationship, target_range))
         })
@@ -108,14 +140,13 @@ pub(crate) fn parse_spanned(xml: &str) -> Result<Vec<(Relationship, Option<Range
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
-    without_entries(xml, &RELATIONSHIPS, "relationships part", "Id", |id| {
-        removed.contains(id)
-    })
+    without_entries(xml, &RELATIONSHIPS, "Id", |id| removed.contains(id))
 }
 
 /// The source part of the relationships part `rels`: `word/document.xml` for
 /// `word/_rels/document.xml.rels`, or `None` for the package's own
 /// `_rels/.rels`.
+#[must_use]
 pub(crate) fn source_of(rels: &PartPath) -> Option<PartPath> {
     let path = rels.as_str();
     let (dir, name) = path.rsplit_once("_rels/")?;
@@ -125,6 +156,7 @@ pub(crate) fn source_of(rels: &PartPath) -> Option<PartPath> {
 
 /// The relationships part of `part`: `word/_rels/document.xml.rels` for
 /// `word/document.xml`.
+#[must_use]
 pub(crate) fn rels_of(part: &PartPath) -> PartPath {
     let path = part.as_str();
     match path.rsplit_once('/') {
@@ -140,6 +172,7 @@ pub(crate) fn rels_of(part: &PartPath) -> PartPath {
 /// joined onto the source part's directory. Backslashes are normalized to `/`
 /// and `.` / `..` segments collapsed, so a target cannot climb out of the
 /// package or name a part by a disguised path.
+#[must_use]
 pub(crate) fn resolve(source: Option<&PartPath>, target: &str) -> PartPath {
     let target = target.replace('\\', "/");
     let joined = match (target.strip_prefix('/'), source) {
@@ -209,7 +242,7 @@ mod tests {
     fn parses_ids_types_targets_and_modes() {
         let rels = parse(RELS).unwrap();
         assert_eq!(rels.len(), 3);
-        assert!(rels[1].external);
+        assert!(rels[1].is_external());
         assert_eq!(rels[1].target_part(None), None);
         let source = PartPath::from("word/document.xml");
         assert_eq!(

@@ -7,8 +7,10 @@ use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
-use super::FORMAT_ID;
+use super::XlsxCodec;
 use super::state::XlsxState;
+use crate::codec::CodecIdentity;
+use crate::xlsx::CellCoord;
 
 /// The body [`Stream<Tabular>`] of an XLSX workbook: each cell is independently
 /// addressable via a [`TabularLocation`] scoped by sheet name. Redactions land on
@@ -20,7 +22,7 @@ pub(super) struct XlsxStream {
 
 impl Stream<Tabular> for XlsxStream {
     fn format(&self) -> FormatId {
-        FORMAT_ID
+        XlsxCodec::FORMAT_ID
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
@@ -30,8 +32,9 @@ impl Stream<Tabular> for XlsxStream {
             .cells()
             .iter()
             .map(|cell| {
+                let CellCoord { row, column } = cell.coord;
                 let mut location =
-                    TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
+                    TabularLocation::new(row, column).with_sheet_name(cell.sheet.clone());
                 // Attach the column's header text as context, so a context-gated
                 // pattern (a payment card wants a nearby `card`/`payment` word) can
                 // reach its threshold on a value that carries no such cue on its
@@ -39,11 +42,11 @@ impl Stream<Tabular> for XlsxStream {
                 // and column; a header cell is its own context and is not re-hinted
                 // with itself.
                 let mut hints = Vec::new();
-                if cell.row > 0
-                    && let Some(header) = headers.get(&(cell.sheet.as_str(), cell.column))
+                if row > 0
+                    && let Some(header) = headers.get(&(cell.sheet.as_str(), column))
                 {
                     location = location.with_column_name(header.clone());
-                    let header_location = TabularLocation::new(0, cell.column)
+                    let header_location = TabularLocation::new(0, column)
                         .with_sheet_name(cell.sheet.clone())
                         .with_column_name(header.clone());
                     hints.push(ResolvedHint::new(
@@ -70,16 +73,10 @@ impl Stream<Tabular> for XlsxStream {
         if span.start > span.end || span.end > cell.len() {
             return None;
         }
-        let mut location =
-            TabularLocation::new(chunk.location.row_index, chunk.location.column_index)
-                .with_span(span);
-        if let Some(sheet) = &chunk.location.sheet_name {
-            location = location.with_sheet_name(sheet.clone());
-        }
-        if let Some(name) = &chunk.location.column_name {
-            location = location.with_column_name(name.clone());
-        }
-        Some(location)
+        Some(TabularLocation {
+            span: Some(span),
+            ..chunk.location.clone()
+        })
     }
 }
 
