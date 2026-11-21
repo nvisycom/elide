@@ -409,6 +409,8 @@ pub(crate) enum FontFile {
     OpenType,
     /// `/FontFile3` of subtype `Type1C`: a bare CFF program.
     Cff,
+    /// `/FontFile3` of subtype `CIDFontType0C`: a bare CID-keyed CFF program.
+    CidCff,
     /// `/FontFile`: a Type 1 program.
     Type1,
 }
@@ -420,12 +422,13 @@ impl FontFile {
             FontFile::TrueType => ("FontFile2", None),
             FontFile::OpenType => ("FontFile3", Some("OpenType")),
             FontFile::Cff => ("FontFile3", Some("Type1C")),
+            FontFile::CidCff => ("FontFile3", Some("CIDFontType0C")),
             FontFile::Type1 => ("FontFile", None),
         }
     }
 }
 
-/// A simple font of `subtype` whose descriptor, flagged `flags`, embeds
+/// A font of `subtype` whose descriptor, flagged `flags`, embeds
 /// `program` in `doc` as `file`. A Type 1 program, as built here or from a
 /// PFB file's segments, is given the lengths of its three parts.
 pub(crate) fn embedding(

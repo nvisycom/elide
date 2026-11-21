@@ -20,7 +20,7 @@ use unicode_normalization::UnicodeNormalization;
 use super::cmap::{Codespace, mapped_codes};
 use super::encoding::{self, BaseEncoding, NONSYMBOLIC, SYMBOLIC};
 use super::standard::{names_symbol, symbol_text};
-use super::{Standard, descendant, subset_free};
+use super::{Standard, descendant, font_file, subset_free};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 
 /// One decoded glyph within an operand's bytes.
@@ -357,11 +357,7 @@ fn encoded_text(doc: &Document, font: &Dictionary) -> Box<[Option<String>; 256]>
 /// Whether the Type1 `font` embeds its program.
 fn embeds_type1(doc: &Document, font: &Dictionary) -> bool {
     matches!(font.name(doc, b"Subtype"), Some(b"Type1" | b"MMType1"))
-        && font
-            .get(b"FontDescriptor")
-            .ok()
-            .and_then(|descriptor| doc.resolve_dict(descriptor))
-            .is_some_and(|d| d.get(b"FontFile").is_ok() || d.get(b"FontFile3").is_ok())
+        && font_file(doc, font).is_some()
 }
 
 /// Whether the predefined CMap `name` maps UCS-2 or UTF-16 codes (9.7.5.2).

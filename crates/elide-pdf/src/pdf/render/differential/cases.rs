@@ -2,8 +2,8 @@
 
 use lopdf::content::Operation;
 use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
-use read_fonts::FontRef;
 use read_fonts::types::Tag;
+use read_fonts::{FontRef, TableProvider};
 
 use super::{
     Placed, compare_rebuilt, compare_source, hidden, placed, reads_programs, rebuilt, theirs,
@@ -649,18 +649,21 @@ fn composite() -> Vec<Case> {
     ]
 }
 
+/// The real font programs in `testdata/fonts`, from
+/// `scripts/pdf/fetch-test-fonts.sh`.
+const SANS: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSans.ttf");
+const MONO: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestMono.ttf");
+const SANS_CFF: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSansCff.otf");
+const SANS_JP: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSansJP.otf");
+const MATH: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestMath.ttf");
+const CMR10: &[u8] = include_bytes!("../../../../testdata/fonts/cmr10.pfb");
+
 /// Fonts embedding a real program and giving no widths: TrueType programs
 /// with several `cmap` subtables, one with fewer horizontal metrics than
 /// glyphs and one with a format 12 subtable past the BMP, a CFF program with
 /// subroutines, as OpenType and bare, and a Type 1 program from its PFB
-/// segments. Each is in `testdata/fonts`, from `scripts/pdf/fetch-test-fonts.sh`.
+/// segments.
 fn real() -> Vec<Case> {
-    const SANS: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSans.ttf");
-    const MONO: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestMono.ttf");
-    const SANS_CFF: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestSansCff.otf");
-    const MATH: &[u8] = include_bytes!("../../../../testdata/fonts/ElideTestMath.ttf");
-    const CMR10: &[u8] = include_bytes!("../../../../testdata/fonts/cmr10.pfb");
-
     let font = |subtype: &str, file: FontFile, program: &[u8], flags: i64, extra: Dictionary| {
         document(|pdf| {
             let mut font = embedding(pdf.doc(), subtype, file, program.to_vec(), flags);
@@ -724,6 +727,217 @@ fn real() -> Vec<Case> {
     ]
 }
 
+/// A glyph of a composite font: its text, its CID and its width.
+type CidGlyph = (char, u16, i64);
+
+/// The text the composite cases draw in Liberation Sans.
+const LATIN: &str = "Jane Roe, jane@roe.io 555 0100";
+
+/// The glyphs of [`LATIN`] in Liberation Sans, each CID its glyph index, and
+/// its width in thousandths of an em.
+fn sans_glyphs() -> Vec<CidGlyph> {
+    let font = FontRef::new(SANS).expect("Liberation Sans reads");
+    let cmap = font.cmap().expect("it has a cmap");
+    let hmtx = font.hmtx().expect("it has an hmtx");
+    let em = f64::from(font.head().expect("it has a head").units_per_em());
+    LATIN
+        .chars()
+        .map(|char| {
+            let glyph = cmap.map_codepoint(char).expect("the subset maps it");
+            let advance = f64::from(hmtx.advance(glyph).expect("it has an advance"));
+            let cid = u16::try_from(glyph.to_u32()).expect("a small glyph index");
+            (char, cid, (advance * 1000.0 / em).round() as i64)
+        })
+        .collect()
+}
+
+/// The glyphs of the Japanese subset, by the CIDs of Source Han Sans's
+/// `Adobe-Identity-0` collection: its proportional Latin, kana, punctuation
+/// and ideographs.
+const SANS_JP_GLYPHS: [CidGlyph; 35] = [
+    ('山', 15891, 1000),
+    ('田', 27065, 1000),
+    ('太', 14080, 1000),
+    ('郎', 40706, 1000),
+    (' ', 1, 224),
+    ('東', 20856, 1000),
+    ('京', 9721, 1000),
+    ('都', 40777, 1000),
+    ('千', 11657, 1000),
+    ('代', 9807, 1000),
+    ('区', 11633, 1000),
+    ('、', 1397, 1000),
+    ('個', 10261, 1000),
+    ('人', 9748, 1000),
+    ('情', 17903, 1000),
+    ('報', 13652, 1000),
+    ('。', 1398, 1000),
+    ('J', 43, 535),
+    ('a', 66, 563),
+    ('n', 79, 610),
+    ('e', 70, 554),
+    ('R', 51, 635),
+    ('o', 80, 606),
+    ('0', 17, 555),
+    ('1', 18, 555),
+    ('2', 19, 555),
+    ('3', 20, 555),
+    ('あ', 1461, 1000),
+    ('い', 1463, 1000),
+    ('う', 1465, 1000),
+    ('え', 1467, 1000),
+    ('お', 1469, 1000),
+    ('カ', 1564, 1000),
+    ('タ', 1584, 1000),
+    ('ナ', 1595, 1000),
+];
+
+/// A document drawing `glyphs` in two lines, the second with character and
+/// word spacing, by a Type0 font over `Identity-H` whose descendant of
+/// `subtype` embeds `program` as `file`, with the entries `extra` adds to it,
+/// and gives each glyph's width in `/W` if `widths`. Each glyph's code, the
+/// CID it draws, is what `code` gives it from its place in `glyphs`; its
+/// `/ToUnicode` maps each code to the glyph's text.
+fn composite_drawn(
+    subtype: &str,
+    file: FontFile,
+    program: &[u8],
+    glyphs: &[CidGlyph],
+    code: &dyn Fn(usize, &CidGlyph) -> u16,
+    extra: &dyn Fn(&mut DocBuilder) -> Dictionary,
+    widths: bool,
+) -> Vec<u8> {
+    let codes: Vec<u16> = glyphs.iter().enumerate().map(|(i, g)| code(i, g)).collect();
+    document(|pdf| {
+        let mut cid = embedding(pdf.doc(), subtype, file, program.to_vec(), 4);
+        cid.set(
+            "CIDSystemInfo",
+            dictionary! {
+                "Registry" => Object::string_literal("Adobe"),
+                "Ordering" => Object::string_literal("Identity"),
+                "Supplement" => 0,
+            },
+        );
+        cid.extend(&extra(pdf));
+        if widths {
+            let w: Vec<Object> = codes
+                .iter()
+                .zip(glyphs)
+                .flat_map(|(&code, &(.., width))| {
+                    [i64::from(code).into(), vec![width.into()].into()]
+                })
+                .collect();
+            cid.set("W", w);
+        }
+        let chars: Vec<String> = codes
+            .iter()
+            .zip(glyphs)
+            .map(|(code, (char, ..))| {
+                let units: String = char
+                    .encode_utf16(&mut [0; 2])
+                    .iter()
+                    .map(|unit| format!("{unit:04X}"))
+                    .collect();
+                format!("<{code:04X}> <{units}>")
+            })
+            .collect();
+        let chars: Vec<&str> = chars.iter().map(String::as_str).collect();
+        let to_unicode = to_unicode_cmap(&["<0000> <FFFF>"], &chars, &[]);
+        let font = dictionary! {
+            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "ABCDEF+Embedded",
+            "Encoding" => "Identity-H",
+            "ToUnicode" => pdf.add(Stream::new(Dictionary::new(), to_unicode)),
+            "DescendantFonts" => vec![Object::Dictionary(cid)],
+        };
+        let shown = |codes: &[u16]| {
+            let bytes = codes.iter().flat_map(|code| code.to_be_bytes()).collect();
+            Object::String(bytes, StringFormat::Hexadecimal)
+        };
+        let (first, second) = codes.split_at(codes.len() / 2);
+        Page::new().font("F1", pdf.add(font)).ops(vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![20.into(), 700.into()]),
+            Operation::new("Tj", vec![shown(first)]),
+            Operation::new("Td", vec![0.into(), (-24).into()]),
+            Operation::new("Tc", vec![1.5.into()]),
+            Operation::new("Tw", vec![6.into()]),
+            Operation::new("Tj", vec![shown(second)]),
+            Operation::new("ET", vec![]),
+        ])
+    })
+}
+
+/// Composite fonts embedding a real program, with and without `/W`: a
+/// CIDFontType2 with a TrueType program, its CIDs glyph indices by
+/// `Identity` or through a `/CIDToGIDMap` stream, and a CIDFontType0 with a
+/// CID-keyed CFF program, bare and as OpenType, whose CIDs reach glyphs
+/// through its charset. Without a `/ToUnicode` their text is unknown to
+/// both readers: their `Identity` ordering has no character collection, so
+/// the reader refuses them, and PDFium reads each code as the character of
+/// its value.
+fn composite_programs() -> Vec<Case> {
+    let sans = sans_glyphs();
+    let by_cid = |_: usize, &(_, cid, _): &CidGlyph| cid;
+    // CIDs 1 onwards, which a `/CIDToGIDMap` stream maps to the glyphs.
+    let by_order = |i: usize, _: &CidGlyph| u16::try_from(i + 1).expect("few glyphs");
+    let identity = |_: &mut DocBuilder| dictionary! { "CIDToGIDMap" => "Identity" };
+    let mapped = |pdf: &mut DocBuilder| {
+        let mut map = vec![0; 2];
+        for &(_, glyph, _) in &sans {
+            map.extend(glyph.to_be_bytes());
+        }
+        dictionary! { "CIDToGIDMap" => pdf.add(Stream::new(Dictionary::new(), map)) }
+    };
+    let truetype = |code: &dyn Fn(usize, &CidGlyph) -> u16,
+                    extra: &dyn Fn(&mut DocBuilder) -> Dictionary,
+                    widths| {
+        let (subtype, file) = ("CIDFontType2", FontFile::TrueType);
+        composite_drawn(subtype, file, SANS, &sans, code, extra, widths)
+    };
+    let bare_jp = FontRef::new(SANS_JP)
+        .ok()
+        .and_then(|font| font.table_data(Tag::new(b"CFF ")))
+        .map(|data| data.as_bytes().to_vec())
+        .expect("the OpenType font holds a CFF table");
+    let none = |_: &mut DocBuilder| Dictionary::new();
+    let cff = |file, program: &[u8], widths| {
+        let glyphs = &SANS_JP_GLYPHS;
+        composite_drawn(
+            "CIDFontType0",
+            file,
+            program,
+            glyphs,
+            &by_cid,
+            &none,
+            widths,
+        )
+    };
+    vec![
+        Case::new("CIDFontType2, Identity", truetype(&by_cid, &identity, true)),
+        Case::new(
+            "CIDFontType2, a CIDToGIDMap stream",
+            truetype(&by_order, &mapped, true),
+        ),
+        Case::new(
+            "CIDFontType2, no widths",
+            truetype(&by_cid, &identity, false),
+        ),
+        Case::new(
+            "CIDFontType0, CID-keyed CFF",
+            cff(FontFile::CidCff, &bare_jp, true),
+        ),
+        Case::new(
+            "CIDFontType0, OpenType",
+            cff(FontFile::OpenType, SANS_JP, true),
+        ),
+        Case::new(
+            "CIDFontType0, no widths",
+            cff(FontFile::CidCff, &bare_jp, false),
+        ),
+    ]
+}
+
 /// Every case.
 fn cases() -> Vec<Case> {
     [
@@ -734,6 +948,7 @@ fn cases() -> Vec<Case> {
         embedded(),
         real(),
         composite(),
+        composite_programs(),
     ]
     .into_iter()
     .flatten()

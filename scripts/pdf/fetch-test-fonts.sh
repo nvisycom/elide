@@ -31,6 +31,10 @@ fetch "https://raw.githubusercontent.com/adobe-fonts/source-sans/3.052R/LICENSE.
 	89ad2c4f66dd29127527493e729c31e731f111cf10faf5774c3db9275ed0c22c source-sans-LICENSE.md
 fetch "https://github.com/notofonts/math/releases/download/NotoSansMath-v3.000/NotoSansMath-v3.000.zip" \
 	ac351837b41f8a897f020b97fb0f075ad574c1e9669fb5839ada1f92fd748356 noto-math.zip
+fetch "https://raw.githubusercontent.com/adobe-fonts/source-han-sans/2.004R/SubsetOTF/JP/SourceHanSansJP-Regular.otf" \
+	b0a8d1b14bbea20d2b159ef87a3c6961def3dbe320c3a219c61166e4c0d015d3 SourceHanSansJP-Regular.otf
+fetch "https://raw.githubusercontent.com/adobe-fonts/source-han-sans/2.004R/LICENSE.txt" \
+	f55c2d43dd905011515f5e46ba78d180027e314ef8ccaaf53a9e88fe316767cd source-han-LICENSE.txt
 fetch "https://mirrors.ctan.org/fonts/amsfonts/pfb/cmr10.pfb" \
 	fdcede8794018df5f2b58f0905fb20a2b418ed8f67b73ee12445855dfbe5b1be cmr10.pfb
 fetch "https://mirrors.ctan.org/fonts/amsfonts/doc/OFL.txt" \
@@ -43,14 +47,17 @@ unzip -o -q "$tmp/noto-math.zip" NotoSansMath/unhinted/ttf/NotoSansMath-Regular.
 mkdir -p "$out"
 liberation="$tmp/liberation-fonts-ttf-2.1.5"
 
-# `source new-name family` triples: each subset to ASCII and Latin-1 (and the
-# math font to the bold mathematical capitals past the BMP too), keeping the
-# legacy Mac cmap subtables, the glyph names and the CFF subroutines.
+# `source new-name family` triples: each subset to ASCII and Latin-1 (the math
+# font to the bold mathematical capitals past the BMP too, and the CID-keyed
+# Japanese font to the CJK text the test draws instead), keeping the legacy Mac
+# cmap subtables, the glyph names (a CID-keyed font's name its CIDs) and the
+# CFF subroutines.
 uv run --quiet --with fonttools==4.55.0 python - "$out" \
 	"$liberation/LiberationSans-Regular.ttf" ElideTestSans.ttf "Elide Test Sans" \
 	"$liberation/LiberationMono-Regular.ttf" ElideTestMono.ttf "Elide Test Mono" \
 	"$tmp/OTF/SourceSans3-Regular.otf" ElideTestSansCff.otf "Elide Test Sans CFF" \
-	"$tmp/NotoSansMath/unhinted/ttf/NotoSansMath-Regular.ttf" ElideTestMath.ttf "Elide Test Math" <<'EOF'
+	"$tmp/NotoSansMath/unhinted/ttf/NotoSansMath-Regular.ttf" ElideTestMath.ttf "Elide Test Math" \
+	"$tmp/SourceHanSansJP-Regular.otf" ElideTestSansJP.otf "Elide Test Sans JP" <<'EOF'
 import sys
 from fontTools import subset
 from fontTools.ttLib import TTFont
@@ -67,7 +74,9 @@ for source, name, family in zip(jobs[0::3], jobs[1::3], jobs[2::3]):
     unicodes = list(range(0x20, 0x7F)) + list(range(0xA0, 0x100))
     if "Math" in name:
         unicodes += list(range(0x1D400, 0x1D41A))
-    font = TTFont(source)
+    if "JP" in name:
+        unicodes = [ord(c) for c in "山田太郎東京都千代田区個人情報あいうえおカタカナ、。Jane Roe0123"]
+    font = TTFont(source, recalcTimestamp=False)
     subsetter = subset.Subsetter(options)
     subsetter.populate(unicodes=unicodes)
     subsetter.subset(font)
@@ -81,10 +90,14 @@ for source, name, family in zip(jobs[0::3], jobs[1::3], jobs[2::3]):
             record.string = "Regular"
     if "CFF " in font:
         cff = font["CFF "].cff
+        original = cff.fontNames[0]
         cff.fontNames = [postscript]
         top = cff.topDictIndex[0]
         top.FullName = family
         top.FamilyName = family
+        # A CID-keyed font's dictionaries are named after it too.
+        for fd in getattr(top, "FDArray", []):
+            fd.FontName = fd.FontName.replace(original, postscript)
     font.save(f"{out}/{name}")
 EOF
 
@@ -92,5 +105,6 @@ cp "$tmp/cmr10.pfb" "$out/cmr10.pfb"
 cp "$liberation/LICENSE" "$out/LICENSE-Liberation.txt"
 cp "$tmp/source-sans-LICENSE.md" "$out/LICENSE-SourceSans.md"
 cp "$tmp/OFL.txt" "$out/LICENSE-NotoSansMath.txt"
+cp "$tmp/source-han-LICENSE.txt" "$out/LICENSE-SourceHanSans.txt"
 cp "$tmp/ams-OFL.txt" "$out/LICENSE-AMS.txt"
 echo "wrote $(ls "$out" | wc -l | tr -d ' ') files to $out"
