@@ -117,6 +117,8 @@ fn an_undecodable_cell_value_is_refused() {
         r#"<c r="A1" t="inlineStr"><is><t>Jane &bogus; Roe</t></is></c>"#,
         r#"<c r="A1" t="str"><f>B1</f><v>Jane &bogus; Roe</v></c>"#,
         r#"<c r="A1" t="s"><v>&bogus;</v></c>"#,
+        // An HTML entity is no XML one, whatever features the build has.
+        r#"<c r="A1" t="inlineStr"><is><t>Jos&eacute;</t></is></c>"#,
     ] {
         let sheet = format!(
             r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">{cell}</row></sheetData></worksheet>"#

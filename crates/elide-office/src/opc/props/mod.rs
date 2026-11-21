@@ -29,13 +29,13 @@ use std::{io, mem};
 use bytes::Bytes;
 use elide_core::entity::LabelRef;
 use quick_xml::NsReader;
-use quick_xml::escape::{resolve_predefined_entity, unescape};
+use quick_xml::escape::resolve_xml_entity;
 use quick_xml::events::{BytesRef, BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 
 use self::walk::{Entered, Place, Walk};
-use crate::opc::attribute_value;
 use crate::opc::xml::edit::{bom_len, bound};
+use crate::opc::{attribute_value, unescape};
 
 /// The property parts detection reads, at the paths it reads them from. A
 /// property part anywhere else is never surfaced, so it is stripped as
@@ -549,8 +549,9 @@ fn is_text_type(elem: &BytesStart<'_>) -> bool {
 /// field value is read as the character a reader would see.
 ///
 /// A numeric reference (`&#233;`, `&#xE9;`) resolves directly to its code point.
-/// A named reference resolves as quick-xml's unescaper resolves it, which knows
-/// the five XML predefined entities (`amp`, `lt`, `gt`, `quot`, `apos`). An
+/// A named reference resolves only to one of the five XML predefined entities
+/// (`amp`, `lt`, `gt`, `quot`, `apos`), whatever quick-xml features the build
+/// unifies (see [`unescape`](crate::opc::unescape)). An
 /// unknown named entity (a DTD-defined one, which OOXML property parts do not
 /// declare) has no value here and contributes nothing, which is the safe
 /// reading: it cannot smuggle text past detection.
@@ -558,7 +559,7 @@ fn resolve_ref(r: &BytesRef<'_>) -> String {
     if let Ok(Some(ch)) = r.resolve_char_ref() {
         return ch.to_string();
     }
-    resolve_predefined_entity(r.as_ref())
+    resolve_xml_entity(r.as_ref())
         .unwrap_or_default()
         .to_owned()
 }

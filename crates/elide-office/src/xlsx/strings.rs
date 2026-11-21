@@ -8,9 +8,9 @@
 use std::ops::Range;
 
 use elide_core::{Error, Result};
-use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
+use crate::opc::unescape;
 use crate::opc::xml::edit::SpannedReader;
 
 /// The decoded strings of a shared-string table, indexed as the cells reference
@@ -121,6 +121,14 @@ mod tests {
     fn decodes_entities() {
         let raw = format!("{HEAD}<si><t>a &amp; b &lt;c&gt;</t></si></sst>");
         assert_eq!(parse_shared_strings(&raw).unwrap(), vec!["a & b <c>"]);
+    }
+
+    /// An HTML entity is no XML one: the item is refused, whatever quick-xml
+    /// features the build unifies.
+    #[test]
+    fn refuses_an_html_entity() {
+        let raw = format!("{HEAD}<si><t>Jos&eacute;</t></si></sst>");
+        assert!(parse_shared_strings(&raw).is_err());
     }
 
     #[test]

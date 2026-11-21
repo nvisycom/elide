@@ -34,6 +34,15 @@ fn an_attribute_span_reads_a_crlf_pair_as_one_space() {
     assert_eq!(offsets.raw_ranges(9..12), vec![(start + 14)..(start + 18)]);
 }
 
+/// A text span with an HTML entity does not decode, whatever quick-xml
+/// features the build unifies: XML defines no `&eacute;`.
+#[test]
+fn a_text_span_with_an_html_entity_is_unreadable() {
+    let raw = "<a>Jos&eacute;</a>";
+    let span = Span::new(3..raw.rfind('<').unwrap(), BlockKind::Text);
+    assert!(span.decode(raw).is_err());
+}
+
 #[test]
 fn text_spans_coalesce_a_run_across_an_entity() {
     // `a &amp; b` is one logical text run split into Text/GeneralRef events;

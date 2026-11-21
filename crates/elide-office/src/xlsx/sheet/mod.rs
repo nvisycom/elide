@@ -19,6 +19,7 @@ use quick_xml::events::Event;
 
 use super::coord::CellCoord;
 use super::decoded_attribute;
+use crate::opc::unescape;
 use crate::opc::xml::edit::SpannedReader;
 
 /// One text-bearing cell of a worksheet.
@@ -316,7 +317,7 @@ impl OpenCell {
 /// Text that cannot be decoded is refused, as a shared string's is: read as
 /// written, it would reach detection as something a reader never sees.
 fn unescape_text(text: &str) -> Result<String> {
-    quick_xml::escape::unescape(text)
+    unescape(text)
         .map(Cow::into_owned)
         .map_err(|e| Error::malformed(format!("cell text entity: {e}")))
 }

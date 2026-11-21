@@ -7,7 +7,6 @@ use std::ops::Range;
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use quick_xml::NsReader;
-use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::name::QName;
 
@@ -19,7 +18,7 @@ use crate::opc::xml::edit::{
     namespace_of, refuse_doctype,
 };
 use crate::opc::xml::ns::{DCTERMS, XSI, transitional};
-use crate::opc::{attribute_value, malformed_xml};
+use crate::opc::{attribute_value, malformed_xml, unescape};
 
 /// The edit that strips from a property part everything no
 /// [`fields`](super::fields) reads, applied when metadata is treated as
