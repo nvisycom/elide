@@ -1,6 +1,9 @@
 use super::*;
 
-const DOCUMENT: Root = Root::Element(W, "document");
+const DOCUMENT: Root = Root::Element {
+    namespace: W,
+    local: "document",
+};
 
 /// `raw` rebuilt as a `root` part, checked to be a fixed point.
 fn rebuilt(raw: &str, root: Root) -> (String, Vec<(HiddenContent, usize)>) {
@@ -96,7 +99,13 @@ fn an_extension_goes_whole() {
     let raw = format!(
         r#"<a:theme xmlns:a="{A}" name="T"><a:themeElements/><a:extLst><a:ext uri="{{05A4C25C}}"><thm15:themeFamily xmlns:thm15="urn:x" name="Jane"/></a:ext></a:extLst></a:theme>"#
     );
-    let (text, removed) = rebuilt(&raw, Root::Element(A, "theme"));
+    let (text, removed) = rebuilt(
+        &raw,
+        Root::Element {
+            namespace: A,
+            local: "theme",
+        },
+    );
     assert_eq!(
         text,
         format!(
@@ -111,6 +120,16 @@ fn a_root_its_content_type_does_not_name_is_refused() {
     let raw = format!(r#"<w:styles xmlns:w="{W}"/>"#);
     assert!(rebuild(&raw, DOCUMENT).is_err());
     assert!(rebuild(r#"<doc/>"#, DOCUMENT).is_err());
+}
+
+/// A document type declaration is refused before the root and inside an
+/// element being left out alike.
+#[test]
+fn a_document_type_is_refused() {
+    let declared = format!(r#"<!DOCTYPE d [<!ENTITY x "Jane">]>{}"#, word("<w:p/>"));
+    assert!(rebuild(&declared, DOCUMENT).is_err());
+    let nested = word("<w:bogus><!DOCTYPE d></w:bogus>");
+    assert!(rebuild(&nested, DOCUMENT).is_err());
 }
 
 /// A part with no root element, or one left open, is refused; a root
@@ -213,7 +232,10 @@ fn a_graphic_keeps_the_payload_its_uri_names() {
     let picture = r#"<pic:pic><pic:nvPicPr><pic:cNvPr id="3" name="logo"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr/></pic:pic>"#;
     let table = r#"<a:tbl><a:tr h="1"><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Jane</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl>"#;
     let vendor = r#"<s:x xmlns:s="urn:vendor"/>"#;
-    let sld = Root::Element(P, "sld");
+    let sld = Root::Element {
+        namespace: P,
+        local: "sld",
+    };
 
     let raw = frame(
         "http://schemas.openxmlformats.org/drawingml/2006/picture",
@@ -270,7 +292,17 @@ fn spreadsheet_strings_keep_their_spacing() {
     let raw = format!(
         r#"<sst xmlns="{X}"><si><r><t xml:space="preserve">Jane </t></r><t xml:space="preserve"> Roe</t></si></sst>"#
     );
-    assert!(rebuild(&raw, Root::Element(X, "sst")).unwrap().is_none());
+    assert!(
+        rebuild(
+            &raw,
+            Root::Element {
+                namespace: X,
+                local: "sst"
+            }
+        )
+        .unwrap()
+        .is_none()
+    );
 }
 
 #[test]
@@ -294,7 +326,7 @@ fn every_kept_content_type_names_a_root_the_schema_defines() {
         "application/vnd.ms-word.commentsExtensible+xml",
         "application/vnd.ms-word.people+xml",
     ] {
-        let Some(Root::Element(namespace, local)) = root(content_type) else {
+        let Some(Root::Element { namespace, local }) = root(&ContentType::new(content_type)) else {
             panic!("{content_type} names no root");
         };
         let index = namespace_index(Some(namespace)).expect(content_type);

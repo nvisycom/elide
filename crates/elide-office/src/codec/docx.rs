@@ -3,12 +3,13 @@
 //!
 //! Everything but the format identity lives in [`super::ooxml`]: the document is
 //! a body [`ExtractStream`](elide_codec::extract::ExtractStream) over the
-//! element-text blocks [`OoxmlPackage::extract`](crate::ooxml::OoxmlPackage::extract)
+//! element-text blocks [`OoxmlPackage::extract`](crate::text_package::OoxmlPackage::extract)
 //! recovers plus its embedding / document-property blobs, re-packed via the
 //! shared `OoxmlDocument`.
 
 use elide_codec::{Format, FormatId};
 
+use super::CodecIdentity;
 use super::ooxml::{self, OoxmlCodec};
 use crate::docx::WordFormat;
 
@@ -16,14 +17,15 @@ use crate::docx::WordFormat;
 #[derive(Debug)]
 pub(crate) struct DocxCodec;
 
-impl OoxmlCodec for DocxCodec {
-    type Format = WordFormat;
-
+impl CodecIdentity for DocxCodec {
     const CONTENT_TYPE: &'static str =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     const EXTENSION: &'static str = "docx";
     const FORMAT_ID: FormatId = FormatId::new("elide.document.docx");
-    const LABEL: &'static str = "docx";
+}
+
+impl OoxmlCodec for DocxCodec {
+    type Format = WordFormat;
 }
 
 /// The DOCX [`Format`]: Word documents, resolved by `.docx`.

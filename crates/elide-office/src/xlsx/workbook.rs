@@ -9,18 +9,20 @@
 use std::collections::HashMap;
 
 use elide_core::{Error, Result};
+use hipstr::HipStr;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use super::WORKBOOK_PART;
-use crate::opc::ct::SML;
-use crate::opc::{PartPath, attribute_value, relationships};
+use super::{WORKBOOK_PART, decoded_attribute};
+use crate::opc::PartPath;
+use crate::opc::package::content_types::SML;
+use crate::opc::package::relationships;
 
 /// One worksheet: its display name and the package part path holding its cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Sheet {
     /// The sheet's display name, as a reader sees it on the tab.
-    pub(crate) name: String,
+    pub(crate) name: HipStr<'static>,
     /// The package-absolute path of the sheet's part (e.g.
     /// `xl/worksheets/sheet1.xml`).
     pub(crate) part: PartPath,
@@ -64,10 +66,10 @@ pub(crate) fn resolve_sheets<'c>(
         for attr in elem.attributes() {
             let attr = attr.map_err(|e| Error::malformed(format!("workbook.xml attr: {e}")))?;
             match attr.key.local_name().as_ref() {
-                "name" => name = Some(decode(attr.value.as_ref())?),
+                "name" => name = Some(decoded_attribute(&attr.value)?),
                 // The relationship id is `r:id`; match on the local name so the
                 // namespace prefix does not matter.
-                "id" => rid = Some(decode(attr.value.as_ref())?),
+                "id" => rid = Some(decoded_attribute(&attr.value)?),
                 _ => {}
             }
         }
@@ -76,73 +78,112 @@ pub(crate) fn resolve_sheets<'c>(
         // fails closed rather than being dropped.
         let (Some(name), Some(rid)) = (name, rid) else {
             return Err(Error::malformed(
-                "workbook `<sheet>` missing a name or relationship id".to_owned(),
+                "workbook `<sheet>` missing a name or relationship id",
             ));
         };
-        let part = match targets.get(&rid) {
-            Some((WORKSHEET_TYPE, part)) => part.clone(),
-            Some((kind, part)) => {
-                let expected = kind.rsplit('/').next().unwrap_or(kind);
-                let typed = content_type(part).is_some_and(|content_type| {
-                    content_type
-                        .to_ascii_lowercase()
-                        .strip_prefix(SML)
-                        .and_then(|rest| rest.strip_suffix("+xml"))
-                        == Some(expected)
-                });
-                if !typed {
-                    return Err(Error::malformed(format!(
-                        "sheet `{name}` names a {expected} whose part `{part}` is not one"
-                    )));
-                }
-                continue;
-            }
-            None => {
+        let Some(target) = targets.get(&rid) else {
+            return Err(Error::malformed(format!(
+                "sheet `{name}` references relationship `{rid}` with no sheet target"
+            )));
+        };
+        let part = &target.part;
+        if target.kind != SheetKind::Worksheet {
+            let expected = target.kind.content_type_suffix();
+            let typed = content_type(part).is_some_and(|content_type| {
+                content_type
+                    .to_ascii_lowercase()
+                    .strip_prefix(SML)
+                    .and_then(|rest| rest.strip_suffix("+xml"))
+                    == Some(expected)
+            });
+            if !typed {
                 return Err(Error::malformed(format!(
-                    "sheet `{name}` references relationship `{rid}` with no sheet target"
+                    "sheet `{name}` names a {expected} whose part `{part}` is not one"
                 )));
             }
-        };
-        sheets.push(Sheet { name, part });
+            continue;
+        }
+        sheets.push(Sheet {
+            name: name.into(),
+            part: part.clone(),
+        });
     }
     Ok(sheets)
 }
 
-/// The worksheet relationship type.
-const WORKSHEET_TYPE: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+/// The kind of sheet a workbook relationship targets: a worksheet, which
+/// holds cells, or a chart or dialog sheet, which holds none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SheetKind {
+    /// A worksheet: a grid of cells.
+    Worksheet,
+    /// A chart sheet: a single chart on its own tab.
+    Chartsheet,
+    /// A dialog sheet: a legacy Excel 5 dialog.
+    Dialogsheet,
+}
 
-/// The relationship types of a sheet: a worksheet, then the sheets without
-/// cells.
-const SHEET_TYPES: [&str; 3] = [
-    WORKSHEET_TYPE,
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet",
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/dialogsheet",
-];
+impl SheetKind {
+    /// Every sheet kind, the worksheet first.
+    const ALL: [Self; 3] = [Self::Worksheet, Self::Chartsheet, Self::Dialogsheet];
 
-/// The `Id -> (type, part)` map of every sheet relationship in `rels`, each
-/// target resolved against the workbook part. Only internal sheet
-/// relationships with an id and a target are kept; the shared-strings and
-/// styles targets are resolved by their well-known paths, not through this
-/// map.
-fn sheet_targets(rels: &str) -> Result<HashMap<String, (&'static str, PartPath)>> {
+    /// The relationship type a workbook targets a sheet of this kind by.
+    const fn relationship_type(self) -> &'static str {
+        match self {
+            Self::Worksheet => {
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+            }
+            Self::Chartsheet => {
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet"
+            }
+            Self::Dialogsheet => {
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/dialogsheet"
+            }
+        }
+    }
+
+    /// The SpreadsheetML content type of a sheet of this kind, between the
+    /// [`SML`] prefix and the `+xml` suffix (e.g. `chartsheet`).
+    const fn content_type_suffix(self) -> &'static str {
+        match self {
+            Self::Worksheet => "worksheet",
+            Self::Chartsheet => "chartsheet",
+            Self::Dialogsheet => "dialogsheet",
+        }
+    }
+
+    /// The sheet kind a relationship of type `rel_type` targets, if any.
+    fn of_relationship(rel_type: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.relationship_type() == rel_type)
+    }
+}
+
+/// What a sheet relationship targets: the kind of sheet and its part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SheetTarget {
+    /// The kind of sheet the relationship's type names.
+    kind: SheetKind,
+    /// The sheet's part, resolved against the workbook part.
+    part: PartPath,
+}
+
+/// The `Id -> target` map of every sheet relationship in `rels`, each target
+/// resolved against the workbook part. Only internal sheet relationships with
+/// an id and a target are kept; the shared-strings and styles targets are
+/// resolved by their well-known paths, not through this map.
+fn sheet_targets(rels: &str) -> Result<HashMap<String, SheetTarget>> {
     let workbook = PartPath::from(WORKBOOK_PART);
     Ok(relationships::parse(rels)?
         .into_iter()
         .filter(|rel| !rel.id.is_empty() && !rel.target.is_empty())
         .filter_map(|rel| {
-            let kind = SHEET_TYPES.into_iter().find(|kind| rel.kind == *kind)?;
+            let kind = SheetKind::of_relationship(&rel.rel_type)?;
             let part = rel.target_part(Some(&workbook))?;
-            Some((rel.id, (kind, part)))
+            Some((rel.id, SheetTarget { kind, part }))
         })
         .collect())
-}
-
-/// Decode an attribute value to an unescaped owned `String`.
-fn decode(value: &str) -> Result<String> {
-    Ok(attribute_value(value)
-        .map_err(|e| Error::malformed(format!("workbook attribute entity: {e}")))?
-        .into_owned())
 }
 
 #[cfg(test)]
@@ -203,7 +244,7 @@ mod tests {
             r#"</Relationships>"#,
         );
         let targets = sheet_targets(rels).unwrap();
-        let part = |id: &str| targets.get(id).map(|(_, part)| part.as_str());
+        let part = |id: &str| targets.get(id).map(|target| target.part.as_str());
         assert_eq!(part("rId1"), Some("xl/worksheets/sheet1.xml"));
         assert_eq!(part("rId2"), Some("xl/worksheets/sheet2.xml"));
         assert_eq!(part("rId3"), Some("xl/worksheets/sheet3.xml"));
@@ -220,7 +261,7 @@ mod tests {
         );
         let targets = sheet_targets(rels).unwrap();
         assert_eq!(
-            targets.get("rId1").map(|(_, part)| part.as_str()),
+            targets.get("rId1").map(|target| target.part.as_str()),
             Some("xl/worksheets/sheet1.xml")
         );
     }

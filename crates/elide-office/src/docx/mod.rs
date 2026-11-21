@@ -7,8 +7,8 @@
 
 mod sanitize;
 
-use crate::ooxml::OoxmlFormat;
 use crate::opc::{Names, PartClassifier, PartKind, PartRole, TextAttribute};
+use crate::text_package::OoxmlFormat;
 
 /// The Word format seam: maps each kind of part to the neutral [`PartRole`] the
 /// engine acts on.
@@ -20,7 +20,7 @@ use crate::opc::{Names, PartClassifier, PartKind, PartRole, TextAttribute};
 /// part; everything else is structure. Comment and change authors, dropdown
 /// entries, and field instructions are text attributes.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct WordFormat;
+pub(crate) struct WordFormat;
 
 impl PartClassifier for WordFormat {
     fn role(&self, kind: PartKind) -> PartRole {

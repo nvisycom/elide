@@ -9,8 +9,8 @@
 
 mod sanitize;
 
-use crate::ooxml::OoxmlFormat;
 use crate::opc::{PartClassifier, PartKind, PartRole, TextAttribute};
+use crate::text_package::OoxmlFormat;
 
 /// The PresentationML format seam: maps each kind of part to the neutral
 /// [`PartRole`] the engine acts on.
@@ -22,7 +22,7 @@ use crate::opc::{PartClassifier, PartKind, PartRole, TextAttribute};
 /// presentation part and everything else is structure. Section and custom-show
 /// names and comment authors are text attributes.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SlideFormat;
+pub(crate) struct SlideFormat;
 
 impl PartClassifier for SlideFormat {
     fn role(&self, kind: PartKind) -> PartRole {
@@ -45,8 +45,8 @@ impl OoxmlFormat for SlideFormat {
 mod tests {
     use super::*;
     use crate::fixtures::{pack_typed, read_text_part};
-    use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
+    use crate::text_package::OoxmlPackage;
 
     /// The opened PPTX package under test.
     type Pptx = OoxmlPackage<SlideFormat>;
@@ -97,8 +97,7 @@ mod tests {
             .expect("slide email block");
         let replacement = Replacement {
             part: block.part.clone(),
-            start: block.start,
-            end: block.end,
+            span: block.span.clone(),
             text: "[EMAIL]".into(),
         };
         let out = pptx.rewrite_with_parts(&[replacement], &[]).unwrap();

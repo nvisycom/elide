@@ -8,7 +8,7 @@ use elide_core::modality::text::TextReplacement;
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-use crate::xlsx::{Cell, CellEdit};
+use crate::xlsx::{Cell, CellCoord, CellEdit};
 
 /// The workbook's editable cell state, owned by the body
 /// [`XlsxStream`](super::stream::XlsxStream): redactions edit it, and the
@@ -42,9 +42,9 @@ impl XlsxState {
     /// is cheap. Provides column context to the recognizer.
     pub(super) fn column_headers(&self) -> HashMap<(&str, u32), HipStr<'static>> {
         let mut headers = HashMap::new();
-        for cell in self.cells.iter().filter(|c| c.row == 0) {
+        for cell in self.cells.iter().filter(|c| c.coord.row == 0) {
             headers
-                .entry((cell.sheet.as_str(), cell.column))
+                .entry((cell.sheet.as_str(), cell.coord.column))
                 .or_insert_with(|| HipStr::from(cell.text.clone()));
         }
         headers
@@ -52,8 +52,7 @@ impl XlsxState {
 
     /// The cell text at `location`, if a unique cell exists.
     pub(super) fn cell_at(&self, location: &TabularLocation) -> Result<Option<&str>> {
-        let sheet = location.sheet_name.as_deref();
-        let index = self.cell_index(sheet, location.row_index, location.column_index)?;
+        let index = self.cell_index(location.sheet_name.as_deref(), coord(location))?;
         Ok(index.map(|index| self.cells[index].text.as_str()))
     }
 
@@ -78,14 +77,14 @@ impl XlsxState {
         let mut working: BTreeMap<usize, String> = BTreeMap::new();
         for (location, replacement) in edits {
             let sheet = location.sheet_name.as_deref();
-            let index = self
-                .cell_index(sheet, location.row_index, location.column_index)?
-                .ok_or_else(|| {
-                    Error::malformed(format!(
-                        "xlsx redaction targets no cell at sheet {:?} (row {}, column {})",
-                        sheet, location.row_index, location.column_index
-                    ))
-                })?;
+            let index = self.cell_index(sheet, coord(location))?.ok_or_else(|| {
+                Error::malformed(format!(
+                    "xlsx redaction targets no cell at (row {}, column {}) on {}",
+                    location.row_index,
+                    location.column_index,
+                    on_sheet(sheet)
+                ))
+            })?;
             let text = working
                 .entry(index)
                 .or_insert_with(|| self.cells[index].text.clone());
@@ -103,22 +102,31 @@ impl XlsxState {
         Ok(())
     }
 
-    /// The index of the unique cell at `(sheet, row, column)`.
+    /// The index of the unique cell at `coord`, on `sheet` when one is named.
     ///
     /// A location with no sheet name must still identify exactly one cell: if the
     /// same coordinates exist on more than one sheet, the match is ambiguous and
     /// this errs rather than silently editing the wrong sheet. `Ok(None)` means no
     /// cell matched.
-    fn cell_index(&self, sheet: Option<&str>, row: u32, column: u32) -> Result<Option<usize>> {
-        let mut matches = self.cells.iter().enumerate().filter(|(_, c)| {
-            c.row == row && c.column == column && sheet.is_none_or(|name| c.sheet == name)
-        });
+    fn cell_index(&self, sheet: Option<&str>, coord: CellCoord) -> Result<Option<usize>> {
+        let mut matches = self
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.coord == coord && sheet.is_none_or(|name| c.sheet == name));
         let first = matches.next().map(|(i, _)| i);
         if first.is_some() && matches.next().is_some() {
-            return Err(Error::malformed(format!(
-                "xlsx redaction at (row {row}, column {column}) is ambiguous \
+            let CellCoord { row, column } = coord;
+            return Err(Error::malformed(match sheet {
+                Some(name) => format!(
+                    "xlsx redaction at (row {row}, column {column}) is ambiguous \
+                     on sheet `{name}`"
+                ),
+                None => format!(
+                    "xlsx redaction at (row {row}, column {column}) is ambiguous \
                      across sheets; a sheet name is required"
-            )));
+                ),
+            }));
         }
         Ok(first)
     }
@@ -128,10 +136,20 @@ impl XlsxState {
     pub(super) fn cell_edits(&self) -> Vec<CellEdit> {
         self.changed
             .iter()
-            .map(|&index| {
-                let cell = &self.cells[index];
-                CellEdit::new(cell.sheet.clone(), cell.row, cell.column, cell.text.clone())
-            })
+            .map(|&index| CellEdit::from(&self.cells[index]))
             .collect()
+    }
+}
+
+/// The cell coordinates `location` addresses.
+fn coord(location: &TabularLocation) -> CellCoord {
+    CellCoord::new(location.row_index, location.column_index)
+}
+
+/// The sheet a lookup is scoped to, for an error message.
+fn on_sheet(sheet: Option<&str>) -> String {
+    match sheet {
+        Some(name) => format!("sheet `{name}`"),
+        None => "any sheet".to_owned(),
     }
 }

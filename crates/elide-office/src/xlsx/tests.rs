@@ -2,7 +2,7 @@ use elide_core::redaction::HiddenContentPolicy;
 
 use super::*;
 use crate::fixtures::{pack_parts, pack_typed, read_text_part};
-use crate::opc::ns::X;
+use crate::opc::xml::ns::X;
 
 /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
 /// and two data rows of PII (names, emails, phones, cards, IBANs, SSNs, IPs)
@@ -47,7 +47,7 @@ fn markup_workbook() -> Vec<u8> {
 #[test]
 fn text_outside_the_cells_is_surfaced_and_cell_text_is_not() {
     let xlsx = Xlsx::open(&markup_workbook()).unwrap();
-    let markup = xlsx.markup();
+    let markup = xlsx.extract();
     assert!(markup.issues.is_empty(), "{:?}", markup.issues);
     let mut texts = markup.texts();
     texts.sort_unstable();
@@ -73,22 +73,21 @@ fn markup_and_cell_redactions_land_together_and_names_stay_valid() {
     let source = markup_workbook();
     let xlsx = Xlsx::open(&source).unwrap();
     let text: Vec<Replacement> = xlsx
-        .markup()
+        .extract()
         .blocks
         .iter()
         .map(|block| Replacement {
             part: block.part.clone(),
-            start: block.start,
-            end: block.end,
+            span: block.span.clone(),
             text: "[PERSON]".into(),
         })
         .collect();
     let edits = [
-        CellEdit::new("Jane Roe", 0, 0, "[PERSON]"),
-        CellEdit::new("Jane Roe", 0, 1, "[EMAIL]"),
+        CellEdit::new("Jane Roe", CellCoord::new(0, 0), "[PERSON]"),
+        CellEdit::new("Jane Roe", CellCoord::new(0, 1), "[EMAIL]"),
     ];
     let out = xlsx.rewrite(&edits, &text, &[]).unwrap();
-    crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier)
+    crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetFormat)
         .expect("the redacted workbook passes the output check");
 
     let workbook = read_text_part(&out, "xl/workbook.xml");
@@ -118,7 +117,7 @@ fn markup_and_cell_redactions_land_together_and_names_stay_valid() {
 fn cell<'a>(cells: &'a [Cell], sheet: &str, row: u32, col: u32) -> Option<&'a Cell> {
     cells
         .iter()
-        .find(|c| c.sheet == sheet && c.row == row && c.column == col)
+        .find(|c| c.sheet == sheet && c.coord == CellCoord::new(row, col))
 }
 
 #[test]
@@ -130,20 +129,11 @@ fn opens_and_resolves_a_real_workbook() {
 
 #[test]
 fn classifier_maps_kinds_to_roles() {
-    assert_eq!(
-        SheetClassifier.role(PartKind::Properties),
-        PartRole::Property
-    );
+    assert_eq!(SheetFormat.role(PartKind::Properties), PartRole::Property);
     // A worksheet is a cell part, a structure part stays structure.
-    assert_eq!(SheetClassifier.role(PartKind::Story), PartRole::Cells);
-    assert_eq!(
-        SheetClassifier.role(PartKind::Structure),
-        PartRole::Structure
-    );
-    assert_eq!(
-        SheetClassifier.role(PartKind::Comments),
-        PartRole::ElementText
-    );
+    assert_eq!(SheetFormat.role(PartKind::Story), PartRole::Cells);
+    assert_eq!(SheetFormat.role(PartKind::Structure), PartRole::Structure);
+    assert_eq!(SheetFormat.role(PartKind::Comments), PartRole::ElementText);
 }
 
 #[test]
@@ -155,7 +145,7 @@ fn open_rejects_a_non_workbook_zip() {
 
 #[test]
 fn extracts_shared_string_cells_from_a_real_workbook() {
-    let cells = Xlsx::open(SAMPLE).unwrap().extract().unwrap();
+    let cells = Xlsx::open(SAMPLE).unwrap().cells().unwrap();
     // The header labels and the first data row's PII, on sheet `in`.
     assert_eq!(cell(&cells, "in", 0, 1).unwrap().text, "email");
     assert_eq!(
@@ -171,7 +161,7 @@ fn extracts_shared_string_cells_from_a_real_workbook() {
 
 #[test]
 fn extracts_shared_and_inline_cells() {
-    let cells = Xlsx::open(SHARED).unwrap().extract().unwrap();
+    let cells = Xlsx::open(SHARED).unwrap().cells().unwrap();
     assert_eq!(cell(&cells, "Customers", 0, 0).unwrap().text, "Email");
     assert_eq!(
         cell(&cells, "Customers", 1, 0).unwrap().text,
@@ -194,11 +184,11 @@ fn extracts_shared_and_inline_cells() {
 fn de_share_inlines_one_cell_and_leaves_the_pool_and_other_sheet() {
     let xlsx = Xlsx::open(SHARED).unwrap();
     // Redact only sheet1!A2 (alice). sheet2!A1 shares the same pool entry.
-    let edit = CellEdit::new("Customers", 1, 0, "[EMAIL]");
+    let edit = CellEdit::new("Customers", CellCoord::new(1, 0), "[EMAIL]");
     let out = xlsx.rewrite(&[edit], &[], &[]).unwrap();
 
     // Re-open the output and read it back.
-    let cells = Xlsx::open(&out).unwrap().extract().unwrap();
+    let cells = Xlsx::open(&out).unwrap().cells().unwrap();
     assert_eq!(cell(&cells, "Customers", 1, 0).unwrap().text, "[EMAIL]");
     // The OTHER sheet's cell, sharing the pool entry, is untouched.
     assert_eq!(
@@ -222,8 +212,8 @@ fn redacting_every_reference_prunes_the_orphaned_pool_entry() {
     // Redact BOTH cells that reference alice's pool entry (sheet1!A2 and
     // sheet2!A1). With no reference left, the pooled value must not survive.
     let edits = [
-        CellEdit::new("Customers", 1, 0, "[EMAIL]"),
-        CellEdit::new("Notes", 0, 0, "[EMAIL]"),
+        CellEdit::new("Customers", CellCoord::new(1, 0), "[EMAIL]"),
+        CellEdit::new("Notes", CellCoord::new(0, 0), "[EMAIL]"),
     ];
     let out = xlsx.rewrite(&edits, &[], &[]).unwrap();
 
@@ -254,7 +244,7 @@ fn redacting_every_reference_prunes_the_orphaned_pool_entry() {
 #[test]
 fn inline_edit_splices_in_place() {
     let xlsx = Xlsx::open(SHARED).unwrap();
-    let edit = CellEdit::new("Customers", 1, 1, "[SSN]");
+    let edit = CellEdit::new("Customers", CellCoord::new(1, 1), "[SSN]");
     let out = xlsx.rewrite(&[edit], &[], &[]).unwrap();
     let sheet1 = read_text_part(&out, "xl/worksheets/sheet1.xml");
     assert!(sheet1.contains("<t>[SSN]</t>"), "sheet1: {sheet1}");
@@ -264,9 +254,9 @@ fn inline_edit_splices_in_place() {
 #[test]
 fn edit_text_is_xml_escaped() {
     let xlsx = Xlsx::open(SHARED).unwrap();
-    let edit = CellEdit::new("Customers", 1, 1, "a & b <c>");
+    let edit = CellEdit::new("Customers", CellCoord::new(1, 1), "a & b <c>");
     let out = xlsx.rewrite(&[edit], &[], &[]).unwrap();
-    let cells = Xlsx::open(&out).unwrap().extract().unwrap();
+    let cells = Xlsx::open(&out).unwrap().cells().unwrap();
     // Round-trips through escaping back to the literal text.
     assert_eq!(cell(&cells, "Customers", 1, 1).unwrap().text, "a & b <c>");
 }
@@ -274,14 +264,14 @@ fn edit_text_is_xml_escaped() {
 #[test]
 fn rewrite_rejects_an_unknown_sheet() {
     let xlsx = Xlsx::open(SHARED).unwrap();
-    let edit = CellEdit::new("Ghost", 0, 0, "x");
+    let edit = CellEdit::new("Ghost", CellCoord::new(0, 0), "x");
     assert!(xlsx.rewrite(&[edit], &[], &[]).is_err());
 }
 
 #[test]
 fn unedited_parts_are_byte_identical() {
     let xlsx = Xlsx::open(SHARED).unwrap();
-    let edit = CellEdit::new("Customers", 1, 1, "[SSN]");
+    let edit = CellEdit::new("Customers", CellCoord::new(1, 1), "[SSN]");
     let out = xlsx.rewrite(&[edit], &[], &[]).unwrap();
     // sheet2 was not edited, so its bytes are unchanged.
     assert_eq!(
@@ -297,7 +287,7 @@ const SAMPLE2: &[u8] = include_bytes!("../../testdata/xlsx/non_cell_text.xlsx");
 
 #[test]
 fn markup_covers_comments_drawings_and_relationship_targets() {
-    let markup = Xlsx::open(SAMPLE2).unwrap().markup();
+    let markup = Xlsx::open(SAMPLE2).unwrap().extract();
     assert!(markup.issues.is_empty(), "{:?}", markup.issues);
     let parts: Vec<&str> = markup.blocks.iter().map(|b| b.part.as_str()).collect();
     assert!(
@@ -320,7 +310,7 @@ fn markup_covers_comments_drawings_and_relationship_targets() {
 #[test]
 fn a_text_replacement_splices_byte_faithfully() {
     let xlsx = Xlsx::open(SAMPLE2).unwrap();
-    let markup = xlsx.markup();
+    let markup = xlsx.extract();
     let block = markup
         .blocks
         .iter()
@@ -331,8 +321,7 @@ fn a_text_replacement_splices_byte_faithfully() {
             &[],
             &[Replacement {
                 part: block.part.clone(),
-                start: block.start,
-                end: block.end,
+                span: block.span.clone(),
                 text: "[EMAIL]".into(),
             }],
             &[],
@@ -389,16 +378,16 @@ fn chart_and_dialog_sheets_open_beside_worksheets() {
     let xlsx = Xlsx::open(&workbook_with_sheet_kinds()).unwrap();
     let names: Vec<_> = xlsx.sheets.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["Data"]);
-    let cells = xlsx.extract().unwrap();
+    let cells = xlsx.cells().unwrap();
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0].text, "Jane Roe");
-    let texts = xlsx.markup().texts();
+    let texts = xlsx.extract().texts();
     for header in ["Chart by Jane Roe", "Dialog by Jane Roe"] {
         assert!(texts.iter().any(|t| *t == header), "{texts:?}");
     }
-    let edits = [CellEdit::new("Data", 0, 0, "[PERSON]")];
+    let edits = [CellEdit::new("Data", CellCoord::new(0, 0), "[PERSON]")];
     let out = xlsx.rewrite(&edits, &[], &[]).unwrap();
-    crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier)
+    crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetFormat)
         .expect("the redacted workbook passes the output check");
 }
 
@@ -460,11 +449,9 @@ fn cells_in_a_chart_sheet_fail_the_check() {
         .collect();
     let package = crate::fixtures::pack_parts(&parts);
     let xlsx = Xlsx::open(&package).unwrap();
-    assert!(xlsx.extract().unwrap().iter().all(|c| c.sheet == "Data"));
+    assert!(xlsx.cells().unwrap().iter().all(|c| c.sheet == "Data"));
     let out = xlsx.rewrite(&[], &[], &[]).unwrap();
-    assert!(
-        crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier).is_err()
-    );
+    assert!(crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetFormat).is_err());
 }
 
 /// A chart sheet's relationship names its part as OPC does, ASCII case
@@ -493,4 +480,50 @@ fn a_chart_sheet_target_matches_its_part_whatever_its_case() {
         .collect();
     let xlsx = Xlsx::open(&crate::fixtures::pack_parts(&parts)).unwrap();
     assert_eq!(xlsx.sheets.len(), 1);
+}
+
+/// Edits are counted by the cells they land on, not by the cells matched: two
+/// cells at one reference must not stand in for an edit that matched none.
+#[test]
+fn a_duplicate_cell_does_not_cover_an_edit_that_matched_nothing() {
+    let sheet = concat!(
+        r#"<worksheet><sheetData><row r="1">"#,
+        r#"<c r="A1" t="inlineStr"><is><t>Jane</t></is></c>"#,
+        r#"<c r="A1" t="inlineStr"><is><t>Roe</t></is></c>"#,
+        r#"</row></sheetData></worksheet>"#,
+    );
+    let a1 = CellEdit::new("Sheet1", CellCoord { row: 0, column: 0 }, "[NAME]");
+    let b1 = CellEdit::new("Sheet1", CellCoord { row: 0, column: 1 }, "[NAME]");
+    let edits = HashMap::from([(a1.coord, &a1), (b1.coord, &b1)]);
+    let error = splice_sheet("xl/worksheets/sheet1.xml", sheet, &edits).unwrap_err();
+    assert!(
+        error.to_string().contains("1 of 2 cell edits matched no"),
+        "{error}"
+    );
+}
+
+/// A shared index written as a character reference still holds its pooled
+/// string: pruning must not blank an entry a cell still points to.
+#[test]
+fn an_entity_encoded_shared_index_keeps_its_string() {
+    let source = markup_workbook();
+    let source = crate::fixtures::read_text_part(&source, "xl/worksheets/sheet1.xml");
+    assert!(source.contains(r#"<c r="A1" t="s"><v>0</v></c>"#));
+    let sheet = source.replace(
+        r#"<c r="A1" t="s"><v>0</v></c>"#,
+        r#"<c r="A1" t="s"><v>&#48;</v></c>"#,
+    );
+    let package = crate::fixtures::pack_typed(&[
+        ("_rels/.rels", "", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+        ("xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml", read_text_part(&markup_workbook(), "xl/workbook.xml").as_bytes()),
+        ("xl/_rels/workbook.xml.rels", "", read_text_part(&markup_workbook(), "xl/_rels/workbook.xml.rels").as_bytes()),
+        ("xl/worksheets/sheet1.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", sheet.as_bytes()),
+        ("xl/worksheets/sheet2.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml", read_text_part(&markup_workbook(), "xl/worksheets/sheet2.xml").as_bytes()),
+        ("xl/sharedStrings.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml", read_text_part(&markup_workbook(), SHARED_STRINGS_PART).as_bytes()),
+    ]);
+    let xlsx = Xlsx::open(&package).unwrap();
+    let edits = [CellEdit::new("Jane Roe", CellCoord::new(0, 1), "[EMAIL]")];
+    let out = xlsx.rewrite(&edits, &[], &[]).unwrap();
+    let pool = read_text_part(&out, SHARED_STRINGS_PART);
+    assert!(pool.contains("<t>Roe</t>"), "pruned a live entry: {pool}");
 }

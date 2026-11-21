@@ -28,6 +28,7 @@ use crate::opc::props;
 ///
 /// Panics if writing the in-memory zip fails, a fixture-builder error, never
 /// a runtime condition.
+#[must_use]
 pub fn pack_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -49,6 +50,7 @@ const RELATIONSHIPS_TYPE: &str = "application/vnd.openxmlformats-package.relatio
 /// # Panics
 ///
 /// As [`pack_parts`].
+#[must_use]
 pub fn pack_typed(parts: &[(&str, &str, &[u8])]) -> Vec<u8> {
     let mut manifest = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="{RELATIONSHIPS_TYPE}"/>"#
@@ -70,6 +72,7 @@ pub fn pack_typed(parts: &[(&str, &str, &[u8])]) -> Vec<u8> {
 ///
 /// The name is the full part name (e.g. `word/document.xml`). Returns `None` if
 /// the package cannot be opened or the part is absent.
+#[must_use]
 pub fn read_part(package: &[u8], name: &str) -> Option<Vec<u8>> {
     let mut zip = ZipArchive::new(Cursor::new(package)).ok()?;
     let mut entry = zip.by_name(name).ok()?;
@@ -93,15 +96,22 @@ pub fn read_text_part(package: &[u8], name: &str) -> String {
 /// Every part name in the package, in archive order.
 ///
 /// Useful to sweep the whole package for leaked values.
+///
+/// # Panics
+///
+/// Panics if the package is not a valid zip container or an entry name is
+/// not valid UTF-8, as [`text_parts`] does: an empty list for unreadable
+/// output would let a part-absence assertion pass on a corrupt package.
+#[must_use]
 pub fn part_names(package: &[u8]) -> Vec<String> {
-    let mut zip = match ZipArchive::new(Cursor::new(package)) {
-        Ok(zip) => zip,
-        Err(_) => return Vec::new(),
-    };
+    let mut zip = ZipArchive::new(Cursor::new(package)).expect("package is a valid zip container");
     (0..zip.len())
-        .filter_map(|i| {
-            let entry = zip.by_index(i).ok()?;
-            Some(entry.name().ok()?.into_owned())
+        .map(|i| {
+            let entry = zip.by_index(i).expect("zip entry index in range");
+            entry
+                .name()
+                .expect("zip entry name is valid UTF-8")
+                .into_owned()
         })
         .collect()
 }
@@ -119,6 +129,7 @@ pub fn part_names(package: &[u8]) -> Vec<String> {
 /// accepts (a non-UTF-8 part fails extraction as `NotUtf8`), so an
 /// undecodable part here is a malformed fixture, not an encoding the
 /// product supports.
+#[must_use]
 pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
     let mut zip = ZipArchive::new(Cursor::new(package)).expect("package is a valid zip container");
     (0..zip.len())

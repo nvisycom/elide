@@ -9,27 +9,14 @@
 //! and an exact byte span) and rewrites those spans back into a byte-faithful
 //! package.
 
-pub(crate) mod archive;
-mod attributes;
 mod block;
 pub(crate) mod check;
-pub(crate) mod content_types;
-pub(crate) mod ct;
-pub(crate) mod index;
-pub(crate) mod kind;
 pub(crate) mod names;
-pub(crate) mod ns;
-pub(crate) mod package_xml;
-mod part;
-pub mod props;
-pub(crate) mod references;
-pub(crate) mod relationships;
+pub(crate) mod package;
+pub(crate) mod props;
 pub(crate) mod sanitize;
 pub(crate) mod schema;
-mod store;
-pub(crate) mod vocabulary;
-pub(crate) mod xml_edit;
-pub(crate) mod xml_span;
+pub(crate) mod xml;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -38,19 +25,26 @@ use bytes::Bytes;
 use elide_core::{Error, Result};
 use quick_xml::escape::{EscapeError, unescape};
 
-pub use self::attributes::TextAttribute;
-pub(crate) use self::attributes::{Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns};
-pub use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
-use self::content_types::ContentTypes;
-use self::index::Index;
-pub use self::kind::PartKind;
-pub use self::names::Names;
-pub use self::part::{PartClassifier, PartPath, PartRole};
-use self::store::StoredPart;
+pub(crate) use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
+pub(crate) use self::names::Names;
+use self::package::archive::{self, RawPart};
+use self::package::content_types::{ContentType, ContentTypes};
+use self::package::index::Index;
+pub(crate) use self::package::kind::PartKind;
+pub(crate) use self::package::part::{PartClassifier, PartPath, PartRole};
+use self::package::store::{Markup, StoredPart};
+pub(crate) use self::xml::attributes::{
+    Collaboration, HiddenAttributes, NEUTRAL_DATE, Ns, TextAttribute,
+};
 
 /// A part's XML failing to read, as `e` says.
 pub(crate) fn malformed_xml(e: impl std::fmt::Display) -> Error {
     Error::malformed(format!("malformed part XML: {e}"))
+}
+
+/// The part `path`'s XML failing to read.
+pub(crate) fn malformed_part(path: impl std::fmt::Display) -> Error {
+    Error::malformed(format!("part `{path}` malformed XML"))
 }
 
 /// The attribute value written `raw` (inside its quotes) as XML reads it
@@ -80,7 +74,7 @@ pub(crate) fn attribute_value(raw: &str) -> Result<Cow<'_, str>> {
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
 #[derive(Debug, Clone)]
-pub struct Package {
+pub(crate) struct Package {
     /// Every package part, in archive order.
     parts: Vec<StoredPart>,
     /// The content-types manifest, which types every part.
@@ -113,37 +107,24 @@ impl Package {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable zip, the
     /// content-types manifest or a relationships part is unreadable, a part is
     /// unreadable, or a part exceeds the size cap.
-    pub fn open(document: &[u8], classifier: &dyn PartClassifier) -> Result<Self> {
-        Self::open_with_limits(
-            document,
-            classifier,
-            archive::MAX_PART_BYTES,
-            archive::MAX_PACKAGE_BYTES,
-        )
-    }
-
-    /// [`open`](Package::open) with explicit `part_cap` (per-part) and
-    /// `package_cap` (aggregate) byte limits, so tests can exercise the caps with
-    /// a small archive.
-    fn open_with_limits(
-        document: &[u8],
-        classifier: &dyn PartClassifier,
-        part_cap: u64,
-        package_cap: u64,
-    ) -> Result<Self> {
-        let index = Index::read_with_limits(document, part_cap, package_cap)?;
+    pub(crate) fn open(document: &[u8], classifier: &dyn PartClassifier) -> Result<Self> {
+        let index = Index::read(document)?;
         let parts = index
             .parts
             .iter()
-            .map(|(path, bytes)| {
+            .map(|RawPart { path, bytes }| {
                 let kind = index.kind(path);
-                let attributes = index.is_xml(path).then(|| classifier.text_attributes());
+                let markup = if index.is_xml(path) {
+                    Markup::Xml(classifier.text_attributes())
+                } else {
+                    Markup::Opaque
+                };
                 StoredPart::new(
                     path.clone(),
                     kind,
                     classifier.role(kind),
                     bytes.clone(),
-                    attributes,
+                    markup,
                 )
             })
             .collect();
@@ -157,44 +138,48 @@ impl Package {
 
     /// Whether the package contains a part of `kind`, so a facade can enforce a
     /// format's required part (e.g. a Word document must have its main part).
-    pub fn contains_kind(&self, kind: PartKind) -> bool {
+    #[must_use]
+    pub(crate) fn contains_kind(&self, kind: PartKind) -> bool {
         self.parts.iter().any(|p| p.kind() == kind)
+    }
+
+    /// The part at `path`, its name compared exactly.
+    fn part(&self, path: &str) -> Option<&StoredPart> {
+        self.parts.iter().find(|part| part.path().as_str() == path)
     }
 
     /// The content type the manifest names for the part at `path`, if the
     /// package has that part; part names compare ASCII case-insensitively, as
     /// OPC requires.
-    pub(crate) fn content_type(&self, path: &PartPath) -> Option<&str> {
+    pub(crate) fn content_type(&self, path: impl AsRef<str>) -> Option<&ContentType> {
+        let path = path.as_ref();
         let part = self
             .parts
             .iter()
-            .find(|p| p.path().as_str().eq_ignore_ascii_case(path.as_str()))?;
+            .find(|part| part.path().as_str().eq_ignore_ascii_case(path))?;
         self.content_types.of(part.path())
     }
 
     /// Whether the package contains a part at `path`.
-    pub fn contains_part(&self, path: &str) -> bool {
-        self.parts.iter().any(|p| p.path().as_str() == path)
+    #[must_use]
+    pub(crate) fn contains_part(&self, path: impl AsRef<str>) -> bool {
+        self.part(path.as_ref()).is_some()
     }
 
     /// The role of the part at `path`, or `None` when the package has no such
     /// part.
-    pub fn role_of(&self, path: &PartPath) -> Option<PartRole> {
-        self.parts
-            .iter()
-            .find(|p| p.path() == path)
-            .map(StoredPart::role)
+    #[must_use]
+    pub(crate) fn role_of(&self, path: impl AsRef<str>) -> Option<PartRole> {
+        self.part(path.as_ref()).map(StoredPart::role)
     }
 
     /// The raw bytes of the part at `path`, or `None` when the package has no
     /// such part. A cheap ref-counted share of the retained buffer, so a facade
     /// can parse a part's own structure (e.g. XLSX reading its shared-string
     /// table and sheet cells) before deciding what to redact.
-    pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
-        self.parts
-            .iter()
-            .find(|p| p.path().as_str() == path)
-            .map(StoredPart::bytes)
+    #[must_use]
+    pub(crate) fn part_bytes(&self, path: impl AsRef<str>) -> Option<Bytes> {
+        self.part(path.as_ref()).map(StoredPart::bytes)
     }
 
     /// Extract the redactable text and embedded media of the package.
@@ -204,7 +189,8 @@ impl Package {
     /// are carried through untouched. Extraction is partial-success: a text part
     /// that cannot be parsed is recorded in [`issues`](Extraction::issues)
     /// rather than failing the whole document.
-    pub fn extract(&self) -> Extraction {
+    #[must_use]
+    pub(crate) fn extract(&self) -> Extraction {
         let mut blocks = Vec::new();
         let mut issues = Vec::new();
         for part in &self.parts {
@@ -230,7 +216,7 @@ impl Package {
 
     /// The binary embeddings (images, media, embedded objects) the classifier
     /// surfaces for redaction, each addressed by its part.
-    pub fn embeddings(&self) -> Vec<Embedding> {
+    pub(crate) fn embeddings(&self) -> Vec<Embedding> {
         self.parts
             .iter()
             .filter_map(|part| match part.role() {
@@ -258,9 +244,8 @@ impl Package {
         replacements: &[&Replacement],
     ) -> Result<String> {
         let part = self
-            .parts
-            .iter()
-            .find(|part| part.path() == path && part.is_text())
+            .part(path.as_str())
+            .filter(|part| part.is_text())
             .ok_or_else(|| {
                 Error::processing(format!("replacement names non-text part `{path}`"))
             })?;
@@ -280,7 +265,7 @@ impl Package {
     ///
     /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if a
     /// replacement can't be applied.
-    pub fn rewrite_with_parts(
+    pub(crate) fn rewrite_with_parts(
         &self,
         replacements: &[Replacement],
         parts: &[PartReplacement],
@@ -298,13 +283,12 @@ impl Package {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a text part is not UTF-8 or well-formed
     /// XML.
     pub(crate) fn fit_names(&self, replacements: &[Replacement]) -> Result<Vec<Replacement>> {
-        let mut texts = Vec::new();
-        for part in &self.parts {
-            if !part.is_text() || part.role() == PartRole::RelationshipTargets {
-                continue;
-            }
-            texts.push((part.path(), part.utf8()?));
-        }
+        let texts = self
+            .parts
+            .iter()
+            .filter(|part| part.is_text() && part.role() != PartRole::RelationshipTargets)
+            .map(|part| Ok((part.path(), part.utf8_or_malformed()?)))
+            .collect::<Result<Vec<_>>>()?;
         names::fit_names(self.names, texts.iter().copied(), replacements)
     }
 
@@ -316,14 +300,14 @@ impl Package {
         parts: &[PartReplacement],
     ) -> Result<Vec<u8>> {
         // Index every stored part once for O(1) lookup during validation.
-        let index: HashMap<&PartPath, &StoredPart> =
+        let by_path: HashMap<&PartPath, &StoredPart> =
             self.parts.iter().map(|p| (p.path(), p)).collect();
 
         // Group text replacements by part, validating each names an existing
         // text-bearing part.
         let mut by_part: HashMap<&PartPath, Vec<&Replacement>> = HashMap::new();
         for r in replacements {
-            let Some(part) = index.get(&r.part) else {
+            let Some(part) = by_path.get(&r.part) else {
                 return Err(Error::processing(format!(
                     "replacement names unknown part `{}`",
                     r.part
@@ -343,7 +327,7 @@ impl Package {
         // by a text splice.
         let mut part_bytes: HashMap<&PartPath, &[u8]> = HashMap::new();
         for pr in parts {
-            let Some(part) = index.get(&pr.part) else {
+            let Some(part) = by_path.get(&pr.part) else {
                 return Err(Error::processing(format!(
                     "part replacement names unknown part `{}`",
                     pr.part

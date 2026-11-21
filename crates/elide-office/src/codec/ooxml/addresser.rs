@@ -29,16 +29,7 @@ impl SourceAddresser<OoxmlAddress> for OoxmlAddresser {
         items: &[ExtractedItem<OoxmlAddress>],
         source: &[SourceRef],
     ) -> Vec<ItemEdit> {
-        locate_source(
-            items.iter().map(|item| {
-                (
-                    item.address.part.as_str(),
-                    item.address.span.clone(),
-                    &item.address.offsets,
-                )
-            }),
-            source,
-        )
+        locate_source(items.iter().map(|item| &item.address), source)
     }
 }
 
@@ -55,33 +46,31 @@ fn source_span(part: &str, offsets: &OffsetMap, local: Range<usize>) -> Vec<Sour
 
 /// Reverse of [`source_span`]: locate the block indices and decoded-local
 /// ranges that raw `source` references address. `blocks` yields each block's
-/// part, raw span, and offset map in item order. Each reference must lie
-/// within one block of its part, and resolves to one edit of it.
+/// address in item order. Each reference must lie within one block of its
+/// part, and resolves to one edit of it.
 ///
 /// Fails closed (no edits) when a reference names no part or lies in no block:
 /// raw offsets are part-local, so a reference is never matched against another
 /// part's blocks (two parts can share the same numeric offsets).
 fn locate_source<'a>(
-    blocks: impl Iterator<Item = (&'a str, Range<usize>, &'a OffsetMap)>,
+    blocks: impl Iterator<Item = &'a OoxmlAddress> + Clone,
     source: &[SourceRef],
 ) -> Vec<ItemEdit> {
-    let blocks: Vec<_> = blocks.collect();
     let mut edits = Vec::with_capacity(source.len());
     for reference in source {
         let Some(part) = reference.part.as_deref() else {
             return Vec::new();
         };
         let raw = &reference.range;
-        let block = blocks
-            .iter()
-            .enumerate()
-            .find(|(_, (block_part, span, _))| {
-                *block_part == part && span.start <= raw.start && raw.end <= span.end
-            });
-        let Some((item, (_, _, offsets))) = block else {
+        let block = blocks.clone().enumerate().find(|(_, block)| {
+            block.part.as_str() == part
+                && block.span.start <= raw.start
+                && raw.end <= block.span.end
+        });
+        let Some((item, block)) = block else {
             return Vec::new();
         };
-        let decoded = offsets.decoded_ranges(raw.clone());
+        let decoded = block.offsets.decoded_ranges(raw.clone());
         let (Some(first), Some(last)) = (decoded.first(), decoded.last()) else {
             return Vec::new();
         };
@@ -99,25 +88,22 @@ mod tests {
 
     /// Two parts whose blocks share the same numeric raw offsets. A selection
     /// must never aggregate references across them.
-    fn two_parts() -> Vec<(&'static str, Range<usize>, OffsetMap)> {
-        vec![
-            ("word/document.xml", 0..10, OffsetMap::identity(0, 10)),
-            ("word/header1.xml", 0..10, OffsetMap::identity(0, 10)),
-        ]
-    }
-
-    /// Each of `v`'s blocks as [`locate_source`] takes it.
-    fn blocks<'a>(
-        v: &'a [(&'static str, Range<usize>, OffsetMap)],
-    ) -> impl Iterator<Item = (&'a str, Range<usize>, &'a OffsetMap)> + 'a {
-        v.iter().map(|(p, span, m)| (*p, span.clone(), m))
+    fn two_parts() -> Vec<OoxmlAddress> {
+        ["word/document.xml", "word/header1.xml"]
+            .into_iter()
+            .map(|part| OoxmlAddress {
+                part: part.into(),
+                span: 0..10,
+                offsets: OffsetMap::identity(0, 10),
+            })
+            .collect()
     }
 
     #[test]
     fn single_part_selection_resolves() {
         let parts = two_parts();
         let source = [SourceRef::in_part(2..5, "word/header1.xml")];
-        let edits = locate_source(blocks(&parts), &source);
+        let edits = locate_source(parts.iter(), &source);
         assert_eq!(
             edits,
             vec![ItemEdit {
@@ -137,7 +123,7 @@ mod tests {
             SourceRef::in_part(2..5, "word/header1.xml"),
         ];
         assert_eq!(
-            locate_source(blocks(&parts), &source),
+            locate_source(parts.iter(), &source),
             vec![
                 ItemEdit {
                     item: 0,
@@ -158,6 +144,6 @@ mod tests {
             SourceRef::in_part(2..5, "word/document.xml"),
             SourceRef::in_part(8..12, "word/header1.xml"),
         ];
-        assert!(locate_source(blocks(&parts), &source).is_empty());
+        assert!(locate_source(parts.iter(), &source).is_empty());
     }
 }

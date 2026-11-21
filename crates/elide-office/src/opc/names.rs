@@ -15,15 +15,15 @@ use std::ops::Range;
 
 use elide_core::{Error, Result};
 
-use crate::opc::attribute_value;
-use crate::opc::attributes::TextAttribute;
 use crate::opc::block::Replacement;
-use crate::opc::part::PartPath;
-use crate::opc::xml_span::attribute_ranges;
+use crate::opc::package::part::PartPath;
+use crate::opc::xml::attributes::TextAttribute;
+use crate::opc::xml::span::attribute_ranges;
+use crate::opc::{attribute_value, malformed_part};
 
 /// A format's names and the attributes referring to them.
 #[derive(Debug, Clone, Copy)]
-pub struct Names {
+pub(crate) struct Names {
     pub(crate) rules: &'static [NameRule],
     pub(crate) references: &'static [NameReference],
 }
@@ -36,16 +36,37 @@ impl Names {
     };
 }
 
+/// The group a name is unique in, and a reference refers into, such as
+/// `sheet` or `bookmark`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct NameGroup(&'static str);
+
+impl NameGroup {
+    /// The group called `name`.
+    pub(crate) const fn new(name: &'static str) -> Self {
+        Self(name)
+    }
+}
+
+/// Where a name is unique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unique {
+    /// In the whole package.
+    InPackage,
+    /// In its own part.
+    InPart,
+}
+
 /// One kind of name and the rules a redacted one is fitted to.
 #[derive(Debug, Clone, Copy)]
-pub struct NameRule {
+pub(crate) struct NameRule {
     /// The attribute holding the name.
     pub(crate) attribute: TextAttribute,
     /// The group the name is unique in. Names of different rules in one group
     /// are unique together.
-    pub(crate) group: &'static str,
-    /// Whether the name is unique in its part, rather than in the package.
-    pub(crate) per_part: bool,
+    pub(crate) group: NameGroup,
+    /// Where the name is unique in its group.
+    pub(crate) unique: Unique,
     /// The name with its forbidden characters replaced; never empty.
     pub(crate) fit: fn(&str) -> String,
     /// The longest name, in characters, or `None` when unbounded.
@@ -74,11 +95,11 @@ impl Numbering {
 
 /// An attribute that refers to a name of `group`.
 #[derive(Debug, Clone, Copy)]
-pub struct NameReference {
+pub(crate) struct NameReference {
     /// The attribute holding the reference. It is a text attribute too, so it
     /// can be spliced.
     pub(crate) attribute: TextAttribute,
-    pub(crate) group: &'static str,
+    pub(crate) group: NameGroup,
     pub(crate) form: ReferenceForm,
 }
 
@@ -101,6 +122,37 @@ struct Found {
     redacted: Option<String>,
 }
 
+impl Found {
+    /// Where the name must be unique.
+    fn scope(&self) -> Scope {
+        Scope {
+            group: self.rule.group,
+            part: match self.rule.unique {
+                Unique::InPackage => None,
+                Unique::InPart => Some(self.part.clone()),
+            },
+        }
+    }
+}
+
+/// Where a name must be unique: its group, within its part when the name is
+/// unique per part.
+#[derive(PartialEq, Eq, Hash)]
+struct Scope {
+    group: NameGroup,
+    part: Option<PartPath>,
+}
+
+/// A renamed name: its group and its old value, lowercased.
+#[derive(PartialEq, Eq, Hash)]
+struct OldName {
+    group: NameGroup,
+    lowercase: String,
+}
+
+/// Each renamed name's new value.
+type Renamed = HashMap<OldName, String>;
+
 /// `replacements` with each one landing in a name folded into a replacement of
 /// the whole name, fitted to its rule and unique in its group, and every
 /// reference to a renamed name rewritten. `parts` are the package's XML text
@@ -119,16 +171,32 @@ pub(crate) fn fit_names<'a>(
         return Ok(replacements.to_vec());
     }
     let mut pending: Vec<&Replacement> = replacements.iter().collect();
+    let found = find_names(names, parts.clone(), &mut pending)?;
+    let (mut out, renamed) = fit_found(&found);
+    if !renamed.is_empty() {
+        for (part, raw) in parts {
+            out.extend(retarget_part(names, part, raw, &renamed, &mut pending)?);
+        }
+    }
+    out.extend(pending.into_iter().cloned());
+    Ok(out)
+}
 
-    // Every name, with the redaction that lands in it.
+/// Every name in `parts`, with the redaction that lands in it taken from
+/// `pending`.
+fn find_names<'a>(
+    names: &'static Names,
+    parts: impl Iterator<Item = (&'a PartPath, &'a str)>,
+    pending: &mut Vec<&Replacement>,
+) -> Result<Vec<Found>> {
     let mut found: Vec<Found> = Vec::new();
     let rule_attributes: Vec<TextAttribute> = names.rules.iter().map(|r| r.attribute).collect();
-    for (part, raw) in parts.clone() {
+    for (part, raw) in parts {
         let ranges = spans(part, raw, &rule_attributes)?;
         for (rule, ranges) in names.rules.iter().zip(ranges) {
             for range in ranges {
-                let (inside, outside) = take_inside(pending, &range);
-                pending = outside;
+                let (inside, outside) = take_inside(std::mem::take(pending), part, &range);
+                *pending = outside;
                 found.push(Found {
                     part: part.clone(),
                     original: decoded(part, &raw[range.clone()])?,
@@ -141,73 +209,76 @@ pub(crate) fn fit_names<'a>(
             }
         }
     }
+    Ok(found)
+}
 
-    // Fit each redacted name, unique among its group's final names.
-    let group_of = |name: &Found| {
-        let part = name.rule.per_part.then(|| name.part.clone());
-        (name.rule.group, part)
-    };
-    let mut taken: HashMap<(&str, Option<PartPath>), HashSet<String>> = HashMap::new();
+/// A replacement of each redacted name in `found` fitted to its rule, unique
+/// among its group's final names, and each renamed name's new value.
+fn fit_found(found: &[Found]) -> (Vec<Replacement>, Renamed) {
+    let mut taken: HashMap<Scope, HashSet<String>> = HashMap::new();
     for name in found.iter().filter(|name| name.redacted.is_none()) {
         taken
-            .entry(group_of(name))
+            .entry(name.scope())
             .or_default()
             .insert(name.original.to_lowercase());
     }
     let mut out: Vec<Replacement> = Vec::new();
-    // A renamed name's group and old (lowercased) value, to its new value.
-    let mut renamed: HashMap<(&str, String), String> = HashMap::new();
-    for name in &found {
+    let mut renamed = Renamed::new();
+    for name in found {
         let Some(redacted) = &name.redacted else {
             continue;
         };
-        let taken = taken.entry(group_of(name)).or_default();
+        let taken = taken.entry(name.scope()).or_default();
         let fitted = unique((name.rule.fit)(redacted), name.rule, taken);
         taken.insert(fitted.to_lowercase());
-        renamed.insert(
-            (name.rule.group, name.original.to_lowercase()),
-            fitted.clone(),
-        );
+        let old = OldName {
+            group: name.rule.group,
+            lowercase: name.original.to_lowercase(),
+        };
+        renamed.insert(old, fitted.clone());
         out.push(Replacement {
             part: name.part.clone(),
-            start: name.range.start,
-            end: name.range.end,
+            span: name.range.clone(),
             text: fitted.into(),
         });
     }
+    (out, renamed)
+}
 
-    // Point every reference to a renamed name at its new one. An attribute
-    // that may refer to names of several groups is retargeted once.
-    if !renamed.is_empty() {
-        let mut retargeted: HashSet<(PartPath, usize)> = HashSet::new();
-        let reference_attributes: Vec<TextAttribute> =
-            names.references.iter().map(|r| r.attribute).collect();
-        for (part, raw) in parts {
-            let ranges = spans(part, raw, &reference_attributes)?;
-            for (reference, ranges) in names.references.iter().zip(ranges) {
-                for range in ranges {
-                    if retargeted.contains(&(part.clone(), range.start)) {
-                        continue;
-                    }
-                    let value = decoded(part, &raw[range.clone()])?;
-                    let Some(text) = retarget(&value, reference, &renamed) else {
-                        continue;
-                    };
-                    let (_, outside) = take_inside(pending, &range);
-                    pending = outside;
-                    retargeted.insert((part.clone(), range.start));
-                    out.push(Replacement {
-                        part: part.clone(),
-                        start: range.start,
-                        end: range.end,
-                        text: text.into(),
-                    });
-                }
+/// A replacement of every reference in `part` to a `renamed` name pointing
+/// it at its new one, each taking the place of what `pending` had for it. An
+/// attribute that may refer to names of several groups is retargeted once.
+fn retarget_part(
+    names: &'static Names,
+    part: &PartPath,
+    raw: &str,
+    renamed: &Renamed,
+    pending: &mut Vec<&Replacement>,
+) -> Result<Vec<Replacement>> {
+    let mut out = Vec::new();
+    let mut retargeted: HashSet<usize> = HashSet::new();
+    let reference_attributes: Vec<TextAttribute> =
+        names.references.iter().map(|r| r.attribute).collect();
+    let ranges = spans(part, raw, &reference_attributes)?;
+    for (reference, ranges) in names.references.iter().zip(ranges) {
+        for range in ranges {
+            if retargeted.contains(&range.start) {
+                continue;
             }
+            let value = decoded(part, &raw[range.clone()])?;
+            let Some(text) = retarget(&value, reference, renamed) else {
+                continue;
+            };
+            let (_, outside) = take_inside(std::mem::take(pending), part, &range);
+            *pending = outside;
+            retargeted.insert(range.start);
+            out.push(Replacement {
+                part: part.clone(),
+                span: range.clone(),
+                text: text.into(),
+            });
         }
     }
-
-    out.extend(pending.into_iter().cloned());
     Ok(out)
 }
 
@@ -218,18 +289,19 @@ fn spans(
     raw: &str,
     attributes: &[TextAttribute],
 ) -> Result<Vec<Vec<Range<usize>>>> {
-    attribute_ranges(raw, attributes)
-        .map_err(|()| Error::malformed(format!("`{part}` malformed XML")))
+    attribute_ranges(raw, attributes).map_err(|_| malformed_part(part))
 }
 
-/// `pending` split into the replacements inside `range` and the rest.
+/// `pending` split into the replacements inside `range` of `part` and the
+/// rest. Another part's replacement at the same offsets stays pending.
 fn take_inside<'r>(
     pending: Vec<&'r Replacement>,
+    part: &PartPath,
     range: &Range<usize>,
 ) -> (Vec<&'r Replacement>, Vec<&'r Replacement>) {
     pending
         .into_iter()
-        .partition(|r| range.start <= r.start && r.end <= range.end)
+        .partition(|r| &r.part == part && range.start <= r.span.start && r.span.end <= range.end)
 }
 
 /// The value at `range` of `raw` with `inside` applied, entities resolved.
@@ -240,13 +312,13 @@ fn redacted(
     inside: &[&Replacement],
 ) -> Result<String> {
     let mut inside = inside.to_vec();
-    inside.sort_by_key(|r| r.start);
+    inside.sort_by_key(|r| r.span.start);
     let mut value = String::new();
     let mut cursor = range.start;
     for r in inside {
-        value.push_str(&decoded(part, &raw[cursor..r.start])?);
+        value.push_str(&decoded(part, &raw[cursor..r.span.start])?);
         value.push_str(&r.text);
-        cursor = r.end;
+        cursor = r.span.end;
     }
     value.push_str(&decoded(part, &raw[cursor..range.end])?);
     Ok(value)
@@ -283,12 +355,13 @@ fn unique(name: String, rule: &NameRule, taken: &HashSet<String>) -> String {
 
 /// The reference `value` pointed at its target's new name, or `None` when its
 /// target was not renamed.
-fn retarget(
-    value: &str,
-    reference: &NameReference,
-    renamed: &HashMap<(&str, String), String>,
-) -> Option<String> {
-    let new = |old: &str| renamed.get(&(reference.group, old.to_lowercase()));
+fn retarget(value: &str, reference: &NameReference, renamed: &Renamed) -> Option<String> {
+    let new = |old: &str| {
+        renamed.get(&OldName {
+            group: reference.group,
+            lowercase: old.to_lowercase(),
+        })
+    };
     match reference.form {
         ReferenceForm::Exact => new(value).cloned(),
         ReferenceForm::SheetQualified => {
@@ -310,18 +383,20 @@ mod tests {
     const SHEET: TextAttribute = TextAttribute::unqualified("sheet", "name");
     const LOCATION: TextAttribute = TextAttribute::unqualified("hyperlink", "location");
 
+    const SHEETS: NameGroup = NameGroup::new("sheet");
+
     static NAMES: Names = Names {
         rules: &[NameRule {
             attribute: SHEET,
-            group: "sheet",
-            per_part: false,
+            group: SHEETS,
+            unique: Unique::InPackage,
             fit: |name| name.replace(['[', ']'], "_"),
             max: Some(31),
             numbering: Numbering::Parenthesized,
         }],
         references: &[NameReference {
             attribute: LOCATION,
-            group: "sheet",
+            group: SHEETS,
             form: ReferenceForm::SheetQualified,
         }],
     };
@@ -330,8 +405,7 @@ mod tests {
         let start = raw.find(value).unwrap();
         Replacement {
             part: part.clone(),
-            start,
-            end: start + value.len(),
+            span: start..start + value.len(),
             text: "[PERSON]".into(),
         }
     }
@@ -363,6 +437,25 @@ mod tests {
         };
         assert_eq!(text(&workbook), ["_PERSON_", "_PERSON_ (2)"]);
         assert_eq!(text(&sheet), ["'_PERSON_'!B2"]);
+    }
+
+    /// A replacement lands in a name only in its own part, though another
+    /// part holds a name at the same offsets.
+    #[test]
+    fn a_replacement_lands_only_in_its_own_part() {
+        let first = PartPath::from("xl/workbook.xml");
+        let second = PartPath::from("xl/workbook2.xml");
+        let raw = r#"<workbook><sheet name="Jane Roe"/></workbook>"#;
+        let parts = [(&first, raw), (&second, raw)];
+        let fitted = fit_names(
+            &NAMES,
+            parts.iter().copied(),
+            &[at(&second, raw, "Jane Roe")],
+        )
+        .unwrap();
+        assert_eq!(fitted.len(), 1, "{fitted:?}");
+        assert_eq!(fitted[0].part, second);
+        assert_eq!(&*fitted[0].text, "_PERSON_");
     }
 
     #[test]

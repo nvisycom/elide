@@ -12,7 +12,7 @@
 //! A hyperlink's location, a defined name or a sheet-qualified cell, follows
 //! a renamed name. A formula naming one does not.
 
-use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
+use crate::opc::names::{NameGroup, NameReference, NameRule, Numbering, ReferenceForm, Unique};
 use crate::opc::{Names, TextAttribute};
 
 /// A sheet's name, shown on its tab.
@@ -42,45 +42,54 @@ const MAX_SHEET_NAME: usize = 31;
 /// The longest defined or table name Excel accepts, in characters.
 const MAX_IDENTIFIER: usize = 255;
 
+/// The sheet names.
+const SHEETS: NameGroup = NameGroup::new("sheet");
+/// The defined names and the table display names, which share one namespace.
+const DEFINED_NAMES: NameGroup = NameGroup::new("name");
+/// The table names.
+const TABLES: NameGroup = NameGroup::new("table");
+/// The column names of a table.
+const COLUMNS: NameGroup = NameGroup::new("column");
+
 /// The names of a workbook.
 pub(super) static NAMES: Names = Names {
     rules: &[
         NameRule {
             attribute: SHEET_NAME,
-            group: "sheet",
-            per_part: false,
+            group: SHEETS,
+            unique: Unique::InPackage,
             fit: fit_sheet_name,
             max: Some(MAX_SHEET_NAME),
             numbering: Numbering::Parenthesized,
         },
         NameRule {
             attribute: DEFINED_NAME,
-            group: "name",
-            per_part: false,
+            group: DEFINED_NAMES,
+            unique: Unique::InPackage,
             fit: fit_identifier,
             max: Some(MAX_IDENTIFIER),
             numbering: Numbering::Underscored,
         },
         NameRule {
             attribute: TABLE_DISPLAY_NAME,
-            group: "name",
-            per_part: false,
+            group: DEFINED_NAMES,
+            unique: Unique::InPackage,
             fit: fit_identifier,
             max: Some(MAX_IDENTIFIER),
             numbering: Numbering::Underscored,
         },
         NameRule {
             attribute: TABLE_NAME,
-            group: "table",
-            per_part: false,
+            group: TABLES,
+            unique: Unique::InPackage,
             fit: fit_identifier,
             max: Some(MAX_IDENTIFIER),
             numbering: Numbering::Underscored,
         },
         NameRule {
             attribute: TABLE_COLUMN_NAME,
-            group: "column",
-            per_part: true,
+            group: COLUMNS,
+            unique: Unique::InPart,
             fit: fit_column_name,
             max: None,
             numbering: Numbering::Parenthesized,
@@ -89,12 +98,12 @@ pub(super) static NAMES: Names = Names {
     references: &[
         NameReference {
             attribute: HYPERLINK_LOCATION,
-            group: "sheet",
+            group: SHEETS,
             form: ReferenceForm::SheetQualified,
         },
         NameReference {
             attribute: HYPERLINK_LOCATION,
-            group: "name",
+            group: DEFINED_NAMES,
             form: ReferenceForm::Exact,
         },
     ],

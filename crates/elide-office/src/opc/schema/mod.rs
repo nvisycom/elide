@@ -55,15 +55,15 @@ use quick_xml::escape::partial_escape;
 use quick_xml::events::{BytesStart, Event};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
-use crate::opc::archive::MAX_PART_BYTES;
-use crate::opc::ct::{self, DML, PML, SML, WML};
-use crate::opc::ns::{
+use crate::opc::package::archive::MAX_PART_BYTES;
+use crate::opc::package::content_types::{self, ContentType, DML, PML, SML, WML};
+use crate::opc::xml::edit::{
+    Cut, Growth, Name, Skipped, SpannedReader, attribute_extent, declarations, namespace_of,
+    push_joined, redeclared, refuse_doctype, splice_with,
+};
+use crate::opc::xml::ns::{
     A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
     W16CEX, W16CID, X, XDR, transitional,
-};
-use crate::opc::xml_edit::{
-    Growth, Name, Skipped, SpannedReader, attribute_extent, declarations, namespace_of,
-    push_joined, redeclared, splice_with,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
@@ -85,14 +85,42 @@ pub(crate) struct Type {
 #[derive(Debug)]
 pub(crate) struct Child(u8, &'static str, u16);
 
+impl Child {
+    /// The index of the element's namespace.
+    fn namespace(&self) -> u8 {
+        self.0
+    }
+
+    /// The element's local name.
+    fn local(&self) -> &'static str {
+        self.1
+    }
+
+    /// The index of the element's type.
+    fn ty(&self) -> u16 {
+        self.2
+    }
+
+    /// The type of the element `local` in the namespace indexed `namespace`
+    /// among `children`, sorted, if one of them is it.
+    fn find(children: &[Self], namespace: u8, local: &str) -> Option<u16> {
+        children
+            .binary_search_by(|child| (child.namespace(), child.local()).cmp(&(namespace, local)))
+            .ok()
+            .map(|at| children[at].ty())
+    }
+}
+
+/// The schema type indexed `index`.
+fn ty(index: u16) -> &'static Type {
+    &TYPES[usize::from(index)]
+}
+
 impl Type {
     /// The type of the child `local` in the namespace indexed `namespace`, if
     /// this type allows it.
     fn child(&self, namespace: u8, local: &str) -> Option<u16> {
-        self.children
-            .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(namespace, local)))
-            .ok()
-            .map(|at| self.children[at].2)
+        Child::find(self.children, namespace, local)
     }
 
     /// Whether this type declares the attribute `local` in the namespace
@@ -139,8 +167,9 @@ pub(crate) fn declares_reference(element: Name<'_>, attribute: Name<'_>) -> bool
             .iter()
             .flat_map(|ty| ty.children)
             .chain(&ROOTS)
-            .flat_map(|&Child(namespace, local, ty)| {
-                TYPES[usize::from(ty)]
+            .flat_map(|child| {
+                let (namespace, local) = (child.namespace(), child.local());
+                ty(child.ty())
                     .attributes
                     .iter()
                     .filter(move |&&(n, l)| Some(n) == r || (Some(n) == o && l == "relid"))
@@ -165,17 +194,22 @@ pub(crate) fn declares_reference(element: Name<'_>, attribute: Name<'_>) -> bool
 /// The root element a part must have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Root {
-    /// This element, by namespace and local name.
-    Element(&'static str, &'static str),
+    /// This element.
+    Element {
+        /// The element's namespace.
+        namespace: &'static str,
+        /// The element's local name.
+        local: &'static str,
+    },
     /// A legacy VML drawing: an unqualified `<xml>` holding VML shapes.
     Vml,
 }
 
 /// The root a part of `content_type` must have, or `None` when no schema this
 /// crate holds describes the part, so it cannot be rebuilt.
-pub(crate) fn root(content_type: &str) -> Option<Root> {
-    let content_type = content_type.to_ascii_lowercase();
-    let element = |namespace, local| Some(Root::Element(namespace, local));
+pub(crate) fn root(content_type: &ContentType) -> Option<Root> {
+    let content_type = content_type.as_str();
+    let element = |namespace, local| Some(Root::Element { namespace, local });
     if let Some(name) = content_type.strip_prefix(WML) {
         return match name {
             "document.main+xml" | "template.main+xml" => element(W, "document"),
@@ -239,13 +273,13 @@ pub(crate) fn root(content_type: &str) -> Option<Root> {
             _ => None,
         };
     }
-    match content_type.as_str() {
+    match content_type {
         "application/vnd.openxmlformats-officedocument.theme+xml" => element(A, "theme"),
         "application/vnd.openxmlformats-officedocument.themeoverride+xml" => {
             element(A, "themeOverride")
         }
         "application/vnd.openxmlformats-officedocument.drawing+xml" => element(XDR, "wsDr"),
-        ct::VML_DRAWING => Some(Root::Vml),
+        content_types::VML_DRAWING => Some(Root::Vml),
         "application/vnd.ms-word.styleswitheffects+xml" => element(W, "styles"),
         "application/vnd.ms-word.commentsextended+xml" => element(W15, "commentsEx"),
         "application/vnd.ms-word.commentsids+xml" => element(W16CID, "commentsIds"),
@@ -338,6 +372,7 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
 
     loop {
         let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
+        refuse_doctype(&event)?;
         if Skipped::skip(&mut rebuild.removing, &event, span.end, &mut rebuild.cuts)? {
             continue;
         }
@@ -354,7 +389,7 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
             }
             Event::Eof => break,
             Event::Decl(_) => {}
-            // Refused by the skip above.
+            // Refused above.
             Event::DocType(_) => {}
             // Comments are cut by their own edit.
             Event::Comment(_) => {}
@@ -363,7 +398,9 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
             // written as the text it stands for, which extraction reads.
             Event::CData(ref text) if holds_text(scope) => {
                 let text: &str = text.as_ref();
-                rebuild.cuts.push((span, partial_escape(text).into_owned()));
+                rebuild
+                    .cuts
+                    .push(Cut::new(span, partial_escape(text).into_owned()));
             }
             Event::CData(_) => rebuild.cut(span, HiddenContent::Undisplayed),
             Event::Text(ref text) => {
@@ -428,7 +465,7 @@ struct Rebuild<'a> {
     raw: &'a str,
     /// Each span of the source the rebuild replaces, with what replaces it:
     /// nothing for what it leaves out.
-    cuts: Vec<(Range<usize>, String)>,
+    cuts: Vec<Cut>,
     /// What was left out, by kind.
     removed: BTreeMap<HiddenContent, usize>,
     /// The open frames, innermost last.
@@ -468,7 +505,7 @@ impl<'a> Rebuild<'a> {
 
     /// Cut `span`, a removal of `content`.
     fn cut(&mut self, span: Range<usize>, content: HiddenContent) {
-        self.cuts.push((span, String::new()));
+        self.cuts.push(Cut::remove(span));
         self.record(content);
     }
 
@@ -512,7 +549,7 @@ impl<'a> Rebuild<'a> {
             // The unwrapped tag goes whole, its declarations carried to the
             // children it held and its other attributes recorded.
             Frame::Alternate(_) | Frame::Fallback(_) => {
-                self.cuts.push((span, String::new()));
+                self.cuts.push(Cut::remove(span));
                 for attr in e.attributes() {
                     let attr = attr.map_err(malformed_xml)?;
                     if attr.key.as_namespace_binding().is_none() {
@@ -540,7 +577,7 @@ impl<'a> Rebuild<'a> {
         if let Some(open) = self.open.pop() {
             self.carried.truncate(open.own_from);
             if open.frame.unwrapped() {
-                self.cuts.push((span, String::new()));
+                self.cuts.push(Cut::remove(span));
             }
         }
     }
@@ -548,7 +585,7 @@ impl<'a> Rebuild<'a> {
     /// Insert `text` at `at`, keeping the part within the size limit, the
     /// cuts made so far counted against it.
     fn insert(&mut self, at: usize, text: String) -> Result<()> {
-        self.cuts.push((at..at, text));
+        self.cuts.push(Cut::new(at..at, text));
         self.growth.count(&self.cuts)
     }
 
@@ -560,7 +597,7 @@ impl<'a> Rebuild<'a> {
         e: &BytesStart<'_>,
         ty: Option<u16>,
     ) -> Result<()> {
-        let ty = ty.map(|ty| &TYPES[usize::from(ty)]);
+        let ty = ty.map(self::ty);
         for attr in e.attributes() {
             let attr = attr.map_err(malformed_xml)?;
             if attr.key.as_namespace_binding().is_some() {
@@ -573,8 +610,8 @@ impl<'a> Rebuild<'a> {
                     .is_some_and(|index| ty.declares(index, local))
             });
             if !declared {
-                let (extent, _) = attribute_extent(self.raw, &attr)?;
-                self.cut(extent, HiddenContent::ApplicationData);
+                let extent = attribute_extent(self.raw, &attr)?;
+                self.cut(extent.whole, HiddenContent::ApplicationData);
             }
         }
         Ok(())
@@ -607,15 +644,53 @@ impl<'a> Rebuild<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Payload(u8, &'static str);
 
-/// The payloads `a:graphicData` may hold, by the `uri` naming each: its
-/// vocabulary and name in the URI, and its element.
-const PAYLOADS: &[(&str, &str, &str, &str)] = &[
-    ("drawingml", "picture", PIC, "pic"),
-    ("drawingml", "chart", C, "chart"),
-    ("drawingml", "diagram", DGM, "relIds"),
-    ("drawingml", "lockedCanvas", LC, "lockedCanvas"),
-    ("drawingml", "table", A, "tbl"),
-    ("presentationml", "ole", P, "oleObj"),
+/// A payload `a:graphicData` may hold, by the `uri` naming it.
+struct PayloadUri {
+    /// The vocabulary the URI names.
+    area: &'static str,
+    /// The payload's name in the URI.
+    name: &'static str,
+    /// The payload element's namespace.
+    namespace: &'static str,
+    /// The payload element's local name.
+    local: &'static str,
+}
+
+impl PayloadUri {
+    const fn new(
+        area: &'static str,
+        name: &'static str,
+        namespace: &'static str,
+        local: &'static str,
+    ) -> Self {
+        Self {
+            area,
+            name,
+            namespace,
+            local,
+        }
+    }
+
+    /// Whether `uri` names this payload, transitional or strict.
+    fn named_by(&self, uri: &str) -> bool {
+        uri.strip_prefix("http://schemas.openxmlformats.org/")
+            .and_then(|rest| rest.strip_prefix(self.area))
+            .is_some_and(|rest| rest.strip_prefix("/2006/") == Some(self.name))
+            || uri
+                .strip_prefix("http://purl.oclc.org/ooxml/")
+                .and_then(|rest| rest.strip_prefix(self.area))
+                .is_some_and(|rest| rest.strip_prefix('/') == Some(self.name))
+    }
+}
+
+/// The payloads `a:graphicData` may hold.
+const PAYLOADS: &[PayloadUri] = &[
+    PayloadUri::new("drawingml", "picture", PIC, "pic"),
+    PayloadUri::new("drawingml", "chart", C, "chart"),
+    PayloadUri::new("drawingml", "diagram", DGM, "relIds"),
+    PayloadUri::new("drawingml", "lockedCanvas", LC, "lockedCanvas"),
+    PayloadUri::new("drawingml", "table", A, "tbl"),
+    PayloadUri::new("presentationml", "ole", P, "oleObj"),
 ];
 
 /// The payload the `uri` of the `a:graphicData` `e` names, transitional or
@@ -630,24 +705,16 @@ fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
     let uri: &str = &uri;
     Ok(PAYLOADS
         .iter()
-        .find(|(area, name, _, _)| {
-            uri.strip_prefix("http://schemas.openxmlformats.org/")
-                .and_then(|rest| rest.strip_prefix(*area))
-                .is_some_and(|rest| rest.strip_prefix("/2006/") == Some(*name))
-                || uri
-                    .strip_prefix("http://purl.oclc.org/ooxml/")
-                    .and_then(|rest| rest.strip_prefix(*area))
-                    .is_some_and(|rest| rest.strip_prefix('/') == Some(*name))
-        })
-        .and_then(|(_, _, namespace, local)| {
-            namespace_index(Some(namespace)).map(|index| Payload(index, local))
+        .find(|payload| payload.named_by(uri))
+        .and_then(|payload| {
+            namespace_index(Some(payload.namespace)).map(|index| Payload(index, payload.local))
         }))
 }
 
 /// Whether text is shown in `scope`.
 fn holds_text(scope: Scope) -> bool {
     match scope {
-        Scope::Typed(ty) | Scope::Graphic(ty, _) => TYPES[usize::from(ty)].text,
+        Scope::Typed(index) | Scope::Graphic(index, _) => ty(index).text,
         Scope::Vml | Scope::Document => false,
     }
 }
@@ -663,10 +730,7 @@ enum Decision {
 /// The type of the global element `local` in the namespace indexed
 /// `namespace`, if the schemas declare one.
 fn root_type(namespace: u8, local: &str) -> Option<u16> {
-    ROOTS
-        .binary_search_by(|Child(n, l, _)| (*n, *l).cmp(&(namespace, local)))
-        .ok()
-        .map(|at| ROOTS[at].2)
+    Child::find(&ROOTS, namespace, local)
 }
 
 /// The frame of the root element `local` in `namespace`, which must be `root`.
@@ -679,7 +743,10 @@ fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decisi
     match root {
         Root::Vml if namespace.is_none() && local == "xml" => Ok(Decision::Keep(Frame::Vml)),
         Root::Vml => Err(mismatch()),
-        Root::Element(expected_namespace, expected_local) => {
+        Root::Element {
+            namespace: expected_namespace,
+            local: expected_local,
+        } => {
             let index = namespace_index(namespace).ok_or_else(mismatch)?;
             let expected = namespace_index(Some(expected_namespace)).ok_or_else(mismatch)?;
             if index != expected || local != expected_local {
@@ -710,11 +777,11 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
         return Decision::Drop(HiddenContent::ApplicationData);
     };
     let ty = match scope {
-        Scope::Typed(parent) => TYPES[usize::from(parent)].child(index, local),
+        Scope::Typed(parent) => ty(parent).child(index, local),
         Scope::Graphic(parent, Some(Payload(namespace, name)))
             if (namespace, name) == (index, local) =>
         {
-            TYPES[usize::from(parent)].child(index, local)
+            ty(parent).child(index, local)
         }
         Scope::Graphic(..) => None,
         // A VML drawing holds the global VML shapes.
@@ -724,7 +791,7 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
         Scope::Vml | Scope::Document => None,
     };
     match ty {
-        Some(ty) if !TYPES[usize::from(ty)].only_wildcard() => Decision::Keep(Frame::Typed(ty)),
+        Some(index) if !self::ty(index).only_wildcard() => Decision::Keep(Frame::Typed(index)),
         _ => Decision::Drop(HiddenContent::ApplicationData),
     }
 }

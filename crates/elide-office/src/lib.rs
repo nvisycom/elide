@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![warn(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
@@ -10,6 +11,6 @@ pub mod fixtures;
 pub(crate) mod opc;
 
 pub(crate) mod docx;
-pub(crate) mod ooxml;
 pub(crate) mod pptx;
+pub(crate) mod text_package;
 pub(crate) mod xlsx;

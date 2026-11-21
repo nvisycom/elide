@@ -11,8 +11,8 @@ use elide_core::redaction::HiddenContentPolicy;
 use super::addresser::OoxmlAddresser;
 use super::document::OoxmlDocument;
 use super::{OoxmlCodec, blobs, items, refuse_issues, sanitized};
-use crate::codec::props::DocProps;
-use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::codec::ooxml::props::DocProps;
+use crate::text_package::{OoxmlFormat, OoxmlPackage};
 
 /// A decoded OOXML package: its native document, its embedded blobs, and what
 /// decode stripped.
@@ -43,7 +43,7 @@ fn decode_package<C: OoxmlCodec>(
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
     let properties = DocProps::under(policy, |path| pkg.part_bytes(path));
     let extraction = pkg.extract();
-    refuse_issues(C::LABEL, &extraction.issues)?;
+    refuse_issues(C::EXTENSION, &extraction.issues)?;
 
     let body = ExtractStream::new(C::FORMAT_ID, items(extraction.blocks), OoxmlAddresser);
     let blobs = blobs(extraction.embeddings);

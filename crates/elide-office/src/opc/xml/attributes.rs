@@ -1,0 +1,248 @@
+//! [`TextAttribute`]: an attribute whose value is text a person wrote, which
+//! element extraction (reading text nodes) never sees.
+//!
+//! A format names its text attributes in two closed lists. A visible one (a
+//! sheet name, a dropdown entry) or one the policy keeps (a comment's author
+//! under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent)) is surfaced
+//! for detection like element text, through the format's
+//! [`PartClassifier::text_attributes`](crate::opc::PartClassifier::text_attributes).
+//! A hidden one (alternative text, a tooltip) is stripped by
+//! [`HiddenAttributes`] and recorded.
+
+use elide_codec::extract::ItemFlag;
+use elide_core::entity::builtins;
+use elide_core::redaction::{HiddenContent, HiddenContentKind};
+
+use crate::opc::xml::edit::{Attribute, Local, Name, Rules};
+use crate::opc::xml::ns::{VML, VML_OFFICE};
+
+/// The namespace a [`TextAttribute`] part matches.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Ns {
+    /// Any namespace, or none.
+    Any,
+    /// Exactly this namespace.
+    In(&'static str),
+    /// No namespace: an unqualified attribute.
+    Unqualified,
+}
+
+impl Ns {
+    fn matches(self, namespace: Option<&str>) -> bool {
+        match self {
+            Self::Any => true,
+            Self::In(expected) => namespace == Some(expected),
+            Self::Unqualified => namespace.is_none(),
+        }
+    }
+}
+
+/// An attribute that carries text a person wrote: the element it sits on and
+/// its own name, each matched by namespace and local name.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TextAttribute {
+    pub(crate) element: (Ns, Local),
+    pub(crate) attribute: (Ns, &'static str),
+    /// The collaboration item the value is, for an attribute of a comment or a
+    /// tracked change.
+    pub(crate) collaboration: Option<Collaboration>,
+}
+
+impl TextAttribute {
+    /// The attribute `attribute` on the element `element`.
+    pub(crate) const fn new(element: (Ns, Local), attribute: (Ns, &'static str)) -> Self {
+        Self {
+            element,
+            attribute,
+            collaboration: None,
+        }
+    }
+
+    /// The unqualified attribute `attribute` on the element `element` in any
+    /// namespace.
+    pub(crate) const fn unqualified(element: &'static str, attribute: &'static str) -> Self {
+        Self::new(
+            (Ns::Any, Local::Exact(element)),
+            (Ns::Unqualified, attribute),
+        )
+    }
+
+    /// This attribute, its value the collaboration item `collaboration`.
+    pub(crate) const fn of(mut self, collaboration: Collaboration) -> Self {
+        self.collaboration = Some(collaboration);
+        self
+    }
+
+    /// Whether `attribute` on `element` is this one.
+    pub(crate) fn matches(&self, element: Name<'_>, attribute: Name<'_>) -> bool {
+        let (element_ns, element_local) = self.element;
+        let (attribute_ns, attribute_local) = self.attribute;
+        element_ns.matches(element.namespace)
+            && element_local.matches(element.local)
+            && attribute_ns.matches(attribute.namespace)
+            && attribute.local == attribute_local
+    }
+}
+
+/// The collaboration item a span of a part holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Collaboration {
+    /// What a comment or a tracked deletion says.
+    Text,
+    /// Who wrote a comment or made a change.
+    Author,
+}
+
+impl Collaboration {
+    /// The flag of an item holding this.
+    pub(crate) fn flag(self) -> ItemFlag {
+        let label = match self {
+            Self::Text => &builtins::COMMUNICATIONS_CONTENT,
+            Self::Author => &builtins::PERSON_NAME,
+        };
+        ItemFlag::new(label.to_ref(), HiddenContentKind::Collaboration)
+    }
+}
+
+/// Element rules for the hidden attributes `attributes`, all of them the one
+/// item of hidden content `content`: each is removed from every element, or,
+/// for attributes a format requires and so cannot remove, given the neutral
+/// `value`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HiddenAttributes {
+    content: HiddenContent,
+    attributes: &'static [TextAttribute],
+    treatment: Treatment,
+}
+
+/// What [`HiddenAttributes`] does with each attribute it matches.
+#[derive(Debug, Clone, Copy)]
+enum Treatment {
+    /// Remove it.
+    Strip,
+    /// Give it this neutral value, for an attribute a format requires.
+    Neutralize(&'static str),
+}
+
+impl HiddenAttributes {
+    /// Rules removing `attributes`, the hidden content `content`.
+    pub(crate) const fn strip(
+        content: HiddenContent,
+        attributes: &'static [TextAttribute],
+    ) -> Self {
+        Self {
+            content,
+            attributes,
+            treatment: Treatment::Strip,
+        }
+    }
+
+    /// Rules giving `attributes` the neutral `value`, the hidden content
+    /// `content`.
+    pub(crate) const fn neutralize(
+        content: HiddenContent,
+        attributes: &'static [TextAttribute],
+        value: &'static str,
+    ) -> Self {
+        Self {
+            content,
+            attributes,
+            treatment: Treatment::Neutralize(value),
+        }
+    }
+
+    /// Whether `attribute` on `element` is one of these.
+    fn matches(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool {
+        self.attributes
+            .iter()
+            .any(|text| text.matches(element, attribute.name))
+    }
+}
+
+impl Rules for HiddenAttributes {
+    fn content(&self) -> Option<HiddenContent> {
+        Some(self.content)
+    }
+
+    fn removes_attribute(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool {
+        matches!(self.treatment, Treatment::Strip) && self.matches(element, attribute)
+    }
+
+    fn neutralizes_attribute(
+        &self,
+        element: Name<'_>,
+        attribute: &Attribute<'_>,
+    ) -> Option<&'static str> {
+        match self.treatment {
+            Treatment::Neutralize(value) if self.matches(element, attribute) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// The neutral timestamp a required date is given: the same for every date, so
+/// it says nothing about when.
+pub(crate) const NEUTRAL_DATE: &str = "1970-01-01T00:00:00Z";
+
+/// Alternative text, in every format: the description and title of a drawing
+/// or picture, and a legacy VML shape's alternative text and title, which may
+/// hold the file name the picture was inserted from.
+pub(crate) const ALTERNATIVE_TEXT: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::AlternativeText,
+    &[
+        TextAttribute::unqualified("docPr", "descr"),
+        TextAttribute::unqualified("docPr", "title"),
+        TextAttribute::unqualified("cNvPr", "descr"),
+        TextAttribute::unqualified("cNvPr", "title"),
+        TextAttribute::new((Ns::In(VML), Local::Any), (Ns::Unqualified, "alt")),
+        TextAttribute::new((Ns::In(VML), Local::Any), (Ns::Unqualified, "title")),
+        TextAttribute::new(
+            (Ns::In(VML), Local::Exact("imagedata")),
+            (Ns::In(VML_OFFICE), "title"),
+        ),
+    ],
+);
+
+/// Tooltips, in every format: the text a hyperlink shows on hover.
+pub(crate) const TOOLTIPS: HiddenAttributes = HiddenAttributes::strip(
+    HiddenContent::AlternativeText,
+    &[
+        TextAttribute::new((Ns::Any, Local::Exact("hyperlink")), (Ns::Any, "tooltip")),
+        TextAttribute::unqualified("hlinkClick", "tooltip"),
+        TextAttribute::unqualified("hlinkHover", "tooltip"),
+    ],
+);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::opc::xml::edit::{edit, expect_edit};
+
+    const DESCRIPTION: &[TextAttribute] = &[TextAttribute::unqualified("cNvPr", "descr")];
+
+    #[test]
+    fn strips_a_named_attribute_from_any_namespace() {
+        let raw =
+            r#"<p:cNvPr xmlns:p="urn:p" id="2" name="Picture 1" descr="C:\Users\jane\photo.jpg"/>"#;
+        let rules = HiddenAttributes::strip(HiddenContent::AlternativeText, DESCRIPTION);
+        let edited = expect_edit(raw, &rules);
+        assert_eq!(edited.count, 1);
+        assert_eq!(
+            edited.text,
+            r#"<p:cNvPr xmlns:p="urn:p" id="2" name="Picture 1"/>"#
+        );
+    }
+
+    #[test]
+    fn a_neutralized_attribute_edits_once() {
+        const CREATED: &[TextAttribute] = &[TextAttribute::unqualified("cm", "created")];
+        let rules = HiddenAttributes::neutralize(HiddenContent::Comment, CREATED, NEUTRAL_DATE);
+        let raw = r#"<cm id="1" created="2024-05-06T07:08:09.123"/>"#;
+        let edited = expect_edit(raw, &rules);
+        assert_eq!(
+            edited.text,
+            format!(r#"<cm id="1" created="{NEUTRAL_DATE}"/>"#)
+        );
+        assert!(edit(&edited.text, &rules).unwrap().is_none());
+    }
+}
