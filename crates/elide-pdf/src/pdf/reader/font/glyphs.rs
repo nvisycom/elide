@@ -308,7 +308,8 @@ fn contains(name: &[u8], part: &[u8]) -> bool {
 const MAX_CODES: u64 = 1 << 18;
 
 /// `stream` read as a `/ToUnicode` CMap by lopdf, the reader detection
-/// decodes text with; `None` when it can't be decoded or lopdf can't read it.
+/// decodes text with; `None` when it can't be decoded, its ranges can't be
+/// counted, or lopdf can't read it.
 ///
 /// lopdf is given the very bytes whose ranges were counted, unfiltered, so
 /// nothing it reads went uncounted.
@@ -324,7 +325,12 @@ pub(crate) fn to_unicode(doc: &Document, stream: &Stream) -> Result<Option<Encod
         Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
         Err(_) => return Ok(None),
     };
-    if mapped_codes(&content) > MAX_CODES {
+    // A CMap whose ranges can't be counted is not read, so lopdf never
+    // expands what went uncounted.
+    let Some(codes) = mapped_codes(&content) else {
+        return Ok(None);
+    };
+    if codes > MAX_CODES {
         return Err(Error::resource_limit(format!(
             "a /ToUnicode CMap maps more than {MAX_CODES} codes"
         )));
@@ -611,15 +617,15 @@ mod tests {
     #[test]
     fn ranges_are_counted_before_they_are_read() {
         let wide = b"1 beginbfrange\n<000000> <04FFFF> <0041>\nendbfrange\n";
-        assert!(mapped_codes(wide) > MAX_CODES);
+        assert!(mapped_codes(wide).unwrap() > MAX_CODES);
         let commented =
             b"1 beginbfrange\n% <000000> <04FFFF> <0041>\n<01> <02> <0041>\nendbfrange\n";
-        assert_eq!(mapped_codes(commented), 2);
+        assert_eq!(mapped_codes(commented), Some(2));
         let array = b"1 beginbfrange\n<01> <02> [<0041> <0042>]\n<10> <10> <0043>\nendbfrange\n";
-        assert_eq!(mapped_codes(array), 3);
+        assert_eq!(mapped_codes(array), Some(3));
         let chars = b"2 beginbfchar\n<01> <0041>\n<02> <0042>\nendbfchar\n\
             1 beginbfrange\n<03> <04> <0043>\nendbfrange\n";
-        assert_eq!(mapped_codes(chars), 4);
+        assert_eq!(mapped_codes(chars), Some(4));
     }
 
     /// A `%` inside a string, or a `>` inside a dictionary, hides no range
@@ -628,7 +634,7 @@ mod tests {
     fn strings_and_dictionaries_hide_no_range() {
         let wide = b"/CIDSystemInfo << /Registry (%) /Ordering (a>b) >> def \
             1 beginbfrange <000000> <04FFFF> <0041> endbfrange";
-        assert!(mapped_codes(wide) > MAX_CODES);
+        assert!(mapped_codes(wide).unwrap() > MAX_CODES);
     }
 
     /// A CMap whose filter is not one is not read at all, so lopdf never
@@ -783,13 +789,14 @@ mod tests {
     /// program's own encoding names, is refused rather than read as nothing.
     #[test]
     fn a_code_whose_text_cant_be_known_is_refused() {
-        for name in ["g7", "A_nosuchglyph"] {
-            let custom =
-                Object::Dictionary(dictionary! { "Differences" => vec![1.into(), name.into()] });
+        for name in [b"g7".as_slice(), b"A_nosuchglyph", b"\xFF"] {
+            let custom = Object::Dictionary(dictionary! {
+                "Differences" => vec![1.into(), Object::Name(name.to_vec())],
+            });
             let refused = encoded("TrueType", false, custom, b"\x01");
             assert!(
                 refused.is_err_and(|e| e.kind() == ErrorKind::Redaction),
-                "{name}"
+                "{name:?}"
             );
         }
 

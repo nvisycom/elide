@@ -646,6 +646,7 @@ mod tests {
         let group = pdf.form(
             dictionary! {
                 "BBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
+                "Group" => dictionary! { "S" => "Transparency", "CS" => "DeviceGray" },
                 "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
             },
             b"BT /F1 12 Tf 10 50 Td (Jane Roe) Tj ET".to_vec(),
@@ -665,6 +666,49 @@ mod tests {
         let text = &pdf.read(Text).unwrap()[0].text;
         assert!(text.contains("alice@example.com"), "{text:?}");
         assert!(text.contains("Jane Roe"), "{text:?}");
+    }
+
+    /// A soft mask a tiling pattern's cell sets draws in that cell, so its
+    /// text shows on every tile the pattern paints.
+    #[test]
+    fn a_soft_mask_set_in_a_pattern_shows_on_its_tiles() {
+        let rects = |area: &[u8]| {
+            let mut pdf = DocBuilder::with_version("1.5");
+            let font = pdf.add(type1("Helvetica"));
+            let group = pdf.form(
+                dictionary! {
+                    "BBox" => vec![0.into(), 0.into(), 50.into(), 20.into()],
+                    "Group" => dictionary! { "S" => "Transparency", "CS" => "DeviceGray" },
+                    "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+                },
+                b"BT /F1 8 Tf 2 5 Td (Jane) Tj ET".to_vec(),
+            );
+            let state = pdf.add(dictionary! {
+                "Type" => "ExtGState",
+                "SMask" => dictionary! { "Type" => "Mask", "S" => "Luminosity", "G" => group },
+            });
+            let pattern = pdf.stream(
+                dictionary! {
+                    "Type" => "Pattern", "PatternType" => 1, "PaintType" => 1, "TilingType" => 1,
+                    "BBox" => vec![0.into(), 0.into(), 50.into(), 20.into()],
+                    "XStep" => 50, "YStep" => 20,
+                    "Resources" => dictionary! { "ExtGState" => dictionary! { "GS1" => state } },
+                },
+                b"/GS1 gs 0 0 50 20 re f".to_vec(),
+            );
+            pdf.page(
+                Page::new()
+                    .resource("Pattern", "P0", pattern)
+                    .content([b"/Pattern cs /P0 scn ".as_slice(), area].concat())
+                    .size(200, 200),
+            );
+            let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+            pdf.read(Text).unwrap().remove(0).rects
+        };
+        let one = rects(b"0 0 50 20 re f");
+        assert!(!one.is_empty());
+        let four = rects(b"0 0 100 40 re f");
+        assert_eq!(four.len(), 4 * one.len());
     }
 
     /// A one-page document drawing `content`, its `/F1` Helvetica, its `/P0`

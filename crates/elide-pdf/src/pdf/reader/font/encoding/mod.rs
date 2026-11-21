@@ -138,7 +138,8 @@ impl<'a> Encoding<'a> {
     /// names after it start at (9.6.5.1), and names before any integer start
     /// at code 0. A name for a code past 255 selects nothing, the names after
     /// a negative code are skipped up to the next integer, and an entry
-    /// neither an integer nor a name is skipped.
+    /// neither an integer nor a name is skipped. A name that isn't UTF-8 is
+    /// kept as the empty name: it names a glyph, but spells no text.
     pub(crate) fn apply(&self, doc: &'a Document, names: &mut GlyphNames<'a>) {
         let mut code = Some(0_usize);
         for entry in self.differences.unwrap_or_default() {
@@ -147,7 +148,7 @@ impl<'a> Encoding<'a> {
                 Some(Object::Name(name)) => {
                     if let Some(at) = code {
                         if let Some(slot) = names.get_mut(at) {
-                            *slot = str::from_utf8(name).ok();
+                            *slot = Some(str::from_utf8(name).unwrap_or(""));
                         }
                         code = at.checked_add(1);
                     }

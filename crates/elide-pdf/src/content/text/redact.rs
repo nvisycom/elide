@@ -84,16 +84,28 @@ pub(super) fn delete(
     // A glyph is deleted whole, wherever it is drawn: one drawing a ligature
     // some of whose characters are detected is gone, and so is one in a form
     // another page's detection deletes from, so its code survives in no text.
+    let deleted: BTreeSet<(ObjectId, Address, usize, usize)> = to_delete
+        .iter()
+        .flat_map(|(&stream, sites)| {
+            sites.iter().flat_map(move |(&address, ranges)| {
+                ranges
+                    .iter()
+                    .map(move |&(start, end)| (stream, address, start, end))
+            })
+        })
+        .collect();
     let mut deleted_codes = Codes::new();
     let mut surviving_codes = Codes::new();
     for block in blocks {
         let mut stream = Streams::new(pristine, block.page_id);
         for glyph in block.offsets.runs().iter().filter_map(|run| run.source) {
-            let deleted = to_delete
-                .get(&stream.of(&glyph)?)
-                .and_then(|sites| sites.get(&glyph.address))
-                .is_some_and(|ranges| ranges.contains(&(glyph.byte_start, glyph.byte_end)));
-            let codes = if deleted {
+            let key = (
+                stream.of(&glyph)?,
+                glyph.address,
+                glyph.byte_start,
+                glyph.byte_end,
+            );
+            let codes = if deleted.contains(&key) {
                 &mut deleted_codes
             } else {
                 &mut surviving_codes
@@ -292,7 +304,7 @@ fn apply_deletions(
 }
 
 /// Zero the numeric position adjustments `items` starts with, up to the
-/// first string element.
+/// first string element that draws a glyph: an empty one sets nothing apart.
 ///
 /// The numbers are zeroed in place rather than removed: other [`Deletions`]
 /// entries for the same operation address array elements by index, so removing
@@ -300,11 +312,12 @@ fn apply_deletions(
 /// and carries no position information.
 fn zero_kerns<'a>(items: impl Iterator<Item = &'a mut Object>) {
     for item in items {
-        *item = match item {
-            Object::Real(_) => Object::Real(0.0),
-            Object::Integer(_) => Object::Integer(0),
+        match item {
+            Object::Real(_) => *item = Object::Real(0.0),
+            Object::Integer(_) => *item = Object::Integer(0),
+            Object::String(bytes, _) if bytes.is_empty() => {}
             _ => break,
-        };
+        }
     }
 }
 
@@ -412,6 +425,27 @@ mod tests {
         assert_eq!(arr[0], Object::string_literal("Mr. "));
         assert_eq!(arr[1], Object::Integer(0), "the a/n kern survived");
         assert_eq!(arr[2], Object::string_literal(" Roe"));
+    }
+
+    /// An empty string between a deleted glyph and a kern doesn't shield the
+    /// kern: zeroing passes over it to the next string that draws a glyph.
+    #[test]
+    fn zeroing_passes_over_empty_strings() {
+        // [(Mr. Jane) () -12 ( Doe)]: delete "Jane", bytes 4..8.
+        let mut content = tj(vec![
+            Object::string_literal("Mr. Jane"),
+            Object::string_literal(""),
+            (-12).into(),
+            Object::string_literal(" Doe"),
+        ]);
+        apply_deletions(&mut content, &deletions([(0, vec![(4, 8)])])).unwrap();
+        let arr = tj_array(&content);
+        assert_eq!(
+            arr[2],
+            Object::Integer(0),
+            "the kern past the empty string survived"
+        );
+        assert_eq!(arr[3], Object::string_literal(" Doe"));
     }
 
     /// Zeroing stops at the neighbouring string: a kern next to a different,

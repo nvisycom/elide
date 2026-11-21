@@ -1294,37 +1294,34 @@ fn a_programs_built_in_encoding_is_pinned() {
 }
 
 /// A program is charged to the copy budget for each font that reads it:
-/// fonts sharing one program each decode it.
+/// fonts sharing one program each decode it. Two programs giving the same
+/// widths, one padded, cost each further font exactly the padding more.
 #[test]
 fn a_shared_program_is_charged_for_each_font() {
-    let mut doc = Document::with_version("1.7");
-    let program = Sfnt::new(1000, &[(".notdef", 300), ("A", 600)])
-        .cmap(3, 1, 0x41, &[1])
-        .build();
-    let size = program.len();
-    let font = embedding(&mut doc, "TrueType", FontFile::TrueType, program, 32);
-    let shared = font.get(b"FontDescriptor").unwrap().clone();
-    let fonts: Vec<ObjectId> = (0..3)
-        .map(|_| {
-            let mut font = font.clone();
-            font.set("FontDescriptor", shared.clone());
-            doc.add_object(font)
-        })
-        .collect();
-    let used = |fonts: &[ObjectId]| {
-        let mut builder = Builder::new(&doc);
-        for &font in fonts {
-            builder
-                .copy(
-                    Kind::Font,
-                    &Object::Reference(font),
-                    At::top(&Scope::default()),
-                )
-                .unwrap();
-        }
-        MAX_COPIED_BYTES - builder.copy_budget
+    let extra = |padding: usize| {
+        let mut doc = Document::with_version("1.7");
+        let mut program = Sfnt::new(1000, &[(".notdef", 300), ("A", 600)])
+            .cmap(3, 1, 0x41, &[1])
+            .build();
+        program.resize(program.len() + padding, 0);
+        let font = embedding(&mut doc, "TrueType", FontFile::TrueType, program, 32);
+        let fonts: Vec<ObjectId> = (0..3).map(|_| doc.add_object(font.clone())).collect();
+        let used = |fonts: &[ObjectId]| {
+            let mut builder = Builder::new(&doc);
+            for &font in fonts {
+                builder
+                    .copy(
+                        Kind::Font,
+                        &Object::Reference(font),
+                        At::top(&Scope::default()),
+                    )
+                    .unwrap();
+            }
+            MAX_COPIED_BYTES - builder.copy_budget
+        };
+        used(&fonts) - used(&fonts[..1])
     };
-    assert!(used(&fonts) - used(&fonts[..1]) >= 2 * size);
+    assert_eq!(extra(10_000) - extra(0), 2 * 10_000);
 }
 
 /// An embedded font's own `/Widths` are kept.
@@ -1906,17 +1903,31 @@ fn layout_and_colour_targets_are_kept() {
         vec![Object::Dictionary(dictionary! {
             "Type" => "OutputIntent", "S" => "GTS_PDFX",
             "OutputConditionIdentifier" => Object::string_literal("FOGRA39"),
+            "OutputCondition" => Object::string_literal("Jane Roe's press"),
+            "Info" => Object::string_literal("proofed by jane@example.com"),
             "DestOutputProfile" => profile,
         })],
     );
 
-    let (out, _) = rebuilt(&doc);
+    let (out, stripped) = rebuilt(&doc);
     assert_eq!(out.version, "1.7");
     let page = page_dict(&out);
     let trim = page.get(b"TrimBox").and_then(Object::as_array).unwrap();
     assert_eq!(trim[2].as_float().unwrap(), 200.0);
     assert!(page.get(b"Group").is_err());
-    assert!(out.catalog().unwrap().get(b"OutputIntents").is_ok());
+    // The intent keeps its identifier and profile; its free-text
+    // description and condition are dropped and recorded.
+    let intents = out
+        .resolve_array(out.catalog().unwrap().get(b"OutputIntents").unwrap())
+        .unwrap();
+    let intent = out.resolve_dict(&intents[0]).unwrap();
+    assert_eq!(
+        intent.get(b"OutputConditionIdentifier").unwrap(),
+        &Object::string_literal("FOGRA39")
+    );
+    assert!(intent.get(b"DestOutputProfile").is_ok());
+    assert!(intent.get(b"Info").is_err() && intent.get(b"OutputCondition").is_err());
+    assert!(count(&stripped, HiddenContent::Properties) >= 2);
     let links = page.get(b"Annots").and_then(Object::as_array).unwrap();
     let link = out
         .get_dictionary(links[0].as_reference().unwrap())
@@ -2145,6 +2156,22 @@ fn form_fonts(resources: Option<Object>) -> Vec<String> {
 /// whose glyph draws `/Fm`, each page naming a different form `/Fm`. The
 /// font's own resources, if any, are made by `resources` from its id.
 fn type3_copies(resources: impl FnOnce(&mut Document, ObjectId) -> Option<Dictionary>) -> usize {
+    let out = type3_rebuilt(resources);
+    out.objects
+        .values()
+        .filter(|object| {
+            object
+                .as_dict()
+                .is_ok_and(|dict| dict.is_subtype(&out, b"Type3"))
+        })
+        .count()
+}
+
+/// The rebuild of two pages drawing one Type3 font, as [`type3_copies`]
+/// builds them.
+fn type3_rebuilt(
+    resources: impl FnOnce(&mut Document, ObjectId) -> Option<Dictionary>,
+) -> Document {
     let mut pdf = DocBuilder::new();
     let glyph = pdf.stream(Dictionary::new(), b"0 0 d0 /Fm Do".to_vec());
     let doc = pdf.doc();
@@ -2173,15 +2200,7 @@ fn type3_copies(resources: impl FnOnce(&mut Document, ObjectId) -> Option<Dictio
         );
     }
     let (doc, _) = pdf.finish();
-    let (out, _) = rebuilt(&doc);
-    out.objects
-        .values()
-        .filter(|object| {
-            object
-                .as_dict()
-                .is_ok_and(|dict| dict.is_subtype(&out, b"Type3"))
-        })
-        .count()
+    rebuilt(&doc).0
 }
 
 /// A Type3 font with no resources of its own resolves its glyphs' names
@@ -2202,7 +2221,7 @@ fn a_type3_font_with_resources_is_copied_once() {
 /// copied once, the form's copy referring back to it.
 #[test]
 fn a_type3_font_drawn_by_its_own_glyph_is_copied_once() {
-    let copies = type3_copies(|doc, font| {
+    let out = type3_rebuilt(|doc, font| {
         let form = doc.add_object(Stream::new(
             dictionary! { "Type" => "XObject", "Subtype" => "Form" },
             b"BT /T3 1 Tf (a) Tj ET".to_vec(),
@@ -2212,7 +2231,42 @@ fn a_type3_font_drawn_by_its_own_glyph_is_copied_once() {
             "XObject" => dictionary! { "Fm" => form },
         })
     });
-    assert_eq!(copies, 1);
+    let type3: Vec<ObjectId> = out
+        .objects
+        .iter()
+        .filter(|(_, object)| {
+            object
+                .as_dict()
+                .is_ok_and(|dict| dict.is_subtype(&out, b"Type3"))
+        })
+        .map(|(&id, _)| id)
+        .collect();
+    assert_eq!(type3.len(), 1);
+    // The glyph's form is kept, and the font it selects is that one copy.
+    let font = out.get_dictionary(type3[0]).unwrap();
+    let resources = out.resolve_dict(font.get(b"Resources").unwrap()).unwrap();
+    let xobjects = out
+        .resolve_dict(resources.get(b"XObject").unwrap())
+        .unwrap();
+    let (_, form) = xobjects.iter().next().expect("the glyph's form is kept");
+    let form = out
+        .get_object(form.as_reference().unwrap())
+        .unwrap()
+        .as_stream()
+        .unwrap();
+    let form_fonts = out
+        .resolve_dict(
+            out.resolve_dict(form.dict.get(b"Resources").unwrap())
+                .unwrap()
+                .get(b"Font")
+                .unwrap(),
+        )
+        .unwrap();
+    let selected: Vec<ObjectId> = form_fonts
+        .iter()
+        .filter_map(|(_, font)| font.as_reference().ok())
+        .collect();
+    assert_eq!(selected, type3, "the form selects the font itself");
 }
 
 /// Glyph procedures of one Type3 font whose graphics states select

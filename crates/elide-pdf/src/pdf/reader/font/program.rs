@@ -98,6 +98,9 @@ fn truetype_glyphs(doc: &Document, font: &Dictionary, program: &Program) -> [Opt
         };
         mapped.or_else(|| program.by_name(name))
     };
+    // A code reaches its glyph through the Windows symbol subtable, in the
+    // `0xF000` range too, else the Mac one, else, as PDFium reads a program
+    // with neither, a Unicode one by the code itself.
     let by_code = |code: usize| {
         let code = code as u32;
         windows_symbol
@@ -107,6 +110,7 @@ fn truetype_glyphs(doc: &Document, font: &Dictionary, program: &Program) -> [Opt
                     .find_map(|code| program.glyph(table, code))
             })
             .or_else(|| program.glyph(mac?, code))
+            .or_else(|| unicode.iter().find_map(|&table| program.glyph(table, code)))
     };
     array::from_fn(|code| {
         if symbolic {
@@ -399,7 +403,8 @@ mod tests {
     }
 
     /// A symbolic TrueType font reaches its glyphs by code: through the
-    /// Windows symbol `cmap`, in the `0xF000` range too, or the Mac one.
+    /// Windows symbol `cmap`, in the `0xF000` range too, or the Mac one, or
+    /// with neither, a Unicode one by the code itself.
     #[test]
     fn a_symbolic_truetype_font_reads_by_code() {
         let program = sfnt().cmap(3, 0, 0xF041, &[1, 2]);
@@ -410,6 +415,10 @@ mod tests {
         let program = sfnt().cmap(1, 0, 0x01, &[3]);
         let widths = truetype(&program, 4, Dictionary::new()).unwrap();
         assert_eq!(widths[0x01], 800.0);
+
+        let program = sfnt().cmap(3, 1, 0x01, &[3]);
+        let widths = truetype(&program, 4, Dictionary::new()).unwrap();
+        assert_eq!(widths[0x01], 800.0, "by the code, through the Unicode one");
     }
 
     /// A font that names `WinAnsiEncoding` reads by name even flagged
@@ -417,7 +426,11 @@ mod tests {
     /// to its codes.
     #[test]
     fn a_latin_encoding_reads_by_name_whatever_the_flags() {
-        let program = sfnt().cmap(3, 1, 0x41, &[1]).cmap(3, 0, 0xF042, &[2]);
+        // Glyph 2's own name is no name an encoding gives a code, so only
+        // the code reaches it.
+        let program = Sfnt::new(2000, &[(".notdef", 600), ("A", 1200), ("g2", 1400)])
+            .cmap(3, 1, 0x41, &[1])
+            .cmap(3, 0, 0xF042, &[2]);
         let widths =
             truetype(&program, 4, dictionary! { "Encoding" => "WinAnsiEncoding" }).unwrap();
         assert_eq!(widths[0x41], 600.0);

@@ -2,6 +2,7 @@
 //! under the state they inherit, within the walk's depth and total limits.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
@@ -26,6 +27,8 @@ pub(super) struct Mask<'d> {
     group: &'d Stream,
     ctm: Matrix,
     depth: u8,
+    /// The tiling pattern whose cell set the mask, if any.
+    cell: Option<ObjectId>,
 }
 
 /// The most glyph boxes a page's tiling patterns place on the tiles they
@@ -304,12 +307,14 @@ impl<'d> Walk<'_, 'd> {
                 group,
                 ctm,
                 depth,
+                cell: self.cell,
             });
         }
     }
 
     /// Walk the queued soft mask group `mask`, its text set apart from the
-    /// text around it.
+    /// text around it. A mask set in a tiling pattern's cell draws in that
+    /// cell, so its glyph boxes join the cell's, placed on every tile.
     ///
     /// # Errors
     ///
@@ -323,7 +328,17 @@ impl<'d> Walk<'_, 'd> {
             },
             painting: Painting::default(),
         };
-        self.set_apart(|walk| walk.walk_nested(mask.id, mask.group, mask.depth, inherited))
+        self.set_apart(|walk| {
+            let start = walk.accum.rects.len();
+            let outer = mem::replace(&mut walk.cell, mask.cell);
+            let walked = walk.walk_nested(mask.id, mask.group, mask.depth, inherited);
+            walk.cell = outer;
+            walked?;
+            if let Some(cell) = mask.cell.and_then(|cell| walk.cells.get_mut(&cell)) {
+                cell.glyphs.extend(walk.accum.rects.drain(start..));
+            }
+            Ok(())
+        })
     }
 
     /// Run `walk`, the text it reads set apart from the text around it by a

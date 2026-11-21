@@ -81,8 +81,10 @@ impl Codespace {
 
 /// How many codes the CMap `data` maps, at least: one for each `bfchar`
 /// entry (a pair of hex strings), and the codes each `bfrange` entry spans
-/// (a `<lo> <hi>` pair of hex strings of one length opening it).
-pub(crate) fn mapped_codes(data: &[u8]) -> u64 {
+/// (a `<lo> <hi>` pair of hex strings of one length opening it); `None` when
+/// a `bfrange` holds a hex string that can't be read as one, so its entries
+/// can't be told apart to count.
+pub(crate) fn mapped_codes(data: &[u8]) -> Option<u64> {
     // Each `bfrange` entry's tokens: a hex string's bytes, or `None` for an
     // array of destinations.
     let mut ranges: Vec<Option<Vec<u8>>> = Vec::new();
@@ -95,6 +97,7 @@ pub(crate) fn mapped_codes(data: &[u8]) -> u64 {
             Token::Keyword(b"beginbfchar") => in_chars = true,
             Token::Keyword(b"endbfchar") => in_chars = false,
             Token::Hex(bytes) if in_ranges => ranges.push(Some(bytes)),
+            Token::Unreadable if in_ranges => return None,
             Token::Array if in_ranges => ranges.push(None),
             Token::Hex(_) => char_strings += u64::from(in_chars),
             _ => {}
@@ -120,14 +123,15 @@ pub(crate) fn mapped_codes(data: &[u8]) -> u64 {
             i += 1;
         }
     }
-    count.saturating_add(char_strings / 2)
+    Some(count.saturating_add(char_strings / 2))
 }
 
 /// A token of a CMap, as far as it is read: a keyword, a hex string's bytes,
-/// an array, or anything else.
+/// a hex string holding more than hex digits, an array, or anything else.
 enum Token<'a> {
     Keyword(&'a [u8]),
     Hex(Vec<u8>),
+    Unreadable,
     Array,
     Other,
 }
@@ -226,7 +230,7 @@ impl<'a> Iterator for Tokens<'a> {
                     .position(|&b| b == b'>')
                     .map_or(data.len(), |end| start + end);
                 self.at = (end + 1).min(data.len());
-                hex(&data[start + 1..end]).map_or(Token::Other, Token::Hex)
+                hex(&data[start + 1..end]).map_or(Token::Unreadable, Token::Hex)
             }
             b if b.is_ascii_alphabetic() => {
                 while self.at < data.len() && data[self.at].is_ascii_alphanumeric() {
@@ -287,13 +291,20 @@ mod tests {
     fn an_array_ends_at_its_own_bracket() {
         let data = b"2 beginbfrange\n<01> <02> [<0041> % ] <00> <FFFF>\n(]) <0042>]\n\
             <10> <1F> <0043>\nendbfrange\n";
-        assert_eq!(mapped_codes(data), 2 + 16);
+        assert_eq!(mapped_codes(data), Some(2 + 16));
         let nested = format!(
             "1 beginbfrange <01> <02> {}{} endbfrange",
             "[".repeat(10_000),
             "]".repeat(10_000)
         );
-        assert_eq!(mapped_codes(nested.as_bytes()), 2);
+        assert_eq!(mapped_codes(nested.as_bytes()), Some(2));
+        let commented =
+            b"1 beginbfrange\n<01> <02> <0041 % a comment\n>\n<10> <FFFF> <0042>\nendbfrange\n";
+        assert_eq!(
+            mapped_codes(commented),
+            None,
+            "an entry that can't be told apart"
+        );
     }
 
     /// A codespace past the range limit is not read in part; one at it is
