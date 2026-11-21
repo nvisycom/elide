@@ -78,15 +78,23 @@ struct Stripping<'a> {
     removing: Option<Skipped>,
     /// How many custom properties are kept, which numbers each.
     properties: usize,
-    /// The custom property being read: where its start tag begins, and how
-    /// many cuts there were before it.
-    property: Option<(usize, usize)>,
+    /// The custom property being read.
+    property: Option<OpenProperty>,
     /// The heading counts, written once the titles they group are known.
     counts: Vec<Count<'a>>,
     /// A heading count being read.
     counting: Option<Counting>,
     /// How many titles of parts are kept.
     titles: usize,
+}
+
+/// A custom property being read, which goes whole if its value is an array.
+#[derive(Debug, Clone, Copy)]
+struct OpenProperty {
+    /// Where its start tag begins.
+    start: usize,
+    /// How many cuts there were before it, which dropping it truncates to.
+    cuts: usize,
 }
 
 impl<'a> Stripping<'a> {
@@ -189,7 +197,7 @@ impl<'a> Stripping<'a> {
         // bounds: the property goes with it, as one with no value does.
         if local == "array"
             && self.reading.is_some_and(|reading| reading + 1 == depth)
-            && let Some((start, cuts)) = self.property.take()
+            && let Some(OpenProperty { start, cuts }) = self.property.take()
         {
             self.walk.leave();
             self.walk.leave();
@@ -224,7 +232,10 @@ impl<'a> Stripping<'a> {
                 .push(Frame::new(depth, span.start, self.cuts.len(), size));
         }
         if matches!(role, Role::Property(_)) && is_start {
-            self.property = Some((span.start, self.cuts.len()));
+            self.property = Some(OpenProperty {
+                start: span.start,
+                cuts: self.cuts.len(),
+            });
         }
         let role = if sized && is_start {
             Role::Vector

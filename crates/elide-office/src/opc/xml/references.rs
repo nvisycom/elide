@@ -74,6 +74,7 @@ impl Rules for References<'_> {
                 }
             }
             Ids::Present(ids) => {
+                // An id that does not decode names no relationship: it dangles.
                 for attribute in references {
                     let id = attribute_value(attribute.value).ok();
                     if !id.as_deref().is_some_and(|id| ids.contains(id)) {
@@ -106,8 +107,7 @@ fn is_relid(attribute: &Attribute<'_>) -> bool {
 
 /// Whether `attribute` names one of the dropped `ids`. The id compares as the
 /// value XML reads, its references decoded; one that does not decode names no
-/// relationship, so it goes when [dropping](References::dropping) and
-/// dangles when [checking](References::checking).
+/// relationship, so it goes.
 fn dropped(ids: &HashSet<String>, attribute: &Attribute<'_>) -> bool {
     attribute_value(attribute.value).map_or(true, |id| ids.contains(id.as_ref()))
 }
