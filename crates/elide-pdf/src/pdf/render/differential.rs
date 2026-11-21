@@ -14,6 +14,8 @@
 //! reader, on what renderers disagree on and the rebuild pins, only the
 //! rebuilt document is compared.
 
+use std::ops::Range;
+
 use elide_core::Error;
 use lopdf::content::Operation;
 use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
@@ -191,16 +193,23 @@ fn paired<'a>(
             errors.push(format!("the reader places {:?} PDFium doesn't", glyph.text));
             continue;
         };
-        for skipped in at..found {
-            if !unplaced(theirs, skipped, source) {
-                let text = theirs[skipped].text;
-                errors.push(format!("PDFium reads {text:?} the reader doesn't"));
-            }
-        }
+        unread(theirs, at..found, source, errors);
         pairs.push((glyph, &theirs[found], found == at));
         at = found + glyph.text.chars().count();
     }
+    unread(theirs, at..theirs.len(), source, errors);
     pairs
+}
+
+/// Report each of PDFium's characters `skipped` in `theirs`, which the
+/// reader places no glyph for, but those [`unplaced`] allows.
+fn unread(theirs: &[Theirs], skipped: Range<usize>, source: bool, errors: &mut Vec<String>) {
+    for at in skipped {
+        if !unplaced(theirs, at, source) {
+            let text = theirs[at].text;
+            errors.push(format!("PDFium reads {text:?} the reader doesn't"));
+        }
+    }
 }
 
 /// A case: a document, the direction its text runs, and where PDFium reads
