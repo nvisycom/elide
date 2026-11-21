@@ -177,9 +177,23 @@ fn io_kind(err: &(dyn StdError + 'static)) -> Option<io::ErrorKind> {
     None
 }
 
+/// The error for an HTTP client failure: a client that could not be built
+/// is configuration, as sending again fails the same way; anything else is a
+/// transport failure.
+fn http(err: &HttpClientError) -> Error {
+    match err {
+        HttpClientError::Unbuilt(e) => Error::Request(match io_kind(e.as_ref()) {
+            Some(kind) => Fault::new(format!("the HTTP client could not be built: {kind}")),
+            None => Fault::new("the HTTP client could not be built"),
+        }),
+        err => Error::Transport(transport(err)),
+    }
+}
+
 /// The transport fault for an HTTP client failure. A failed status keeps the
 /// status, not the body; a client failure keeps the kind of its I/O cause, not
-/// its message; protocol messages name no content and are kept.
+/// its message; protocol messages name no content and are kept. A failure of
+/// a kind rig adds later is a client failure, its message unkept.
 fn transport(err: &HttpClientError) -> Fault {
     match err {
         HttpClientError::InvalidStatusCodeWithDetails { status, .. } => {
@@ -196,6 +210,7 @@ fn transport(err: &HttpClientError) -> Fault {
         HttpClientError::InvalidContentType(_) => {
             Fault::new("the response had an unexpected content type")
         }
+        _ => Fault::new("the HTTP client failed"),
     }
 }
 
@@ -217,7 +232,7 @@ impl From<ProviderError> for Error {
     fn from(err: ProviderError) -> Self {
         match err {
             // No reply reached us: a reset, timeout, or unreadable response.
-            ProviderError::Http(e) => Self::Transport(transport(&e)),
+            ProviderError::Http(e) => http(&e),
             // The provider answered with a failure (an error status/envelope,
             // rejected credentials, an expired cache handle).
             ProviderError::Provider(_) => {
@@ -304,7 +319,7 @@ impl From<StructuredOutputError> for Error {
 
 impl From<HttpClientError> for Error {
     fn from(err: HttpClientError) -> Self {
-        Self::Transport(transport(&err))
+        http(&err)
     }
 }
 
@@ -423,6 +438,19 @@ mod tests {
     #[derive(Debug, thiserror::Error)]
     #[error("error sending request for url (https://api.example/?key={SECRET})")]
     struct ClientFailure(#[source] io::Error);
+
+    /// A client that could not be built is configuration, not a transport
+    /// failure to retry: sending again fails the same way.
+    #[test]
+    fn an_unbuilt_client_is_configuration() {
+        let failure = ClientFailure(io::Error::from(io::ErrorKind::NotFound));
+        let display = assert_content_free(HttpClientError::Unbuilt(Box::new(failure)));
+        assert!(display.contains("could not be built"), "{display}");
+        let err = Error::from(HttpClientError::Unbuilt(Box::new(ClientFailure(
+            io::Error::from(io::ErrorKind::NotFound),
+        ))));
+        assert_eq!(CoreError::from(err).kind(), ErrorKind::Configuration);
+    }
 
     #[test]
     fn a_client_failure_keeps_its_io_kind_not_its_message() {
