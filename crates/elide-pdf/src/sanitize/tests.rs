@@ -9,8 +9,8 @@ use super::*;
 use crate::content::attachment::Tree;
 use crate::content::text::{Detection, Text, TextBlock, TextRedaction};
 use crate::fixtures::{
-    DocBuilder, FontFile, Page, Sfnt, Type1, blank, embedding, encoded, shown, type1,
-    with_attachments, with_pages,
+    DocBuilder, FontFile, Page, Sfnt, Type1, blank, embedding, encoded, shown, to_unicode_cmap,
+    type1, with_attachments, with_pages,
 };
 use crate::pdf::reader::DictionaryExt;
 
@@ -992,16 +992,7 @@ fn a_to_unicode_cmap_maps_to_readable_text() {
 /// A `/ToUnicode` CMap mapping one-byte codes by the `bfchar` entries
 /// `entries`.
 fn to_unicode(entries: &[&str]) -> Vec<u8> {
-    format!(
-        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
-         /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
-         /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
-         1 begincodespacerange\n<00> <FF>\nendcodespacerange\n{} beginbfchar\n{}\n\
-         endbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n",
-        entries.len(),
-        entries.join("\n"),
-    )
-    .into_bytes()
+    to_unicode_cmap(&["<00> <FF>"], entries, &[])
 }
 
 /// The first page's fonts in `doc` replaced by `fonts`.

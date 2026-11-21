@@ -227,7 +227,7 @@ mod tests {
     use lopdf::{Dictionary, Object, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::{DocBuilder, Page, encoded, shown, text, tm, type1};
+    use crate::fixtures::{DocBuilder, Page, encoded, shown, text, tm, to_unicode_cmap, type1};
 
     /// Build a one-page document whose single content stream is `ops`, drawing
     /// with a simple Helvetica font (no `/Widths`, so glyph advances are the
@@ -445,12 +445,7 @@ mod tests {
     fn composite(encoding: &str) -> Dictionary {
         let to_unicode = Stream::new(
             Dictionary::new(),
-            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
-              /CMapName /Test-UCS def\n/CMapType 2 def\n\
-              1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n\
-              1 beginbfchar\n<0001> <004A>\nendbfchar\n\
-              endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
-                .to_vec(),
+            to_unicode_cmap(&["<0000> <FFFF>"], &["<0001> <004A>"], &[]),
         );
         dictionary! {
             "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X", "Encoding" => encoding,
