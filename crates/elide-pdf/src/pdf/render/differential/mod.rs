@@ -156,7 +156,8 @@ fn hidden(block: &TextBlock) -> HashMap<char, usize> {
 }
 
 /// The characters PDFium reads from each page of `pdf`, but those it adds
-/// itself (between words and lines).
+/// itself (between words and lines). A hyphen it finds ending a line, which
+/// it reads as `U+0002`, reads as the hyphen it is.
 fn theirs(pdf: &Pdf) -> Result<Vec<Vec<Placed<char>>>, String> {
     let read = with_document(pdf, |doc| {
         let failed = |e: PdfiumError| Error::malformed(e.to_string());
@@ -183,8 +184,13 @@ fn theirs(pdf: &Pdf) -> Result<Vec<Vec<Placed<char>>>, String> {
                     _ => unit,
                 };
                 let (x, y) = c.origin().map_err(failed)?;
+                let text = if c.is_hyphen().map_err(failed)? {
+                    '-'
+                } else {
+                    char::from_u32(value).unwrap_or(char::REPLACEMENT_CHARACTER)
+                };
                 theirs.push(Placed {
-                    text: char::from_u32(value).unwrap_or(char::REPLACEMENT_CHARACTER),
+                    text,
                     origin: (f64::from(x.value), f64::from(y.value)),
                 });
             }
@@ -243,17 +249,15 @@ fn excused(theirs: &[Placed<char>], at: usize, hidden: &mut HashMap<char, usize>
             .is_some_and(|next| same(c.origin, next.origin))
 }
 
-/// Whether PDFium's characters from `at` in `theirs` read as `text`: PDFium
-/// reads a ligature as its letters, and a hyphen ending a line as `U+0002`.
+/// Whether PDFium's characters from `at` in `theirs` read as `text`, as it
+/// reads a ligature: as its letters.
 fn reads(theirs: &[Placed<char>], at: usize, text: &str) -> bool {
     let len = text.chars().count();
     theirs.len() >= at + len
         && theirs[at..at + len]
             .iter()
             .zip(text.chars())
-            .all(|(c, ours)| {
-                c.text == ours || (ours == '-' && matches!(c.text, '\u{2}' | '\u{AD}'))
-            })
+            .all(|(c, ours)| c.text == ours)
 }
 
 /// The side of a cell of the grid PDFium's characters are found in by
