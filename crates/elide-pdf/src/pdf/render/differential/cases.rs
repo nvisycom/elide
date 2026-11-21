@@ -314,6 +314,52 @@ fn placement() -> Vec<Case> {
             helvetica(&format!("BT /F1 12 Tf 0 -1 1 0 300 600 Tm {SAMPLE} Tj ET")),
         ),
         Case::new(
+            "a sheared text matrix",
+            helvetica(&format!(
+                "BT /F1 12 Tf 1 0 0.35 1 50 600 Tm {SAMPLE} Tj 5 Ts (Roe) Tj 0 Ts 0 -20 Td {SAMPLE} Tj ET"
+            )),
+        ),
+        Case::new(
+            "synthetic italics",
+            helvetica(&format!(
+                "BT /F1 1 Tf 12 0 2.5 12 50 600 Tm {SAMPLE} Tj 0 -1.5 Td {SAMPLE} Tj ET"
+            )),
+        ),
+        Case::new(
+            "a mirrored text matrix",
+            helvetica(&format!("BT /F1 12 Tf -1 0 0 1 500 600 Tm {SAMPLE} Tj ET")),
+        ),
+        Case::new(
+            "negative horizontal scaling",
+            helvetica(&format!(
+                "BT /F1 12 Tf -100 Tz 500 700 Td {SAMPLE} Tj -60 Tz 0 -20 Td {SAMPLE} Tj ET"
+            )),
+        ),
+        Case::new(
+            "a negative font size",
+            helvetica(&format!(
+                "BT /F1 -12 Tf 500 700 Td {SAMPLE} Tj 2 Tc 4 Tw 0 -20 Td {SAMPLE} Tj ET"
+            )),
+        ),
+        Case::new(
+            "a mirroring CTM",
+            helvetica(&format!(
+                "q -1 0 0 1 612 0 cm BT /F1 12 Tf 20 700 Td {SAMPLE} Tj ET Q"
+            )),
+        ),
+        Case::new(
+            "a flipping CTM",
+            helvetica(&format!(
+                "q 1 0 0 -1 0 792 cm BT /F1 12 Tf 1 0 0 -1 20 100 Tm {SAMPLE} Tj ET Q"
+            )),
+        ),
+        Case::new(
+            "a sheared CTM",
+            helvetica(&format!(
+                "q 1 0.2 -0.3 1 100 50 cm BT /F1 12 Tf 20 600 Td {SAMPLE} Tj ET Q"
+            )),
+        ),
+        Case::new(
             "a scaling CTM",
             helvetica(&format!(
                 "q 0.5 0 0 0.75 100 100 cm BT /F1 12 Tf 20 700 Td {SAMPLE} Tj ET Q"
