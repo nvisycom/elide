@@ -78,6 +78,9 @@ struct Stripping<'a> {
     removing: Option<Skipped>,
     /// How many custom properties are kept, which numbers each.
     properties: usize,
+    /// The custom property being read: where its start tag begins, and how
+    /// many cuts there were before it.
+    property: Option<(usize, usize)>,
     /// The heading counts, written once the titles they group are known.
     counts: Vec<Count<'a>>,
     /// A heading count being read.
@@ -98,6 +101,7 @@ impl<'a> Stripping<'a> {
             reading: None,
             removing: None,
             properties: 0,
+            property: None,
             counts: Vec::new(),
             counting: None,
             titles: 0,
@@ -181,6 +185,20 @@ impl<'a> Stripping<'a> {
             self.on_count(e, span, is_start);
             return Ok(());
         }
+        // An array is a custom property's whole value, and nothing reads its
+        // bounds: the property goes with it, as one with no value does.
+        if local == "array"
+            && self.reading.is_some_and(|reading| reading + 1 == depth)
+            && let Some((start, cuts)) = self.property.take()
+        {
+            self.walk.leave();
+            self.walk.leave();
+            self.cuts.truncate(cuts);
+            self.properties -= 1;
+            self.reading = None;
+            self.removing = Some(Skipped::open(start, if is_start { 2 } else { 1 }));
+            return Ok(());
+        }
         let Some(role) = self.role(depth, field, local, is_start) else {
             self.walk.leave();
             self.removing = Skipped::begin(span, is_start, &mut self.cuts);
@@ -204,6 +222,9 @@ impl<'a> Stripping<'a> {
             let size = if sized { size(self.raw, e)? } else { None };
             self.frames
                 .push(Frame::new(depth, span.start, self.cuts.len(), size));
+        }
+        if matches!(role, Role::Property(_)) && is_start {
+            self.property = Some((span.start, self.cuts.len()));
         }
         let role = if sized && is_start {
             Role::Vector
@@ -285,6 +306,7 @@ impl<'a> Stripping<'a> {
         let depth = self.walk.depth();
         if self.reading == Some(depth) {
             self.reading = None;
+            self.property = None;
         } else if self.reading.is_some() {
             if let Some(vector) = self.vectors.pop_if(|vector| vector.depth == depth) {
                 vector.resize(&mut self.cuts);

@@ -278,3 +278,16 @@ fn a_strict_property_part_is_redacted_and_checked() {
     assert!(!app.contains("Vendor Writer"));
     check(&sanitized, policy, &WordFormat).unwrap();
 }
+
+/// A reference is text to the stray-text check: one spelling a letter is
+/// stray as plain text is, and one spelling whitespace is blank.
+#[test]
+fn a_referenced_letter_is_stray_text() {
+    let root = r#"<volTypes xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><volType><main><tp><v>"#;
+    let tail = "</v></tp></main></volType></volTypes>";
+    let stray = |value: &str| stray_text(&format!("{root}{value}{tail}")).unwrap();
+    assert_eq!(stray("Jane").as_deref(), Some("Jane"));
+    assert_eq!(stray("&#74;&#97;").as_deref(), Some("&#74;"));
+    assert_eq!(stray("&custom;").as_deref(), Some("&custom;"));
+    assert_eq!(stray("&#32;&#x9;"), None);
+}

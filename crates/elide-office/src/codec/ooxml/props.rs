@@ -29,19 +29,12 @@ use crate::opc::{PartPath, PartReplacement, props};
 /// Stable [`FormatId`] for an OOXML property part's metadata stream.
 pub(crate) const FORMAT_ID: FormatId = FormatId::new("elide.office.docprops");
 
-/// The document-property parts an OOXML package surfaces as metadata.
-const DOCPROPS_PARTS: &[&str] = &[
-    "docProps/core.xml",
-    "docProps/app.xml",
-    "docProps/custom.xml",
-];
-
 /// A package's document-property parts, each a metadata stream keyed by the
 /// part it was read from. Shared by every OOXML document (docx, pptx, xlsx).
 #[derive(Debug, Default)]
 pub(crate) struct DocProps {
     /// Each property part the package carries, with its stream, in
-    /// [`DOCPROPS_PARTS`] order.
+    /// [`props::SURFACED_PARTS`] order.
     parts: Vec<(PartPath, DocPropsStream)>,
 }
 
@@ -63,7 +56,7 @@ impl DocProps {
     /// The property parts a package carries, read through its `part_bytes`
     /// accessor. A part the package lacks is skipped.
     fn read(mut part_bytes: impl FnMut(&str) -> Option<Bytes>) -> Self {
-        let parts = DOCPROPS_PARTS
+        let parts = props::SURFACED_PARTS
             .iter()
             .filter_map(|path| {
                 Some((

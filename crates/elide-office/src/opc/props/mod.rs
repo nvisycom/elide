@@ -37,6 +37,15 @@ use self::walk::{Entered, Place, Walk};
 use crate::opc::attribute_value;
 use crate::opc::xml::edit::{bom_len, bound};
 
+/// The property parts detection reads, at the paths it reads them from. A
+/// property part anywhere else is never surfaced, so it is stripped as
+/// hidden content whatever the policy (see [`PartKind`](crate::opc::PartKind)).
+pub(crate) const SURFACED_PARTS: &[&str] = &[
+    "docProps/core.xml",
+    "docProps/app.xml",
+    "docProps/custom.xml",
+];
+
 /// The core and extended property elements surfaced as fields, each holding
 /// its value as text.
 const ELEMENT_FIELDS: &[&str] = &[
@@ -55,8 +64,8 @@ const ELEMENT_FIELDS: &[&str] = &[
     "HyperlinkBase",
 ];
 
-/// The element fields that hold a typed W3CDTF timestamp, which is cleared
-/// rather than overwritten with arbitrary text.
+/// The element fields that hold a typed W3CDTF timestamp, which is removed
+/// rather than overwritten with arbitrary text or left empty.
 const TIMESTAMPS: &[&str] = &["created", "modified"];
 
 /// The variant types (`vt:`) that hold free text: a list entry, or a custom
@@ -201,8 +210,8 @@ pub(crate) fn fields(xml: &[u8]) -> Vec<Field> {
 /// returning the edited XML.
 ///
 /// An element field or a list entry keeps its element: its new
-/// value becomes its only text, and a blank one, or any value for a field
-/// holding a typed timestamp, leaves it empty. A custom property takes its new
+/// value becomes its only text, and a blank one leaves it empty; a field
+/// holding a typed timestamp given any value is removed whole. A custom property takes its new
 /// value in its typed value when that holds text, and is otherwise dropped
 /// whole, since an empty or mistyped value is not valid, and those after it
 /// are numbered past every pid before it, so none repeats and the numbering
@@ -267,8 +276,8 @@ enum Mode<'v> {
     /// Clear a field, this many elements open in it, itself included: its
     /// text is dropped and its elements are written empty.
     Clearing(usize),
-    /// Drop a custom property, this many elements open in it, itself
-    /// included: nothing of it is written.
+    /// Drop a custom property or a redacted timestamp, this many elements
+    /// open in it, itself included: nothing of it is written.
     Dropping(usize),
     /// Hold back a custom property being given this value until its typed
     /// child says whether the value fits.
@@ -438,11 +447,17 @@ impl<'v> Rewriting<'v> {
                     }
                 }
             }
+            // A timestamp cannot hold a redacted value, and an empty one is
+            // not a W3CDTF date: it goes whole. Every core property is
+            // optional.
+            Place::Element | Place::Entry if field.timestamp => {
+                self.mode = Mode::Dropping(1);
+            }
             Place::Element | Place::Entry => {
                 let value = value.unwrap_or_default();
                 self.write(Event::Start(elem))?;
                 self.mode = Mode::Clearing(1);
-                if !value.is_empty() && !field.timestamp {
+                if !value.is_empty() {
                     self.write(Event::Text(BytesText::new(value)))?;
                 }
             }

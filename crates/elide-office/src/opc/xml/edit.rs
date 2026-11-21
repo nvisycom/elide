@@ -638,6 +638,12 @@ impl Skipped {
         Self { start, depth: 1 }
     }
 
+    /// The element whose start tag begins at `start`, `depth` elements open
+    /// inside it already, itself included.
+    pub(crate) fn open(start: usize, depth: usize) -> Self {
+        Self { start, depth }
+    }
+
     /// Begin removing the element whose tag spans `span`: an empty one is cut
     /// into `cuts` now, a started one (`is_start`) is returned to skip to its
     /// end tag.

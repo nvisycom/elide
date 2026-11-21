@@ -13,6 +13,7 @@ use crate::opc::block::EmbeddingKind;
 use crate::opc::package::content_types::{self, ContentType, PML, SML, WML};
 use crate::opc::package::part::PartPath;
 use crate::opc::package::relationships::{IMPORTED_CHUNK, THUMBNAIL};
+use crate::opc::props;
 
 /// What a package part is, decided by its content type and the relationship
 /// that reaches it.
@@ -121,7 +122,14 @@ impl PartKind {
         if let Some(name) = content_type.strip_prefix(SML) {
             return Self::of_spreadsheet(name);
         }
-        Self::of_shared(content_type)
+        match Self::of_shared(content_type) {
+            // Detection reads the property parts only at their usual paths:
+            // one anywhere else would ship unread.
+            Self::Properties if !props::SURFACED_PARTS.contains(&part.as_str()) => {
+                Self::Hidden(HiddenContent::Properties)
+            }
+            kind => kind,
+        }
     }
 
     /// The kind of an image, media, font, or embedded-object content type.

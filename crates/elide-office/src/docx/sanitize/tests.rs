@@ -173,6 +173,67 @@ fn strict_revisions_are_resolved() {
     check(&out, policy, &WordFormat).unwrap();
 }
 
+/// Accepting a tracked row or cell deletion removes the row or cell with its
+/// text; a row whose properties hold only an insertion stays.
+#[test]
+fn a_deleted_table_row_or_cell_goes_whole() {
+    let del = r#"w:id="1" w:author="Jane Roe" w:date="2024-01-02T03:04:05Z""#;
+    for namespace in [W, STRICT_W] {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{namespace}"><w:body><w:tbl><w:tr><w:trPr><w:del {del}/></w:trPr><w:tc><w:p><w:r><w:t>deleted row</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:ins {del}/></w:trPr><w:tc><w:tcPr><w:cellDel {del}/></w:tcPr><w:p><w:r><w:t>deleted cell</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>kept cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/></w:body></w:document>"#
+        );
+        let package = pack_typed(&[("word/document.xml", DOCUMENT, body.as_bytes())]);
+        let policy = HiddenContentPolicy::default();
+        let Sanitized { bytes: out, .. } = sanitize(&package, policy, &WordFormat).unwrap();
+        let out = out.unwrap();
+        let body = read_text_part(&out, "word/document.xml");
+        for hidden in [
+            "deleted row",
+            "deleted cell",
+            "cellDel",
+            "w:del",
+            "Jane Roe",
+        ] {
+            assert!(!body.contains(hidden), "{hidden} in {body}");
+        }
+        assert!(body.contains("kept cell"), "{body}");
+        assert_eq!(body.matches("<w:tr>").count(), 1, "{body}");
+        check(&out, policy, &WordFormat).unwrap();
+    }
+}
+
+/// Detection reads the core properties only at `docProps/core.xml`, so a
+/// core-properties part anywhere else goes, even when metadata is scanned.
+#[test]
+fn a_property_part_off_its_usual_path_goes() {
+    let core = br#"<?xml version="1.0"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jane Roe</dc:creator></cp:coreProperties>"#;
+    let body = format!(
+        r#"<?xml version="1.0"?><w:document xmlns:w="{W}"><w:body><w:p/></w:body></w:document>"#
+    );
+    let core_type = "application/vnd.openxmlformats-package.core-properties+xml";
+    let package = pack_typed(&[
+        ("word/document.xml", DOCUMENT, body.as_bytes()),
+        ("docProps/core.xml", core_type, core),
+        ("metadata/core.xml", core_type, core),
+    ]);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+    let Sanitized {
+        bytes: out,
+        stripped,
+    } = sanitize(&package, policy, &WordFormat).unwrap();
+    let out = out.unwrap();
+    let names = crate::fixtures::part_names(&out);
+    assert!(!names.iter().any(|n| n == "metadata/core.xml"), "{names:?}");
+    assert!(names.iter().any(|n| n == "docProps/core.xml"), "{names:?}");
+    assert!(
+        stripped
+            .iter()
+            .any(|e| e.content == HiddenContent::Properties),
+        "{stripped:?}"
+    );
+    check(&out, policy, &WordFormat).unwrap();
+}
+
 /// An accepted insertion's children keep the namespaces it declared, and
 /// its siblings are left as they were.
 #[test]

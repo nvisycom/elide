@@ -155,6 +155,8 @@ fn check_xml_part(index: &Index, part: &RawPart, sanitizer: &dyn Sanitizer) -> R
 }
 
 /// The first non-blank text of `raw`, or `None` when the part carries none.
+/// A reference is text too: one that resolves to whitespace is blank, and any
+/// other (an unknown entity among them) is stray, as written.
 ///
 /// # Errors
 ///
@@ -167,6 +169,17 @@ fn stray_text(raw: &str) -> Result<Option<String>> {
             Event::Eof => return Ok(None),
             Event::Text(text) => text,
             Event::CData(text) => text,
+            Event::GeneralRef(reference) => {
+                let blank = reference
+                    .resolve_char_ref()
+                    .ok()
+                    .flatten()
+                    .is_some_and(char::is_whitespace);
+                if blank {
+                    continue;
+                }
+                return Ok(Some(format!("&{};", &**reference)));
+            }
             _ => continue,
         };
         let text = text.trim();

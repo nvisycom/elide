@@ -8,7 +8,7 @@ use crate::opc::props::walk::Walk;
 use crate::opc::xml::edit::{Edit, edit, expect_edit};
 
 const CORE: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
-<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">
+<coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <dc:creator>Ada Lovelace</dc:creator>
   <lastModifiedBy>Alan Turing</lastModifiedBy>
   <dc:title></dc:title>
@@ -95,21 +95,33 @@ fn strict_property_parts_keep_only_the_surfaced_fields() {
 /// surfaced field, or anything a field holds that its value leaves out.
 /// A heading's count is structure, written from the titles it groups.
 fn unread(xml: &str) -> Vec<String> {
-    let read: Vec<String> = fields(xml.as_bytes())
+    let read: Vec<(String, String)> = fields(xml.as_bytes())
         .into_iter()
-        .map(|field| field.value)
+        .map(|field| (field.key, field.value))
         .collect();
     let mut reader = NsReader::from_str(xml);
     let mut unread = Vec::new();
     let mut walk = Walk::default();
+    // The field each open element holds, if any: a text is read only when
+    // the field it sits in surfaces it.
+    let mut open: Vec<Option<String>> = Vec::new();
     loop {
         let (resolved, event) = reader.read_resolved_event().unwrap();
         let namespace = bound(&resolved);
         match &event {
             Event::Start(e) => {
-                walk.enter(namespace.as_deref(), e);
+                let field = walk.enter(namespace.as_deref(), e);
+                open.push(field.map(|field| field.key));
             }
-            Event::End(_) => walk.leave(),
+            // An empty element still takes its place in a list.
+            Event::Empty(e) => {
+                walk.enter(namespace.as_deref(), e);
+                walk.leave();
+            }
+            Event::End(_) => {
+                walk.leave();
+                open.pop();
+            }
             Event::Text(_) if walk.is_count() => continue,
             _ => {}
         }
@@ -125,7 +137,12 @@ fn unread(xml: &str) -> Vec<String> {
             _ => continue,
         };
         let text = text.trim();
-        if !text.is_empty() && !read.iter().any(|value| value.contains(text)) {
+        let field = open.iter().rev().find_map(Option::as_deref);
+        let surfaced = field.is_some_and(|field| {
+            read.iter()
+                .any(|(key, value)| key == field && value.contains(text))
+        });
+        if !text.is_empty() && !surfaced {
             unread.push(text.to_owned());
         }
     }
@@ -338,19 +355,20 @@ fn a_custom_property_keeps_only_its_structural_attributes() {
         "555123456",
         "987654321",
         "vt:array",
+        // An array-valued property goes whole.
+        "Grid",
     ] {
         assert!(!text.contains(gone), "{gone} kept: {text}");
     }
     assert_eq!(
         text.matches(r#"fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}""#)
             .count(),
-        3,
+        2,
         "{text}"
     );
     for kept in [
         r#"pid="2" name="Client">"#,
         r#"pid="3" name="Team">"#,
-        r#"pid="4" name="Grid">"#,
         r#"<vt:vector size="2" baseType="lpwstr">"#,
     ] {
         assert!(text.contains(kept), "{kept} missing: {text}");
@@ -590,7 +608,10 @@ fn rewrite_overwrites_a_text_field_and_clears_a_timestamp() {
     let after = pairs(&out);
     assert!(after.contains(&("creator".to_owned(), "[A & B]".to_owned())));
     assert!(!after.iter().any(|(k, _)| k == "created"));
-    assert!(!std::str::from_utf8(&out).unwrap().contains("never"));
+    let out = std::str::from_utf8(&out).unwrap();
+    // The redacted timestamp goes whole: an empty one is not a date.
+    assert!(!out.contains("created"), "{out}");
+    assert!(!out.contains("never"), "{out}");
 }
 
 #[test]
@@ -721,4 +742,42 @@ fn a_named_entity_reference_is_read_and_stripped() {
         "named entity leaked past strip: {text}"
     );
     assert!(!text.contains(" B"), "value text leaked past strip: {text}");
+}
+
+/// Text repeating a surfaced value is unread outside the field that
+/// surfaces it.
+#[test]
+fn a_repeated_value_outside_its_field_is_unread() {
+    let app = format!("{EXTENDED}<Company>Ada</Company>Ada</Properties>");
+    assert_eq!(unread(&app), ["Ada"]);
+    let app = format!("{EXTENDED}<Company>Ada</Company></Properties>");
+    assert_eq!(unread(&app), Vec::<String>::new());
+}
+
+/// A custom property whose value is an array goes whole, not left without a
+/// typed value, and those after it are numbered on without a gap.
+#[test]
+fn a_custom_array_property_goes_whole() {
+    let property = |pid: u32, name: &str, value: &str| {
+        format!(
+            r#"<property fmtid="{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}" pid="{pid}" name="{name}">{value}</property>"#
+        )
+    };
+    let array = r#"<vt:array vt:lBounds="0" vt:uBounds="0" vt:baseType="lpwstr"><vt:lpwstr>Jane</vt:lpwstr></vt:array>"#;
+    let empty_array = r#"<vt:array vt:lBounds="0" vt:uBounds="0" vt:baseType="lpwstr"/>"#;
+    let kept = property(4, "Kept", "<vt:lpwstr>x</vt:lpwstr>");
+    for value in [array, empty_array] {
+        let xml = format!(
+            "{CUSTOM_ROOT}>{}{kept}</Properties>",
+            property(2, "Arr", value)
+        );
+        let out = UnsurfacedProperties.apply(&xml).unwrap().unwrap().text;
+        assert!(!out.contains("Arr"), "{out}");
+        assert!(!out.contains("array"), "{out}");
+        assert!(
+            out.contains(&property(2, "Kept", "<vt:lpwstr>x</vt:lpwstr>")),
+            "{out}"
+        );
+        assert!(UnsurfacedProperties.apply(&out).unwrap().is_none(), "{out}");
+    }
 }

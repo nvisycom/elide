@@ -195,7 +195,7 @@ fn find_names<'a>(
         let ranges = spans(part, raw, &rule_attributes)?;
         for (rule, ranges) in names.rules.iter().zip(ranges) {
             for range in ranges {
-                let (inside, outside) = take_inside(std::mem::take(pending), &range);
+                let (inside, outside) = take_inside(std::mem::take(pending), part, &range);
                 *pending = outside;
                 found.push(Found {
                     part: part.clone(),
@@ -269,7 +269,7 @@ fn retarget_part(
             let Some(text) = retarget(&value, reference, renamed) else {
                 continue;
             };
-            let (_, outside) = take_inside(std::mem::take(pending), &range);
+            let (_, outside) = take_inside(std::mem::take(pending), part, &range);
             *pending = outside;
             retargeted.insert(range.start);
             out.push(Replacement {
@@ -292,14 +292,16 @@ fn spans(
     attribute_ranges(raw, attributes).map_err(|_| malformed_part(part))
 }
 
-/// `pending` split into the replacements inside `range` and the rest.
+/// `pending` split into the replacements inside `range` of `part` and the
+/// rest. Another part's replacement at the same offsets stays pending.
 fn take_inside<'r>(
     pending: Vec<&'r Replacement>,
+    part: &PartPath,
     range: &Range<usize>,
 ) -> (Vec<&'r Replacement>, Vec<&'r Replacement>) {
     pending
         .into_iter()
-        .partition(|r| range.start <= r.span.start && r.span.end <= range.end)
+        .partition(|r| &r.part == part && range.start <= r.span.start && r.span.end <= range.end)
 }
 
 /// The value at `range` of `raw` with `inside` applied, entities resolved.
@@ -435,6 +437,25 @@ mod tests {
         };
         assert_eq!(text(&workbook), ["_PERSON_", "_PERSON_ (2)"]);
         assert_eq!(text(&sheet), ["'_PERSON_'!B2"]);
+    }
+
+    /// A replacement lands in a name only in its own part, though another
+    /// part holds a name at the same offsets.
+    #[test]
+    fn a_replacement_lands_only_in_its_own_part() {
+        let first = PartPath::from("xl/workbook.xml");
+        let second = PartPath::from("xl/workbook2.xml");
+        let raw = r#"<workbook><sheet name="Jane Roe"/></workbook>"#;
+        let parts = [(&first, raw), (&second, raw)];
+        let fitted = fit_names(
+            &NAMES,
+            parts.iter().copied(),
+            &[at(&second, raw, "Jane Roe")],
+        )
+        .unwrap();
+        assert_eq!(fitted.len(), 1, "{fitted:?}");
+        assert_eq!(fitted[0].part, second);
+        assert_eq!(&*fitted[0].text, "_PERSON_");
     }
 
     #[test]

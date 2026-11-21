@@ -6,7 +6,7 @@
 //!   name their editors), and document protection (a password hash).
 //! - **Tracked revisions**, under [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential): insertions
 //!   are accepted (their marks unwrapped, their content kept), deletions applied
-//!   (removed with their content), moves resolved the same way, and every
+//!   (removed with their content, a deleted table row or cell whole), moves resolved the same way, and every
 //!   property-change record dropped, so the document is its final visible text.
 //!   The setting that turns tracking back on goes too.
 //! - **Comment anchors**, under the same action: the range marks and reference
@@ -24,14 +24,20 @@
 //!   under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too; the authors are surfaced instead (see
 //!   [`TEXT_ATTRIBUTES`]).
 
+use std::ops::Range;
+
+use elide_core::Result;
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
+use quick_xml::events::Event;
 
 use super::WordFormat;
 use crate::opc::names::{NameGroup, NameReference, NameRule, Numbering, ReferenceForm, Unique};
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml::edit::{Declared, Local};
-use crate::opc::xml::ns::{W, W14, W15};
-use crate::opc::{Collaboration, HiddenAttributes, Names, Ns, PartKind, TextAttribute};
+use crate::opc::xml::edit::{Cut, Declared, Edit, Edited, Local, SpannedReader};
+use crate::opc::xml::ns::{W, W14, W15, transitional};
+use crate::opc::{
+    Collaboration, HiddenAttributes, Names, Ns, PartKind, TextAttribute, malformed_xml,
+};
 
 /// The editing-session ids: the `rsid` table and attributes, and the paragraph
 /// and text ids.
@@ -106,6 +112,94 @@ const REVISIONS: Declared = Declared {
     unwrap: &[(W, "ins"), (W, "moveTo")],
     attributes: &[],
 };
+
+/// The table rows and cells a tracked change deletes: a `w:tr` whose
+/// `w:trPr` holds `w:del`, and a `w:tc` whose `w:tcPr` holds `w:cellDel`.
+/// The deletion is marked in a child, so this edit reads each row and cell
+/// whole before cutting it; it runs before [`REVISIONS`], which removes the
+/// markers.
+struct DeletedTableParts;
+
+impl Edit for DeletedTableParts {
+    fn content(&self) -> Option<HiddenContent> {
+        Some(HiddenContent::TrackedChange)
+    }
+
+    fn apply(&self, raw: &str) -> Result<Option<Edited>> {
+        cut_deleted_table_parts(raw)
+    }
+}
+
+/// An open element of a story as [`cut_deleted_table_parts`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Opened {
+    /// A row or a cell, from this offset, and whether its deletion is marked.
+    Table {
+        start: usize,
+        deleted: bool,
+    },
+    /// A row's or a cell's properties.
+    Properties {
+        marker: &'static str,
+    },
+    Other,
+}
+
+/// `raw` without the table rows and cells a tracked change deletes. The
+/// count is of the rows and cells cut.
+fn cut_deleted_table_parts(raw: &str) -> Result<Option<Edited>> {
+    if !raw.contains("cellDel") && !raw.contains("trPr") {
+        return Ok(None);
+    }
+    let mut reader = SpannedReader::new_ns(raw);
+    let mut open: Vec<Opened> = Vec::new();
+    let mut cuts: Vec<Range<usize>> = Vec::new();
+    loop {
+        let (namespace, event, span) = reader.read_resolved_event().map_err(malformed_xml)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e) => {
+                let local = e.local_name();
+                let local = local.into_inner();
+                let in_w = namespace.as_deref().map(transitional) == Some(W);
+                // A marker in the properties of the open row or cell.
+                if let Some(&Opened::Properties { marker }) = open.last()
+                    && in_w
+                    && local == marker
+                    && let Some(Opened::Table { deleted, .. }) = open.iter_mut().rev().nth(1)
+                {
+                    *deleted = true;
+                }
+                if matches!(event, Event::Start(_)) {
+                    let parent_table = matches!(open.last(), Some(Opened::Table { .. }));
+                    open.push(match local {
+                        "tr" | "tc" if in_w => Opened::Table {
+                            start: span.start,
+                            deleted: false,
+                        },
+                        "trPr" if in_w && parent_table => Opened::Properties { marker: "del" },
+                        "tcPr" if in_w && parent_table => Opened::Properties { marker: "cellDel" },
+                        _ => Opened::Other,
+                    });
+                }
+            }
+            Event::End(_) => {
+                if let Some(Opened::Table {
+                    start,
+                    deleted: true,
+                }) = open.pop()
+                {
+                    cuts.push(start..span.end);
+                }
+            }
+            _ => {}
+        }
+    }
+    let count = cuts.len();
+    // The cuts may nest: a deleted row can hold a table with one of its own.
+    let cuts: Vec<Cut<&str>> = cuts.into_iter().map(Cut::remove).collect();
+    Ok(Edited::from_cuts(raw, cuts, count))
+}
 
 /// The comment anchors in the stories.
 const COMMENT_ANCHORS: Declared = Declared::removing(
@@ -253,6 +347,7 @@ impl Sanitizer for WordFormat {
             &CHANGE_DATES,
         ];
         if !policy.collaboration.treats_as_content() {
+            edits.push(&DeletedTableParts);
             edits.push(&REVISIONS);
             edits.push(&COMMENT_ANCHORS);
         }
