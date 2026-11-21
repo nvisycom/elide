@@ -25,6 +25,12 @@ updates:
           - "ocrs"
           - "rten"
           - "rten-*"
+      # rig-reqwest implements rig's HTTP client for one rig version, so they
+      # always move together, a breaking bump included.
+      rig:
+        patterns:
+          - "rig"
+          - "rig-*"
       rust-dependencies:
         patterns:
           - "*"
