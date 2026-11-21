@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashSet};
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
-use crate::pdf::reader::{DictionaryExt, DocumentExt, Scope, StreamExt};
+use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 
 /// Where a content stream is written back: a page's content, or the stream
 /// object of a form XObject, tiling pattern or glyph procedure.
@@ -109,12 +109,7 @@ pub(super) fn drop_xobjects(doc: &mut Document, hidden: &HashSet<ObjectId>) {
     if hidden.is_empty() {
         return;
     }
-    for object in doc.objects.values_mut() {
-        let dict = match object {
-            Object::Dictionary(dict) => dict,
-            Object::Stream(stream) => &mut stream.dict,
-            _ => continue,
-        };
+    for dict in doc.objects.values_mut().filter_map(ObjectExt::dict_mut) {
         if let Ok(Object::Dictionary(resources)) = dict.get_mut(b"Resources")
             && let Ok(Object::Dictionary(entries)) = resources.get_mut(b"XObject")
         {

@@ -68,10 +68,12 @@ pub(crate) struct Entry<'a> {
 }
 
 /// The `/EmbeddedFiles` name tree, read once: its nodes (so entries can be
-/// dropped in place) and its file entries.
+/// dropped in place), its file entries, and how many of its values embed no
+/// file (a path to a file elsewhere, or a specification without one).
 pub(crate) struct Tree<'a> {
     pub(crate) nodes: Vec<Node>,
     pub(crate) entries: Vec<Entry<'a>>,
+    pub(crate) unembedded: usize,
 }
 
 impl<'a> Tree<'a> {
@@ -88,13 +90,15 @@ impl<'a> Tree<'a> {
                 "attachment name tree cannot be read whole",
             ));
         }
-        let entries = tree
+        let pairs = tree.pairs.len();
+        let entries: Vec<Entry<'a>> = tree
             .pairs
             .into_iter()
             .filter_map(|(key, value)| entry(doc, key, value))
             .collect();
         Ok(Self {
             nodes: tree.nodes,
+            unembedded: pairs - entries.len(),
             entries,
         })
     }

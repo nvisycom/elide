@@ -19,7 +19,9 @@ embedded image and attached file as content of its own format for the registry
 to redact.
 
 The rebuilt document is untagged: its structure tree carries alternate text
-detection never reads. Embedded font programs are copied as stored.
+detection never reads. Embedded font programs are copied as stored. Metadata
+(`/Info`, XMP) and collaboration content (annotations, comments) are always
+stripped and recorded, whatever the `HiddenContentPolicy` asks.
 
 Encoding deletes the detected glyphs from the content streams, keeping a
 selectable text layer, writes the redacted images and files back, and replaces

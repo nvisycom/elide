@@ -68,6 +68,7 @@ async-trait = { workspace = true, features = [] }
 # Markup parsing
 lopdf = { workspace = true, default-features = false, features = ["embed_image"] }
 hayro-cmap = { workspace = true, features = ["embed-cmaps"] }
+read-fonts = { workspace = true, features = ["std", "type1"] }
 
 # Image processing
 image = { workspace = true, features = [] }

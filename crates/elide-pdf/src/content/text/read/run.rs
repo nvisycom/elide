@@ -6,11 +6,11 @@ use lopdf::Object;
 
 use super::geometry::{Cursor, SpaceRule, TextState};
 use crate::content::text::{Address, GlyphBytes, OffsetRun, StreamTarget};
-use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource, decode_glyphs};
+use crate::pdf::reader::font::{FontText, Glyph, GlyphMetrics, WidthSource, decode_glyphs};
 use crate::pdf::reader::{DeviceRect, GlyphRect, ObjectExt};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
-/// applies to (ISO 32000-1 §9.3.3).
+/// applies to (9.3.3).
 pub(super) const SPACE_CODE: u32 = 32;
 
 /// Append a synthetic space no glyph drew to `text`, its run to `runs`: one
@@ -69,28 +69,23 @@ pub(super) struct TextRun<'a> {
 }
 
 impl TextRun<'_> {
-    /// Append the characters a glyph drew (its decoded text) as one run tied to
-    /// the glyph's bytes.
-    pub(super) fn push_glyph(
-        &mut self,
-        text: &str,
-        address: Address,
-        byte_start: usize,
-        byte_end: usize,
-    ) {
+    /// Append the characters `glyph` drew (its decoded text) as one run tied
+    /// to its bytes at `address`.
+    pub(super) fn push_glyph(&mut self, address: Address, glyph: &Glyph) {
         let start = *self.next_char;
-        let count = text.chars().count();
+        let count = glyph.text.chars().count();
         if count == 0 {
             return;
         }
-        self.text.push_str(text);
+        self.text.push_str(&glyph.text);
         *self.next_char += count;
         self.runs.push(OffsetRun {
             chars: start..*self.next_char,
             source: Some(GlyphBytes {
                 address,
-                byte_start,
-                byte_end,
+                byte_start: glyph.byte_start,
+                byte_end: glyph.byte_end,
+                code: glyph.code,
                 font: self.font,
             }),
         });
@@ -112,7 +107,7 @@ impl TextRun<'_> {
     /// is 0 when the whole operand list is passed.
     pub(super) fn show(
         &mut self,
-        enc: &FontText<'_>,
+        enc: &FontText,
         operands: &[Object],
         op: usize,
         operand_base: usize,
@@ -173,7 +168,7 @@ impl TextRun<'_> {
     /// as a word break while glyphs packed at the same origin do not.
     pub(super) fn show_string(
         &mut self,
-        enc: &FontText<'_>,
+        enc: &FontText,
         bytes: &[u8],
         address: Address,
     ) -> Result<()> {
@@ -204,16 +199,17 @@ impl TextRun<'_> {
             }
 
             let char_start = *self.next_char;
-            self.push_glyph(&glyph.text, address, glyph.byte_start, glyph.byte_end);
+            self.push_glyph(address, &glyph);
             let char_end = *self.next_char;
 
             // The glyph's advance (visible width only, no Tc/Tw) and its box in
             // text space, relative to the current pen: x from 0 to the advance,
-            // y from descent to ascent (em fractions × font size). An unknown
-            // width gives a zero-width advance; the box still has its height.
+            // y from descent to ascent (em fractions × font size), raised by
+            // the text rise (9.4.4). An unknown width gives a zero-width
+            // advance; the box still has its height.
             let glyph_w = w0 * self.state.font_size * self.state.h_scale;
-            let top = self.metrics.top * self.state.font_size;
-            let bottom = self.metrics.bottom * self.state.font_size;
+            let top = self.metrics.top * self.state.font_size + self.state.rise;
+            let bottom = self.metrics.bottom * self.state.font_size + self.state.rise;
 
             // Record the glyph's device-space box: project its four text-space
             // corners through the text matrix + CTM (handles rotation/shear),

@@ -5,10 +5,11 @@
 //! byte code from `/FirstChar`; a composite (Type0) font carries a `/W` array
 //! keyed by CID with a `/DW` default. A simple font that names one of the
 //! standard 14 fonts and embeds no program may give no `/Widths`; a reader
-//! then supplies the face's own (see [`Standard`]). This module reads each into
-//! a uniform [`WidthSource`] that answers [`advance`](WidthSource::advance) in
-//! text-space thousandths per unit of font size (the unit `/Widths` and `/W`
-//! use, `1000` to the em). A Type3 font's `/Widths` are in its glyph space, so
+//! then supplies the face's own (see [`Standard`]). A simple font that embeds
+//! its program and gives none is given the program's by the rebuild (see
+//! [`Program`](super::Program)). This module reads each into a uniform [`WidthSource`] that answers
+//! [`advance`](WidthSource::advance) in text-space thousandths per unit of
+//! font size (the unit `/Widths` and `/W` use, `1000` to the em). A Type3 font's `/Widths` are in its glyph space, so
 //! are scaled by its `/FontMatrix` into that unit.
 //!
 //! Widths place glyphs: they decide where a word space is read, and the boxes a
@@ -18,10 +19,12 @@
 //! [`WidthSource::Unknown`], and the caller falls back to treating any
 //! positional move as a word boundary rather than failing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use lopdf::{Dictionary, Document, Object};
 
+use super::descendant;
 use super::standard::Standard;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt};
 
@@ -48,7 +51,8 @@ pub(crate) enum WidthSource {
     /// Ranges are kept compact rather than expanded into `w`: a `/W` entry of the
     /// form `c_first c_last w` may name an enormous CID span (it is document-
     /// supplied, untrusted), so expanding it per CID would let a hostile font
-    /// exhaust memory. Lookups search the (few) ranges instead.
+    /// exhaust memory. They are held disjoint and sorted, so a lookup is a
+    /// binary search however many the font gives.
     Composite {
         dw: f64,
         w: BTreeMap<u32, f64>,
@@ -82,24 +86,23 @@ impl WidthSource {
                 widths,
                 missing,
             } => {
-                let idx = i64::from(code) - first_char;
-                let within = usize::try_from(idx)
-                    .ok()
-                    .and_then(|i| widths.get(i))
+                let within = i64::from(code)
+                    .checked_sub(*first_char)
+                    .and_then(|index| usize::try_from(index).ok())
+                    .and_then(|index| widths.get(index))
                     .copied();
                 Some(within.unwrap_or(*missing))
             }
             WidthSource::Composite { dw, w, ranges } => {
                 // Explicit per-CID width first, then a covering range, then the
-                // default. Ranges are few (one `/W` range entry each), so a linear
-                // scan is cheap and avoids expanding them per CID.
+                // default.
                 if let Some(width) = w.get(&code) {
                     return Some(*width);
                 }
                 let in_range = ranges
-                    .iter()
-                    .find(|r| code >= r.first && code <= r.last)
-                    .map(|r| r.width);
+                    .get(ranges.partition_point(|range| range.last < code))
+                    .filter(|range| range.first <= code)
+                    .map(|range| range.width);
                 Some(in_range.unwrap_or(*dw))
             }
             WidthSource::Unknown => None,
@@ -131,9 +134,8 @@ impl WidthSource {
 
     /// `/Widths` + `/FirstChar` of a simple font, each width times `scale`.
     fn from_widths(doc: &Document, font: &Dictionary, scale: f64) -> Option<WidthSource> {
-        let first_char = font.get(b"FirstChar").ok()?.as_i64().ok()?;
-        let widths = doc
-            .resolve_array(font.get(b"Widths").ok()?)?
+        let (first_char, widths) = own_widths(doc, font)?;
+        let widths = widths
             .iter()
             .map(|o| o.as_number().unwrap_or(0.0) * scale)
             .collect();
@@ -153,15 +155,7 @@ impl WidthSource {
 
     /// `/W` + `/DW` of a Type0 font's descendant CIDFont.
     fn from_type0(doc: &Document, font: &Dictionary) -> WidthSource {
-        // `/DescendantFonts` is a one-element array holding the CIDFont (inline or
-        // by reference).
-        let Some(cid_font) = font
-            .get(b"DescendantFonts")
-            .ok()
-            .and_then(|o| doc.resolve_array(o))
-            .and_then(|arr| arr.first())
-            .and_then(|o| doc.resolve_dict(o))
-        else {
+        let Some(cid_font) = descendant(doc, font) else {
             return WidthSource::Unknown;
         };
 
@@ -178,6 +172,20 @@ impl WidthSource {
         }
         WidthSource::Composite { dw, w, ranges }
     }
+}
+
+/// The `/FirstChar` and `/Widths` the simple `font` gives, when it gives
+/// both.
+fn own_widths<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<(i64, &'a [Object])> {
+    let first_char = doc.resolve(font.get(b"FirstChar").ok()?)?.as_i64().ok()?;
+    let widths = doc.resolve_array(font.get(b"Widths").ok()?)?;
+    Some((first_char, widths))
+}
+
+/// Whether the simple `font` gives widths of its own: a `/FirstChar` and
+/// `/Widths`.
+pub(crate) fn has_own_widths(doc: &Document, font: &Dictionary) -> bool {
+    own_widths(doc, font).is_some()
 }
 
 /// One `c_first c_last w` entry of a `/W` array, kept as a range rather than
@@ -285,11 +293,7 @@ fn type3_scale(doc: &Document, font: &Dictionary) -> Option<(f64, f64)> {
 /// descendant CIDFont (whose descriptor carries the metrics).
 fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Dictionary> {
     let owner = if font.is_subtype(doc, b"Type0") {
-        font.get(b"DescendantFonts")
-            .ok()
-            .and_then(|o| doc.resolve_array(o))
-            .and_then(|arr| arr.first())
-            .and_then(|o| doc.resolve_dict(o))?
+        descendant(doc, font)?
     } else {
         font
     };
@@ -301,12 +305,13 @@ fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Di
 
 /// Parse a Type0 `/W` array into explicit per-CID widths plus compact ranges.
 ///
-/// The array mixes two forms (ISO 32000-1 §9.7.4.3): `c [w1 w2 …]` assigns
-/// consecutive CIDs starting at `c` (expanded into `out`, bounded by the list
-/// length the document actually wrote), and `c_first c_last w` assigns one width
-/// to every CID in the inclusive range (kept as a [`CidRange`] rather than
-/// expanded — the span is untrusted and may be enormous). A malformed tail is
-/// ignored; widths are best-effort.
+/// The array mixes two forms (9.7.4.3): `c [w1 w2 …]` assigns consecutive
+/// CIDs starting at `c` (expanded into `out`, bounded by the list length the
+/// document actually wrote), and `c_first c_last w` assigns one width to every
+/// CID in the inclusive range (kept as a [`CidRange`] rather than expanded —
+/// the span is untrusted and may be enormous). Where ranges overlap, the
+/// first gives the width, as PDFium reads them; they are kept
+/// [`disjoint`]. A malformed tail is ignored; widths are best-effort.
 fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut Vec<CidRange>) {
     let mut i = 0;
     while i < entries.len() {
@@ -318,7 +323,11 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
             // count is the length of the array the document itself supplied.
             Some(Object::Array(list)) => {
                 for (offset, width) in list.iter().enumerate() {
-                    if let Ok(cid) = u32::try_from(start + offset as i64) {
+                    let cid = i64::try_from(offset)
+                        .ok()
+                        .and_then(|offset| start.checked_add(offset))
+                        .and_then(|cid| u32::try_from(cid).ok());
+                    if let Some(cid) = cid {
                         out.insert(cid, width.as_number().unwrap_or(0.0));
                     }
                 }
@@ -343,6 +352,62 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
             None => break,
         }
     }
+    *ranges = disjoint(mem::take(ranges));
+}
+
+/// `ranges`, in the order a `/W` array gives them, as disjoint ranges sorted
+/// by CID, each CID the width of the first range covering it.
+///
+/// A sweep over the ranges' ends keeps the ranges covering each span between
+/// two ends by their order, the first of them giving its width, so ranges
+/// that overlap any number of others are split in `O(n log n)`.
+fn disjoint(ranges: Vec<CidRange>) -> Vec<CidRange> {
+    let mut starts: Vec<(u32, usize)> = ranges
+        .iter()
+        .enumerate()
+        .map(|(order, range)| (range.first, order))
+        .collect();
+    starts.sort_unstable();
+    let mut ends: Vec<u64> = ranges
+        .iter()
+        .flat_map(|range| [u64::from(range.first), u64::from(range.last) + 1])
+        .collect();
+    ends.sort_unstable();
+    ends.dedup();
+    let mut covering = BTreeSet::new();
+    let mut started = starts.iter().peekable();
+    let mut out: Vec<CidRange> = Vec::new();
+    for span in ends.windows(2) {
+        let (first, past) = (span[0], span[1]);
+        while let Some(&&(start, order)) = started.peek()
+            && u64::from(start) <= first
+        {
+            covering.insert(order);
+            started.next();
+        }
+        // A range that ended before the span is dropped once it is the first.
+        while let Some(&order) = covering.first()
+            && u64::from(ranges[order].last) < first
+        {
+            covering.pop_first();
+        }
+        let Some(&order) = covering.first() else {
+            continue;
+        };
+        let (Ok(first), Ok(last)) = (u32::try_from(first), u32::try_from(past - 1)) else {
+            continue;
+        };
+        let width = ranges[order].width;
+        match out.last_mut() {
+            Some(previous)
+                if previous.last.checked_add(1) == Some(first) && previous.width == width =>
+            {
+                previous.last = last;
+            }
+            _ => out.push(CidRange { first, last, width }),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -467,5 +532,67 @@ mod tests {
             ranges,
         };
         assert_eq!(src.advance(3_000_000_000), Some(500.0));
+    }
+
+    /// The composite widths a `/W` array of `entries` gives, by default 1000.
+    fn composite(entries: Vec<Object>) -> WidthSource {
+        let mut w = BTreeMap::new();
+        let mut ranges = Vec::new();
+        parse_w_array(&entries, &mut w, &mut ranges);
+        WidthSource::Composite {
+            dw: 1000.0,
+            w,
+            ranges,
+        }
+    }
+
+    /// Where `/W` ranges overlap, the first gives the width, as PDFium reads
+    /// them; a CID none covers takes the default.
+    #[test]
+    fn the_first_of_overlapping_ranges_gives_the_width() {
+        let widths = composite(vec![
+            10.into(),
+            20.into(),
+            100.into(),
+            0.into(),
+            30.into(),
+            200.into(),
+            15.into(),
+            40.into(),
+            300.into(),
+        ]);
+        assert_eq!(widths.advance(5), Some(200.0));
+        assert_eq!(widths.advance(10), Some(100.0));
+        assert_eq!(widths.advance(20), Some(100.0));
+        assert_eq!(widths.advance(25), Some(200.0));
+        assert_eq!(widths.advance(35), Some(300.0));
+        assert_eq!(widths.advance(41), Some(1000.0));
+    }
+
+    /// Many overlapping ranges are split once, not searched for each glyph,
+    /// and widths at the ends of the integer range don't overflow.
+    #[test]
+    fn hostile_widths_are_bounded() {
+        let entries: Vec<Object> = (0..100_000_i64)
+            .flat_map(|i| [i.into(), (i + 100_000).into(), 500.into()])
+            .collect();
+        let widths = composite(entries);
+        let WidthSource::Composite { ranges, .. } = &widths else {
+            panic!("composite");
+        };
+        assert!(ranges.len() <= 200_001);
+        assert_eq!(widths.advance(150_000), Some(500.0));
+
+        let extreme = composite(vec![
+            i64::MAX.into(),
+            vec![Object::from(1), 2.into()].into(),
+        ]);
+        assert_eq!(extreme.advance(0), Some(1000.0));
+        let simple = WidthSource::Simple {
+            first_char: i64::MIN,
+            widths: vec![1.0],
+            missing: 7.0,
+        };
+        assert_eq!(simple.advance(65), Some(7.0));
     }
 }

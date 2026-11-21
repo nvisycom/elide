@@ -16,20 +16,21 @@ mod paint;
 mod run;
 mod stream;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::mem;
+use std::rc::Rc;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, ObjectId};
 
-use self::nested::{Cell, Selected};
+use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
-use self::stream::{Frame, Inherited};
+use self::stream::{Frame, Inherited, ScopeFont};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
-use crate::pdf::reader::{DocumentExt, GlyphRect, PageFrame, Scope, page_frame};
+use crate::pdf::reader::{DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Scope, page_frame};
 
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
@@ -42,6 +43,11 @@ pub(super) const MAX_XOBJECT_DEPTH: u8 = 12;
 /// an enormous number of decodes. This caps the total; a genuine page draws far
 /// fewer forms than this, so it only bites pathological fan-out.
 pub(super) const MAX_XOBJECT_WALKS: u32 = 4_096;
+
+/// The most content the forms and patterns one page draws decode to, all
+/// told: a form drawn many times is decoded each time, so the walk budget
+/// alone would let a few large forms decode without bound.
+pub(super) const MAX_WALKED_BYTES: usize = 4 * MAX_CONTENT_BYTES;
 
 /// Build one [`TextBlock`] per page by walking its content in operator order,
 /// the same order lopdf's text extraction uses, so a character offset maps to
@@ -99,11 +105,14 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         active: BTreeSet::new(),
         patterns: BTreeSet::new(),
         selected: Vec::new(),
+        masks: Vec::new(),
         painted: Vec::new(),
         cell: None,
         cells: BTreeMap::new(),
         page,
         walks_remaining: MAX_XOBJECT_WALKS,
+        decoded_remaining: MAX_WALKED_BYTES,
+        read_fonts: HashMap::new(),
         unplaced: false,
     };
 
@@ -117,13 +126,19 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
             inherited: None,
         },
     )?;
+    // The text tiling patterns and soft mask groups draw is read once the
+    // page's is, each apart, and what they select in turn after them.
     loop {
         let selected = mem::take(&mut walk.selected);
-        if selected.is_empty() {
+        let masks = mem::take(&mut walk.masks);
+        if selected.is_empty() && masks.is_empty() {
             break;
         }
         for pattern in selected {
             walk.walk_pattern(pattern)?;
+        }
+        for mask in masks {
+            walk.walk_soft_mask(mask)?;
         }
     }
     walk.place_tiles()?;
@@ -176,6 +191,9 @@ struct Walk<'a, 'd> {
     /// The tiling patterns selected and not yet walked: each is walked once
     /// the page's own text is, so its text never falls inside the page's.
     selected: Vec<Selected<'d>>,
+    /// The soft mask groups set and not yet walked, each walked once the
+    /// page's own text is.
+    masks: Vec<Mask<'d>>,
     /// The regions tiling patterns paint on this page, each with the
     /// pattern whose cell it was painted in, if any.
     painted: Vec<(Option<ObjectId>, Painted)>,
@@ -192,7 +210,13 @@ struct Walk<'a, 'd> {
     /// stream decodes without ever recursing cyclically. This bounds the total,
     /// independent of nesting depth.
     walks_remaining: u32,
-    /// Whether a glyph was drawn in a font whose advances can't be known.
+    /// The bytes of form and pattern content the page's walk may still
+    /// decode.
+    decoded_remaining: usize,
+    /// Each font held as an object of its own, read once for the page.
+    read_fonts: HashMap<ObjectId, Rc<ScopeFont>>,
+    /// Whether a glyph was drawn that can't be placed: in a font whose
+    /// advances can't be known, or written vertically.
     unplaced: bool,
 }
 
@@ -203,7 +227,7 @@ mod tests {
     use lopdf::{Dictionary, Object, Stream, dictionary};
 
     use super::*;
-    use crate::fixtures::{DocBuilder, Page, encoded, shown, tm, type1};
+    use crate::fixtures::{DocBuilder, Page, encoded, shown, text, tm, type1};
 
     /// Build a one-page document whose single content stream is `ops`, drawing
     /// with a simple Helvetica font (no `/Widths`, so glyph advances are the
@@ -394,6 +418,89 @@ mod tests {
         assert!(!extract_block_in(selected, type1("Custom")).unplaced);
     }
 
+    /// A font a form names is read once a page and keeps one slot, however
+    /// many times the form is drawn.
+    #[test]
+    fn a_font_drawn_through_a_form_many_times_is_read_once() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let form = pdf.form(
+            dictionary! { "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } } },
+            encoded(text("F1", 10, "Hi")),
+        );
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .xobject("Fm", form)
+                .content(b"/Fm Do\n".repeat(200))
+                .size(100, 200),
+        );
+        let (doc, pages) = pdf.finish();
+        let block = text_block_for_page(&doc, 1, pages[0]).unwrap();
+        assert_eq!(block.fonts.len(), 1);
+        assert_eq!(block.text.matches("Hi").count(), 200);
+    }
+
+    /// A composite font of `encoding` drawing code 1 as `J`.
+    fn composite(encoding: &str) -> Dictionary {
+        let to_unicode = Stream::new(
+            Dictionary::new(),
+            b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
+              /CMapName /Test-UCS def\n/CMapType 2 def\n\
+              1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n\
+              1 beginbfchar\n<0001> <004A>\nendbfchar\n\
+              endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
+                .to_vec(),
+        );
+        dictionary! {
+            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X", "Encoding" => encoding,
+            "ToUnicode" => Object::Stream(to_unicode),
+            "DescendantFonts" => vec![Object::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "X",
+                "CIDSystemInfo" => dictionary! {
+                    "Registry" => Object::string_literal("Adobe"),
+                    "Ordering" => Object::string_literal("Identity"),
+                    "Supplement" => 0,
+                },
+            })],
+        }
+    }
+
+    /// Vertical writing is not laid out, so a page drawing glyphs in a font
+    /// that writes vertically is unplaced, though its widths are known, and
+    /// its text is not read: a code that maps to no text doesn't stop the
+    /// page from being redacted from its render.
+    #[test]
+    fn vertical_writing_leaves_its_page_unplaced() {
+        let drawn = |bytes: &[u8]| shown(bytes.to_vec());
+        let vertical = extract_block_in(drawn(b"\x00\x01"), composite("Identity-V"));
+        assert!(vertical.unplaced);
+        assert!(vertical.text.is_empty());
+        let unmapped = extract_block_in(drawn(b"\x00\x09"), composite("Identity-V"));
+        assert!(unmapped.unplaced);
+        assert!(!extract_block_in(drawn(b"\x00\x01"), composite("Identity-H")).unplaced);
+    }
+
+    /// The text rise raises a glyph's box: the glyph is drawn above its
+    /// baseline, though the pen is not moved.
+    #[test]
+    fn the_text_rise_raises_glyph_boxes() {
+        let top = |rise: i64| {
+            let ops = vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 10.into()]),
+                Operation::new("Ts", vec![rise.into()]),
+                Operation::new("Td", vec![10.into(), 100.into()]),
+                show("A"),
+                Operation::new("ET", vec![]),
+            ];
+            let block = extract_block_with_widths(ops, true);
+            block.geometry().rects_for(0..1)[0].y
+        };
+        // The page is 200 points tall, and fractions run down from its top.
+        assert!((top(0) - top(20) - 0.1).abs() < 1e-9);
+    }
+
     /// Glyphs drawn contiguously (one `Tj`) are not split by spurious spaces.
     #[test]
     fn a_single_run_is_not_broken_up() {
@@ -502,7 +609,7 @@ mod tests {
                 "Matrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 20.into(), 180.into()],
                 "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
             },
-            encoded(crate::fixtures::text("F1", 10, "Hi")),
+            encoded(text("F1", 10, "Hi")),
         );
         // The page just invokes the form.
         pdf.page(

@@ -7,15 +7,16 @@
 //! by. A name that is already neutral stays, so a rebuild of a rebuild renames
 //! nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use lopdf::{Dictionary, Object, ObjectId};
 
+use super::Builder;
+use super::content::Fresh;
 use super::copy::At;
 use super::keys::Kind;
-use super::{Builder, record};
 use crate::content::attachment::Tree;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, Scope};
 
@@ -24,6 +25,26 @@ const NEUTRAL_PREFIX: &str = "attachment-";
 
 /// The file specification entries the rebuild writes itself.
 const SPEC_KEYS: [&[u8]; 5] = [b"Type", b"F", b"UF", b"EF", b"AFRelationship"];
+
+/// The attached files a rebuild copies.
+pub(super) struct Files {
+    /// The neutral names given.
+    names: HashSet<String>,
+    /// The neutral names to try.
+    fresh: Fresh,
+    /// The copy of each embedded file made for a name of each extension.
+    copies: HashMap<ObjectId, HashMap<Option<String>, Object>>,
+}
+
+impl Default for Files {
+    fn default() -> Self {
+        Self {
+            names: HashSet::new(),
+            fresh: Fresh::new(NEUTRAL_PREFIX),
+            copies: HashMap::new(),
+        }
+    }
+}
 
 impl Builder<'_> {
     /// The attachment tree rebuilt as one leaf of its files, sorted by their
@@ -35,6 +56,10 @@ impl Builder<'_> {
     /// the tree cannot be read.
     pub(super) fn attachment_tree(&mut self) -> Result<Option<Dictionary>> {
         let tree = Tree::read(self.source)?;
+        // A value embedding no file is a path to one elsewhere, not a file
+        // the document carries.
+        self.stripped
+            .record(HiddenContent::FilePath, None, tree.unembedded);
         let mut pairs = Vec::new();
         for entry in &tree.entries {
             if let Some(spec) =
@@ -94,7 +119,7 @@ impl Builder<'_> {
         };
         for (key, _) in spec.iter() {
             if !SPEC_KEYS.contains(&key.as_slice()) {
-                self.drop_key(key, record::entry);
+                self.drop_key(key);
             }
         }
         let name = name.unwrap_or_default();
@@ -134,7 +159,7 @@ impl Builder<'_> {
         stream: ObjectId,
         extension: Option<String>,
     ) -> Result<Option<Object>> {
-        let copies = self.file_copies.get(&stream);
+        let copies = self.files.copies.get(&stream);
         if let Some(file) = copies.and_then(|copies| copies.get(&extension)) {
             return Ok(Some(file.clone()));
         }
@@ -154,7 +179,8 @@ impl Builder<'_> {
             self.copy(Kind::EmbeddedFile, data, At::top(&scope))?
         };
         if let Some(file) = &file {
-            self.file_copies
+            self.files
+                .copies
                 .entry(stream)
                 .or_default()
                 .insert(extension, file.clone());
@@ -166,19 +192,16 @@ impl Builder<'_> {
     /// is neutral and not yet given, else the next neutral name not given,
     /// recorded as a property removed.
     fn neutral(&mut self, name: &str) -> String {
-        let neutral = if is_neutral(name) && !self.file_names.contains(name) {
+        let neutral = if is_neutral(name) && !self.files.names.contains(name) {
             name.to_owned()
         } else {
             self.record(HiddenContent::Properties);
-            loop {
-                let candidate = neutral_name(self.next_file, name);
-                self.next_file += 1;
-                if !self.file_names.contains(&candidate) {
-                    break candidate;
-                }
-            }
+            let suffix =
+                extension(name).map_or_else(String::new, |extension| format!(".{extension}"));
+            let Files { names, fresh, .. } = &mut self.files;
+            fresh.name_ending(&suffix, |candidate| names.contains(candidate))
         };
-        self.file_names.insert(neutral.clone());
+        self.files.names.insert(neutral.clone());
         neutral
     }
 

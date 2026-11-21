@@ -32,14 +32,14 @@ fn parse(list: &'static str) -> HashMap<&'static str, String> {
 
 /// The text the glyph `name` stands for, `dingbats` when it names a glyph of
 /// ZapfDingbats; `None` when the name spells none. A suffix after the first
-/// `.` is dropped, and each `_`-joined component maps on its own.
-pub(super) fn text(name: &str, dingbats: bool) -> Option<String> {
+/// `.` is dropped, and each `_`-joined component maps on its own: a name
+/// with a component that spells nothing spells none.
+pub(crate) fn text(name: &str, dingbats: bool) -> Option<String> {
     let base = name.split('.').next().unwrap_or_default();
-    let text: String = base
-        .split('_')
-        .filter_map(|component| component_text(component, dingbats))
-        .collect();
-    (!text.is_empty()).then_some(text)
+    base.split('_')
+        .map(|component| component_text(component, dingbats))
+        .collect::<Option<String>>()
+        .filter(|text| !text.is_empty())
 }
 
 /// The text of one name component: its ZapfDingbats entry when `dingbats`,

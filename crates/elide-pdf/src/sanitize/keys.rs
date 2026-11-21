@@ -1,12 +1,19 @@
 //! What each kind of object keeps: the keys the PDF specification defines for
 //! it, each with the kind of value it holds. A key not listed is not copied.
 
+use lopdf::Object;
+
 /// The kind of a value being copied, which decides the keys it keeps and how
 /// its children are copied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Kind {
-    /// A number, name, string, or boolean, or an array of them.
+    /// A number, name, or boolean, or an array of them.
     Value,
+    /// A string or name identifying something the specification lets a
+    /// producer name: a character collection's registry and ordering, a
+    /// font's family, character set, language and classification, an output
+    /// condition's identifier and registry.
+    Label,
     /// A font dictionary (any subtype; a Type3 font's glyph procedures are
     /// rebuilt as content).
     Font,
@@ -27,8 +34,9 @@ pub(super) enum Kind {
     CMap,
     /// A font's `/ToUnicode` CMap stream: the text a viewer copies.
     ToUnicode,
-    /// A stream of opaque data: a palette, a CID set, a CID-to-glyph map,
-    /// global JBIG2 segments.
+    /// Opaque data, a stream or (an Indexed colour space's palette) a
+    /// string: a palette, a CID set, a CID-to-glyph map, global JBIG2
+    /// segments.
     Data,
     /// An image XObject.
     Image,
@@ -59,6 +67,8 @@ pub(super) enum Kind {
     DecodeParms,
     /// A file specification, its file given a neutral name.
     FileSpec,
+    /// An `/AF` array of associated file specifications.
+    Associated,
     /// An embedded file stream.
     EmbeddedFile,
     /// An embedded file's parameters.
@@ -79,6 +89,34 @@ pub(super) enum Kind {
     Map(&'static Kind),
 }
 
+impl Kind {
+    /// Whether a value of this kind may be the scalar `value`: a number or
+    /// boolean only where values are, a name only where a kind can be named,
+    /// a string only where a label or data is. Every other kind is a dictionary,
+    /// stream or array.
+    pub(super) fn holds(self, value: &Object) -> bool {
+        match value {
+            Object::Null => true,
+            Object::Integer(_) | Object::Real(_) | Object::Boolean(_) => {
+                matches!(self, Kind::Value | Kind::Mask)
+            }
+            Object::Name(_) => matches!(
+                self,
+                Kind::Value
+                    | Kind::Label
+                    | Kind::Encoding
+                    | Kind::CMap
+                    | Kind::ToUnicode
+                    | Kind::SoftMask
+                    | Kind::ColorSpace
+                    | Kind::Function
+            ),
+            Object::String(..) => matches!(self, Kind::Label | Kind::Data),
+            _ => false,
+        }
+    }
+}
+
 /// The kinds a [`Kind::Map`] holds.
 pub(super) const FONT_DESCRIPTORS: Kind = Kind::Map(&Kind::FontDescriptor);
 pub(super) const COLOR_SPACES: Kind = Kind::Map(&Kind::ColorSpace);
@@ -86,9 +124,9 @@ pub(super) const VALUES: Kind = Kind::Map(&Kind::Value);
 pub(super) const FUNCTIONS: Kind = Kind::Map(&Kind::Function);
 
 use Kind::{
-    CMap, CidFont, CidSystemInfo, ColorSpace, Data, DecodeParms, Encoding, FileParams, FileSpec,
-    FontDescriptor, FontProgram, FontStyle, Form, Function, Image, Mask, SoftMask, ToUnicode,
-    Value,
+    Associated, CMap, CidFont, CidSystemInfo, ColorSpace, Data, DecodeParms, Encoding, FileParams,
+    FontDescriptor, FontProgram, FontStyle, Form, Function, Image, Label, Mask, SoftMask,
+    ToUnicode, Value,
 };
 
 /// The keys every stream keeps beside its own: how its data is encoded. The
@@ -118,7 +156,7 @@ pub(super) fn fields(kind: Kind) -> Option<&'static [(&'static [u8], Kind)]> {
         Kind::FontDescriptor => &[
             (b"Type", Value),
             (b"FontName", Value),
-            (b"FontFamily", Value),
+            (b"FontFamily", Label),
             (b"FontStretch", Value),
             (b"FontWeight", Value),
             (b"Flags", Value),
@@ -134,8 +172,8 @@ pub(super) fn fields(kind: Kind) -> Option<&'static [(&'static [u8], Kind)]> {
             (b"AvgWidth", Value),
             (b"MaxWidth", Value),
             (b"MissingWidth", Value),
-            (b"CharSet", Value),
-            (b"Lang", Value),
+            (b"CharSet", Label),
+            (b"Lang", Label),
             (b"Style", FontStyle),
             (b"FontFile", FontProgram),
             (b"FontFile2", FontProgram),
@@ -143,10 +181,10 @@ pub(super) fn fields(kind: Kind) -> Option<&'static [(&'static [u8], Kind)]> {
             (b"CIDSet", Data),
             (b"FD", FONT_DESCRIPTORS),
         ],
-        Kind::FontStyle => &[(b"Panose", Value)],
+        Kind::FontStyle => &[(b"Panose", Label)],
         Kind::CidSystemInfo => &[
-            (b"Registry", Value),
-            (b"Ordering", Value),
+            (b"Registry", Label),
+            (b"Ordering", Label),
             (b"Supplement", Value),
         ],
         Kind::Encoding => &[
@@ -178,7 +216,7 @@ pub(super) fn fields(kind: Kind) -> Option<&'static [(&'static [u8], Kind)]> {
             (b"Decode", Value),
             (b"Interpolate", Value),
             (b"Matte", Value),
-            (b"AF", FileSpec),
+            (b"AF", Associated),
         ],
         Kind::Mask => &[
             (b"Type", Value),
@@ -315,19 +353,19 @@ pub(super) fn fields(kind: Kind) -> Option<&'static [(&'static [u8], Kind)]> {
         Kind::OutputIntent => &[
             (b"Type", Value),
             (b"S", Value),
-            (b"OutputCondition", Value),
-            (b"OutputConditionIdentifier", Value),
-            (b"RegistryName", Value),
-            (b"Info", Value),
+            (b"OutputConditionIdentifier", Label),
+            (b"RegistryName", Label),
             (b"DestOutputProfile", Kind::IccProfile),
             (b"MixingHints", Kind::MixingHints),
         ],
         Kind::Value
+        | Kind::Label
         | Kind::Font
         | Kind::Form
         | Kind::Pattern
         | Kind::ColorSpace
         | Kind::FileSpec
+        | Kind::Associated
         | Kind::Map(_) => return None,
     })
 }
@@ -377,7 +415,7 @@ pub(super) const FORM: &[(&[u8], Kind)] = &[
     (b"BBox", Value),
     (b"Matrix", Value),
     (b"Group", Kind::Group),
-    (b"AF", FileSpec),
+    (b"AF", Associated),
 ];
 
 /// The keys a tiling pattern keeps beside its rebuilt content and resources.

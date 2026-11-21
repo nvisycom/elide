@@ -45,13 +45,34 @@ impl DeviceRect {
     /// The part of the box `other` also covers, or `None` when they share
     /// no area; boxes that only touch share none.
     pub(crate) fn intersection(self, other: DeviceRect) -> Option<DeviceRect> {
-        let out = DeviceRect {
+        let out = self.clamped(other);
+        (out.min_x < out.max_x && out.min_y < out.max_y).then_some(out)
+    }
+
+    /// The box clamped to `other`'s bounds, empty or inverted where they
+    /// share none.
+    fn clamped(self, other: DeviceRect) -> DeviceRect {
+        DeviceRect {
             min_x: self.min_x.max(other.min_x),
             min_y: self.min_y.max(other.min_y),
             max_x: self.max_x.min(other.max_x),
             max_y: self.max_y.min(other.max_y),
-        };
-        (out.min_x < out.max_x && out.min_y < out.max_y).then_some(out)
+        }
+    }
+
+    /// The box of the rectangle `[min_x, min_y, max_x, max_y]`.
+    fn of_array([min_x, min_y, max_x, max_y]: [f64; 4]) -> DeviceRect {
+        DeviceRect {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        }
+    }
+
+    /// The box as a rectangle `[min_x, min_y, max_x, max_y]`.
+    fn array(self) -> [f64; 4] {
+        [self.min_x, self.min_y, self.max_x, self.max_y]
     }
 
     /// The part of the box within `clip`, or `None` when it lies outside: it
@@ -59,12 +80,7 @@ impl DeviceRect {
     /// axis it has no extent (a glyph whose advance is unknown) lying on or
     /// inside `clip` is enough. A box only touching `clip`'s edge is outside.
     pub(crate) fn within(self, clip: DeviceRect) -> Option<DeviceRect> {
-        let out = DeviceRect {
-            min_x: self.min_x.max(clip.min_x),
-            min_y: self.min_y.max(clip.min_y),
-            max_x: self.max_x.min(clip.max_x),
-            max_y: self.max_y.min(clip.max_y),
-        };
+        let out = self.clamped(clip);
         let overlaps = |extent: f64, low: f64, high: f64| {
             if extent > 0.0 {
                 low < high
@@ -283,13 +299,9 @@ pub(crate) fn normalize_rect([x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
 /// The overlap of two normalized rectangles, or `None` when they share no
 /// area.
 fn intersect(a: [f64; 4], b: [f64; 4]) -> Option<[f64; 4]> {
-    let overlap = [
-        a[0].max(b[0]),
-        a[1].max(b[1]),
-        a[2].min(b[2]),
-        a[3].min(b[3]),
-    ];
-    (overlap[0] < overlap[2] && overlap[1] < overlap[3]).then_some(overlap)
+    DeviceRect::of_array(a)
+        .intersection(DeviceRect::of_array(b))
+        .map(DeviceRect::array)
 }
 
 /// Resolve a 4-number rectangle attribute (`MediaBox`/`CropBox`) on a page,

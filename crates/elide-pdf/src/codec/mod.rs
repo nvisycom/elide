@@ -13,8 +13,8 @@
 //!   pipeline detects on what it shows (OCR) and redacts the render, and
 //!   encode replaces the page by it. This is every page under
 //!   [`RasterMode::Always`], and under the default mode a scanned page, or one
-//!   that draws text in a font whose glyph widths can't be known, so its text
-//!   layer can't be placed. Its text layer is never read.
+//!   that draws text whose glyphs can't be placed (in a font whose widths
+//!   can't be known, or written vertically). Its text layer is never read.
 //!
 //! [`pdf_format`] decodes for glyph deletion; with the `render` feature
 //! [`pdf_format_with`] takes an explicit [`RasterMode`].
@@ -49,6 +49,11 @@ const BODY_PART_ID: &str = "body";
 const SCAN_DPI: Dpi = Dpi::OCR;
 
 /// The PDF [`Format`], decoding pages for glyph deletion.
+///
+/// Its metadata (`/Info`, XMP) and collaboration content (annotations,
+/// comments) are always stripped and recorded, whatever the
+/// [`HiddenContentPolicy`](elide_core::redaction::HiddenContentPolicy): the
+/// rebuild models neither as content.
 ///
 /// With the `render` feature, scanned pages are also rendered for OCR, the
 /// raster mode [`Auto`](crate::primitive::RasterMode::Auto); build the format

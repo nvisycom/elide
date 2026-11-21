@@ -53,11 +53,9 @@ fn with_document<T: Send>(
     let bytes = pdf.bytes();
     PDF_POOL.install(|| {
         RENDERER.with_borrow_mut(|slot| {
-            if slot.is_none() {
-                *slot = Some(bind()?);
-            }
-            let Some(pdfium) = slot.as_ref() else {
-                unreachable!("the binding was just created");
+            let pdfium = match slot {
+                Some(pdfium) => pdfium,
+                None => slot.insert(bind()?),
             };
             let document = pdfium
                 .load_pdf_from_byte_slice(&bytes, None)
@@ -74,10 +72,15 @@ fn with_document<T: Send>(
 }
 
 /// Bind the PDFium library: the system one, else one beside the binary.
+///
+/// # Errors
+///
+/// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
+/// if neither can be loaded: the input is not at fault, the build is.
 fn bind() -> Result<Pdfium> {
     let bindings = Pdfium::bind_to_system_library().or_else(|system| {
         Pdfium::bind_to_library("libpdfium").map_err(|local| {
-            Error::malformed(format!(
+            Error::capability_unavailable(format!(
                 "failed to load PDFium library: {system}; fallback: {local}"
             ))
         })

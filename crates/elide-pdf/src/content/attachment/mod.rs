@@ -35,10 +35,12 @@ impl AttachmentId {
         Self { number, generation }
     }
 
+    /// The attachment whose stream is the object `id`.
     pub(crate) fn from_object((number, generation): ObjectId) -> Self {
         Self::new(number, generation)
     }
 
+    /// This id as a lopdf `ObjectId` pair.
     pub(crate) fn object(self) -> ObjectId {
         (self.number, self.generation)
     }

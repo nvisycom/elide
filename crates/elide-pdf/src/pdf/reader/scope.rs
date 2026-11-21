@@ -12,9 +12,6 @@ use crate::pdf::reader::DocumentExt;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Scope<'a>(Vec<&'a Dictionary>);
 
-/// How many page-tree levels a page's resources are looked for in.
-const MAX_TREE_DEPTH: usize = 64;
-
 impl<'a> Scope<'a> {
     /// A scope of `resources`, nearest first.
     pub(crate) fn new(resources: impl IntoIterator<Item = &'a Dictionary>) -> Self {
@@ -26,26 +23,17 @@ impl<'a> Scope<'a> {
     /// so a page's own dictionary, even an empty one, hides its ancestors'.
     /// Empty when no dictionary is found.
     pub(crate) fn page(doc: &'a Document, page: ObjectId) -> Self {
-        let mut node = doc.get_dictionary(page).ok();
-        for _ in 0..MAX_TREE_DEPTH {
-            let Some(dict) = node else {
-                break;
-            };
-            // A null or dangling entry is absent, so inheritance goes on.
-            if let Some(resources) = dict
-                .get(b"Resources")
-                .ok()
-                .and_then(|resources| doc.resolve(resources))
+        // A null or dangling entry is absent, so inheritance goes on.
+        let resources = doc.inherited(page, b"Resources", |resources| {
+            doc.resolve(resources)
                 .filter(|resources| !matches!(resources, Object::Null))
-            {
-                return Self(resources.as_dict().ok().into_iter().collect());
-            }
-            node = dict
-                .get(b"Parent")
-                .ok()
-                .and_then(|parent| doc.resolve_dict(parent));
-        }
-        Self::default()
+        });
+        Self(
+            resources
+                .and_then(|resources| resources.as_dict().ok())
+                .into_iter()
+                .collect(),
+        )
     }
 
     /// The resources of the content `dict` (a form, tiling pattern or Type3

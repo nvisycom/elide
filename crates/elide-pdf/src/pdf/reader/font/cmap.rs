@@ -1,11 +1,17 @@
-//! A CMap's codespace (9.7.6.2): which byte sequences are codes, and how
-//! long each is, so a composite font's string splits into its codes whether
-//! or not the CMap maps each one to a CID.
+//! What is read from a CMap's own bytes, past what hayro-cmap and lopdf read
+//! of it: its codespace, and how many codes it maps.
 //!
-//! hayro-cmap reads a CMap's mappings but keeps its codespace to itself, so
-//! the ranges of a CMap a font embeds are read here from the same bytes. A
-//! predefined CMap (one named, or one an embedded CMap names by `usecmap`)
-//! maps every code of its codespace, so its mappings split codes alone.
+//! A CMap's codespace (9.7.6.2) says which byte sequences are codes, and how
+//! long each is, so a composite font's string splits into its codes whether
+//! or not the CMap maps each one to a CID. hayro-cmap reads a CMap's mappings
+//! but keeps its codespace to itself, so the ranges of a CMap a font embeds
+//! are read here from the same bytes. A predefined CMap (one named, or one an
+//! embedded CMap names by `usecmap`) maps every code of its codespace, so its
+//! mappings split codes alone.
+//!
+//! lopdf expands every range a `/ToUnicode` CMap maps into a table entry per
+//! code, so the codes it maps are counted ([`mapped_codes`]) before it reads
+//! one.
 
 /// The most ranges one codespace holds (the operator allows 100 a section).
 const MAX_RANGES: usize = 1024;
@@ -73,16 +79,66 @@ impl Codespace {
     }
 }
 
-/// A token of a CMap, as far as its codespace is read: a keyword, a hex
-/// string's bytes, or anything else.
+/// How many codes the CMap `data` maps, at least: one for each `bfchar`
+/// entry (a pair of hex strings), and the codes each `bfrange` entry spans
+/// (a `<lo> <hi>` pair of hex strings of one length opening it); `None` when
+/// a `bfrange` holds a hex string that can't be read as one, so its entries
+/// can't be told apart to count.
+pub(crate) fn mapped_codes(data: &[u8]) -> Option<u64> {
+    // Each `bfrange` entry's tokens: a hex string's bytes, or `None` for an
+    // array of destinations.
+    let mut ranges: Vec<Option<Vec<u8>>> = Vec::new();
+    let (mut in_ranges, mut in_chars) = (false, false);
+    let mut char_strings = 0u64;
+    for token in Tokens::new(data) {
+        match token {
+            Token::Keyword(b"beginbfrange") => in_ranges = true,
+            Token::Keyword(b"endbfrange") => in_ranges = false,
+            Token::Keyword(b"beginbfchar") => in_chars = true,
+            Token::Keyword(b"endbfchar") => in_chars = false,
+            Token::Hex(bytes) if in_ranges => ranges.push(Some(bytes)),
+            Token::Unreadable if in_ranges => return None,
+            Token::Array if in_ranges => ranges.push(None),
+            Token::Hex(_) => char_strings += u64::from(in_chars),
+            _ => {}
+        }
+    }
+    let code = |bytes: &Option<Vec<u8>>| {
+        let bytes = bytes.as_ref().filter(|bytes| bytes.len() <= 4)?;
+        let value = bytes
+            .iter()
+            .fold(0u64, |code, &byte| code << 8 | u64::from(byte));
+        Some((bytes.len(), value))
+    };
+    let mut count = 0u64;
+    let mut i = 0;
+    while i + 1 < ranges.len() {
+        if let (Some((lo_len, lo)), Some((hi_len, hi))) = (code(&ranges[i]), code(&ranges[i + 1]))
+            && lo_len == hi_len
+            && hi >= lo
+        {
+            count = count.saturating_add(hi - lo + 1);
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    Some(count.saturating_add(char_strings / 2))
+}
+
+/// A token of a CMap, as far as it is read: a keyword, a hex string's bytes,
+/// a hex string holding more than hex digits, an array, or anything else.
 enum Token<'a> {
     Keyword(&'a [u8]),
     Hex(Vec<u8>),
+    Unreadable,
+    Array,
     Other,
 }
 
-/// The tokens of CMap data: comments and literal strings are passed over
-/// whole, so neither hides nor fakes a keyword or a code.
+/// The tokens of CMap data: comments, literal strings and arrays are passed
+/// over whole, and dictionary delimiters as such, so none hides nor fakes a
+/// keyword or a code.
 struct Tokens<'a> {
     data: &'a [u8],
     at: usize,
@@ -137,9 +193,36 @@ impl<'a> Iterator for Tokens<'a> {
                 self.at = self.past_string(start);
                 Token::Other
             }
-            b'<' if data.get(start + 1) == Some(&b'<') => {
+            b'<' | b'>' if data.get(start + 1) == Some(&byte) => {
                 self.at += 2;
                 Token::Other
+            }
+            b'[' => {
+                // The array's contents are tokens too, so a `]` in a comment
+                // or a string inside it does not end it. Nested arrays are
+                // counted rather than recursed into.
+                self.at += 1;
+                let mut depth = 1usize;
+                while depth > 0 {
+                    while self.at < data.len() && data[self.at].is_ascii_whitespace() {
+                        self.at += 1;
+                    }
+                    match data.get(self.at) {
+                        None => break,
+                        Some(b']') => {
+                            depth -= 1;
+                            self.at += 1;
+                        }
+                        Some(b'[') => {
+                            depth += 1;
+                            self.at += 1;
+                        }
+                        Some(_) => {
+                            self.next();
+                        }
+                    }
+                }
+                Token::Array
             }
             b'<' => {
                 let end = data[start..]
@@ -147,7 +230,7 @@ impl<'a> Iterator for Tokens<'a> {
                     .position(|&b| b == b'>')
                     .map_or(data.len(), |end| start + end);
                 self.at = (end + 1).min(data.len());
-                hex(&data[start + 1..end]).map_or(Token::Other, Token::Hex)
+                hex(&data[start + 1..end]).map_or(Token::Unreadable, Token::Hex)
             }
             b if b.is_ascii_alphabetic() => {
                 while self.at < data.len() && data[self.at].is_ascii_alphanumeric() {
@@ -200,6 +283,28 @@ mod tests {
         assert_eq!(space.code_len(&[0x81, 0x40]), Some(2));
         assert_eq!(space.code_len(&[0x81]), None);
         assert_eq!(space.code_len(&[0xFF, 0xFF]), None);
+    }
+
+    /// A `]` in a comment or a string inside a `bfrange` array does not end
+    /// it, so no entry after the array is read from inside it or missed.
+    #[test]
+    fn an_array_ends_at_its_own_bracket() {
+        let data = b"2 beginbfrange\n<01> <02> [<0041> % ] <00> <FFFF>\n(]) <0042>]\n\
+            <10> <1F> <0043>\nendbfrange\n";
+        assert_eq!(mapped_codes(data), Some(2 + 16));
+        let nested = format!(
+            "1 beginbfrange <01> <02> {}{} endbfrange",
+            "[".repeat(10_000),
+            "]".repeat(10_000)
+        );
+        assert_eq!(mapped_codes(nested.as_bytes()), Some(2));
+        let commented =
+            b"1 beginbfrange\n<01> <02> <0041 % a comment\n>\n<10> <FFFF> <0042>\nendbfrange\n";
+        assert_eq!(
+            mapped_codes(commented),
+            None,
+            "an entry that can't be told apart"
+        );
     }
 
     /// A codespace past the range limit is not read in part; one at it is

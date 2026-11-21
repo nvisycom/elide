@@ -1,4 +1,4 @@
-//! Reading name trees (ISO 32000-2, 7.9.6): the trees under the catalog's
+//! Reading name trees (7.9.6): the trees under the catalog's
 //! `/Names`, node by node.
 
 use std::collections::BTreeSet;

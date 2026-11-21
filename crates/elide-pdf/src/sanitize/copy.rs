@@ -5,12 +5,11 @@ use std::mem;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Dictionary, Object, ObjectId, Stream, dictionary};
+use lopdf::{Dictionary, Object, ObjectId, Stream};
 
-use super::keys::{self, FONT, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
-use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST, record};
+use super::keys::{self, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
+use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST};
 use crate::content::image;
-use crate::pdf::reader::font::Standard;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 use crate::pdf::writer::{UnicodeMap, compressed};
 
@@ -91,6 +90,9 @@ impl<'a> Builder<'a> {
             _ => 0,
         };
         self.charge(VALUE_COST + held)?;
+        if kind == Kind::Associated {
+            return self.associated(value);
+        }
         match value {
             Object::Reference(id) => self.copy_reference(kind, *id, at),
             // A font held in place is written as an object of its own, as
@@ -113,12 +115,17 @@ impl<'a> Builder<'a> {
                 }
                 Ok(Some(Object::Array(out)))
             }
-            Object::Null
-            | Object::Boolean(_)
-            | Object::Integer(_)
-            | Object::Real(_)
-            | Object::Name(_)
-            | Object::String(..) => Ok(Some(value.clone())),
+            scalar if kind.holds(scalar) => Ok(Some(scalar.clone())),
+            // A file specification given as a string is a path to a file
+            // elsewhere, not a file the document embeds.
+            Object::String(..) if kind == Kind::FileSpec => {
+                self.record(HiddenContent::FilePath);
+                Ok(None)
+            }
+            _ => {
+                self.residue += 1;
+                Ok(None)
+            }
         }
     }
 
@@ -240,22 +247,24 @@ impl<'a> Builder<'a> {
         'a: 's,
     {
         match (kind, value) {
+            // Data kept in another file, or under a `/Crypt` filter, is not
+            // what the stream's own bytes say, so nothing is copied from them.
+            (_, Object::Stream(stream)) if self.external(&stream.dict) => {
+                self.unreadable(id);
+                Ok(None)
+            }
             (Kind::Font, Object::Dictionary(dict)) => self.font(dict, at).map(Some),
             (Kind::Form, Object::Stream(stream)) => self.form(stream, FORM, at),
             (Kind::Pattern, _) => self.pattern(value, at),
             (Kind::FileSpec, Object::Dictionary(dict)) => self.file_spec(dict),
-            (Kind::ToUnicode, Object::Stream(stream)) if !self.external(&stream.dict) => {
-                self.unicode_map(stream, at)
-            }
+            (Kind::ToUnicode, Object::Stream(stream)) => self.unicode_map(stream, at),
             (Kind::Image | Kind::Mask, Object::Stream(stream))
                 if !image::is_surfaceable(self.source, stream) =>
             {
                 self.unreadable(id);
                 Ok(None)
             }
-            (Kind::Image | Kind::Mask, Object::Stream(stream)) if !self.external(&stream.dict) => {
-                self.image(kind, id, stream, at)
-            }
+            (Kind::Image | Kind::Mask, Object::Stream(stream)) => self.image(kind, id, stream, at),
             (Kind::Map(inner), Object::Dictionary(dict)) => {
                 let mut out = Dictionary::new();
                 for (key, value) in dict.iter() {
@@ -290,110 +299,14 @@ impl<'a> Builder<'a> {
     /// what it draws resolved its names there, not in the scope it is drawn
     /// in, so whether its copy depends on that scope is as it was before,
     /// `scoped`.
-    fn own_scope(&mut self, dict: &Dictionary, scoped: bool) {
+    pub(super) fn own_scope(&mut self, dict: &Dictionary, scoped: bool) {
         if Scope::own(self.source, dict).is_some() {
             self.scoped = scoped;
         }
     }
 
-    /// An image XObject or stencil mask `stream` (the source object `id`
-    /// when it is one): one stored as raw samples written as exactly the
-    /// samples it takes, so no bytes past them are carried; one stored as a
-    /// JPEG or JPEG 2000 file copied as it is. Either is written as an image
-    /// XObject, which the image pipeline surfaces, whatever its source said.
-    fn image<'s>(
-        &mut self,
-        kind: Kind,
-        id: Option<ObjectId>,
-        stream: &'s Stream,
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
-        let fields = keys::fields(kind).unwrap_or_default();
-        let samples = match image::raw_samples(self.source, stream) {
-            Ok(Some(samples)) => {
-                self.charge(samples.len())?;
-                samples
-            }
-            Ok(None) => return self.stored(stream, fields, at),
-            Err(_) => {
-                self.unreadable(id);
-                return Ok(None);
-            }
-        };
-        let mut dict = self.stream_keys(
-            &stream.dict,
-            fields,
-            &[b"Filter", b"DecodeParms", b"DL"],
-            at,
-        )?;
-        image_xobject(&mut dict);
-        Ok(Some(Object::Stream(compressed(dict, samples)?)))
-    }
-
-    /// An image `stream` stored as a JPEG or JPEG 2000 file, keeping
-    /// `fields`, and its data and parameters as stored: the file a codec
-    /// reads. Its one filter is written as a name.
-    fn stored<'s>(
-        &mut self,
-        stream: &'s Stream,
-        fields: &[(&[u8], Kind)],
-        at: At<'_, 's>,
-    ) -> Result<Option<Object>>
-    where
-        'a: 's,
-    {
-        self.charge(stream.content.len())?;
-        let mut dict = self.stream_keys(&stream.dict, fields, &[b"Filter", b"DecodeParms"], at)?;
-        let filters = stream.filters();
-        let Ok([filter]) = filters.as_deref() else {
-            return Ok(None);
-        };
-        dict.set("Filter", Object::Name(filter.to_vec()));
-        // The one filter's parameters (a dictionary, or the one in a
-        // one-item array): a JPEG's colour transform, 0 or 1, is the only
-        // one either file filter takes (7.4.8), so it alone is written.
-        let source = self.source;
-        let parameters = match stream
-            .dict
-            .get(b"DecodeParms")
-            .ok()
-            .and_then(|p| source.resolve(p))
-        {
-            Some(Object::Array(parameters)) => {
-                self.residue += parameters.len().saturating_sub(1);
-                parameters.first().and_then(|p| source.resolve(p))
-            }
-            parameters => parameters,
-        }
-        .filter(|p| !matches!(p, Object::Null));
-        let transform = parameters
-            .and_then(|p| p.as_dict().ok())
-            .and_then(|p| source.resolve(p.get(b"ColorTransform").ok()?))
-            .and_then(|t| t.as_i64().ok())
-            .filter(|t| *filter == b"DCTDecode" && matches!(t, 0 | 1));
-        // Every other parameter, and a transform not written, is dropped.
-        match parameters.map(Object::as_dict) {
-            None => {}
-            Some(Ok(p)) => self.residue += p.len() - usize::from(transform.is_some()),
-            Some(Err(_)) => self.residue += 1,
-        }
-        if let Some(transform) = transform {
-            dict.set(
-                "DecodeParms",
-                Dictionary::from_iter([("ColorTransform", Object::Integer(transform))]),
-            );
-        }
-        image_xobject(&mut dict);
-        Ok(Some(Object::Stream(
-            Stream::new(dict, stream.content.clone()).with_compression(false),
-        )))
-    }
-
     /// `object` added to the rebuild as an object of its own, referred to.
-    fn add(&mut self, object: Object) -> Object {
+    pub(super) fn add(&mut self, object: Object) -> Object {
         Object::Reference(self.out.add_object(object))
     }
 
@@ -433,10 +346,6 @@ impl<'a> Builder<'a> {
     {
         Ok(Some(match value {
             Object::Dictionary(dict) => Object::Dictionary(self.keys(dict, fields, &[], at)?),
-            Object::Stream(stream) if self.external(&stream.dict) => {
-                self.record(HiddenContent::Unreadable);
-                return Ok(None);
-            }
             // Written as its data, compressed anew, so no encoding but Flate
             // reaches the output; its data decodes within what the copy
             // budget has left.
@@ -464,7 +373,7 @@ impl<'a> Builder<'a> {
 
     /// Whether the stream `dict` describes holds data the rebuild cannot
     /// carry: data in another file (`/F`), or under a `/Crypt` filter.
-    fn external(&self, dict: &Dictionary) -> bool {
+    pub(super) fn external(&self, dict: &Dictionary) -> bool {
         let source = self.source;
         let crypt = dict
             .get(b"Filter")
@@ -503,7 +412,7 @@ impl<'a> Builder<'a> {
                         out.set(key.clone(), value);
                     }
                 }
-                None => self.drop_key(key, record::entry),
+                None => self.drop_key(key),
             }
         }
         Ok(out)
@@ -511,7 +420,7 @@ impl<'a> Builder<'a> {
 
     /// As [`keys`](Self::keys), for a stream's dictionary: the stream encoding
     /// entries are kept too, and its length is rewritten on save.
-    fn stream_keys<'s>(
+    pub(super) fn stream_keys<'s>(
         &mut self,
         dict: &'s Dictionary,
         fields: &[(&[u8], Kind)],
@@ -526,159 +435,8 @@ impl<'a> Builder<'a> {
         self.keys(dict, &fields, &handled, at)
     }
 
-    /// A font, a Type3 font's glyph procedures rebuilt as content with names
-    /// resolved in its own resources, else in `at`'s scope.
-    fn font<'s>(&mut self, dict: &'s Dictionary, at: At<'_, 's>) -> Result<Object>
-    where
-        'a: 's,
-    {
-        let source = self.source;
-        let subtype = dict.name(self.source, b"Subtype");
-        let standard = Standard::of(source, dict);
-        let handled: &[&[u8]] = match subtype {
-            Some(b"Type3") => &[b"CharProcs", b"Resources"],
-            Some(b"Type0") => &[b"Encoding"],
-            // A pinned font's descriptor is its own (see `pin`).
-            _ if standard.is_some() => &[b"FontDescriptor"],
-            _ => &[],
-        };
-        let mut out = self.keys(dict, FONT, handled, at)?;
-        if subtype == Some(b"Type0") {
-            if let Ok(encoding) = dict.get(b"Encoding")
-                && let Some(encoding) = self.copy(Kind::CMap, encoding, at.deeper())?
-            {
-                out.set("Encoding", encoding);
-            }
-            return Ok(Object::Dictionary(out));
-        }
-        if subtype != Some(b"Type3") {
-            if let Some(standard) = standard {
-                self.pin(standard, dict, &mut out, at)?;
-            }
-            return Ok(Object::Dictionary(out));
-        }
-        let inner = at.scope.inner(source, dict);
-        let scoped = self.scoped;
-        // The glyph procedures share one resource dictionary, so the names
-        // they are rebuilt with are given across all of them.
-        let mut resources = Dictionary::new();
-        let mut procs = Dictionary::new();
-        let glyphs = dict
-            .get(b"CharProcs")
-            .ok()
-            .and_then(|p| source.resolve_dict(p));
-        for (name, glyph) in glyphs.into_iter().flat_map(Dictionary::iter) {
-            let Some(Object::Stream(glyph)) = source.resolve(glyph) else {
-                self.residue += 1;
-                continue;
-            };
-            if self.external(&glyph.dict) {
-                self.record(HiddenContent::Unreadable);
-                continue;
-            }
-            let content = self.content(
-                &glyph.decoded()?,
-                at.within(&inner).font(true),
-                &mut resources,
-            )?;
-            self.charge(content.len())?;
-            procs.set(
-                name.clone(),
-                self.out.add_object(compressed(Dictionary::new(), content)?),
-            );
-        }
-        self.own_scope(dict, scoped);
-        out.set("CharProcs", procs);
-        out.set("Resources", resources);
-        Ok(Object::Dictionary(out))
-    }
-
-    /// Pin the glyphs and widths of `font`, which names the standard face
-    /// `standard` and embeds no program, copied as `out`: an explicit
-    /// `/Encoding` naming every code's glyph (`.notdef` for none), `/Widths`
-    /// for every code when it has none of its own, and a descriptor of its
-    /// own whose flags make every reader take that encoding as it is (a
-    /// TrueType font without one is given one). Every viewer then selects and
-    /// places the glyphs the reader does, where without them each supplies
-    /// its own. The descriptor is the font's own because its flags depend on
-    /// the font: another font sharing the source's keeps a copy of its own.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::ResourceLimit`] if what it writes is past the copy budget.
-    fn pin<'s>(
-        &mut self,
-        standard: Standard,
-        font: &'s Dictionary,
-        out: &mut Dictionary,
-        at: At<'_, 's>,
-    ) -> Result<()>
-    where
-        'a: 's,
-    {
-        let source = self.source;
-        let names = standard.names(source, font);
-        let own_widths = font
-            .get(b"FirstChar")
-            .is_ok_and(|first| first.as_i64().is_ok())
-            && font
-                .get(b"Widths")
-                .is_ok_and(|widths| source.resolve_array(widths).is_some());
-        let named: usize = names.iter().map(|name| name.map_or(7, str::len)).sum();
-        let values = names.len() + 1 + if own_widths { 0 } else { names.len() + 2 };
-        self.charge(values * VALUE_COST + named)?;
-
-        let differences = [Object::Integer(0)]
-            .into_iter()
-            .chain(
-                names
-                    .iter()
-                    .map(|name| Object::Name(name.unwrap_or(".notdef").as_bytes().to_vec())),
-            )
-            .collect::<Vec<_>>();
-        out.set(
-            "Encoding",
-            dictionary! { "Type" => "Encoding", "Differences" => differences },
-        );
-        if !own_widths {
-            let widths = standard.widths(source, font).map(number);
-            out.set("FirstChar", 0);
-            out.set("LastChar", 255);
-            out.set("Widths", widths.to_vec());
-        }
-
-        let descriptor = match font.get(b"FontDescriptor").ok().map(|d| source.resolve(d)) {
-            Some(Some(descriptor @ Object::Dictionary(_))) => {
-                match self.copy(Kind::FontDescriptor, descriptor, at.deeper())? {
-                    Some(Object::Dictionary(mut copy)) => {
-                        let flags = copy.get(b"Flags").and_then(Object::as_i64).unwrap_or(0);
-                        copy.set("Flags", standard.flags(flags));
-                        Some(copy)
-                    }
-                    _ => None,
-                }
-            }
-            // A TrueType font with no descriptor reads as symbolic, which
-            // ignores an `/Encoding` dictionary (9.6.5.4); give it one whose
-            // flags make the encoding count.
-            _ if font.is_subtype(source, b"TrueType") => {
-                let name = font.name(source, b"BaseFont").unwrap_or(b"Font");
-                let descriptor = standard.descriptor(name, standard.flags(0));
-                self.charge(descriptor.len() * VALUE_COST)?;
-                Some(descriptor)
-            }
-            _ => None,
-        };
-        if let Some(descriptor) = descriptor {
-            out.set("FontDescriptor", self.out.add_object(descriptor));
-        }
-        Ok(())
-    }
-
     /// A form XObject or tiling pattern `stream` keeping `fields`, its content
-    /// rebuilt with names resolved in its own resources, else in `at`'s scope;
-    /// `None`, recorded as unreadable, when its data is in another file or
-    /// under a `/Crypt` filter.
+    /// rebuilt with names resolved in its own resources, else in `at`'s scope.
     fn form<'s>(
         &mut self,
         stream: &'s Stream,
@@ -688,12 +446,6 @@ impl<'a> Builder<'a> {
     where
         'a: 's,
     {
-        // Content kept in another file is not what the stream's own bytes
-        // say, so it is not rebuilt from them.
-        if self.external(&stream.dict) {
-            self.record(HiddenContent::Unreadable);
-            return Ok(None);
-        }
         let inner = at.scope.inner(self.source, &stream.dict);
         let scoped = self.scoped;
         let mut resources = Dictionary::new();
@@ -823,20 +575,5 @@ impl<'a> Builder<'a> {
         }
         self.residue += parameters.len().saturating_sub(kinds.len());
         Ok(Some(Object::Array(out)))
-    }
-}
-
-/// Mark `dict` an image XObject.
-fn image_xobject(dict: &mut Dictionary) {
-    dict.set("Type", Object::Name(b"XObject".to_vec()));
-    dict.set("Subtype", Object::Name(b"Image".to_vec()));
-}
-
-/// `value` as a PDF number: an integer when it is whole.
-fn number(value: f64) -> Object {
-    if value.fract() == 0.0 && value.abs() < f64::from(i32::MAX) {
-        Object::Integer(value as i64)
-    } else {
-        Object::Real(value as f32)
     }
 }

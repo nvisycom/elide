@@ -17,9 +17,6 @@
 //! where they differ, the spec's reading is. Every glyph is as wide as its AFM
 //! says, and a code that selects no glyph the face has is 0 wide.
 
-mod encodings;
-mod glyph_list;
-
 use std::array;
 use std::collections::HashMap;
 use std::str::SplitWhitespace;
@@ -27,15 +24,9 @@ use std::sync::OnceLock;
 
 use lopdf::{Dictionary, Document, Object, dictionary};
 
-use self::encodings::{MAC_EXPERT, MAC_OS_ROMAN, MAC_ROMAN, WIN_ANSI};
+use super::encoding::{self, BaseEncoding, Encoding, GlyphNames, NONSYMBOLIC, SYMBOLIC};
+use super::subset_free;
 use crate::pdf::reader::{DictionaryExt, DocumentExt};
-
-/// A code's glyph name in a 256-code simple-font encoding.
-pub(crate) type GlyphNames<'a> = [Option<&'a str>; 256];
-
-/// The Symbolic and Nonsymbolic font descriptor flags (Table 121).
-const SYMBOLIC: i64 = 1 << 2;
-const NONSYMBOLIC: i64 = 1 << 5;
 
 /// One of the 14 standard faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,11 +110,7 @@ impl Face {
     /// The face a `/BaseFont` names, by its own name or an alias. A subset
     /// prefix (`ABCDEF+`, 9.9.2) is ignored.
     fn named(base_font: &[u8]) -> Option<Face> {
-        let name = match base_font.split_at_checked(7) {
-            Some(([prefix @ .., b'+'], rest)) if prefix.iter().all(u8::is_ascii_uppercase) => rest,
-            _ => base_font,
-        };
-        Some(match name {
+        Some(match subset_free(base_font) {
             b"Courier" | b"CourierNew" | b"CourierNewPSMT" => Face::Courier,
             b"Courier-Bold" | b"Courier,Bold" | b"CourierNew,Bold" | b"CourierNewPS-BoldMT" => {
                 Face::CourierBold
@@ -288,7 +275,7 @@ impl Standard {
         let dingbats = self.face == Face::ZapfDingbats;
         let names = glyph_names(doc, font, self.face);
         Box::new(array::from_fn(|code| {
-            glyph_list::text(names[code]?, dingbats)
+            encoding::text(names[code]?, dingbats)
         }))
     }
 
@@ -360,37 +347,14 @@ impl Standard {
 /// The base is `WinAnsiEncoding`, `MacRomanEncoding` or `MacExpertEncoding`
 /// when the encoding names one, and otherwise the
 /// [`default`](default_encoding); Symbol and ZapfDingbats always read by their
-/// own, as PDFium and pdf.js read them. An `/Encoding` neither a name nor a
-/// dictionary, a base that isn't a known name, and a `/Differences` that isn't
-/// an array are ignored.
+/// own, as PDFium and pdf.js read them.
 fn glyph_names<'a>(doc: &'a Document, font: &'a Dictionary, face: Face) -> GlyphNames<'a> {
-    let default = default_encoding(doc, font, face);
-    let (base, differences) = match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
-        Some(Object::Name(name)) => (Some(name.as_slice()), None),
-        Some(Object::Dictionary(dict)) => {
-            let base = dict
-                .get(b"BaseEncoding")
-                .ok()
-                .and_then(|base| doc.resolve(base))
-                .and_then(|base| base.as_name().ok());
-            let differences = dict
-                .get(b"Differences")
-                .ok()
-                .and_then(|d| doc.resolve_array(d));
-            (base, differences)
-        }
-        _ => (None, None),
+    let encoding = Encoding::of(doc, font);
+    let mut names = match encoding.base() {
+        Some(base) if !face.is_symbolic() => base.names(),
+        _ => default_encoding(doc, font, face),
     };
-    let mut names: GlyphNames<'a> = match base {
-        _ if face.is_symbolic() => default,
-        Some(b"WinAnsiEncoding") => WIN_ANSI,
-        Some(b"MacRomanEncoding") => MAC_ROMAN,
-        Some(b"MacExpertEncoding") => MAC_EXPERT,
-        _ => default,
-    };
-    if let Some(differences) = differences {
-        apply_differences(doc, differences, &mut names);
-    }
+    encoding.apply(doc, &mut names);
     names
 }
 
@@ -405,41 +369,13 @@ fn default_encoding(doc: &Document, font: &Dictionary, face: Face) -> GlyphNames
     if face.is_symbolic() || !font.is_subtype(doc, b"TrueType") {
         return built_in;
     }
-    let flags = font
-        .get(b"FontDescriptor")
-        .ok()
-        .and_then(|descriptor| doc.resolve_dict(descriptor))
-        .and_then(|descriptor| doc.resolve_number(descriptor.get(b"Flags").ok()?))
-        .map_or(0, |flags| flags as i64);
+    let flags = encoding::flags(doc, font);
     if flags & NONSYMBOLIC != 0 {
         built_in
     } else if flags & SYMBOLIC != 0 {
-        MAC_OS_ROMAN
+        BaseEncoding::MacOsRoman.names()
     } else {
-        WIN_ANSI
-    }
-}
-
-/// Apply the `/Differences` array `entries` to `names`: each integer is the
-/// code the names after it start at (9.6.5.1), and names before any integer
-/// start at code 0. A name for a code past 255 selects nothing, the names
-/// after a negative code are skipped up to the next integer, and an entry
-/// neither an integer nor a name is skipped.
-fn apply_differences<'a>(doc: &'a Document, entries: &'a [Object], names: &mut GlyphNames<'a>) {
-    let mut code = Some(0_usize);
-    for entry in entries {
-        match doc.resolve(entry) {
-            Some(Object::Integer(start)) => code = usize::try_from(*start).ok(),
-            Some(Object::Name(name)) => {
-                if let Some(at) = code {
-                    if let Some(slot) = names.get_mut(at) {
-                        *slot = str::from_utf8(name).ok();
-                    }
-                    code = at.checked_add(1);
-                }
-            }
-            _ => {}
-        }
+        BaseEncoding::WinAnsi.names()
     }
 }
 
@@ -502,7 +438,7 @@ mod tests {
     /// The Latin faces' built-in encoding is the standard encoding.
     #[test]
     fn latin_faces_share_the_standard_encoding() {
-        let standard = Face::Helvetica.metrics().built_in;
+        let standard = BaseEncoding::Standard.names();
         for face in &Face::ALL[..12] {
             assert_eq!(face.metrics().built_in, standard, "{face:?}");
         }

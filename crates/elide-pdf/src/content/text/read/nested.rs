@@ -2,22 +2,34 @@
 //! under the state they inherit, within the walk's depth and total limits.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use elide_core::{Error, Result};
 use lopdf::content::Content;
-use lopdf::{Document, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use super::geometry::TextState;
 use super::paint::{Painted, Painting};
 use super::run::gap;
 use super::stream::Frame;
-use super::{Inherited, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
+use super::{Inherited, MAX_WALKED_BYTES, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
 use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
 use crate::pdf::reader::{
     DeviceRect, DictionaryExt, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt,
     normalize_rect,
 };
+
+/// A soft mask group queued to be walked once the page's own text is: the
+/// group, and the CTM and nesting depth left where its graphics state was set.
+pub(super) struct Mask<'d> {
+    id: ObjectId,
+    group: &'d Stream,
+    ctm: Matrix,
+    depth: u8,
+    /// The tiling pattern whose cell set the mask, if any.
+    cell: Option<ObjectId>,
+}
 
 /// The most glyph boxes a page's tiling patterns place on the tiles they
 /// paint, together, so a pattern of tiny tiles over a large region is
@@ -273,6 +285,85 @@ impl<'d> Walk<'_, 'd> {
         Some(id)
     }
 
+    /// Queue the group of the soft mask the graphics state `graphics` sets,
+    /// if it sets one, to be walked once the page's own text is: the group is
+    /// drawn under `ctm`, the CTM where the state is set, in a graphics state
+    /// of its own (11.6.5.2), and the text it draws shows wherever the mask
+    /// lets later painting through. Read apart from the text around the
+    /// state, it never falls inside a word the page draws across it.
+    pub(super) fn select_soft_mask(&mut self, graphics: &'d Dictionary, ctm: Matrix, depth: u8) {
+        let doc = self.doc;
+        let Some(id) = graphics
+            .get(b"SMask")
+            .ok()
+            .and_then(|mask| doc.resolve_dict(mask))
+            .and_then(|mask| mask.get(b"G").ok()?.as_reference().ok())
+        else {
+            return;
+        };
+        if let Ok(Object::Stream(group)) = doc.get_object(id) {
+            self.masks.push(Mask {
+                id,
+                group,
+                ctm,
+                depth,
+                cell: self.cell,
+            });
+        }
+    }
+
+    /// Walk the queued soft mask group `mask`, its text set apart from the
+    /// text around it. A mask set in a tiling pattern's cell draws in that
+    /// cell, so its glyph boxes join the cell's, placed on every tile.
+    ///
+    /// # Errors
+    ///
+    /// As [`walk_nested`](Self::walk_nested).
+    pub(super) fn walk_soft_mask(&mut self, mask: Mask<'d>) -> Result<()> {
+        let inherited = Inherited {
+            font: None,
+            state: TextState {
+                ctm: mask.ctm,
+                ..TextState::default()
+            },
+            painting: Painting::default(),
+        };
+        self.set_apart(|walk| {
+            let start = walk.accum.rects.len();
+            let outer = mem::replace(&mut walk.cell, mask.cell);
+            let walked = walk.walk_nested(mask.id, mask.group, mask.depth, inherited);
+            walk.cell = outer;
+            walked?;
+            if let Some(cell) = mask.cell.and_then(|cell| walk.cells.get_mut(&cell)) {
+                cell.glyphs.extend(walk.accum.rects.drain(start..));
+            }
+            Ok(())
+        })
+    }
+
+    /// Run `walk`, the text it reads set apart from the text around it by a
+    /// gap on each side, from a pen of its own; one that reads none leaves no
+    /// gap.
+    fn set_apart<T>(&mut self, walk: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let before = *self.accum.next_char;
+        let accum = &mut self.accum;
+        gap(accum.text, accum.next_char, accum.runs);
+        let after_gap = *self.accum.next_char;
+        self.pen = None;
+        let walked = walk(self)?;
+        let accum = &mut self.accum;
+        if *accum.next_char == after_gap {
+            if after_gap > before {
+                accum.text.pop();
+                accum.runs.pop();
+                *accum.next_char = before;
+            }
+        } else {
+            gap(accum.text, accum.next_char, accum.runs);
+        }
+        Ok(walked)
+    }
+
     /// Walk the selected tiling `pattern`'s cell.
     ///
     /// A pattern's cell is drawn in its own graphics state, so it inherits no
@@ -295,30 +386,16 @@ impl<'d> Walk<'_, 'd> {
             state: TextState::default(),
             painting: Painting::default(),
         };
-        let before = *self.accum.next_char;
-        let accum = &mut self.accum;
-        gap(accum.text, accum.next_char, accum.runs);
-        let after_gap = *self.accum.next_char;
-        let cell_start = self.accum.rects.len();
-        self.pen = None;
-        let outer = self.cell.replace(pattern.id);
-        let walked = self.walk_nested(pattern.id, pattern.stream, pattern.depth, inherited);
-        self.cell = outer;
-        walked?;
-        let glyphs = self.accum.rects.drain(cell_start..).collect();
-        self.cells.insert(pattern.id, Cell { pattern, glyphs });
-
-        let accum = &mut self.accum;
-        if *accum.next_char == after_gap {
-            if after_gap > before {
-                accum.text.pop();
-                accum.runs.pop();
-                *accum.next_char = before;
-            }
-        } else {
-            gap(accum.text, accum.next_char, accum.runs);
-        }
-        Ok(())
+        self.set_apart(|walk| {
+            let cell_start = walk.accum.rects.len();
+            let outer = walk.cell.replace(pattern.id);
+            let walked = walk.walk_nested(pattern.id, pattern.stream, pattern.depth, inherited);
+            walk.cell = outer;
+            walked?;
+            let glyphs = walk.accum.rects.drain(cell_start..).collect();
+            walk.cells.insert(pattern.id, Cell { pattern, glyphs });
+            Ok(())
+        })
     }
 
     /// Record the regions `painted`, as painted in the cell being walked, if
@@ -497,7 +574,18 @@ impl<'d> Walk<'_, 'd> {
                 self.page
             )));
         }
-        let content = Content::decode(&stream.decoded()?)
+        let decoded = stream.decoded()?;
+        self.decoded_remaining = self
+            .decoded_remaining
+            .checked_sub(decoded.len())
+            .ok_or_else(|| {
+                Error::resource_limit(format!(
+                    "page {} draws forms and patterns decoding to more than \
+                     {MAX_WALKED_BYTES} bytes; its text cannot be walked",
+                    self.page
+                ))
+            })?;
+        let content = Content::decode(&decoded)
             .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
         // Its own resources: in a rebuild, every form and pattern has them.
