@@ -7,7 +7,8 @@
 //!
 //! - **Glyph deletion** (the default): the text detected on the page's text
 //!   layer is deleted from the content streams, keeping a selectable text
-//!   layer with the detected spans gone. A redaction on the body stream is
+//!   layer with the detected spans gone. A removed span's text closes up; a
+//!   covered one keeps its place under a black box. A redaction on the body stream is
 //!   recorded on its `PdfState` and applied on encode.
 //! - **From its render** (feature `render`): the page is rendered, the image
 //!   pipeline detects on what it shows (OCR) and redacts the render, and

@@ -12,7 +12,7 @@ use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use super::FORMAT_ID;
-use super::state::PdfState;
+use super::state::{PdfState, Span};
 
 /// The whole of a page, as a rendered rectangle.
 const WHOLE_PAGE: UnitBoundingBox = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
@@ -146,13 +146,15 @@ impl DataWriter<Text> for PdfStream {
         let spans = redactions
             .into_iter()
             .map(|(location, replacement)| {
-                if matches!(replacement, TextReplacement::Covered { .. }) {
-                    return Err(Error::capability_unavailable(
-                        "PDF text can't be covered in place; remove it, or redact its page \
-                         from its render",
-                    ));
-                }
-                page_span(&location).map(|(range, page)| (page, range.clone()))
+                let cover = match replacement {
+                    TextReplacement::Covered { color } => Some(color),
+                    _ => None,
+                };
+                page_span(&location).map(|(range, page)| Span {
+                    page,
+                    range: range.clone(),
+                    cover,
+                })
             })
             .collect::<Result<Vec<_>>>()?;
         self.state.record(spans)
@@ -179,7 +181,6 @@ fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::ErrorKind;
     use elide_core::primitive::Color;
 
     use super::*;
@@ -206,15 +207,19 @@ mod tests {
         )
     }
 
-    /// Covered text is refused rather than removed: nothing is recorded.
+    /// A covered span is recorded with its color, to be covered in place.
     #[tokio::test]
-    async fn covered_text_is_refused() {
+    async fn a_covered_span_is_recorded_as_covered() {
         let mut body = body();
         let (location, _) = redaction(1, 0..4);
-        let batch = Redactions::from([(location, TextReplacement::covered(Color::BLACK))]);
-        let error = body.write_at(batch).await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
-        assert!(body.state.detections().is_empty());
+        let red = Color::rgb(200, 0, 0);
+        body.write_at(Redactions::from([(
+            location,
+            TextReplacement::covered(red),
+        )]))
+        .await
+        .unwrap();
+        assert_eq!(body.state.detections()[0].cover, Some(red));
     }
 
     /// A batch with one span the document doesn't have records none of it.

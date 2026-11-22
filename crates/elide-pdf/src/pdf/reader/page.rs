@@ -330,6 +330,15 @@ impl<'a> PageGeometry<'a> {
     /// per line: the boxes of the glyphs that drew them, merged along each
     /// line.
     pub(crate) fn rects_for(&self, chars: Range<usize>) -> Vec<UnitBoundingBox> {
+        self.lines_for(chars)
+            .into_iter()
+            .map(|r| self.frame.normalize(r))
+            .collect()
+    }
+
+    /// The device-space rectangles covering the characters `chars`, one per
+    /// line, as [`rects_for`](Self::rects_for) gives them normalized.
+    pub(crate) fn lines_for(&self, chars: Range<usize>) -> Vec<DeviceRect> {
         let mut lines: Vec<DeviceRect> = Vec::new();
         let covering = self
             .rects
@@ -341,7 +350,7 @@ impl<'a> PageGeometry<'a> {
                 _ => lines.push(glyph.rect),
             }
         }
-        lines.into_iter().map(|r| self.frame.normalize(r)).collect()
+        lines
     }
 
     /// The page-local character range of each glyph whose center falls in any

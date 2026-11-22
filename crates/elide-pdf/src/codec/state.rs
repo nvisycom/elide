@@ -4,12 +4,21 @@
 use std::ops::Range;
 
 use bytes::Bytes;
+use elide_core::primitive::Color;
 use elide_core::{Error, Result};
 
 use super::plan::Plan;
 use crate::content::text::{Detection, TextBlock};
 use crate::pdf::Pdf;
 use crate::pdf::reader::PageGeometry;
+
+/// A redaction of a page-local byte range on a page: removed, or covered in
+/// place.
+pub(super) struct Span {
+    pub(super) page: u32,
+    pub(super) range: Range<usize>,
+    pub(super) cover: Option<Color>,
+}
 
 /// A decoded PDF's text pages and the redactions recorded on them.
 #[derive(Debug)]
@@ -87,8 +96,7 @@ impl PdfState {
         &self.detections
     }
 
-    /// Record a redaction of each page-local byte `range` on its page, all or
-    /// none.
+    /// Record a redaction of each of `spans`, all or none.
     ///
     /// # Errors
     ///
@@ -97,12 +105,14 @@ impl PdfState {
     /// dropped, and none of the batch is recorded.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(super) fn record(
-        &mut self,
-        spans: impl IntoIterator<Item = (u32, Range<usize>)>,
-    ) -> Result<()> {
+    pub(super) fn record(&mut self, spans: impl IntoIterator<Item = Span>) -> Result<()> {
         let mut detections = Vec::new();
-        for (number, range) in spans {
+        for Span {
+            page: number,
+            range,
+            cover,
+        } in spans
+        {
             let text = self.text(number)?;
             let (Some(before), Some(_)) = (text.get(..range.start), text.get(range.clone())) else {
                 return Err(Error::malformed(format!(
@@ -119,7 +129,11 @@ impl PdfState {
             // character offsets.
             let start = before.chars().count();
             let end = start + text[range].chars().count();
-            detections.push(Detection::new(number, start, end));
+            let detection = Detection::new(number, start, end);
+            detections.push(match cover {
+                Some(color) => detection.covering(color),
+                None => detection,
+            });
         }
         self.detections.extend(detections);
         Ok(())

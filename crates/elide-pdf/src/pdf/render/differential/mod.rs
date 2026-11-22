@@ -19,6 +19,7 @@
 
 mod cases;
 mod corpus;
+mod covered;
 
 use std::collections::HashMap;
 use std::ops::Range;

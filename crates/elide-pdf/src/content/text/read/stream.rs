@@ -397,6 +397,7 @@ impl<'d> Walk<'_, 'd> {
             runs: self.accum.runs,
             next_char: self.accum.next_char,
             rects: self.accum.rects,
+            advances: self.accum.advances,
             cursor,
             pen: &mut self.pen,
             state: graphics.state,

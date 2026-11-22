@@ -28,7 +28,7 @@ use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
 use self::stream::{Frame, Graphics, ScopeFont};
-use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
+use super::{FontEntry, GlyphSite, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
 use crate::pdf::reader::{DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Scope, page_frame};
 
@@ -89,12 +89,14 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut runs: Vec<OffsetRun> = Vec::new();
     let mut next_char = 0usize;
     let mut rects: Vec<GlyphRect> = Vec::new();
+    let mut advances = BTreeMap::new();
     let mut fonts: Vec<FontEntry> = Vec::new();
     let accum = TextAccum {
         text: &mut text,
         runs: &mut runs,
         next_char: &mut next_char,
         rects: &mut rects,
+        advances: &mut advances,
         fonts: &mut fonts,
     };
     let mut walk = Walk::new(doc, page, accum);
@@ -124,6 +126,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         text,
         offsets: OffsetMap::new(runs),
         rects,
+        advances,
         frame,
         fonts,
         unplaced,
@@ -137,6 +140,7 @@ struct TextAccum<'a> {
     runs: &'a mut Vec<OffsetRun>,
     next_char: &'a mut usize,
     rects: &'a mut Vec<GlyphRect>,
+    advances: &'a mut BTreeMap<GlyphSite, Option<f64>>,
     fonts: &'a mut Vec<FontEntry>,
 }
 

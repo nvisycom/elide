@@ -14,9 +14,11 @@
 mod read;
 mod redact;
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 use elide_core::Result;
+use elide_core::primitive::Color;
 use lopdf::ObjectId;
 
 use crate::pdf::reader::{GlyphRect, PageFrame, PageGeometry};
@@ -98,6 +100,12 @@ pub(crate) struct TextBlock {
     /// The page's visible rectangle and rotation, for normalizing a device box
     /// to page fractions.
     pub(crate) frame: PageFrame,
+    /// Each glyph's advance as a `TJ` number moves the pen, by its site: the
+    /// number that, put in the
+    /// glyph's place, leaves the text after it where it was. `None` for a
+    /// glyph no number moves the pen as it does (one at font size 0), or one
+    /// drawn with different spacings (a form drawn twice).
+    pub(crate) advances: BTreeMap<GlyphSite, Option<f64>>,
     /// The fonts referenced by the glyphs in `offsets`, indexed by
     /// [`GlyphBytes::font`](super::GlyphBytes); each carries the font's
     /// `/ToUnicode` CMap object id (when it has one) so a deleted glyph's code can
@@ -163,12 +171,28 @@ pub(crate) struct Detection {
     pub(crate) start: usize,
     /// End character offset into the page text (exclusive).
     pub(crate) end: usize,
+    /// The color of the box the span is covered with in place, its glyphs'
+    /// extent kept; `None` when it is removed.
+    pub(crate) cover: Option<Color>,
 }
 
 impl Detection {
-    /// A detection of `[start, end)` (character offsets) on `page`.
+    /// A detection of `[start, end)` (character offsets) on `page`, removed.
     pub(crate) fn new(page: u32, start: usize, end: usize) -> Self {
-        Self { page, start, end }
+        Self {
+            page,
+            start,
+            end,
+            cover: None,
+        }
+    }
+
+    /// The detection covered in place instead, under a box of `color`.
+    pub(crate) fn covering(self, color: Color) -> Self {
+        Self {
+            cover: Some(color),
+            ..self
+        }
     }
 }
 
@@ -239,6 +263,24 @@ pub(crate) struct GlyphBytes {
     /// Index into the block's font table of the font that drew the glyph, so its
     /// code can be scrubbed from that font's `/ToUnicode` CMap.
     pub(crate) font: u16,
+}
+
+/// Where a glyph's code is: the string that holds it, and its first byte
+/// there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct GlyphSite {
+    pub(crate) address: Address,
+    pub(crate) byte_start: usize,
+}
+
+impl GlyphBytes {
+    /// Where the glyph's code is.
+    pub(crate) fn site(&self) -> GlyphSite {
+        GlyphSite {
+            address: self.address,
+            byte_start: self.byte_start,
+        }
+    }
 }
 
 /// The decoded-text-to-glyph-bytes correspondence for one page, as a list of
@@ -574,6 +616,227 @@ mod tests {
         let bytes = pdf.bytes();
         let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
         assert_eq!(pdf.read(Text).unwrap()[0].text, "alice");
+    }
+
+    /// Every glyph `blocks`' first page draws that `chars` doesn't, by its
+    /// origin.
+    fn origins_outside(blocks: &[TextBlock], chars: Range<usize>) -> Vec<(f64, f64)> {
+        blocks[0]
+            .rects
+            .iter()
+            .filter(|glyph| glyph.chars.end <= chars.start || glyph.chars.start >= chars.end)
+            .map(|glyph| glyph.origin)
+            .collect()
+    }
+
+    /// Whether the origins `a` and `b` are the same, each within 0.001 pt.
+    fn same_origins(a: &[(f64, f64)], b: &[(f64, f64)]) -> bool {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(a, b)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3)
+    }
+
+    /// The `re` rectangles the page `number` of `pdf` draws, as corners.
+    fn boxes(pdf: &Pdf, number: u32) -> Vec<[f64; 4]> {
+        let id = pdf.doc().get_pages()[&number];
+        let content = Content::decode(&pdf.doc().get_page_content(id)).unwrap();
+        content
+            .operations
+            .iter()
+            .filter(|op| op.operator == "re")
+            .map(|op| {
+                let [x, y, w, h] = [0, 1, 2, 3].map(|i| op.operands[i].as_float().unwrap() as f64);
+                [x, y, x + w, y + h]
+            })
+            .collect()
+    }
+
+    /// The fill colors set on `pdf`'s page `number`, each as `r g b` in
+    /// `0..=255`.
+    fn fill_colors(pdf: &Pdf, number: u32) -> Vec<[u8; 3]> {
+        let id = pdf.doc().get_pages()[&number];
+        let content = Content::decode(&pdf.doc().get_page_content(id)).unwrap();
+        content
+            .operations
+            .iter()
+            .filter(|op| op.operator == "rg")
+            .map(|op| [0, 1, 2].map(|i| (op.operands[i].as_float().unwrap() * 255.0).round() as u8))
+            .collect()
+    }
+
+    /// The rebuilt document drawing `content` in Helvetica as `/F1`, its text
+    /// read, and `detections` redacted from it, its text read again.
+    fn covered(content: &[u8], detections: &[Detection]) -> (Vec<TextBlock>, Pdf, Vec<TextBlock>) {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .content(content.to_vec())
+                .size(300, 100),
+        );
+        let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let before = pdf.read(Text).unwrap();
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &before,
+            detections,
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        out.read(Check).unwrap();
+        let after = out.read(Text).unwrap();
+        (before, out, after)
+    }
+
+    /// Covered text is deleted, the text after it stays exactly where it
+    /// was, and a box is drawn over where it showed.
+    #[test]
+    fn covered_text_keeps_its_place_under_a_box() {
+        let (before, out, after) = covered(
+            b"BT /F1 12 Tf 1.5 Tc 4 Tw 110 Tz 10 50 Td (Call Jane Roe now) Tj ET",
+            &[Detection::new(1, 5, 13).covering(Color::BLACK)],
+        );
+        assert!(!streams_of(&out.bytes()).contains("Jane"));
+        let (kept, now) = (
+            origins_outside(&before, 5..13),
+            origins_outside(&after, 0..0),
+        );
+        assert!(same_origins(&kept, &now), "{kept:?} against {now:?}");
+        let expected = before[0].geometry().lines_for(5..13);
+        let drawn = boxes(&out, 1);
+        assert_eq!(drawn.len(), 1);
+        let line = expected[0];
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
+        assert!(
+            near(drawn[0][0], line.min_x)
+                && near(drawn[0][1], line.min_y)
+                && near(drawn[0][2], line.max_x)
+                && near(drawn[0][3], line.max_y),
+            "{drawn:?} against {line:?}"
+        );
+    }
+
+    /// Each cover's box is filled in its own color: covers of two colors on
+    /// one line are two boxes, one fill each, never joined across the gap
+    /// between them.
+    #[test]
+    fn each_cover_is_boxed_in_its_color() {
+        let red = Color::rgb(200, 0, 0);
+        let (_, out, _) = covered(
+            b"BT /F1 12 Tf 10 50 Td [(Call Jane) -300 (Roe now)] TJ ET",
+            &[
+                Detection::new(1, 5, 9).covering(red),
+                Detection::new(1, 10, 13).covering(Color::BLACK),
+            ],
+        );
+        assert_eq!(boxes(&out, 1).len(), 2);
+        assert_eq!(fill_colors(&out, 1), [[200, 0, 0], [0, 0, 0]]);
+    }
+
+    /// In a `TJ` array the kerns beside a covered glyph keep their place,
+    /// and a line shown by `'` keeps its line move: every other glyph stays
+    /// where it was.
+    #[test]
+    fn covered_text_keeps_kerns_and_line_moves() {
+        let (before, _, after) = covered(
+            b"BT /F1 12 Tf 14 TL 10 60 Td [(Jane) -300 (Roe) 120 (x)] TJ (Ann Lee) ' ET",
+            &[
+                Detection::new(1, 5, 8).covering(Color::BLACK),
+                Detection::new(1, 10, 13).covering(Color::BLACK),
+            ],
+        );
+        let mut kept = before[0].rects.clone();
+        kept.retain(|glyph| {
+            !(5..8).contains(&glyph.chars.start) && !(10..13).contains(&glyph.chars.start)
+        });
+        let kept: Vec<(f64, f64)> = kept.iter().map(|glyph| glyph.origin).collect();
+        let now = origins_outside(&after, 0..0);
+        assert!(same_origins(&kept, &now), "{kept:?} against {now:?}");
+    }
+
+    /// One string can lose a removed span and keep a covered one: the
+    /// removed closes up, and what follows the covered keeps its place
+    /// relative to it.
+    #[test]
+    fn removed_and_covered_spans_share_a_string() {
+        let (before, out, after) = covered(
+            b"BT /F1 12 Tf 10 50 Td (Jane Roe at Acme) Tj ET",
+            &[
+                Detection::new(1, 0, 5),
+                Detection::new(1, 12, 16).covering(Color::BLACK),
+            ],
+        );
+        assert!(!streams_of(&out.bytes()).contains("Jane"));
+        assert!(!streams_of(&out.bytes()).contains("Acme"));
+        assert_eq!(after[0].text.trim(), "Roe at");
+        // "Roe at " moved left by "Jane "'s width; nothing follows the cover.
+        let shift = before[0].rects[5].origin.0 - after[0].rects[0].origin.0;
+        assert!(shift > 0.0);
+        assert_eq!(boxes(&out, 1).len(), 1);
+    }
+
+    /// A covered glyph in a form two pages draw is deleted on both, so both
+    /// draw a box over it, though only one page's text was detected.
+    #[test]
+    fn a_covered_form_is_boxed_on_every_page_drawing_it() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let form = pdf.form(
+            dictionary! {
+                "BBox" => vec![0.into(), 0.into(), 200.into(), 100.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            },
+            b"BT /F1 12 Tf 10 50 Td (Jane Roe) Tj ET".to_vec(),
+        );
+        for _ in 0..2 {
+            pdf.page(
+                Page::new()
+                    .xobject("Fm", form)
+                    .content(b"/Fm Do".to_vec())
+                    .size(200, 100),
+            );
+        }
+        let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let blocks = pdf.read(Text).unwrap();
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &blocks,
+            detections: &[Detection::new(1, 0, 4).covering(Color::BLACK)],
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        out.read(Check).unwrap();
+        assert_eq!(boxes(&out, 1).len(), 1);
+        assert_eq!(boxes(&out, 2).len(), 1);
+    }
+
+    /// Text at font size 0 has no `TJ` number for its advance, so it can't
+    /// be covered in place, and the redaction is refused.
+    #[test]
+    fn text_no_number_spaces_is_refused() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .content(b"BT /F1 0 Tf 10 50 Td (Jane) Tj ET".to_vec())
+                .size(100, 100),
+        );
+        let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let blocks = pdf.read(Text).unwrap();
+        let error = pdf
+            .edit()
+            .redact(TextRedaction {
+                source: &pdf,
+                blocks: &blocks,
+                detections: &[Detection::new(1, 0, 4).covering(Color::BLACK)],
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Redaction);
     }
 
     /// Find and delete the text a tiling pattern of `/PatternType` `kind`
