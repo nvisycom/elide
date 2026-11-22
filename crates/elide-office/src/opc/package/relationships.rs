@@ -150,9 +150,18 @@ pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
 /// `_rels/.rels`.
 #[must_use]
 pub(crate) fn source_of(rels: &PartPath) -> Option<PartPath> {
+    // Part names compare ASCII case-insensitively; folding ASCII keeps every
+    // byte where it was, so the positions found in the folded path index the
+    // path as written.
     let path = rels.as_str();
-    let (dir, name) = path.rsplit_once("_rels/")?;
-    let name = name.strip_suffix(".rels")?;
+    let folded = path.to_ascii_lowercase();
+    let at = folded.rfind("_rels/")?;
+    let (dir, name) = (&path[..at], &path[at + "_rels/".len()..]);
+    let stem = name.len().checked_sub(".rels".len())?;
+    let name = name
+        .get(stem..)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case(".rels"))
+        .then(|| &name[..stem])?;
     (!name.is_empty()).then(|| PartPath::from(format!("{dir}{name}")))
 }
 

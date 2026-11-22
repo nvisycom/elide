@@ -116,6 +116,58 @@ pub fn part_names(package: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// `package` with the text part `name` rewritten by `edit`, every other part
+/// as it was, in archive order.
+///
+/// # Panics
+///
+/// As [`read_part`] and [`pack_parts`] do, or if the part is not UTF-8.
+#[must_use]
+pub fn edit_part(package: &[u8], name: &str, edit: impl Fn(String) -> String) -> Vec<u8> {
+    let mut entries = entries(package);
+    for (part, bytes) in &mut entries {
+        if part == name {
+            let text = String::from_utf8(std::mem::take(bytes))
+                .unwrap_or_else(|_| panic!("part `{name}` is not valid UTF-8"));
+            *bytes = edit(text).into_bytes();
+        }
+    }
+    repack(&entries)
+}
+
+/// `package` with an entry `name` holding `bytes` added after its own.
+///
+/// # Panics
+///
+/// As [`read_part`] and [`pack_parts`] do.
+#[must_use]
+pub fn add_part(package: &[u8], name: &str, bytes: &[u8]) -> Vec<u8> {
+    let mut entries = entries(package);
+    entries.push((name.to_owned(), bytes.to_vec()));
+    repack(&entries)
+}
+
+/// Every entry of `package`, its name and its bytes, in archive order.
+fn entries(package: &[u8]) -> Vec<(String, Vec<u8>)> {
+    part_names(package)
+        .into_iter()
+        .map(|name| {
+            let bytes =
+                read_part(package, &name).unwrap_or_else(|| panic!("part `{name}` is unreadable"));
+            (name, bytes)
+        })
+        .collect()
+}
+
+/// A package of `entries`, in order.
+fn repack(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let parts: Vec<(&str, &[u8])> = entries
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    pack_parts(&parts)
+}
+
 /// Every text-bearing part, the `.xml` and `.rels` parts, as `(name, text)`.
 ///
 /// These parts carry all of a document's text; binary parts (fonts, images,

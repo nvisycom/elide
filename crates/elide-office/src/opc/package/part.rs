@@ -2,7 +2,9 @@
 //! [`PartClassifier`] seam a format supplies to tell the engine how each kind of
 //! part is treated.
 
+use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use hipstr::HipStr;
 
@@ -19,7 +21,13 @@ use crate::opc::xml::attributes::TextAttribute;
 /// these back on every [`Block`](crate::opc::Block), and a
 /// [`Replacement`](crate::opc::Replacement) targets one. Held as a [`HipStr`]
 /// so a path clones cheaply (short paths inline; longer ones share).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+///
+/// OPC part names are ASCII case-insensitive, so two paths are equal, hash
+/// alike, and order by their names with ASCII letters folded:
+/// `word/media/Logo.png` is the part a relationship to `media/logo.png`
+/// targets. The path keeps the spelling it was made with, so a part read from
+/// the archive is written back under its own name.
+#[derive(Debug, Clone)]
 pub(crate) struct PartPath(HipStr<'static>);
 
 impl PartPath {
@@ -31,6 +39,13 @@ impl PartPath {
     /// The path as a string slice.
     pub(crate) fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    /// Whether the path names the part `name`, compared ASCII
+    /// case-insensitively as OPC part names are.
+    #[must_use]
+    pub(crate) fn is(&self, name: &str) -> bool {
+        self.as_str().eq_ignore_ascii_case(name)
     }
 
     /// The path's file extension: the text after the last `.` of the final path
@@ -59,30 +74,69 @@ impl PartPath {
     }
 
     /// Whether the path lies within the directory `dir` (a `/`-terminated or bare
-    /// prefix), i.e. `dir/...`. `in_dir("xl/media")` matches `xl/media/image1.png`
-    /// but not `xl/media.xml`.
+    /// prefix), i.e. `dir/...`, compared ASCII case-insensitively.
+    /// `in_dir("xl/media")` matches `xl/media/image1.png` but not
+    /// `xl/media.xml`.
     #[must_use]
     pub(crate) fn in_dir(&self, dir: &str) -> bool {
         let dir = dir.strip_suffix('/').unwrap_or(dir);
-        self.as_str()
-            .strip_prefix(dir)
-            .is_some_and(|rest| rest.starts_with('/'))
+        let path = self.as_str();
+        path.get(..dir.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(dir))
+            && path[dir.len()..].starts_with('/')
     }
 
     /// Whether this is an OPC relationships part: the package root `_rels/.rels`,
     /// or a `<dir>/_rels/<name>.rels` sidecar. Both live in a `_rels/` directory
     /// and end in `.rels`, which uniquely identifies the OPC relationships parts
-    /// across every OOXML format.
+    /// across every OOXML format. Like any part name, compared ASCII
+    /// case-insensitively.
     #[must_use]
     pub(crate) fn is_relationships(&self) -> bool {
         self.has_extension("rels")
-            && (self.as_str() == "_rels/.rels" || self.as_str().contains("/_rels/"))
+            && (self.is("_rels/.rels") || self.as_str().to_ascii_lowercase().contains("/_rels/"))
     }
 
     /// Whether this is the OPC content-types manifest, `[Content_Types].xml`.
     #[must_use]
     pub(crate) fn is_content_types(&self) -> bool {
-        self.as_str() == CONTENT_TYPES_PART
+        self.is(CONTENT_TYPES_PART)
+    }
+
+    /// The path's bytes with ASCII letters folded, as OPC compares part names.
+    fn folded(&self) -> impl Iterator<Item = u8> + '_ {
+        self.as_str().bytes().map(|b| b.to_ascii_lowercase())
+    }
+}
+
+impl PartialEq for PartPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.is(other.as_str())
+    }
+}
+
+impl Eq for PartPath {}
+
+impl Hash for PartPath {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // As `str` hashes: the bytes, then a terminator, so equal paths hash
+        // alike whatever their case.
+        for b in self.folded() {
+            state.write_u8(b);
+        }
+        state.write_u8(0xff);
+    }
+}
+
+impl PartialOrd for PartPath {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PartPath {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.folded().cmp(other.folded())
     }
 }
 
@@ -230,6 +284,30 @@ mod tests {
         // A sibling file that merely shares the prefix text is not inside it.
         assert!(!PartPath::from("xl/media.xml").in_dir("xl/media"));
         assert!(!media.in_dir("ppt"));
+    }
+
+    /// Part names compare as OPC compares them, ASCII case-insensitively,
+    /// while each path keeps its own spelling.
+    #[test]
+    fn paths_differing_only_in_case_are_one_part() {
+        use std::collections::{BTreeSet, HashSet};
+
+        let archive = PartPath::from("word/media/Logo.png");
+        let target = PartPath::from("word/media/logo.PNG");
+        assert_eq!(archive, target);
+        assert_eq!(archive.cmp(&target), Ordering::Equal);
+        assert_eq!(
+            HashSet::from([archive.clone(), target.clone()]).len(),
+            1,
+            "equal paths hash alike"
+        );
+        assert_eq!(BTreeSet::from([archive.clone(), target]).len(), 1);
+        assert_eq!(archive.as_str(), "word/media/Logo.png");
+        assert_ne!(archive, PartPath::from("word/media/logo.png.bak"));
+        assert!(PartPath::from("[content_types].XML").is_content_types());
+        assert!(PartPath::from("_RELS/.rels").is_relationships());
+        assert!(PartPath::from("word/_Rels/document.xml.rels").is_relationships());
+        assert!(PartPath::from("CustomXml/item1.xml").in_dir("customXml"));
     }
 
     #[test]

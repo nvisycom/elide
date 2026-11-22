@@ -1,6 +1,7 @@
 //! The package's zip container: read every part under size bounds, and write a
 //! package back, copying each untouched part's compressed bytes straight through.
 
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
 
@@ -35,14 +36,19 @@ pub(crate) struct RawPart {
 /// Read every part of the zip `document`, in archive order, refusing a part
 /// past `part_cap` bytes or a package past `package_cap` in total.
 ///
+/// Two entries naming one part, their names equal once ASCII case is folded as
+/// OPC compares part names, are refused: either could stand for the part, and
+/// the other would escape whatever is done to it.
+///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable zip, a part is
-/// unreadable, or a size cap is exceeded.
+/// unreadable, two entries name one part, or a size cap is exceeded.
 pub(crate) fn read(document: &[u8], part_cap: u64, package_cap: u64) -> Result<Vec<RawPart>> {
     let mut zip = ZipArchive::new(Cursor::new(document))
         .map_err(|e| Error::malformed(format!("not a zip: {e}")))?;
     let mut parts = Vec::with_capacity(zip.len());
+    let mut named = HashSet::with_capacity(zip.len());
     // Bytes still allowed across the whole package; each part's read and
     // allocation are bounded by this, so a bomb of many parts is refused before
     // it can inflate past the package cap.
@@ -55,6 +61,11 @@ pub(crate) fn read(document: &[u8], part_cap: u64, package_cap: u64) -> Result<V
             .name()
             .map_err(|e| Error::malformed(format!("bad zip entry name: {e}")))?;
         let path = PartPath::from(name.as_ref());
+        if !named.insert(path.clone()) {
+            return Err(Error::malformed(format!(
+                "two zip entries name the part `{path}`"
+            )));
+        }
         // Cap this part at the smaller of the per-part limit and what remains of
         // the package budget. Reserve only up to that cap (the entry's claimed
         // size may lie), and bound the read one byte past it so an over-large
@@ -158,6 +169,17 @@ mod tests {
     fn a_single_part_over_the_per_part_cap_is_refused() {
         let bytes = zip_of(&[("a.xml", &[b'x'; 200])]);
         assert!(read(&bytes, 100, 10_000).is_err());
+    }
+
+    #[test]
+    fn two_entries_naming_one_part_are_refused() {
+        let bytes = zip_of(&[("word/media/Logo.png", b"a"), ("word/media/logo.png", b"b")]);
+        assert!(read(&bytes, 100, 1000).is_err());
+        let bytes = zip_of(&[
+            ("word/media/Logo.png", b"a"),
+            ("word/media/logo2.png", b"b"),
+        ]);
+        assert!(read(&bytes, 100, 1000).is_ok());
     }
 
     #[test]

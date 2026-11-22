@@ -125,7 +125,7 @@ impl PartKind {
         match Self::of_shared(content_type) {
             // Detection reads the property parts only at their usual paths:
             // one anywhere else would ship unread.
-            Self::Properties if !props::SURFACED_PARTS.contains(&part.as_str()) => {
+            Self::Properties if !props::SURFACED_PARTS.iter().any(|name| part.is(name)) => {
                 Self::Hidden(HiddenContent::Properties)
             }
             kind => kind,

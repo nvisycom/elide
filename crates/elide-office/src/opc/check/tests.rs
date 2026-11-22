@@ -2,7 +2,7 @@ use elide_core::redaction::{Disposition, HiddenContent};
 
 use super::*;
 use crate::docx::WordFormat;
-use crate::fixtures::{pack_parts, part_names, read_part};
+use crate::fixtures::{add_part, edit_part, part_names, read_part};
 use crate::pptx::SlideFormat;
 use crate::xlsx::SheetFormat;
 
@@ -36,34 +36,13 @@ fn fixtures_sanitize_to_clean_packages() {
     sanitizes_to_a_clean_package(SAMPLE2_XLSX, &SheetFormat);
 }
 
-/// `package` with the part `name` rewritten by `edit`.
-fn replacing(package: &[u8], name: &str, edit: impl Fn(String) -> String) -> Vec<u8> {
-    let parts: Vec<(String, Vec<u8>)> = part_names(package)
-        .into_iter()
-        .map(|part| {
-            let bytes = read_part(package, &part).unwrap();
-            let bytes = if part == name {
-                edit(String::from_utf8(bytes).unwrap()).into_bytes()
-            } else {
-                bytes
-            };
-            (part, bytes)
-        })
-        .collect();
-    let parts: Vec<(&str, &[u8])> = parts
-        .iter()
-        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
-        .collect();
-    pack_parts(&parts)
-}
-
 /// A property no field surfaces fails the check under `ScanAsContent`,
 /// since nothing could have detected what it holds.
 #[test]
 fn an_unsurfaced_property_fails_the_check() {
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
     let sanitized = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap().bytes;
-    let sanitized = replacing(&sanitized.unwrap(), "docProps/core.xml", |core| {
+    let sanitized = edit_part(&sanitized.unwrap(), "docProps/core.xml", |core| {
         core.replace(
             "</coreProperties>",
             "<revision>7</revision></coreProperties>",
@@ -76,7 +55,7 @@ fn an_unsurfaced_property_fails_the_check() {
 /// The fixture with vendor markup and text in its manifest and its
 /// document's relationships.
 fn with_vendor_package_markup() -> Vec<u8> {
-    let package = replacing(SAMPLE_DOCX, "[Content_Types].xml", |manifest| {
+    let package = edit_part(SAMPLE_DOCX, "[Content_Types].xml", |manifest| {
         manifest
             .replace(
                 "<Types ",
@@ -87,7 +66,7 @@ fn with_vendor_package_markup() -> Vec<u8> {
                 "<v:note>Jane Roe</v:note>secret<Default v:by=\"Jane Roe\" Extension=\"xml\"",
             )
     });
-    replacing(&package, "word/_rels/document.xml.rels", |rels| {
+    edit_part(&package, "word/_rels/document.xml.rels", |rels| {
         rels.replace(
             "<Relationship Type=",
             "<Relationship Author=\"Jane Roe\" Type=",
@@ -147,7 +126,7 @@ fn clean_package_parts_ship_byte_for_byte() {
 fn a_vendor_attribute_in_a_package_part_fails_the_check() {
     let policy = HiddenContentPolicy::default();
     let sanitized = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap().bytes;
-    let sanitized = replacing(&sanitized.unwrap(), "_rels/.rels", |rels| {
+    let sanitized = edit_part(&sanitized.unwrap(), "_rels/.rels", |rels| {
         rels.replace("<Relationship ", "<Relationship Author=\"Jane Roe\" ")
     });
     let error = check(&sanitized, policy, &WordFormat).unwrap_err();
@@ -160,14 +139,14 @@ fn a_vendor_attribute_in_a_package_part_fails_the_check() {
 fn a_dangling_strict_reference_fails_the_check() {
     let policy = HiddenContentPolicy::default();
     let sanitized = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap().bytes;
-    let sanitized = replacing(&sanitized.unwrap(), "word/document.xml", |document| {
+    let sanitized = edit_part(&sanitized.unwrap(), "word/document.xml", |document| {
         document.replace(
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
             "http://purl.oclc.org/ooxml/officeDocument/relationships",
         )
     });
     check(&sanitized, policy, &WordFormat).unwrap();
-    let dangling = replacing(&sanitized, "word/_rels/document.xml.rels", |rels| {
+    let dangling = edit_part(&sanitized, "word/_rels/document.xml.rels", |rels| {
         rels.replace("Id=\"R207b36bfad034c28\"", "Id=\"rIdGone\"")
     });
     let error = check(&dangling, policy, &WordFormat).unwrap_err();
@@ -189,14 +168,14 @@ fn a_dangling_reference_names_the_first_relationships_part() {
         .unwrap();
     let rels = ["_rels/.rels", "word/_rels/document.xml.rels"];
     for part in rels {
-        sanitized = replacing(&sanitized, part, |rels| {
+        sanitized = edit_part(&sanitized, part, |rels| {
             rels.replace(
                     "</Relationships>",
                     r#"<Relationship Id="rIdGone" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="/gone.png"/></Relationships>"#,
                 )
         });
     }
-    let names = crate::fixtures::part_names(&sanitized);
+    let names = part_names(&sanitized);
     let first = names
         .iter()
         .find(|name| rels.contains(&name.as_str()))
@@ -210,10 +189,10 @@ fn a_dangling_reference_names_the_first_relationships_part() {
 #[test]
 fn a_property_part_keeps_only_what_its_fields_read() {
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
-    let document = replacing(SAMPLE_DOCX, "docProps/app.xml", |_| {
+    let document = edit_part(SAMPLE_DOCX, "docProps/app.xml", |_| {
         r#"<?xml version="1.0"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">Stray Roe<Company>Acme</Company><TitlesOfParts><vt:lpstr>Jane Roe salary</vt:lpstr><Company>Secret</Company></TitlesOfParts><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Pages</vt:lpstr></vt:variant><vt:variant><vt:i4>Jane Roe</vt:i4></vt:variant></vt:vector></HeadingPairs></Properties>"#.to_owned()
     });
-    let document = replacing(&document, "docProps/core.xml", |core| {
+    let document = edit_part(&document, "docProps/core.xml", |core| {
         core.replace(
                 "</coreProperties>",
                 r#"<vt:lpwstr xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">Jane Roe</vt:lpwstr></coreProperties>"#,
@@ -242,7 +221,7 @@ fn a_property_part_keeps_only_what_its_fields_read() {
 #[test]
 fn a_property_part_keeps_only_the_attributes_it_needs() {
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
-    let document = replacing(SAMPLE_DOCX, "docProps/core.xml", |core| {
+    let document = edit_part(SAMPLE_DOCX, "docProps/core.xml", |core| {
         core.replace("<lastModifiedBy>", r#"<lastModifiedBy note="Jane Roe">"#)
             .replace(
                 "<coreProperties ",
@@ -266,7 +245,7 @@ fn a_property_part_keeps_only_the_attributes_it_needs() {
 #[test]
 fn a_strict_property_part_is_redacted_and_checked() {
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
-    let document = replacing(SAMPLE_DOCX, "docProps/app.xml", |_| {
+    let document = edit_part(SAMPLE_DOCX, "docProps/app.xml", |_| {
         r#"<?xml version="1.0"?><Properties xmlns="http://purl.oclc.org/ooxml/officeDocument/extendedProperties" xmlns:vt="http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes"><Company>Acme</Company><Application>Vendor Writer</Application></Properties>"#.to_owned()
     });
     let sanitized = sanitize(&document, policy, &WordFormat)
@@ -290,4 +269,65 @@ fn a_referenced_letter_is_stray_text() {
     assert_eq!(stray("&#74;&#97;").as_deref(), Some("&#74;"));
     assert_eq!(stray("&custom;").as_deref(), Some("&custom;"));
     assert_eq!(stray("&#32;&#x9;"), None);
+}
+
+/// Part names compare ASCII case-insensitively, as OPC requires: a
+/// relationship whose target differs from the part's name only in case
+/// reaches the part. The thumbnail it reaches is classified as one and
+/// removed with its relationship, the core properties keep their own name,
+/// and the output passes the check.
+#[test]
+fn a_target_differing_only_in_case_reaches_its_part() {
+    let package = edit_part(SAMPLE_DOCX, "_rels/.rels", |rels| {
+        rels.replace("Target=\"docProps/core.xml\"", "Target=\"DocProps/Core.XML\"")
+            .replace(
+                "</Relationships>",
+                r#"<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail" Target="docProps/Thumbnail.JPEG"/></Relationships>"#,
+            )
+    });
+    let package = edit_part(&package, "[Content_Types].xml", |manifest| {
+        manifest.replace(
+            "<Default Extension=\"xml\"",
+            "<Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/><Default Extension=\"xml\"",
+        )
+    });
+    let package = edit_part(&package, "word/_rels/document.xml.rels", |rels| {
+        rels.replace("Target=\"styles.xml\"", "Target=\"Styles.xml\"")
+    });
+    let package = add_part(&package, "docProps/thumbnail.jpeg", b"\xff\xd8\xff");
+
+    let scanned = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+    for policy in [HiddenContentPolicy::default(), scanned] {
+        let Sanitized { bytes, stripped } = sanitize(&package, policy, &WordFormat).unwrap();
+        let sanitized = bytes.unwrap();
+        assert!(
+            stripped
+                .iter()
+                .any(|entry| entry.content == HiddenContent::Thumbnail),
+            "the thumbnail is classified by the relationship that reaches it"
+        );
+        let names = part_names(&sanitized);
+        assert!(
+            !names.iter().any(|name| name.contains("thumbnail")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name == "word/styles.xml"),
+            "{names:?}"
+        );
+        let kept = names.iter().any(|name| name == "docProps/core.xml");
+        assert_eq!(kept, policy == scanned, "{names:?}");
+        let rels = String::from_utf8(read_part(&sanitized, "_rels/.rels").unwrap()).unwrap();
+        assert!(!rels.contains("Thumbnail"), "{rels}");
+        check(&sanitized, policy, &WordFormat).unwrap();
+    }
+}
+
+/// A package whose archive holds two entries naming one part, their names
+/// equal but for case, is refused.
+#[test]
+fn two_entries_differing_only_in_case_are_refused() {
+    let core = read_part(SAMPLE_DOCX, "docProps/core.xml").unwrap();
+    let package = add_part(SAMPLE_DOCX, "docProps/Core.xml", &core);
+    assert!(sanitize(&package, HiddenContentPolicy::default(), &WordFormat).is_err());
 }

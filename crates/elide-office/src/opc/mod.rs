@@ -158,20 +158,16 @@ impl Package {
         self.parts.iter().any(|p| p.kind() == kind)
     }
 
-    /// The part at `path`, its name compared exactly.
+    /// The part at `path`; part names compare ASCII case-insensitively, as
+    /// OPC requires.
     fn part(&self, path: &str) -> Option<&StoredPart> {
-        self.parts.iter().find(|part| part.path().as_str() == path)
+        self.parts.iter().find(|part| part.path().is(path))
     }
 
     /// The content type the manifest names for the part at `path`, if the
-    /// package has that part; part names compare ASCII case-insensitively, as
-    /// OPC requires.
+    /// package has that part.
     pub(crate) fn content_type(&self, path: impl AsRef<str>) -> Option<&ContentType> {
-        let path = path.as_ref();
-        let part = self
-            .parts
-            .iter()
-            .find(|part| part.path().as_str().eq_ignore_ascii_case(path))?;
+        let part = self.part(path.as_ref())?;
         self.content_types.of(part.path())
     }
 
