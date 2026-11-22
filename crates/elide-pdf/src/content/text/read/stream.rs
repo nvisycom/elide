@@ -220,7 +220,7 @@ impl<'d> Walk<'_, 'd> {
         // The text matrices, reset at `BT`. The pen, where the last glyph left
         // off, is shared across this stream and every form it draws, so a word
         // gap is judged consistently across a `Do` boundary.
-        let mut cursor = Cursor::new();
+        let mut cursor = Cursor::new(self.accum.new_line());
         // The space a pattern this stream selects is laid out in (8.7.3.1).
         let pattern_space = graphics.state.ctm;
 
@@ -254,7 +254,7 @@ impl<'d> Walk<'_, 'd> {
                 // producers emit one `BT`/`ET` per positioned field, so nulling
                 // the pen here would run every field into the next.
                 "BT" => {
-                    cursor = Cursor::new();
+                    cursor = Cursor::new(self.accum.new_line());
                     graphics.painting.begin_text();
                 }
                 "ET" => graphics.painting.end_text(),
@@ -273,20 +273,29 @@ impl<'d> Walk<'_, 'd> {
                 }
 
                 // Text positioning: move the line/text matrix.
-                "Td" => cursor
-                    .next_line_offset(operand_f64(&op.operands, 0), operand_f64(&op.operands, 1)),
+                "Td" => cursor.next_line_offset(
+                    operand_f64(&op.operands, 0),
+                    operand_f64(&op.operands, 1),
+                    self.accum.new_line(),
+                ),
                 "TD" => {
                     // `TD tx ty` also sets leading to `-ty`.
                     let ty = operand_f64(&op.operands, 1);
                     graphics.state.leading = -ty;
-                    cursor.next_line_offset(operand_f64(&op.operands, 0), ty);
+                    cursor.next_line_offset(
+                        operand_f64(&op.operands, 0),
+                        ty,
+                        self.accum.new_line(),
+                    );
                 }
                 "Tm" => {
                     if let Some(m) = read_matrix(&op.operands, 0) {
-                        cursor.set_matrix(m);
+                        cursor.set_matrix(m, self.accum.new_line());
                     }
                 }
-                "T*" => cursor.next_line_offset(0.0, -graphics.state.leading),
+                "T*" => {
+                    cursor.next_line_offset(0.0, -graphics.state.leading, self.accum.new_line());
+                }
 
                 // Text showing. `'` is an implicit `T*` then show; `"`
                 // additionally sets word and character spacing from its first
@@ -362,11 +371,11 @@ impl<'d> Walk<'_, 'd> {
         stream: StreamTarget,
     ) -> Result<()> {
         if operation.operator == "'" {
-            cursor.next_line_offset(0.0, -graphics.state.leading);
+            cursor.next_line_offset(0.0, -graphics.state.leading, self.accum.new_line());
         } else if operation.operator == "\"" {
             graphics.state.word_spacing = operand_f64(&operation.operands, 0);
             graphics.state.char_spacing = operand_f64(&operation.operands, 1);
-            cursor.next_line_offset(0.0, -graphics.state.leading);
+            cursor.next_line_offset(0.0, -graphics.state.leading, self.accum.new_line());
         }
         let Some(selected) = graphics.font else {
             return Err(Error::redaction(format!(
@@ -398,6 +407,7 @@ impl<'d> Walk<'_, 'd> {
             next_char: self.accum.next_char,
             rects: self.accum.rects,
             advances: self.accum.advances,
+            steps: self.accum.steps,
             cursor,
             pen: &mut self.pen,
             state: graphics.state,

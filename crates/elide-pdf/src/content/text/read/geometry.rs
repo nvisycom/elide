@@ -59,33 +59,45 @@ impl Default for TextState {
 
 /// The text matrix `Tm` and text line matrix `Tlm` (9.4.2). Both
 /// reset to the identity at `BT`; the positioning operators move them, and each
-/// shown glyph advances `Tm`.
+/// shown glyph advances `Tm`. Each setting of the line matrix starts a line,
+/// numbered by the caller.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Cursor {
     tm: Matrix,
     tlm: Matrix,
+    line: u64,
 }
 
 impl Cursor {
-    /// A cursor at the text-object origin, as `BT` establishes.
-    pub(super) fn new() -> Self {
+    /// A cursor at the text-object origin, as `BT` establishes, starting line
+    /// `line`.
+    pub(super) fn new(line: u64) -> Self {
         Self {
             tm: Matrix::IDENTITY,
             tlm: Matrix::IDENTITY,
+            line,
         }
     }
 
-    /// `Tm a b c d e f`: set both the text and line matrix absolutely.
-    pub(super) fn set_matrix(&mut self, m: Matrix) {
+    /// The line the cursor places glyphs on.
+    pub(super) fn line(&self) -> u64 {
+        self.line
+    }
+
+    /// `Tm a b c d e f`: set both the text and line matrix absolutely,
+    /// starting line `line`.
+    pub(super) fn set_matrix(&mut self, m: Matrix, line: u64) {
         self.tm = m;
         self.tlm = m;
+        self.line = line;
     }
 
     /// `Td tx ty`: move to the start of the next line, offset by `(tx, ty)` from
-    /// the current line's start.
-    pub(super) fn next_line_offset(&mut self, tx: f64, ty: f64) {
+    /// the current line's start, starting line `line`.
+    pub(super) fn next_line_offset(&mut self, tx: f64, ty: f64, line: u64) {
         self.tlm = Matrix::translation(tx, ty).then(self.tlm);
         self.tm = self.tlm;
+        self.line = line;
     }
 
     /// Advance the text matrix by a horizontal displacement `tx` (text-space

@@ -22,6 +22,23 @@ pub(crate) struct GlyphRect {
     pub(crate) origin: (f64, f64),
 }
 
+impl GlyphRect {
+    /// The glyph's box and origin moved by `(dx, dy)` in device space.
+    pub(crate) fn moved(&self, (dx, dy): (f64, f64)) -> Self {
+        let rect = self.rect;
+        Self {
+            chars: self.chars.clone(),
+            rect: DeviceRect {
+                min_x: rect.min_x + dx,
+                min_y: rect.min_y + dy,
+                max_x: rect.max_x + dx,
+                max_y: rect.max_y + dy,
+            },
+            origin: (self.origin.0 + dx, self.origin.1 + dy),
+        }
+    }
+}
+
 /// An axis-aligned box in device (page) space, as the glyph quad projects to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DeviceRect {
@@ -339,18 +356,39 @@ impl<'a> PageGeometry<'a> {
     /// The device-space rectangles covering the characters `chars`, one per
     /// line, as [`rects_for`](Self::rects_for) gives them normalized.
     pub(crate) fn lines_for(&self, chars: Range<usize>) -> Vec<DeviceRect> {
-        let mut lines: Vec<DeviceRect> = Vec::new();
-        let covering = self
-            .rects
-            .iter()
-            .filter(|g| g.chars.start < chars.end && g.chars.end > chars.start);
-        for glyph in covering {
-            match lines.last_mut() {
+        self.lines_for_each(&[((), chars)])
+            .into_iter()
+            .map(|((), rect)| rect)
+            .collect()
+    }
+
+    /// The device-space rectangles covering each of `spans`, with its tag, one
+    /// per line of each, in the order of `spans`: [`lines_for`](Self::lines_for)
+    /// for many spans at once, in one pass over the glyphs. `spans` are sorted
+    /// and disjoint; a glyph in two of them boxes the first.
+    pub(crate) fn lines_for_each<T: Copy>(
+        &self,
+        spans: &[(T, Range<usize>)],
+    ) -> Vec<(T, DeviceRect)> {
+        let mut lines: Vec<Vec<DeviceRect>> = vec![Vec::new(); spans.len()];
+        for glyph in self.rects {
+            let i = spans.partition_point(|(_, chars)| chars.end <= glyph.chars.start);
+            let Some((_, chars)) = spans.get(i) else {
+                continue;
+            };
+            if chars.start >= glyph.chars.end {
+                continue;
+            }
+            match lines[i].last_mut() {
                 Some(line) if same_line(line, &glyph.rect) => *line = line.union(glyph.rect),
-                _ => lines.push(glyph.rect),
+                _ => lines[i].push(glyph.rect),
             }
         }
-        lines
+        spans
+            .iter()
+            .zip(lines)
+            .flat_map(|((tag, _), lines)| lines.into_iter().map(move |rect| (*tag, rect)))
+            .collect()
     }
 
     /// The page-local character range of each glyph whose center falls in any

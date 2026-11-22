@@ -18,6 +18,7 @@
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::ops::Range;
 
 use elide_core::primitive::Color;
@@ -27,8 +28,10 @@ use lopdf::{Document, Object, ObjectId, StringFormat};
 
 #[cfg(doc)]
 use super::OffsetMap;
-use super::{Address, Detection, GlyphBytes, GlyphSite, StreamTarget, TextBlock};
-use crate::pdf::reader::{DeviceRect, DocumentExt, StreamExt, parse_content};
+use super::{Address, Detection, GlyphBytes, GlyphSite, Mover, StreamTarget, TextBlock};
+use crate::pdf::reader::{
+    DeviceRect, DocumentExt, GlyphRect, PageGeometry, StreamExt, parse_content,
+};
 use crate::pdf::writer::{encoded, scrub};
 use crate::pdf::{Edit, Pdf};
 
@@ -100,6 +103,10 @@ enum RunKind {
     Uncovered,
 }
 
+/// The `TJ` kerns a deletion zeroed, each by the content stream it is in and
+/// its address there.
+type Zeroed = BTreeSet<(ObjectId, Address)>;
+
 /// Glyph codes, keyed by the object id of the `/ToUnicode` CMap that maps
 /// them.
 type Codes = BTreeMap<ObjectId, BTreeSet<Vec<u8>>>;
@@ -135,8 +142,8 @@ pub(super) fn delete(
     let to_delete = deletions(pristine, blocks, detections)?;
     let (deleted, surviving) = codes(pristine, blocks, &to_delete)?;
     let doc = edit.doc_mut();
-    rewrite(pristine, doc, &to_delete)?;
-    draw_covers(pristine, doc, blocks, &to_delete)?;
+    let zeroed = rewrite(pristine, doc, &to_delete)?;
+    draw_covers(pristine, doc, blocks, &to_delete, &zeroed)?;
     // The deleted codes are scrubbed from each font's `/ToUnicode` CMap,
     // sparing any code surviving text still draws, so the removed text can't
     // be recovered through the code-to-Unicode table.
@@ -144,13 +151,16 @@ pub(super) fn delete(
 }
 
 /// The glyphs of `blocks`, read from `pristine`, that `detections` delete,
-/// by the content stream each is drawn in, each covered one with its advance.
+/// by the content stream each is drawn in, each covered one with its advance,
+/// and each string's cuts [`resolved`], so the rewrite and the boxes agree on
+/// which glyphs are covered.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) as
-/// [`Streams::of`], and for a covered glyph whose advance no `TJ` number
-/// gives.
+/// [`Streams::of`] and [`check_shared_advances`], for a covered glyph whose
+/// advance no `TJ` number gives, and for a string whose cuts partly overlap:
+/// the pages drawing it decode its glyphs differently.
 fn deletions(
     pristine: &Document,
     blocks: &[TextBlock],
@@ -181,7 +191,54 @@ fn deletions(
             }
         }
     }
+    for sites in to_delete.values_mut() {
+        for (address, cuts) in sites.iter_mut() {
+            *cuts = resolved(cuts).ok_or_else(|| {
+                Error::redaction(format!(
+                    "the glyphs at operation {} operand {} of {:?} decode differently on the \
+                     pages drawing them, so they cannot be deleted",
+                    address.op, address.operand, address.stream
+                ))
+            })?;
+        }
+    }
+    check_shared_advances(blocks, &to_delete)?;
     Ok(to_delete)
+}
+
+/// Check that every page drawing a covered glyph of a form spaces it as its
+/// cover's `TJ` number does: the number is written once into the form, which
+/// each page drawing it shows with its own character and word spacing.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a covered
+/// glyph a page spaces differently, or with no number: the text after it would
+/// move there, so it can't be covered in place.
+fn check_shared_advances(blocks: &[TextBlock], to_delete: &Deletions) -> Result<()> {
+    for block in blocks {
+        for (site, advance) in &block.advances {
+            let StreamTarget::XObject(id) = site.address.stream else {
+                continue;
+            };
+            let number = to_delete
+                .get(&id)
+                .and_then(|sites| sites.get(&site.address))
+                .and_then(|cuts| cuts.iter().find(|cut| cut.start == site.byte_start))
+                .and_then(|cut| cut.cover)
+                .map(|cover| cover.number);
+            if let Some(number) = number
+                && *advance != Some(number)
+            {
+                return Err(Error::redaction(format!(
+                    "page {} draws covered text of a form spaced unlike another page drawing \
+                     it; it can't be covered in place",
+                    block.page
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The `TJ` number that takes the place of `glyph`, drawn on `block`'s page,
@@ -221,13 +278,13 @@ fn codes(
     blocks: &[TextBlock],
     to_delete: &Deletions,
 ) -> Result<(Codes, Codes)> {
-    let deleted = located(to_delete, |_| Some(()));
+    let deleted = located_set(to_delete, |_| true);
     let mut deleted_codes = Codes::new();
     let mut surviving_codes = Codes::new();
     for block in blocks {
         let mut stream = Streams::new(pristine, block.page_id);
         for glyph in block.offsets.runs().iter().filter_map(|run| run.source) {
-            let codes = if deleted.contains_key(&stream.locate(&glyph)?) {
+            let codes = if deleted.contains(&stream.locate(&glyph)?) {
                 &mut deleted_codes
             } else {
                 &mut surviving_codes
@@ -239,7 +296,7 @@ fn codes(
 }
 
 /// Write each stream of `to_delete` in `doc` once, from its `pristine`
-/// bytes, with every deletion in it.
+/// bytes, with every deletion in it, and return the kerns zeroed.
 ///
 /// # Errors
 ///
@@ -247,7 +304,8 @@ fn codes(
 /// changed since it was read; as [`apply_deletions`]; and
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// one can't be decoded or encoded.
-fn rewrite(pristine: &Document, doc: &mut Document, to_delete: &Deletions) -> Result<()> {
+fn rewrite(pristine: &Document, doc: &mut Document, to_delete: &Deletions) -> Result<Zeroed> {
+    let mut zeroed = Zeroed::new();
     for (id, sites) in to_delete {
         let bytes = stream_content(pristine, *id)?;
         if stream_content(doc, *id)? != bytes {
@@ -257,22 +315,25 @@ fn rewrite(pristine: &Document, doc: &mut Document, to_delete: &Deletions) -> Re
             )));
         }
         let mut content = parse_content(&bytes)?;
-        apply_deletions(&mut content, sites)?;
+        let kerns = apply_deletions(&mut content, sites)?;
+        zeroed.extend(kerns.into_iter().map(|address| (*id, address)));
         let new_content = encoded(&content)?;
         doc.set_stream_content(*id, new_content)?;
     }
-    Ok(())
+    Ok(zeroed)
 }
 
 /// Draw a box of its color over the covered glyphs of `to_delete` on every
 /// page of `blocks` that shows them, a form's on each page drawing it: a box per
 /// line, over their glyph boxes joined across the word gaps between them,
 /// drawn after the page's content at its initial graphics state. A glyph a
-/// clip hides has no box, so draws none.
+/// clip hides has no box, so draws none. Each box is drawn where its glyphs
+/// are once the removals and `zeroed` kerns before them on their line have
+/// closed up.
 ///
 /// # Errors
 ///
-/// As [`Streams::of`] and [`content_stream`], and
+/// As [`Streams::of`], [`content_stream`] and [`moved_rects`], and
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
 /// page's content can't be read or the boxes encoded.
 fn draw_covers(
@@ -280,23 +341,21 @@ fn draw_covers(
     doc: &mut Document,
     blocks: &[TextBlock],
     to_delete: &Deletions,
+    zeroed: &Zeroed,
 ) -> Result<()> {
     let covered = located(to_delete, |cut| cut.cover.map(|cover| cover.color));
     if covered.is_empty() {
         return Ok(());
     }
+    let removed = located_set(to_delete, |cut| cut.cover.is_none());
     for block in blocks {
         let runs = box_runs(pristine, block, &covered)?;
-        let geometry = block.geometry();
-        let boxes: Vec<(Color, DeviceRect)> = covered_spans(&runs)
-            .into_iter()
-            .flat_map(|(color, chars)| {
-                geometry
-                    .lines_for(chars)
-                    .into_iter()
-                    .map(move |rect| (color, rect))
-            })
-            .collect();
+        let rects = moved_rects(pristine, block, &covered, &removed, zeroed)?;
+        let geometry = PageGeometry {
+            rects: &rects,
+            frame: &block.frame,
+        };
+        let boxes = geometry.lines_for_each(&covered_spans(&runs));
         if boxes.is_empty() {
             continue;
         }
@@ -315,6 +374,66 @@ fn draw_covers(
         doc.set_stream_content(id, content)?;
     }
     Ok(())
+}
+
+/// The glyph boxes of `block`, read from `pristine`, each `covered` glyph's
+/// moved as far as the text before it on its line moves: back by each glyph
+/// `removed` and each kern `zeroed` there, as they close up.
+///
+/// # Errors
+///
+/// As [`Streams::of`], and
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a covered
+/// glyph that moves and is drawn more than once from one walk, as a tiling
+/// pattern's is on each tile: one move can't place each copy's box.
+fn moved_rects(
+    pristine: &Document,
+    block: &TextBlock,
+    covered: &BTreeMap<Located, Color>,
+    removed: &BTreeSet<Located>,
+    zeroed: &Zeroed,
+) -> Result<Vec<GlyphRect>> {
+    let mut stream = Streams::new(pristine, block.page_id);
+    // How far each line has closed up so far, and each covered glyph's move,
+    // by its first character.
+    let mut closed: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
+    let mut moves: BTreeMap<usize, (f64, f64)> = BTreeMap::new();
+    for step in &block.steps {
+        let line = closed.entry(step.line).or_default();
+        let gone = match &step.mover {
+            Mover::Glyph { site, chars } => {
+                let glyph = Located {
+                    stream: stream.target(site.address.stream)?,
+                    site: *site,
+                };
+                if covered.contains_key(&glyph) && *line != (0.0, 0.0) && !chars.is_empty() {
+                    moves.insert(chars.start, *line);
+                }
+                removed.contains(&glyph)
+            }
+            Mover::Kern(address) => zeroed.contains(&(stream.target(address.stream)?, *address)),
+        };
+        if gone {
+            line.0 -= step.delta.0;
+            line.1 -= step.delta.1;
+        }
+    }
+    let mut rects = block.rects.clone();
+    let mut drawn = BTreeSet::new();
+    for rect in &mut rects {
+        let Some(&by) = moves.get(&rect.chars.start) else {
+            continue;
+        };
+        if !drawn.insert(rect.chars.start) {
+            return Err(Error::redaction(format!(
+                "page {} covers text drawn on several tiles after a removal on its line; \
+                 its boxes can't be placed",
+                block.page
+            )));
+        }
+        *rect = rect.moved(by);
+    }
+    Ok(rects)
 }
 
 /// Each run of `block`'s offset map, read from `pristine`, as covers' boxes
@@ -402,6 +521,13 @@ fn covered_spans(runs: &[BoxRun]) -> Vec<(Color, Range<usize>)> {
     spans
 }
 
+/// Each glyph `to_delete` cuts that `keep` keeps, where it is drawn.
+fn located_set(to_delete: &Deletions, keep: impl Fn(&Cut) -> bool) -> BTreeSet<Located> {
+    located(to_delete, |cut| keep(cut).then_some(()))
+        .into_keys()
+        .collect()
+}
+
 /// Each glyph `to_delete` cuts that `pick` picks, where it is drawn, with
 /// what `pick` picks of it.
 fn located<T>(to_delete: &Deletions, pick: impl Fn(&Cut) -> Option<T>) -> BTreeMap<Located, T> {
@@ -457,7 +583,16 @@ impl<'a> Streams<'a> {
     ///
     /// As [`content_stream`].
     fn of(&mut self, glyph: &GlyphBytes) -> Result<ObjectId> {
-        Ok(match glyph.address.stream {
+        self.target(glyph.address.stream)
+    }
+
+    /// The stream `target` names.
+    ///
+    /// # Errors
+    ///
+    /// As [`content_stream`].
+    fn target(&mut self, target: StreamTarget) -> Result<ObjectId> {
+        Ok(match target {
             StreamTarget::PageContent => match self.content {
                 Some(id) => id,
                 None => *self.content.insert(content_stream(self.doc, self.page)?),
@@ -541,11 +676,14 @@ fn missing_glyph(address: &Address) -> Error {
 /// caller needing pixel-faithful layout uses the raster path instead. A
 /// covered glyph keeps its place on purpose, so the adjustments beside it
 /// stay.
-fn apply_deletions(content: &mut Content, sites: &BTreeMap<Address, Vec<Cut>>) -> Result<()> {
+fn apply_deletions(
+    content: &mut Content,
+    sites: &BTreeMap<Address, Vec<Cut>>,
+) -> Result<BTreeSet<Address>> {
     // Each `TJ` array's strings that lose their first or last glyph, by
     // index, for each array: its kerns are zeroed once every string is
     // drained, in one pass however many lost glyphs.
-    let mut edges: BTreeMap<(usize, usize), Edges> = BTreeMap::new();
+    let mut edges: BTreeMap<(StreamTarget, usize, usize), Edges> = BTreeMap::new();
     let mut covers: Vec<StringCovers> = Vec::new();
     for (address, cuts) in sites {
         let bytes = string_at(content, address).ok_or_else(|| missing_glyph(address))?;
@@ -554,7 +692,7 @@ fn apply_deletions(content: &mut Content, sites: &BTreeMap<Address, Vec<Cut>>) -
             // Recorded even for a string that lost no end, so one emptied by
             // covers still counts as having drawn a glyph.
             let edge = edges
-                .entry((address.op, address.operand))
+                .entry((address.stream, address.op, address.operand))
                 .or_default()
                 .entry(k)
                 .or_default();
@@ -568,20 +706,27 @@ fn apply_deletions(content: &mut Content, sites: &BTreeMap<Address, Vec<Cut>>) -
             });
         }
     }
-    for ((op, operand), edges) in &edges {
-        if let Some(Object::Array(items)) = content.operations[*op].operands.get_mut(*operand) {
-            zero_kerns(items, edges);
+    let mut zeroed = BTreeSet::new();
+    for (&(stream, op, operand), edges) in &edges {
+        if let Some(Object::Array(items)) = content.operations[op].operands.get_mut(operand) {
+            zeroed.extend(zero_kerns(items, edges).into_iter().map(|item| Address {
+                stream,
+                op,
+                operand,
+                item: Some(item),
+            }));
         }
     }
-    put_covers(content, covers)
+    put_covers(content, covers)?;
+    Ok(zeroed)
 }
 
 /// Put each covered run back where it was drained from, as the `TJ` number
-/// `covers` gives it at its offset in its drained string: an element of a
-/// `TJ` array is split around it, last element first so earlier indices stay
-/// valid; a string shown by `Tj`, `'` or `"` becomes a `TJ` array, the line
-/// move and spacing `'` and `"` make written as their own operators, last
-/// operation first so earlier addresses stay valid.
+/// `covers` gives it at its offset in its drained string: each `TJ` array with
+/// covered elements is rebuilt once, its elements split around their numbers;
+/// a string shown by `Tj`, `'` or `"` becomes a `TJ` array, the line move and
+/// spacing `'` and `"` make written as their own operators, last operation
+/// first so earlier addresses stay valid.
 ///
 /// # Errors
 ///
@@ -589,6 +734,9 @@ fn apply_deletions(content: &mut Content, sites: &BTreeMap<Address, Vec<Cut>>) -
 /// that no longer names a string.
 fn put_covers(content: &mut Content, mut strings: Vec<StringCovers>) -> Result<()> {
     strings.sort_by_key(|string| Reverse(string.address));
+    // Each `TJ` array's covered elements, by index, split once every string
+    // is known, so the array is rebuilt in one pass.
+    let mut arrays: BTreeMap<(usize, usize), BTreeMap<usize, Vec<Object>>> = BTreeMap::new();
     let mut shown = Vec::new();
     for StringCovers { address, covers } in strings {
         let operand = content
@@ -601,8 +749,10 @@ fn put_covers(content: &mut Content, mut strings: Vec<StringCovers>) -> Result<(
                 let Some(Object::String(bytes, format)) = items.get(k) else {
                     return Err(missing_glyph(&address));
                 };
-                let pieces = split(bytes, *format, &covers);
-                items.splice(k..=k, pieces);
+                arrays
+                    .entry((address.op, address.operand))
+                    .or_default()
+                    .insert(k, split(bytes, *format, &covers));
             }
             (Object::String(bytes, format), None) => {
                 shown.push(ShownString {
@@ -611,6 +761,18 @@ fn put_covers(content: &mut Content, mut strings: Vec<StringCovers>) -> Result<(
                 });
             }
             _ => return Err(missing_glyph(&address)),
+        }
+    }
+    for ((op, operand), mut pieces_at) in arrays {
+        if let Some(Object::Array(items)) = content.operations[op].operands.get_mut(operand) {
+            let mut rebuilt = Vec::with_capacity(items.len() + pieces_at.len());
+            for (k, item) in mem::take(items).into_iter().enumerate() {
+                match pieces_at.remove(&k) {
+                    Some(pieces) => rebuilt.extend(pieces),
+                    None => rebuilt.push(item),
+                }
+            }
+            *items = rebuilt;
         }
     }
     for ShownString { op, pieces } in shown {
@@ -679,48 +841,53 @@ struct Drained {
     covers: Vec<Cover>,
 }
 
-/// Drain the glyph `cuts` from `bytes`, high to low so earlier offsets stay
-/// valid; `None` when one is past its end. The same glyph can be cut more
-/// than once (a ligature whose one code spans several detected characters,
-/// or overlapping detections), so each byte range is drained once: draining
-/// one twice would consume later, still-valid bytes. A glyph both removed and
-/// covered is removed. Each run of covered glyphs leaves one number, the sum
-/// of their advances, at the offset they leave in the drained string.
-fn drain(bytes: &mut Vec<u8>, cuts: &[Cut]) -> Option<Drained> {
-    let mut merged: Vec<Cut> = Vec::with_capacity(cuts.len());
+/// The glyph `cuts` of one string, sorted, each byte range once. The same
+/// glyph can be cut more than once (a ligature whose one code spans several
+/// detected characters, or overlapping detections); draining it twice would
+/// consume later, still-valid bytes. A glyph both removed and covered is
+/// removed. `None` when two cuts partly overlap: the pages drawing the string
+/// decode its glyphs differently.
+fn resolved(cuts: &[Cut]) -> Option<Vec<Cut>> {
     let mut sorted = cuts.to_vec();
     sorted.sort_by_key(|cut| (cut.start, cut.end));
+    let mut merged: Vec<Cut> = Vec::with_capacity(sorted.len());
     for cut in sorted {
         match merged.last_mut() {
-            Some(last) if last.start == cut.start && last.end == cut.end => {
+            Some(last) if (last.start, last.end) == (cut.start, cut.end) => {
                 if cut.cover.is_none() {
                     last.cover = None;
                 }
             }
+            Some(last) if cut.start < last.end => return None,
             _ => merged.push(cut),
         }
     }
+    Some(merged)
+}
+
+/// Drain the glyph `cuts` from `bytes`, [`resolved`] as [`deletions`] leaves
+/// them, high to low so earlier offsets stay valid; `None` when one is past
+/// its end. Each run of covered glyphs leaves one number, the sum of their
+/// advances, at the offset they leave in the drained string.
+fn drain(bytes: &mut Vec<u8>, cuts: &[Cut]) -> Option<Drained> {
     let len = bytes.len();
-    if merged
-        .iter()
-        .any(|cut| cut.end > len || cut.start > cut.end)
-    {
+    if cuts.iter().any(|cut| cut.end > len || cut.start > cut.end) {
         return None;
     }
     let removed = |cut: &&Cut| cut.cover.is_none();
     let lost = Lost {
-        first: merged
+        first: cuts
             .first()
             .filter(removed)
             .is_some_and(|cut| cut.start == 0),
-        last: merged
+        last: cuts
             .last()
             .filter(removed)
             .is_some_and(|cut| cut.end == len),
     };
     let mut covers: Vec<Cover> = Vec::new();
     let mut drained = 0;
-    for cut in &merged {
+    for cut in cuts {
         if let Some(Covering { number, .. }) = cut.cover {
             let offset = cut.start - drained;
             match covers.last_mut() {
@@ -730,7 +897,7 @@ fn drain(bytes: &mut Vec<u8>, cuts: &[Cut]) -> Option<Drained> {
         }
         drained += cut.end - cut.start;
     }
-    for cut in merged.iter().rev() {
+    for cut in cuts.iter().rev() {
         bytes.drain(cut.start..cut.end);
     }
     Some(Drained { lost, covers })
@@ -756,10 +923,15 @@ type Edges = BTreeMap<usize, Lost>;
 /// The numbers are zeroed in place rather than removed: other [`Deletions`]
 /// entries for the same operation address array elements by index, so removing
 /// an element would invalidate those indices. A zero adjustment draws nothing
-/// and carries no position information.
-fn zero_kerns(items: &mut [Object], edges: &Edges) {
-    zero_beyond(items.iter_mut().enumerate(), edges, |lost| lost.last);
-    zero_beyond(items.iter_mut().enumerate().rev(), edges, |lost| lost.first);
+/// and carries no position information. Returns the index of each number
+/// zeroed.
+fn zero_kerns(items: &mut [Object], edges: &Edges) -> BTreeSet<usize> {
+    let mut zeroed = BTreeSet::new();
+    let forward = items.iter_mut().enumerate();
+    zero_beyond(forward, edges, |lost| lost.last, &mut zeroed);
+    let backward = items.iter_mut().enumerate().rev();
+    zero_beyond(backward, edges, |lost| lost.first, &mut zeroed);
+    zeroed
 }
 
 /// One pass of [`zero_kerns`] over `items` in the order given: the numbers
@@ -769,12 +941,19 @@ fn zero_beyond<'a>(
     items: impl Iterator<Item = (usize, &'a mut Object)>,
     edges: &Edges,
     end: impl Fn(&Lost) -> bool,
+    zeroed: &mut BTreeSet<usize>,
 ) {
     let mut zeroing = false;
     for (index, item) in items {
         match item {
-            Object::Integer(_) if zeroing => *item = Object::Integer(0),
-            Object::Real(_) if zeroing => *item = Object::Real(0.0),
+            Object::Integer(_) if zeroing => {
+                *item = Object::Integer(0);
+                zeroed.insert(index);
+            }
+            Object::Real(_) if zeroing => {
+                *item = Object::Real(0.0);
+                zeroed.insert(index);
+            }
             Object::Integer(_) | Object::Real(_) => {}
             // A string drew a glyph before any deletion if it lost one or
             // still has bytes.
@@ -861,6 +1040,60 @@ mod tests {
         assert_matches!(&arr[2], Object::String(b, _) if b.is_empty());
         assert_eq!(arr[3], Object::Integer(0), "right kern not zeroed");
         assert_eq!(arr[4], Object::string_literal(" Agent"));
+    }
+
+    /// Two cuts that partly overlap mean the pages drawing the string decode
+    /// its glyphs differently: they don't resolve, so nothing is drained.
+    #[test]
+    fn partly_overlapping_cuts_are_refused() {
+        let cut = |start, end| Cut {
+            start,
+            end,
+            cover: None,
+        };
+        assert_eq!(resolved(&[cut(0, 1), cut(0, 2)]), None);
+        assert_eq!(resolved(&[cut(0, 2), cut(0, 2)]), Some(vec![cut(0, 2)]));
+    }
+
+    /// Covers in several strings of one `TJ` array each leave their number in
+    /// place, the array rebuilt once.
+    #[test]
+    fn covers_across_a_tj_array_keep_their_places() {
+        let mut content = tj(vec![
+            Object::string_literal("Jane"),
+            (-40).into(),
+            Object::string_literal("Roe"),
+        ]);
+        let cover = |start, end, number| Cut {
+            start,
+            end,
+            cover: Some(Covering {
+                number,
+                color: Color::BLACK,
+            }),
+        };
+        let address = |item| Address {
+            stream: StreamTarget::PageContent,
+            op: 0,
+            operand: 0,
+            item: Some(item),
+        };
+        let sites = BTreeMap::from([
+            (address(0), vec![cover(1, 2, -500.0)]),
+            (address(2), vec![cover(0, 1, -700.0)]),
+        ]);
+        apply_deletions(&mut content, &sites).unwrap();
+        assert_eq!(
+            tj_array(&content),
+            [
+                Object::string_literal("J"),
+                Object::Real(-500.0),
+                Object::string_literal("ne"),
+                Object::Integer(-40),
+                Object::Real(-700.0),
+                Object::string_literal("oe"),
+            ]
+        );
     }
 
     /// A deletion that leaves a string's last glyph keeps the kerns after it:

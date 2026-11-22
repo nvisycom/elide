@@ -106,6 +106,10 @@ pub(crate) struct TextBlock {
     /// glyph no number moves the pen as it does (one at font size 0), or one
     /// drawn with different spacings (a form drawn twice).
     pub(crate) advances: BTreeMap<GlyphSite, Option<f64>>,
+    /// Every move of the pen as the page draws its text, in draw order: how
+    /// far each glyph and `TJ` kern moved it, so a deletion can tell how far
+    /// the text after it moves.
+    pub(crate) steps: Vec<PenStep>,
     /// The fonts referenced by the glyphs in `offsets`, indexed by
     /// [`GlyphBytes::font`](super::GlyphBytes); each carries the font's
     /// `/ToUnicode` CMap object id (when it has one) so a deleted glyph's code can
@@ -271,6 +275,33 @@ pub(crate) struct GlyphBytes {
 pub(crate) struct GlyphSite {
     pub(crate) address: Address,
     pub(crate) byte_start: usize,
+}
+
+/// One move of the pen as a page draws its text: a glyph's advance or a `TJ`
+/// kern, on its line, and how far it moved the pen in device space.
+///
+/// A line is a run of glyphs placed from one setting of the line matrix
+/// (`BT`, `Td`, `TD`, `T*`, `Tm`, `'`, `"`), numbered uniquely across the
+/// page and the forms it draws: a glyph deleted from a line moves only what
+/// the same line shows after it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PenStep {
+    pub(crate) line: u64,
+    pub(crate) mover: Mover,
+    pub(crate) delta: (f64, f64),
+}
+
+/// What moved the pen in a [`PenStep`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Mover {
+    /// The glyph whose code is at `site`, drawing the page's characters
+    /// `chars` (none for a glyph that reads as nothing).
+    Glyph {
+        site: GlyphSite,
+        chars: Range<usize>,
+    },
+    /// The `TJ` kern at this address.
+    Kern(Address),
 }
 
 impl GlyphBytes {
@@ -778,6 +809,97 @@ mod tests {
         assert_eq!(boxes(&out, 1).len(), 1);
     }
 
+    /// The x of the origin of the first glyph of `word` on the first page.
+    fn origin_of(blocks: &[TextBlock], word: &str) -> f64 {
+        let at = blocks[0].text[..blocks[0].text.find(word).unwrap()]
+            .chars()
+            .count();
+        let glyph = blocks[0]
+            .rects
+            .iter()
+            .find(|g| g.chars.start == at)
+            .unwrap();
+        glyph.origin.0
+    }
+
+    /// The one box drawn on `out`'s first page, checked to sit exactly over
+    /// the gap the covered characters `cover` of `before` leave in `after`,
+    /// which moved left by `moved`, and over no character left.
+    fn box_over_gap(
+        before: &[TextBlock],
+        out: &Pdf,
+        after: &[TextBlock],
+        cover: Range<usize>,
+        moved: f64,
+    ) {
+        let drawn = boxes(out, 1);
+        assert_eq!(drawn.len(), 1, "{drawn:?}");
+        let [x0, y0, x1, y1] = drawn[0];
+        let line = before[0].geometry().lines_for(cover)[0];
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
+        assert!(
+            near(x0, line.min_x - moved)
+                && near(x1, line.max_x - moved)
+                && near(y0, line.min_y)
+                && near(y1, line.max_y),
+            "{:?} against {line:?} moved {moved}",
+            drawn[0]
+        );
+        for glyph in &after[0].rects {
+            let apart_x = glyph.rect.max_x <= x0 + 1e-3 || glyph.rect.min_x >= x1 - 1e-3;
+            let apart_y = glyph.rect.max_y <= y0 + 1e-3 || glyph.rect.min_y >= y1 - 1e-3;
+            assert!(apart_x || apart_y, "the box {:?} hides {glyph:?}", drawn[0]);
+        }
+    }
+
+    /// A removal before a cover on its line closes up, so the box moves with
+    /// the covered gap: over it, and over none of the text after it.
+    #[test]
+    fn a_box_moves_with_text_a_removal_closes_up() {
+        let (before, out, after) = covered(
+            b"BT /F1 24 Tf 20 60 Td (Call Jane Roe at Acme Ltd now) Tj ET",
+            &[
+                Detection::new(1, 5, 10),
+                Detection::new(1, 17, 21).covering(Color::BLACK),
+            ],
+        );
+        assert!(!streams_of(&out.bytes()).contains("Acme"));
+        let moved = origin_of(&before, "Roe") - origin_of(&after, "Roe");
+        assert!(moved > 0.0);
+        box_over_gap(&before, &out, &after, 17..21, moved);
+    }
+
+    /// In a `TJ` array a removal's zeroed kern closes up too, and the box
+    /// moves by both.
+    #[test]
+    fn a_box_moves_by_a_zeroed_kern_too() {
+        let (before, out, after) = covered(
+            b"BT /F1 24 Tf 20 60 Td [(Call Jane) -400 (Roe at Acme Ltd)] TJ ET",
+            &[
+                Detection::new(1, 5, 9),
+                Detection::new(1, 17, 21).covering(Color::BLACK),
+            ],
+        );
+        let moved = origin_of(&before, "Roe") - origin_of(&after, "Roe");
+        assert!(moved > 0.0);
+        box_over_gap(&before, &out, &after, 17..21, moved);
+    }
+
+    /// A removal on another line moves nothing on this one: a line starts
+    /// where its line matrix puts it, whatever the line before lost.
+    #[test]
+    fn a_removal_on_another_line_leaves_the_box() {
+        let (before, out, after) = covered(
+            b"BT /F1 24 Tf 30 TL 20 80 Td (Call Jane Roe) Tj T* (at Acme Ltd) Tj ET",
+            &[
+                Detection::new(1, 5, 10),
+                Detection::new(1, 17, 21).covering(Color::BLACK),
+            ],
+        );
+        assert_eq!(&before[0].text[17..21], "Acme");
+        box_over_gap(&before, &out, &after, 17..21, 0.0);
+    }
+
     /// A covered glyph in a form two pages draw is deleted on both, so both
     /// draw a box over it, though only one page's text was detected.
     #[test]
@@ -812,6 +934,57 @@ mod tests {
         out.read(Check).unwrap();
         assert_eq!(boxes(&out, 1).len(), 1);
         assert_eq!(boxes(&out, 2).len(), 1);
+    }
+
+    /// A form's covered glyph gets one `TJ` number, written into the form, so
+    /// a page drawing it with other spacing would move the text after it: the
+    /// redaction is refused.
+    #[test]
+    fn a_form_spaced_unlike_on_another_page_is_refused() {
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        let form = pdf.form(
+            dictionary! {
+                "BBox" => vec![0.into(), 0.into(), 200.into(), 100.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+            },
+            b"BT /F1 12 Tf 10 50 Td (Jane Roe) Tj ET".to_vec(),
+        );
+        for content in [b"/Fm Do".to_vec(), b"2 Tc /Fm Do".to_vec()] {
+            pdf.page(
+                Page::new()
+                    .xobject("Fm", form)
+                    .content(content)
+                    .size(200, 100),
+            );
+        }
+        let pdf = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let blocks = pdf.read(Text).unwrap();
+        let error = pdf
+            .edit()
+            .redact(TextRedaction {
+                source: &pdf,
+                blocks: &blocks,
+                detections: &[Detection::new(1, 0, 4).covering(Color::BLACK)],
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Redaction);
+    }
+
+    /// A glyph both removed and covered is removed: it closes up, and no box
+    /// is drawn over where it was.
+    #[test]
+    fn a_glyph_removed_and_covered_is_removed_without_a_box() {
+        let (_, out, after) = covered(
+            b"BT /F1 12 Tf 10 50 Td (Jane Roe) Tj ET",
+            &[
+                Detection::new(1, 0, 4),
+                Detection::new(1, 0, 4).covering(Color::BLACK),
+            ],
+        );
+        assert!(!streams_of(&out.bytes()).contains("Jane"));
+        assert_eq!(after[0].text.trim(), "Roe");
+        assert!(boxes(&out, 1).is_empty());
     }
 
     /// Text at font size 0 has no `TJ` number for its advance, so it can't

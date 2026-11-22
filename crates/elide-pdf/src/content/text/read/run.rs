@@ -8,7 +8,9 @@ use elide_core::Result;
 use lopdf::Object;
 
 use super::geometry::{Cursor, SpaceRule, TextState};
-use crate::content::text::{Address, GlyphBytes, GlyphSite, OffsetRun, StreamTarget};
+use crate::content::text::{
+    Address, GlyphBytes, GlyphSite, Mover, OffsetRun, PenStep, StreamTarget,
+};
 use crate::pdf::reader::font::{FontText, Glyph, GlyphMetrics, WidthSource, decode_glyphs};
 use crate::pdf::reader::{DeviceRect, GlyphRect, ObjectExt};
 
@@ -59,6 +61,8 @@ pub(super) struct TextRun<'a> {
     pub(super) rects: &'a mut Vec<GlyphRect>,
     /// Each glyph's advance as a `TJ` number, by its address and first byte.
     pub(super) advances: &'a mut BTreeMap<GlyphSite, Option<f64>>,
+    /// Every move of the pen, in draw order.
+    pub(super) steps: &'a mut Vec<PenStep>,
     /// The current parametric text state (font size, spacings, scaling, CTM).
     pub(super) state: TextState,
     /// The selected font's width table, for the per-glyph advance.
@@ -144,7 +148,9 @@ impl TextRun<'_> {
                                 let kern = item.as_number().unwrap_or(0.0);
                                 // Displacement is −kern/1000 × font size × hscale.
                                 let tx = -kern / 1000.0 * self.state.font_size * self.state.h_scale;
+                                let from = self.cursor.device_origin(self.state.ctm);
                                 self.cursor.advance(tx);
+                                self.step(Mover::Kern(address(Some(item_idx))), from);
                             }
                             _ => {}
                         }
@@ -176,6 +182,7 @@ impl TextRun<'_> {
             let start = *self.next_char;
             self.push_glyph(address, &glyph);
             let chars = start..*self.next_char;
+            let drawn = chars.clone();
             // The glyph's advance: its visible width only, no `Tc`/`Tw`. An
             // unknown width gives a zero-width advance; its box still has its
             // height.
@@ -186,9 +193,25 @@ impl TextRun<'_> {
             }
             let word = self.word_spacing(&glyph);
             self.record_advance(address, &glyph, w0, word);
+            let from = self.cursor.device_origin(self.state.ctm);
             self.advance(advance, word);
+            let site = GlyphSite {
+                address,
+                byte_start: glyph.byte_start,
+            };
+            self.step(Mover::Glyph { site, chars: drawn }, from);
         }
         Ok(())
+    }
+
+    /// Record that `mover` moved the pen from `from` to where it is now.
+    fn step(&mut self, mover: Mover, from: (f64, f64)) {
+        let to = self.cursor.device_origin(self.state.ctm);
+        self.steps.push(PenStep {
+            line: self.cursor.line(),
+            mover,
+            delta: (to.0 - from.0, to.1 - from.1),
+        });
     }
 
     /// The word spacing `glyph` moves the pen by: `Tw`, for a one-byte code

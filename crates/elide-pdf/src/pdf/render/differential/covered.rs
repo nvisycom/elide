@@ -3,7 +3,7 @@
 
 use elide_core::primitive::Color;
 
-use super::{Placed, same, theirs};
+use super::{Placed, Point, same, theirs};
 use crate::content::text::{Detection, Text, TextRedaction};
 use crate::fixtures::{DocBuilder, Page, type1};
 use crate::pdf::Pdf;
@@ -46,19 +46,42 @@ fn covered_text_stays_where_pdfium_drew_it() {
     let before = &theirs(&source).unwrap()[0];
     let after = &theirs(&out).unwrap()[0];
     // PDFium drops a space that follows a wide gap, as the one after each
-    // cover is, so only the characters that draw ink are counted.
-    let inked = |chars: &[Placed<char>]| chars.iter().filter(|c| !c.text.is_whitespace()).count();
-    let covered = "JaneRoe".len() + "Lee".len();
-    assert_eq!(inked(after), inked(before) - covered, "{after:?}");
-    for c in after {
+    // cover is, so only the characters that draw ink are compared.
+    let inked = |chars: &[Placed<char>]| -> Vec<(char, Point)> {
+        chars
+            .iter()
+            .filter(|c| !c.text.is_whitespace())
+            .map(|c| (c.text, c.origin))
+            .collect()
+    };
+    // The covered characters are PDFium's own of the two spans, by their
+    // place among the inked characters of the text the reader read.
+    let inked_text: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let covered_at = |value: &str| {
+        let value: Vec<char> = value.chars().filter(|c| !c.is_whitespace()).collect();
+        let start = inked_text
+            .windows(value.len())
+            .position(|window| window == value.as_slice())
+            .unwrap();
+        start..start + value.len()
+    };
+    assert_eq!(
+        inked(before).iter().map(|(c, _)| *c).collect::<Vec<_>>(),
+        inked_text
+    );
+    let (jane, lee) = (covered_at("Jane Roe"), covered_at("Lee"));
+    let expected: Vec<_> = inked(before)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !jane.contains(i) && !lee.contains(i))
+        .map(|(_, c)| c)
+        .collect();
+    let left = inked(after);
+    assert_eq!(left.len(), expected.len(), "{after:?}");
+    for ((c, origin), (want, was)) in left.iter().zip(&expected) {
         assert!(
-            before
-                .iter()
-                .any(|was| was.text == c.text && same(was.origin, c.origin)),
-            "{:?} at {:?} moved",
-            c.text,
-            c.origin
+            c == want && same(*origin, *was),
+            "{c:?} at {origin:?}, where {want:?} was at {was:?}"
         );
     }
-    assert!(!after.iter().any(|c| matches!(c.text, 'J' | 'L')));
 }
