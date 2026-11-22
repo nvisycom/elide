@@ -12,7 +12,9 @@
 //!   does one whose type holds nothing but a schema wildcard (an extension's
 //!   payload, `a:ext` and its kin); an `a:graphicData` keeps only the payload
 //!   its `uri` names (a picture, chart, diagram, locked canvas, table, or OLE
-//!   object);
+//!   object), and an extension keeps the one payload its `uri` names when
+//!   that payload references a kept part (a slide's modern comments, a
+//!   SmartArt drawing), going whole otherwise;
 //! - the attributes of a VML drawing's `<xml>` root go, but for its namespace
 //!   declarations;
 //! - an attribute its type does not declare goes; namespace declarations stay,
@@ -358,6 +360,9 @@ enum Frame {
     Typed(u16),
     /// An `a:graphicData` of this type, holding the payload its `uri` names.
     Graphic(u16, Option<Payload>),
+    /// An extension of this type, holding the payload its `uri` names; it goes
+    /// whole if that payload does not stay.
+    Extension(u16, Payload),
     /// The root of a VML drawing.
     Vml,
     /// An `mc:AlternateContent`, read in this scope.
@@ -373,6 +378,8 @@ enum Scope {
     Typed(u16),
     /// An `a:graphicData`'s type, allowing only this payload.
     Graphic(u16, Option<Payload>),
+    /// An extension, allowing only this payload.
+    Extension(Payload),
     /// The top of a VML drawing.
     Vml,
     /// Nothing yet: before the root.
@@ -384,6 +391,7 @@ impl Frame {
         match self {
             Self::Typed(ty) => Scope::Typed(ty),
             Self::Graphic(ty, payload) => Scope::Graphic(ty, payload),
+            Self::Extension(_, payload) => Scope::Extension(payload),
             Self::Vml => Scope::Vml,
             Self::Alternate(scope) | Self::Fallback(scope) => scope,
         }
@@ -467,14 +475,20 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
                     root_frame(root, namespace.as_deref(), local)?
                 } else {
                     let parent = rebuild.open.last().map(|open| open.frame);
-                    decide(scope, namespace.as_deref(), local, parent)
+                    // An empty extension holds no payload to keep.
+                    let extension = if is_start && local == "ext" {
+                        extension_payload(e)?
+                    } else {
+                        None
+                    };
+                    decide(scope, namespace.as_deref(), local, parent, extension)
                 };
                 let decision = match decision {
                     Decision::Keep(Frame::Typed(ty))
                         if namespace_index(namespace.as_deref()) == drawingml
                             && local == "graphicData" =>
                     {
-                        Decision::Keep(Frame::Graphic(ty, payload(e)?))
+                        Decision::Keep(Frame::Graphic(ty, graphic_payload(e)?))
                     }
                     decision => decision,
                 };
@@ -495,6 +509,13 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
 #[derive(Debug, Clone, Copy)]
 struct Open {
     frame: Frame,
+    /// Where its start tag begins.
+    start: usize,
+    /// Where in [`Rebuild::cuts`] its own cuts begin.
+    cuts_from: usize,
+    /// Whether a child element of it is kept, read through the unwrapped
+    /// frames between.
+    holds: bool,
     /// Where the declarations its children declare again begin: those the
     /// unwrapped frames around it carried, for an unwrapped frame.
     carried_from: usize,
@@ -579,8 +600,19 @@ impl<'a> Rebuild<'a> {
         };
         let own_from = self.carried.len();
         let mut carried_from = own_from;
+        let start = span.start;
+        let cuts_from = self.cuts.len();
+        if !frame.unwrapped()
+            && let Some(parent) = self
+                .open
+                .iter_mut()
+                .rev()
+                .find(|open| !open.frame.unwrapped())
+        {
+            parent.holds = true;
+        }
         match frame {
-            Frame::Typed(ty) | Frame::Graphic(ty, _) => {
+            Frame::Typed(ty) | Frame::Graphic(ty, _) | Frame::Extension(ty, _) => {
                 self.cut_attributes(reader, e, Some(ty))?;
                 let missing = redeclared(&self.carried, around, raw, e)?;
                 if !missing.is_empty() {
@@ -608,6 +640,9 @@ impl<'a> Rebuild<'a> {
         if is_start {
             self.open.push(Open {
                 frame,
+                start,
+                cuts_from,
+                holds: false,
                 carried_from,
                 own_from,
             });
@@ -619,8 +654,15 @@ impl<'a> Rebuild<'a> {
     fn close(&mut self, span: Range<usize>) {
         if let Some(open) = self.open.pop() {
             self.carried.truncate(open.own_from);
-            if open.frame.unwrapped() {
-                self.cuts.push(Cut::remove(span));
+            match open.frame {
+                frame if frame.unwrapped() => self.cuts.push(Cut::remove(span)),
+                // An extension whose payload went, with the part it named,
+                // goes whole: what it held is already counted.
+                Frame::Extension(..) if !open.holds => {
+                    self.cuts.truncate(open.cuts_from);
+                    self.cuts.push(Cut::remove(open.start..span.end));
+                }
+                _ => {}
             }
         }
     }
@@ -736,29 +778,63 @@ const PAYLOADS: &[PayloadUri] = &[
     PayloadUri::new("presentationml", "ole", P, "oleObj"),
 ];
 
+/// The payloads an extension may hold, by the `uri` naming them: those that
+/// reference a part the rebuild keeps, a slide's modern comments ([MS-PPTX])
+/// and a SmartArt data model's drawing ([MS-ODRAWXML]). Each is a global
+/// element of the schemas, read as its type there.
+const EXTENSIONS: &[(&str, &str, &str)] = &[
+    ("{6950BFC3-D8DA-4A85-94F7-54DA5524770B}", P188, "commentRel"),
+    (
+        "http://schemas.microsoft.com/office/drawing/2008/diagram",
+        DSP,
+        "dataModelExt",
+    ),
+];
+
 /// The payload the `uri` of the `a:graphicData` `e` names, transitional or
 /// strict, or `None` for one this rebuild does not keep.
-fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+fn graphic_payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+    named_payload(e, |uri| {
+        PAYLOADS
+            .iter()
+            .find(|payload| payload.named_by(uri))
+            .map(|payload| (payload.namespace, payload.local))
+    })
+}
+
+/// The payload the `uri` of the extension `e` names, or `None` for one this
+/// rebuild does not keep.
+fn extension_payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+    named_payload(e, |uri| {
+        EXTENSIONS
+            .iter()
+            .find(|&&(named, ..)| named == uri)
+            .map(|&(_, namespace, local)| (namespace, local))
+    })
+}
+
+/// The payload `select` finds for the `uri` of `e`, or `None` if `e` has no
+/// `uri` or `select` finds none.
+fn named_payload(
+    e: &BytesStart<'_>,
+    select: impl FnOnce(&str) -> Option<(&'static str, &'static str)>,
+) -> Result<Option<Payload>> {
     let uri = e.try_get_attribute("uri").map_err(malformed_xml)?;
     let Some(uri) = uri else {
         return Ok(None);
     };
     // A reference in the value stands for the character it names.
     let uri = attribute_value(&uri.value)?;
-    let uri: &str = &uri;
-    Ok(PAYLOADS
-        .iter()
-        .find(|payload| payload.named_by(uri))
-        .and_then(|payload| {
-            namespace_index(Some(payload.namespace)).map(|index| Payload(index, payload.local))
-        }))
+    Ok(select(&uri).and_then(|(namespace, local)| {
+        namespace_index(Some(namespace)).map(|index| Payload(index, local))
+    }))
 }
 
 /// Whether text is shown in `scope`.
 fn holds_text(scope: Scope) -> bool {
     match scope {
         Scope::Typed(index) | Scope::Graphic(index, _) => ty(index).text,
-        Scope::Vml | Scope::Document => false,
+        Scope::Extension(_) | Scope::Vml | Scope::Document => false,
     }
 }
 
@@ -802,8 +878,15 @@ fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decisi
 }
 
 /// What the rebuild does with the element `local` in `namespace` met in
-/// `scope`, inside the `parent` frame.
-fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Frame>) -> Decision {
+/// `scope`, inside the `parent` frame, the payload its `uri` names being
+/// `extension` if it is an extension.
+fn decide(
+    scope: Scope,
+    namespace: Option<&str>,
+    local: &str,
+    parent: Option<Frame>,
+    extension: Option<Payload>,
+) -> Decision {
     if namespace == Some(MC) {
         return match (local, parent) {
             ("AlternateContent", _) => Decision::Keep(Frame::Alternate(scope)),
@@ -827,14 +910,23 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
             ty(parent).child(index, local)
         }
         Scope::Graphic(..) => None,
+        // An extension holds the global element its `uri` names.
+        Scope::Extension(Payload(namespace, name)) if (namespace, name) == (index, local) => {
+            root_type(index, local)
+        }
+        Scope::Extension(_) => None,
         // A VML drawing holds the global VML shapes.
         Scope::Vml if namespace.is_some_and(|namespace| VML_SHAPES.contains(&namespace)) => {
             root_type(index, local)
         }
         Scope::Vml | Scope::Document => None,
     };
-    match ty {
-        Some(index) if !self::ty(index).only_wildcard() => Decision::Keep(Frame::Typed(index)),
+    match (ty, extension) {
+        (Some(index), _) if !self::ty(index).only_wildcard() => Decision::Keep(Frame::Typed(index)),
+        // An extension keeps the payload its `uri` names, or goes whole.
+        (Some(index), Some(payload)) if local == "ext" => {
+            Decision::Keep(Frame::Extension(index, payload))
+        }
         _ => Decision::Drop(HiddenContent::ApplicationData),
     }
 }

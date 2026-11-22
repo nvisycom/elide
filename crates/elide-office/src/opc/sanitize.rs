@@ -24,9 +24,9 @@
 //! - **Refused**: a part the table does not recognize, or one it recognizes but
 //!   cannot redact.
 //! - **Without a schema**: a kept XML part whose content type names no root
-//!   element of the schemas this crate holds (a chart style, a SmartArt
-//!   drawing, a threaded or modern comment) cannot be rebuilt, so it is
-//!   removed as [`ApplicationData`](HiddenContent::ApplicationData).
+//!   element of the schemas this crate holds cannot be rebuilt, so it is
+//!   removed as [`ApplicationData`](HiddenContent::ApplicationData). Every
+//!   kind classified today has one.
 //!
 //! Removing a part removes every relationship that targets it, and every
 //! element that names a removed relationship, so no reference dangles. The
@@ -34,8 +34,9 @@
 //! recorded by what it is: revision marks, comment anchors, editor
 //! fingerprints. Last, each kept XML part but the manifest, the relationships,
 //! and the properties is rebuilt from its schema ([`schema`]): an element or
-//! attribute its parent's type does not allow, an extension, and markup
-//! compatibility's choices go, so nothing the schema does not name ships.
+//! attribute its parent's type does not allow, an extension (but for one
+//! referencing a kept part), and markup compatibility's choices go, so
+//! nothing the schema does not name ships.
 
 use std::collections::{HashMap, HashSet};
 

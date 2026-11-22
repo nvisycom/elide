@@ -430,3 +430,45 @@ fn the_newer_microsoft_parts_pass_unchanged() {
         assert!(out.is_none(), "{root:?}: {out:?}");
     }
 }
+
+/// An extension keeps the payload its `uri` names where that payload
+/// references a part the rebuild keeps: a slide's modern comments.
+/// Every other extension goes whole, including one left empty, one holding
+/// something else, and one naming another payload.
+#[test]
+fn an_extension_keeps_only_the_payload_its_uri_names() {
+    const SLIDE: Root = Root::Element {
+        namespace: P,
+        local: "sld",
+    };
+    let slide = |extensions: &str| {
+        format!(
+            r#"<p:sld xmlns:p="{P}" xmlns:r="{R}" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" xmlns:p188="{P188}"><p:cSld/><p:extLst>{extensions}</p:extLst></p:sld>"#
+        )
+    };
+    let comments = r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"><p188:commentRel r:id="rId1"/></p:ext>"#;
+    assert!(rebuild(&slide(comments), SLIDE).unwrap().is_none());
+    for other in [
+        r#"<p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:creationId val="42"/></p:ext>"#,
+        r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"/>"#,
+        r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"> </p:ext>"#,
+        r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"><p14:creationId val="42"/></p:ext>"#,
+        r#"<p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p188:commentRel r:id="rId1"/></p:ext>"#,
+    ] {
+        let (text, _) = rebuilt(&slide(&format!("{other}{comments}")), SLIDE);
+        assert_eq!(text, slide(comments), "{other}");
+    }
+}
+
+/// A SmartArt data model keeps the extension that locates its drawing.
+#[test]
+fn a_data_model_keeps_its_drawing_reference() {
+    let raw = format!(
+        r#"<dgm:dataModel xmlns:dgm="{DGM}" xmlns:a="{A}" xmlns:dsp="{DSP}"><dgm:ptLst/><dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt relId="rId6" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext></dgm:extLst></dgm:dataModel>"#
+    );
+    let root = Root::Element {
+        namespace: DGM,
+        local: "dataModel",
+    };
+    assert!(rebuild(&raw, root).unwrap().is_none());
+}

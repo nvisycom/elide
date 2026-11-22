@@ -80,6 +80,12 @@ pub(crate) const THREADED: &str =
     "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 /// PowerPoint's modern comments and their authors (`p188:`).
 pub(crate) const P188: &str = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
+/// The PowerPoint commands (`pc:`), whose slide monikers anchor a modern
+/// comment.
+pub(crate) const PC: &str = "http://schemas.microsoft.com/office/powerpoint/2013/main/command";
+/// The DrawingML commands (`ac:`), whose shape monikers anchor a modern
+/// comment.
+pub(crate) const AC: &str = "http://schemas.microsoft.com/office/drawing/2013/main/command";
 
 /// DrawingML (`a:`).
 pub(crate) const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
