@@ -24,10 +24,9 @@ use elide_codec::extract::{OffsetMap, OffsetRun, Passage};
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 use elide_markup::{CharacterReferences, decode_references};
-use quick_xml::escape::{escape, partial_escape, unescape};
+use quick_xml::escape::{escape, partial_escape};
 use quick_xml::events::Event;
 
-use crate::opc::attribute_value;
 use crate::opc::package::part::PartPath;
 use crate::opc::package::relationships::{self, HYPERLINK};
 use crate::opc::xml::attributes::{Collaboration, TextAttribute};
@@ -35,6 +34,7 @@ use crate::opc::xml::edit::{
     Action, Attribute, Name, Rules, SpannedReader, edit, local_name, namespace_of,
 };
 use crate::opc::xml::ns::{W, X, XML, transitional};
+use crate::opc::{attribute_value, unescape};
 
 /// A read of a part's spans, which fails (with nothing more to say) on
 /// malformed XML; the caller reports the part as an issue.

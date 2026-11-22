@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
-use quick_xml::escape::{EscapeError, unescape};
+use quick_xml::escape::{EscapeError, resolve_xml_entity, unescape_with};
 
 pub(crate) use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
 pub(crate) use self::names::Names;
@@ -45,6 +45,21 @@ pub(crate) fn malformed_xml(e: impl std::fmt::Display) -> Error {
 /// The part `path`'s XML failing to read.
 pub(crate) fn malformed_part(path: impl std::fmt::Display) -> Error {
     Error::malformed(format!("part `{path}` malformed XML"))
+}
+
+/// `raw` text with its references resolved as XML resolves them: character
+/// references and the five predefined entities (`amp`, `lt`, `gt`, `quot`,
+/// `apos`). Any other named entity does not decode.
+///
+/// quick-xml's own `unescape` also resolves the HTML entities (`&eacute;`)
+/// when its `escape-html` feature is on, which a build unifies in from any
+/// crate that enables it; this decodes the same way whatever the build.
+///
+/// # Errors
+///
+/// [`EscapeError`] if a reference does not decode.
+pub(crate) fn unescape(raw: &str) -> std::result::Result<Cow<'_, str>, EscapeError> {
+    unescape_with(raw, resolve_xml_entity)
 }
 
 /// The attribute value written `raw` (inside its quotes) as XML reads it
@@ -396,6 +411,18 @@ mod tests {
         ));
         assert!(attribute_value("a&unknown;").is_err());
         assert!(attribute_value("a\n&unknown;").is_err());
+    }
+
+    /// Only XML's five named entities decode, whatever quick-xml features the
+    /// build unifies: an HTML one (`&eacute;`) is as unknown as any other.
+    #[test]
+    fn an_html_entity_does_not_decode() {
+        assert_eq!(unescape("&lt;&amp;&gt;&quot;&apos;").unwrap(), "<&>\"'");
+        assert_eq!(unescape("Jos&#233;").unwrap(), "José");
+        for html in ["Jos&eacute;", "a&nbsp;b", "&copy;"] {
+            assert!(unescape(html).is_err(), "{html}");
+            assert!(attribute_value(html).is_err(), "{html}");
+        }
     }
 
     /// A classifier that makes the main part text, an image binary, and the

@@ -316,6 +316,18 @@ fn an_entity_no_field_resolves_is_removed() {
     assert!(!text.contains("JaneRoe") && text.contains("Ada"), "{text}");
 }
 
+/// An HTML entity resolves to nothing, as any entity XML does not define,
+/// whatever quick-xml features the build unifies: it is neither read nor
+/// kept.
+#[test]
+fn an_html_entity_is_read_as_nothing_and_removed() {
+    let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jos&eacute; Roe</dc:creator></cp:coreProperties>"#;
+    let read = pairs(core.as_bytes());
+    assert_eq!(read, [("creator".to_owned(), "Jos Roe".to_owned())]);
+    let text = surfaced_only(core);
+    assert!(!text.contains("eacute"), "{text}");
+}
+
 #[test]
 fn a_custom_property_keeps_its_value_and_loses_an_empty_one() {
     let custom = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Carol Doe"/><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="4" name="Count"><vt:i4>42</vt:i4></property></Properties>"#;
