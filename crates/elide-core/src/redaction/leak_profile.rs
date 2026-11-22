@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 /// What a redacted output leaks about the original it replaced.
 ///
+/// It measures what survives of the value itself: its content, or its
+/// extent. Where the value sat (which sentence, cell, or second of audio) is
+/// not counted, since every treatment keeps its surroundings.
+///
 /// Variants are ordered from most-leaky to least-leaky, so `Recoverable
 /// < Partial < Irrecoverable`. Surfaced through
 /// [`Operator::leak_profile`] for policy authoring and audit reporting.
@@ -21,14 +25,14 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum LeakProfile {
-    /// The original value is recoverable from the output given the right
-    /// metadata (encryption key, token vault, pseudonym map, or the
-    /// candidate entity list against a hash).
+    /// The value's content can be recovered from the output given the right
+    /// metadata: an encryption key, the token vault or pseudonym map, or the
+    /// candidate entity list against a hash.
     Recoverable = 0,
-    /// The original value is gone, but observable shape leaks: position,
-    /// length, bounding box, cell coordinates, or a known silence on the
-    /// timeline.
+    /// Part of the value survives: some of its content (masked digits, a
+    /// date's year, a bucket, a blur), or its extent (a cover's length, a
+    /// box's size, a stretch of silence).
     Partial = 1,
-    /// No trace of the original value or its shape remains in the output.
+    /// Nothing of the value survives: neither its content nor its extent.
     Irrecoverable = 2,
 }

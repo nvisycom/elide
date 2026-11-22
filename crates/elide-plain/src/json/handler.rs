@@ -765,6 +765,7 @@ mod tests {
     use elide_core::ErrorKind;
     use elide_core::modality::ModalityLocation;
     use elide_core::modality::text::TextReplacement;
+    use elide_core::primitive::Color;
 
     use super::*;
 
@@ -904,8 +905,11 @@ mod tests {
         let name = find_chunk(&h, "Alice");
         let age = find_chunk(&h, "42");
         h.write_at(Redactions::from([
-            (name.location.clone(), TextReplacement::Covered),
-            (age.location.clone(), TextReplacement::Covered),
+            (
+                name.location.clone(),
+                TextReplacement::covered(Color::BLACK),
+            ),
+            (age.location.clone(), TextReplacement::covered(Color::BLACK)),
         ]))
         .await?;
         assert_eq!(encoded(&h), r#"{"name":"█████","age":"██"}"#);

@@ -146,7 +146,7 @@ impl DataWriter<Text> for PdfStream {
         let spans = redactions
             .into_iter()
             .map(|(location, replacement)| {
-                if replacement == TextReplacement::Covered {
+                if matches!(replacement, TextReplacement::Covered { .. }) {
                     return Err(Error::capability_unavailable(
                         "PDF text can't be covered in place; remove it, or redact its page \
                          from its render",
@@ -180,6 +180,7 @@ fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
+    use elide_core::primitive::Color;
 
     use super::*;
     use crate::content::text::Text;
@@ -210,7 +211,7 @@ mod tests {
     async fn covered_text_is_refused() {
         let mut body = body();
         let (location, _) = redaction(1, 0..4);
-        let batch = Redactions::from([(location, TextReplacement::Covered)]);
+        let batch = Redactions::from([(location, TextReplacement::covered(Color::BLACK))]);
         let error = body.write_at(batch).await.unwrap_err();
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
         assert!(body.state.detections().is_empty());

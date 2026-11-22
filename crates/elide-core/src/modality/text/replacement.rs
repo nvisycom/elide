@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 
 use crate::modality::ModalityReplacement;
+use crate::primitive::Color;
 
 /// What a text operator produces: a removal, a cover, or a replacement.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,9 +18,12 @@ pub enum TextReplacement {
     /// was.
     Removed,
     /// The span is hidden in place: its extent is kept and visibly marked.
-    /// Each format draws the mark: a box over it in a PDF, one `█` per
-    /// character in text.
-    Covered,
+    /// Each format draws the mark: one `█` per character in text, a box of
+    /// `color` where the format draws one.
+    Covered {
+        /// The color a format that draws a box draws it in.
+        color: Color,
+    },
     /// The span is replaced by this text.
     Replaced(String),
 }
@@ -28,6 +32,11 @@ impl TextReplacement {
     /// The mark a covered span is written as in text, one per character: a
     /// full block, `█`. A format that can't hold it draws its own.
     pub const MARK: char = '\u{2588}';
+
+    /// A cover drawn in `color`.
+    pub const fn covered(color: Color) -> Self {
+        Self::Covered { color }
+    }
 
     /// A replacement by `value`.
     pub fn replaced(value: impl Into<String>) -> Self {
@@ -40,21 +49,13 @@ impl TextReplacement {
     pub fn written(&self, original: &str) -> Cow<'_, str> {
         match self {
             Self::Removed => Cow::Borrowed(""),
-            Self::Covered => Cow::Owned(original.chars().map(|_| Self::MARK).collect()),
+            Self::Covered { .. } => Cow::Owned(original.chars().map(|_| Self::MARK).collect()),
             Self::Replaced(value) => Cow::Borrowed(value),
         }
     }
 }
 
-impl ModalityReplacement for TextReplacement {
-    fn removed() -> Self {
-        Self::Removed
-    }
-
-    fn covered() -> Self {
-        Self::Covered
-    }
-}
+impl ModalityReplacement for TextReplacement {}
 
 #[cfg(test)]
 mod tests {
@@ -63,7 +64,10 @@ mod tests {
     #[test]
     fn each_replacement_writes_its_text() {
         assert_eq!(TextReplacement::Removed.written("Jane Roe"), "");
-        assert_eq!(TextReplacement::Covered.written("Jané Roe"), "████████");
+        assert_eq!(
+            TextReplacement::covered(Color::BLACK).written("Jané Roe"),
+            "████████"
+        );
         assert_eq!(
             TextReplacement::replaced("[NAME]").written("Jane Roe"),
             "[NAME]"

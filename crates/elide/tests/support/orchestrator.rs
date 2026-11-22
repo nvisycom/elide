@@ -19,7 +19,7 @@ use elide::modality::text::Text;
 use elide::modality::{ChunkReader, DataReader, DataWriter, Modality, TextRecognizable};
 use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Mask, Remove, Replace};
+use elide::redaction::operators::{Cover, Mask, Remove, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
 use elide::{Orchestrator, Result};
 
@@ -109,10 +109,14 @@ where
         .with(Rule::fallback(Replace::default()))
 }
 
-/// An erase-everything [`Anonymizer`] for a modality `M`, the image default, and
+/// A cover-everything [`Anonymizer`] for a modality `M`, the image default, and
 /// what OCR image tests use.
-pub fn erase_anonymizer<M: Modality>() -> Anonymizer<M> {
-    Anonymizer::new().with(Rule::fallback(Remove))
+pub fn cover_anonymizer<M>() -> Anonymizer<M>
+where
+    M: Modality,
+    Cover: Operator<M>,
+{
+    Anonymizer::new().with(Rule::fallback(Cover::default()))
 }
 
 /// The default image [`Analyzer`]: a mock LLM recognizer that detects nothing,
@@ -187,7 +191,7 @@ impl TestOrchestrator {
     pub fn new() -> Result<Self> {
         let this = Self::bare().with_text(default_text_analyzer()?, build_anonymizer::<Text>());
         #[cfg(all(feature = "image", feature = "llm"))]
-        let this = this.with_image(image_analyzer()?, erase_anonymizer());
+        let this = this.with_image(image_analyzer()?, cover_anonymizer());
         Ok(this)
     }
 

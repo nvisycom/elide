@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 /// A color as 8-bit RGB, like the fill of a block redaction.
 ///
-/// Used by visual redaction (a solid-fill block over an image region) and
-/// any other rendering instruction that needs a color.
+/// The color a cover is drawn in, wherever a format draws one: a block over an
+/// image region, a box over a PDF's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

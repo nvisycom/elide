@@ -132,7 +132,7 @@ Elide ships a wider operator catalogue as first-class typed operators: `Mask`,
 `Replace`, `Truncate`, `Clamp`, `GeneralizeDate`, `Sha2Hash`, `HmacHash`,
 `AesEncrypt`, `Pseudonymize`, `Keep`, `Remove`, `Cover`, and a locale-aware `Fake`
 generator (synthetic replacement is built-in, not a custom hook), plus
-per-modality operators: `Blur`/`Pixelate`/`Fill` for images, `Beep`
+per-modality operators: `Blur`/`Pixelate` for images, `Beep`
 for audio, and `DropColumn`/`DropRow` for tabular data. Each operator declares a
 **leak profile** (irrecoverable / partial / recoverable), and reversibility is a
 trait boundary: `AesEncrypt` implements the reversible contract (AES-256-GCM with

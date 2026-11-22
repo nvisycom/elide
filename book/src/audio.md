@@ -20,7 +20,7 @@ let analyzer = Analyzer::<Audio>::new()
 
 let anonymizer = Anonymizer::<Audio>::new()
     .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Beep::default()))
-    .with(Rule::fallback(Cover));
+    .with(Rule::fallback(Cover::default()));
 # Ok(())
 # }
 ```

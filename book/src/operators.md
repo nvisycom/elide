@@ -12,7 +12,7 @@ For `dana.reed@example.com`:
 |---|---|
 | `Keep` | Left as it is: nothing is written; the selection is audited |
 | `Remove` | Removed: nothing marks where it was |
-| `Cover` | `█████████████████████`, one `█` per character; a black box in a PDF |
+| `Cover::default()` | `█████████████████████`, one `█` per character |
 | `Replace::new("[EMAIL]")` | `[EMAIL]` |
 | `Mask::stars()` | `*********************` |
 | `Mask::stars().with_keep_suffix(11)` | `**********example.com` |
@@ -37,26 +37,31 @@ such as `GeneralizeDate` on text that is not a date, the second runs.
 
 | Modality | Operators |
 |---|---|
-| `Image` | `Blur::new(sigma)`, `Pixelate::new(block_size)`, `Fill::new(color)` |
+| `Image` | `Blur::new(sigma)`, `Pixelate::new(block_size)` |
 | `Audio` | `Beep::new(hz)` |
 | `Tabular` | `DropRow`, `DropColumn`, and the text operators on a cell |
 
-`Remove`, `Cover` and `Keep` work in every modality, a custom one included.
-`Remove` leaves nothing that marks where the value was: text closes up, audio
-is cut. `Cover` hides it in place and keeps its extent: text is covered, audio
-silenced, an image region covered in black.
+`Keep` works in every modality, `Cover` in every built-in one, and `Remove`
+in every one that can make a value vanish. `Remove` leaves nothing that marks
+where the value was: text closes up, and audio is cut. An image can't lose its
+pixels, so `Remove` doesn't apply to it; use `Cover`, which hides a value in
+place and keeps its extent: text is covered, audio silenced, an image region
+covered in black, or in the colour given to `Cover::new(color)`. A custom modality implements `Operator` for `Remove` and
+`Cover` itself, for whichever it can give.
 
 ## Leak profiles
 
-Every operator declares a `LeakProfile`, how much of the original its output
-still exposes:
+Every operator declares a `LeakProfile`, how much of the original value its
+output still exposes: its content, or its extent. Where the value sat (which
+sentence, cell, or second of audio) is not counted, since every treatment
+keeps its surroundings.
 
-- **Irrecoverable**: nothing survives. `Remove`, `DropRow`, `DropColumn`.
-  An image can't lose its pixels, so `Remove` on an image obscures the region
-  in place and is partial.
-- **Partial**: some survives by design, at least the value's position and
-  extent. `Cover`, `Mask`, `Replace`, `Truncate`, `Clamp`, `GeneralizeDate`,
-  and the image and audio treatments.
+- **Irrecoverable**: nothing of the value survives. `Remove`, `DropRow`,
+  `DropColumn`.
+- **Partial**: part of the value survives by design: some of its content (the
+  digits a mask keeps, a date's year, a bucket, a blur) or its extent (a
+  cover's length, a box's size). `Cover`, `Mask`, `Replace`, `Truncate`,
+  `Clamp`, `GeneralizeDate`, and the image and audio treatments.
 - **Recoverable**: the output stays linked to the original. `AesEncrypt`
   decrypts with its key; `Pseudonymize`'s vault keeps the mapping from each
   original (or coreference cluster) to its surrogate; a hash can be

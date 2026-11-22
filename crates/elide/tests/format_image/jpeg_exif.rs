@@ -13,7 +13,7 @@ use elide::entity::{LabelCatalog, builtins};
 use elide::modality::image::Image;
 use elide::modality::metadata::Metadata;
 use elide::recognition::Scope;
-use elide::redaction::operators::Remove;
+use elide::redaction::operators::Cover;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Document, Orchestrator};
 use elide_image::fixtures::{
@@ -34,7 +34,7 @@ async fn jpeg_gps_is_stripped_through_the_facade() {
         .with_registry(registry.clone())
         .with_modality::<Image>(
             Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Remove)),
+            Anonymizer::new().with(Rule::fallback(Cover::default())),
         );
 
     let handle = registry

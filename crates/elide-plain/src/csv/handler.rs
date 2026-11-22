@@ -405,6 +405,7 @@ fn no_cell(location: &TabularLocation) -> Error {
 mod tests {
     use elide_codec::Loader;
     use elide_core::ErrorKind;
+    use elide_core::primitive::Color;
 
     use super::super::loader::CsvLoader;
     use super::*;
@@ -482,7 +483,7 @@ mod tests {
         let mut h = load("name,email\nAlice,alice@x.test\n").await;
         h.write_at(Redactions::from([(
             TabularLocation::new(1, 1),
-            TabularReplacement::CellRedacted(TextReplacement::Covered),
+            TabularReplacement::CellRedacted(TextReplacement::covered(Color::BLACK)),
         )]))
         .await
         .unwrap();

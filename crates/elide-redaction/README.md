@@ -62,7 +62,7 @@ assert_eq!(document.text(), "write to [EMAIL_ADDRESS]");
     `GeneralizeDate` (feature `datetime`), `Sha2Hash` (`sha2`), `HmacHash`
     (`hmac`), `AesEncrypt` (`aes`), `Fake` (`fake`).
   - Tabular: `DropRow`, `DropColumn` (feature `tabular`).
-  - Image: `Blur`, `Pixelate`, `Fill` (feature `image`).
+  - Image: `Blur`, `Pixelate` (feature `image`).
   - Audio: `Beep` (feature `audio`).
   - Cross-modality: `Remove`, `Cover`, `Keep`, and `WithFallback` for composing a
     declining `TryOperator` with a fallback.

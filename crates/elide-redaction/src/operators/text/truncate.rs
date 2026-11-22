@@ -4,8 +4,8 @@
 //! [`Mask`]: crate::operators::Mask
 
 use elide_core::entity::Entity;
+use elide_core::modality::TextRedactable;
 use elide_core::modality::text::TextReplacement;
-use elide_core::modality::{ModalityReplacement, TextRedactable};
 use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Component, Result};
 #[cfg(feature = "serde")]
@@ -94,7 +94,7 @@ impl<M: TextRedactable> Operator<M> for Truncate {
         // Used on its own, a declined value erases, the safe default.
         Ok(Some(match self.try_anonymize(entity, data).await? {
             Attempt::Applied(replacement) => replacement,
-            Attempt::Declined => M::Replacement::removed(),
+            Attempt::Declined => TextReplacement::Removed.into(),
         }))
     }
 }

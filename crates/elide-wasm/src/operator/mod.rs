@@ -6,8 +6,8 @@
 //! [`Rule::label`](crate::rule::Rule::label) or
 //! [`Rule::fallback`](crate::rule::Rule::fallback). One class wraps every
 //! operator kind; which modality a stage's anonymizer accepts is an operator
-//! question — text substitution applies to text and tabular, a coloured fill only
-//! to image, a cover to every modality — checked when the anonymizer is built
+//! question — text substitution applies to text and tabular, a cover to every
+//! modality — checked when the anonymizer is built
 //! (and, in TypeScript, branded so the mismatch is a compile-time error).
 
 use elide::modality::audio::Audio;
@@ -15,7 +15,7 @@ use elide::modality::image::Image;
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
 use elide::redaction::Rule as RustRule;
-use elide::redaction::operators::{Cover, Fill, Keep, Mask, Remove, Replace};
+use elide::redaction::operators::{Cover, Keep, Mask, Remove, Replace};
 use serde::Deserialize;
 use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
@@ -52,8 +52,6 @@ pub(crate) enum OperatorKind {
     Cover,
     /// Leave the matched value untouched (text, tabular, image).
     Keep,
-    /// Paint a solid box of a colour over the matched region (image).
-    Fill(Fill),
 }
 
 impl OperatorKind {
@@ -65,7 +63,6 @@ impl OperatorKind {
             Self::Remove => "remove",
             Self::Cover => "cover",
             Self::Keep => "keep",
-            Self::Fill(_) => "fill",
         }
     }
 
@@ -84,7 +81,7 @@ impl OperatorKind {
 /// A redaction operator, ready to fold into an anonymizer rule.
 ///
 /// Built with [`Operator::replace`], [`Operator::mask`], [`Operator::remove`],
-/// [`Operator::cover`], [`Operator::keep`], or [`Operator::fill`], and
+/// [`Operator::cover`], or [`Operator::keep`], and
 /// consumed by [`Rule::label`](crate::rule::Rule::label) or
 /// [`Rule::fallback`](crate::rule::Rule::fallback).
 #[wasm_bindgen]
@@ -144,12 +141,6 @@ impl Operator {
     pub fn keep() -> Operator {
         Self(OperatorKind::Keep)
     }
-
-    /// Paint a solid black box over the matched region (image).
-    #[wasm_bindgen(js_name = fill)]
-    pub fn fill() -> Operator {
-        Self(OperatorKind::Fill(Fill::default()))
-    }
 }
 
 impl Operator {
@@ -170,9 +161,8 @@ impl OperatorKind {
             Self::Replace(t) => Ok(rule(label, Replace::new(t))),
             Self::Mask(m) => Ok(rule(label, m)),
             Self::Remove => Ok(rule(label, Remove)),
-            Self::Cover => Ok(rule(label, Cover)),
+            Self::Cover => Ok(rule(label, Cover::default())),
             Self::Keep => Ok(rule(label, Keep)),
-            other => Err(other.mismatch("text")),
         }
     }
 
@@ -185,9 +175,8 @@ impl OperatorKind {
             Self::Replace(t) => Ok(rule(label, Replace::new(t))),
             Self::Mask(m) => Ok(rule(label, m)),
             Self::Remove => Ok(rule(label, Remove)),
-            Self::Cover => Ok(rule(label, Cover)),
+            Self::Cover => Ok(rule(label, Cover::default())),
             Self::Keep => Ok(rule(label, Keep)),
-            other => Err(other.mismatch("tabular")),
         }
     }
 
@@ -197,8 +186,7 @@ impl OperatorKind {
         label: Option<elide::entity::LabelRef>,
     ) -> Result<RustRule<Image>, ElideError> {
         match self {
-            Self::Fill(fill) => Ok(rule(label, fill)),
-            Self::Cover => Ok(rule(label, Cover)),
+            Self::Cover => Ok(rule(label, Cover::default())),
             Self::Keep => Ok(rule(label, Keep)),
             other => Err(other.mismatch("image")),
         }
@@ -210,7 +198,7 @@ impl OperatorKind {
         label: Option<elide::entity::LabelRef>,
     ) -> Result<RustRule<Audio>, ElideError> {
         match self {
-            Self::Cover => Ok(rule(label, Cover)),
+            Self::Cover => Ok(rule(label, Cover::default())),
             Self::Remove => Ok(rule(label, Remove)),
             other => Err(other.mismatch("audio")),
         }

@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// The "pixelated face" look: the region is reduced to coarse blocks. A
 /// common compliance default, more obviously redacted than [`Blur`] while
-/// still keeping the region's footprint visible. Contrast [`Fill`],
+/// still keeping the region's footprint visible. Contrast [`Cover`],
 /// which hides it behind a solid fill.
 ///
 /// [`Blur`]: crate::operators::Blur
-/// [`Fill`]: crate::operators::Fill
+/// [`Cover`]: crate::operators::Cover
 #[derive(Debug, Clone, Copy, Component)]
 #[component(name = "pixelate", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

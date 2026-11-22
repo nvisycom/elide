@@ -216,10 +216,10 @@ mod tests {
     use elide_codec::{Blob, Document, DocumentLoader, LocalId};
     use elide_core::ErrorKind;
     use elide_core::modality::text::Text;
-    use elide_core::modality::{ChunkReader, DataReader, DataWriter, ModalityReplacement};
+    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
     use elide_core::redaction::{HiddenContentPolicy, Redactions};
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
-    use elide_image::primitive::{BoundingBox, Dimensions, Point};
+    use elide_image::primitive::{BoundingBox, Color, Dimensions, Point};
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage, load_from_memory};
     use lopdf::{Document as PdfDocument, Stream, dictionary};
 
@@ -232,6 +232,11 @@ mod tests {
     use crate::pdf::Pdf;
     use crate::primitive::RasterMode;
     use crate::sanitize::Rebuild;
+
+    /// A region covered in black.
+    const BLACK: ImageReplacement = ImageReplacement::Covered {
+        color: Color::BLACK,
+    };
 
     /// A solid-colour PNG of `w`x`h`.
     fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
@@ -495,13 +500,9 @@ mod tests {
     async fn a_scanned_page_is_reflattened_at_its_own_size() {
         // Rendered at 3x: the raster is 300px, the page stays 100pt.
         let mut doc = scanned_document(&scanned_doc(), &png(300, 300, [200, 200, 200]), vec![]);
-        redact_page(
-            &mut doc,
-            region(0.0, 0.0, 300.0, 300.0),
-            ImageReplacement::covered(),
-        )
-        .await
-        .unwrap();
+        redact_page(&mut doc, region(0.0, 0.0, 300.0, 300.0), BLACK)
+            .await
+            .unwrap();
 
         let out = doc.encode().unwrap().to_bytes();
         assert!(
@@ -528,13 +529,9 @@ mod tests {
     #[tokio::test]
     async fn a_redacted_page_reads_back_redacted() {
         let mut doc = scanned_document(&scanned_doc(), &png(30, 30, [200, 200, 200]), vec![]);
-        redact_page(
-            &mut doc,
-            region(0.0, 0.0, 30.0, 30.0),
-            ImageReplacement::covered(),
-        )
-        .await
-        .unwrap();
+        redact_page(&mut doc, region(0.0, 0.0, 30.0, 30.0), BLACK)
+            .await
+            .unwrap();
         let page = doc.stream_mut::<Image>("page-1").unwrap();
         let chunk = page.chunks().unwrap().remove(0);
         assert!(
@@ -553,13 +550,9 @@ mod tests {
     #[tokio::test]
     async fn a_region_outside_the_render_is_refused() {
         let mut doc = scanned_document(&scanned_doc(), &png(30, 30, [200, 200, 200]), vec![]);
-        let err = redact_page(
-            &mut doc,
-            region(40.0, 40.0, 5.0, 5.0),
-            ImageReplacement::covered(),
-        )
-        .await
-        .unwrap_err();
+        let err = redact_page(&mut doc, region(40.0, 40.0, 5.0, 5.0), BLACK)
+            .await
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         let out = doc.encode().unwrap().to_bytes();
         assert!(holds_marker(&out));
@@ -572,9 +565,7 @@ mod tests {
         let mut doc = scanned_document(&scanned_doc(), &png(30, 30, [200, 200, 200]), vec![]);
         let mut elsewhere = region(0.0, 0.0, 30.0, 30.0);
         elsewhere.page = Some(2);
-        let err = redact_page(&mut doc, elsewhere, ImageReplacement::covered())
-            .await
-            .unwrap_err();
+        let err = redact_page(&mut doc, elsewhere, BLACK).await.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         let out = doc.encode().unwrap().to_bytes();
         assert!(holds_marker(&out));

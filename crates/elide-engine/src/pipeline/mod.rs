@@ -26,8 +26,8 @@ pub(crate) use self::erased::{BoxFuture, ErasedPipeline, PartAnalysis};
 /// [`Analyzer`] and [`Anonymizer`] the erased layer drives against a matched
 /// stream.
 ///
-/// The anonymizer always ends in [`flagged::erase_rule`], so flagged hidden
-/// content no caller rule covers is erased rather than kept.
+/// The anonymizer ends in [`flagged::erase_rule`] where the modality has one,
+/// so flagged hidden content no caller rule covers is removed rather than kept.
 pub(crate) struct ModalityPipeline<M: Modality> {
     pub(crate) analyzer: Analyzer<M>,
     anonymizer: Anonymizer<M>,
@@ -38,12 +38,20 @@ impl<M: Modality> ModalityPipeline<M> {
     pub(crate) fn new(analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self {
         Self {
             analyzer,
-            anonymizer: anonymizer.with(flagged::erase_rule()),
+            anonymizer: with_erase_rule(anonymizer),
         }
     }
 
     /// Replace the anonymizer, keeping the flagged-content rule last.
     pub(crate) fn set_anonymizer(&mut self, anonymizer: Anonymizer<M>) {
-        self.anonymizer = anonymizer.with(flagged::erase_rule());
+        self.anonymizer = with_erase_rule(anonymizer);
+    }
+}
+
+/// `anonymizer` ending in the modality's flagged-content rule, if it has one.
+fn with_erase_rule<M: Modality>(anonymizer: Anonymizer<M>) -> Anonymizer<M> {
+    match flagged::erase_rule() {
+        Some(rule) => anonymizer.with(rule),
+        None => anonymizer,
     }
 }

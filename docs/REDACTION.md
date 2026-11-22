@@ -154,7 +154,7 @@ Audio        time interval      beep | silence | remove
 ```
 
 **Text.** A location is a half-open byte range. The replacement is a
-removal, a cover (one `█` per character, or a box in a PDF), or a
+removal, a cover (one `█` per character), or a
 replacement string. A replacement's length may differ from the
 original, which is why text redaction batches require coordinate care (Section
 6).

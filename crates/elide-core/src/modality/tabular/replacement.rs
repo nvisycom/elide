@@ -48,15 +48,7 @@ impl TryFrom<TabularReplacement> for TextReplacement {
     }
 }
 
-impl ModalityReplacement for TabularReplacement {
-    fn removed() -> Self {
-        Self::CellRedacted(TextReplacement::Removed)
-    }
-
-    fn covered() -> Self {
-        Self::CellRedacted(TextReplacement::Covered)
-    }
-}
+impl ModalityReplacement for TabularReplacement {}
 
 #[cfg(test)]
 mod tests {
@@ -72,18 +64,6 @@ mod tests {
         assert_eq!(
             TextReplacement::try_from(TabularReplacement::RowDropped),
             Err(TabularReplacement::RowDropped)
-        );
-    }
-
-    #[test]
-    fn a_cell_is_covered_and_removed_as_text() {
-        assert_eq!(
-            TabularReplacement::covered(),
-            TabularReplacement::CellRedacted(TextReplacement::Covered)
-        );
-        assert_eq!(
-            TabularReplacement::removed(),
-            TabularReplacement::CellRedacted(TextReplacement::Removed)
         );
     }
 }

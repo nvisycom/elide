@@ -43,7 +43,7 @@ schema = [
 
 ## The `audio` modality operators (`Beep`).
 audio = ["dep:elide-audio"]
-## The `image` modality operators (`Blur`, `Pixelate`, `Fill`).
+## The `image` modality operators (`Blur`, `Pixelate`).
 image = ["dep:elide-image"]
 ## The `tabular` modality operators (`DropRow`, `DropColumn`).
 tabular = ["elide-core/tabular"]

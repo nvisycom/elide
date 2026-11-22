@@ -42,22 +42,4 @@ pub enum AudioReplacement {
     Removed,
 }
 
-impl ModalityReplacement for AudioReplacement {
-    fn removed() -> Self {
-        Self::Removed
-    }
-
-    fn covered() -> Self {
-        Self::Silenced
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_interval_is_covered_by_silence() {
-        assert_eq!(AudioReplacement::covered(), AudioReplacement::Silenced);
-    }
-}
+impl ModalityReplacement for AudioReplacement {}

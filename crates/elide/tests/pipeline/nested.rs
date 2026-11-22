@@ -22,7 +22,7 @@ use elide::redaction::HiddenContentPolicy;
 use elide::{PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{
-    TestOrchestrator, build_anonymizer, default_text_analyzer, erase_anonymizer, ocr_analyzer,
+    TestOrchestrator, build_anonymizer, cover_anonymizer, default_text_analyzer, ocr_analyzer,
 };
 
 /// A real (small) PNG the image codec decodes.
@@ -42,7 +42,7 @@ fn orchestrator(registry: FormatRegistry) -> Result<elide::Orchestrator> {
         .with_registry(registry)
         .with_image(
             ocr_analyzer(MockBackend::with(vec![region]))?,
-            erase_anonymizer(),
+            cover_anonymizer(),
         )
         .build())
 }

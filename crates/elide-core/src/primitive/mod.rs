@@ -1,5 +1,6 @@
 //! Validated primitive newtypes shared across the domain model.
 //!
+//! - [`Color`], an 8-bit RGB color a cover is drawn in;
 //! - [`Confidence`] (a produced score) and [`ConfidenceThreshold`] (a
 //!   configured cutoff), range-checked over `0.0..=1.0`;
 //! - [`LanguageTag`], a validated BCP 47 language tag;
@@ -13,12 +14,14 @@
 //! Modality-specific recognition artifacts live with their modality: a
 //! `Transcription` in the audio crate, a `Layout` in the image crate.
 
+mod color;
 mod component;
 mod confidence;
 mod language;
 mod region;
 mod unit_bounding_box;
 
+pub use self::color::Color;
 pub use self::component::ComponentId;
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::language::{LanguageClaim, LanguageSource, LanguageTag, LocalizedText};

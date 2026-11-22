@@ -209,6 +209,7 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
 mod tests {
     use elide_core::ErrorKind;
     use elide_core::modality::text::SourceRef;
+    use elide_core::primitive::Color;
     use elide_core::redaction::HiddenContentPolicy;
 
     use super::*;
@@ -322,7 +323,7 @@ mod tests {
         let start = src.find("Jané").unwrap();
         h.write_at(Redactions::from([(
             TextLocation::inline(start..start + "Jané".len()),
-            TextReplacement::Covered,
+            TextReplacement::covered(Color::BLACK),
         )]))
         .await?;
         assert_eq!(h.text(), "Call ████ now");

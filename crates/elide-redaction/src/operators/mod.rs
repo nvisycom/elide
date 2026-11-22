@@ -26,7 +26,7 @@
 //! Tabular (feature `tabular`): [`DropRow`], [`DropColumn`], structural drops
 //! that remove a whole record or field rather than editing a cell.
 //!
-//! Image (feature `image`): [`Blur`], [`Pixelate`], [`Fill`].
+//! Image (feature `image`): [`Blur`], [`Pixelate`].
 //!
 //! Audio (feature `audio`): [`Beep`].
 //!
@@ -76,7 +76,7 @@ pub use self::audio::Beep;
 pub use self::cover::Cover;
 // Image region operators.
 #[cfg(feature = "image")]
-pub use self::image::{Blur, Fill, Pixelate};
+pub use self::image::{Blur, Pixelate};
 pub use self::keep::Keep;
 /// The key-supply abstraction shared by [`HmacHash`] and [`AesEncrypt`].
 #[cfg(any(feature = "hmac", feature = "aes"))]

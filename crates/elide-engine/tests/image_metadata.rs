@@ -23,7 +23,7 @@ use elide_format::FormatRegistry;
 use elide_image::fixtures::{has_gps, is_valid_image, jpeg_with_tags, pixel, text_tag};
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
-use elide_redaction::operators::{Keep, Remove, Replace};
+use elide_redaction::operators::{Cover, Keep, Remove, Replace};
 use elide_redaction::{Anonymizer, Rule};
 
 /// A small JPEG carrying a GPS latitude and an artist.
@@ -267,7 +267,7 @@ async fn pixel_redaction_and_gps_erasure_compose_end_to_end() {
 
     let orchestrator = orchestrator().with_modality::<Image>(
         Analyzer::new().with_recognizer(WholeFrame),
-        Anonymizer::new().with(Rule::fallback(Remove)),
+        Anonymizer::new().with(Rule::fallback(Cover::default())),
     );
     let out = redact(&orchestrator, original).await;
 

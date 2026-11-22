@@ -238,6 +238,7 @@ mod tests {
     use elide_core::ErrorKind;
     use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{DataReader, ModalityLocation};
+    use elide_core::primitive::Color;
 
     use super::*;
     use crate::extract::ItemEdit;
@@ -361,7 +362,7 @@ mod tests {
         stream
             .write_at(Redactions::from([(
                 TextLocation::inline(5..29),
-                TextReplacement::Covered,
+                TextReplacement::covered(Color::BLACK),
             )]))
             .await
             .unwrap();

@@ -189,7 +189,7 @@ impl<A> SpliceState<A> {
         let Some(first) = edits.first().map(|edit| edit.item) else {
             return Ok(());
         };
-        let covered = *replacement == TextReplacement::Covered;
+        let covered = matches!(replacement, TextReplacement::Covered { .. });
         let written = if covered {
             String::new()
         } else {

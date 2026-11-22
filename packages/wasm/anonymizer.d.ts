@@ -32,8 +32,7 @@ export interface MaskConfig {
  * A redaction operator, branded with the modalities `M` it applies to.
  *
  * Built by {@link Operator.replace}/{@link Operator.mask} (text and tabular),
- * {@link Operator.fill} ({@link Image}), {@link Operator.cover} (every
- * modality), or {@link Operator.remove}/{@link Operator.keep} (broad), and
+ * {@link Operator.cover} (every modality), or {@link Operator.remove}/{@link Operator.keep} (broad), and
  * folded into a {@link Rule}. Using one where its modality does not apply is a
  * type error.
  */
@@ -58,8 +57,6 @@ export const Operator: {
   cover(): Operator<Text | Tabular | Image | Audio>;
   /** Leave the matched value untouched (text, tabular, image). */
   keep(): Operator<Text | Tabular | Image>;
-  /** Paint a solid black box over the matched region (image). */
-  fill(): Operator<Image>;
 };
 
 /**

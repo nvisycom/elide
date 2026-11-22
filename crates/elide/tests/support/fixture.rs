@@ -231,7 +231,10 @@ impl Fixture {
         let analyzer = Analyzer::new()
             .with_enricher(SttEnricher::new(MockBackend::new()).with_name("mock-stt"));
         let anonymizer = Anonymizer::new()
-            .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Cover))
+            .with(Rule::label(
+                builtins::PHONE_NUMBER.to_ref(),
+                Cover::default(),
+            ))
             .with(Rule::fallback(Remove));
 
         // A built-in catalog so the analyzer runs the enricher (the mock STT
@@ -277,7 +280,7 @@ impl Fixture {
     #[cfg(feature = "ocr")]
     pub async fn run_image(&self) -> Result<PipelineOutcome<Image>> {
         use elide::enrichment::ocr::{MockBackend, OcrEnricher};
-        use elide::redaction::operators::Remove;
+        use elide::redaction::operators::Cover;
 
         let registry = FormatRegistry::with_builtin();
         let mut document = self
@@ -285,10 +288,10 @@ impl Fixture {
             .await?;
 
         // The mock OCR backend recognizes nothing, so recognition finds
-        // nothing; the anonymizer would clear any regions it did.
+        // nothing; the anonymizer would cover any regions it did.
         let analyzer = Analyzer::new()
             .with_enricher(OcrEnricher::new(MockBackend::new()).with_name("mock-ocr"));
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Cover::default()));
 
         // A built-in catalog so the analyzer runs the enricher (the mock OCR
         // still recognizes nothing), the point is to drive the whole codec +

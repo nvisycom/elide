@@ -11,7 +11,6 @@
 //! (as [`ImageLocation`](crate::modality::ImageLocation)) is the modality's job.
 
 mod bounding_box;
-mod color;
 mod dimensions;
 mod point;
 mod polygon;
@@ -19,8 +18,9 @@ mod polygon;
 mod schema;
 mod unit_bounding_box;
 
+pub use elide_core::primitive::Color;
+
 pub use self::bounding_box::BoundingBox;
-pub use self::color::Color;
 pub use self::dimensions::Dimensions;
 pub use self::point::{Coordinate, Point};
 pub use self::polygon::Polygon;

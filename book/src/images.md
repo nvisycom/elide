@@ -24,7 +24,7 @@ let analyzer = Analyzer::<Image>::new()
     .with_enricher(OcrEnricher::new(ocr))
     .with_recognizer(PatternRecognizer::builder().with_builtin_patterns().build()?);
 
-let anonymizer = Anonymizer::<Image>::new().with(Rule::fallback(Cover));
+let anonymizer = Anonymizer::<Image>::new().with(Rule::fallback(Cover::default()));
 # Ok(())
 # }
 ```
@@ -48,7 +48,7 @@ use elide::prelude::*;
 # fn main() -> Result<()> {
 let anonymizer = Anonymizer::<Image>::new()
     .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
-    .with(Rule::label(builtins::SIGNATURE.to_ref(), Cover))
+    .with(Rule::label(builtins::SIGNATURE.to_ref(), Cover::default()))
     .with(Rule::fallback(Pixelate::new(16)?));
 # Ok(())
 # }
@@ -58,8 +58,8 @@ let anonymizer = Anonymizer::<Image>::new()
 
 | Operator | Effect |
 |---|---|
-| `Cover` | Covers the region in black |
-| `Fill::new(color)` | Covers the region in a colour of your choice |
+| `Cover::default()` | Covers the region in black |
+| `Cover::new(color)` | Covers the region in a colour of your choice |
 | `Blur::new(sigma)` | Gaussian blur; a larger sigma blurs more (at least 1 pixel) |
 | `Pixelate::new(block_size)` | Replaces the region with blocks of that size (at least 2 pixels) |
 
