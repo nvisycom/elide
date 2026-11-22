@@ -153,7 +153,7 @@ Modality     Location           Replacement primitive
 --------     --------           ---------------------
 Text         byte range         replace | cover | remove
 Tabular      cell coordinate    replace | cover | remove, or drop row/column
-Image        bounding box       blur | pixelate | cover | remove
+Image        bounding box       blur | pixelate | cover
 Audio        time interval      beep | silence | remove
 ```
 
@@ -173,22 +173,25 @@ described here.
 
 **Image.** A location is a bounding box. The replacement value is an image
 treatment, and its flavors are not interchangeable: a Gaussian blur preserves a
-rough silhouette, mosaic pixelation preserves coarse color statistics, a solid
-block preserves nothing, and removal excises the region. These treatments are
-produced and applied by the image codec handler, not by a text operator.
+rough silhouette, mosaic pixelation preserves coarse color statistics, and a
+cover, a solid box, preserves nothing but the region's extent. An image can't
+lose its pixels, so it has no removal: a region can only be covered in place.
+The image operators produce these treatments, and the image codec handler
+applies them.
 
 **Audio.** A location is a time interval. The replacement value silences the
-interval (its amplitude is zeroed) or removes it (the buffer shrinks and
-downstream timestamps shift). As with image, these are handled by the audio
-codec handler rather than a catalogue operator.
+interval (its amplitude is zeroed), beeps over it, or removes it (the buffer
+shrinks and downstream timestamps shift). As with image, the audio operators
+produce these treatments, and the audio codec handler applies them.
 
-The split is deliberate. The catalogue operators are text-modality operators,
-written once against a text-backed notion that both text and tabular satisfy, so
-a single masking implementation serves both. Image and audio replacements have
-no meaningful character-level definition, so they are expressed as replacement
-values the codec handler interprets, not as operators a caller binds to a label.
-This keeps the catalogue small: every catalogue operator has a meaningful
-definition in every modality it claims to serve.
+The split is deliberate. The text operators are written once against a
+text-backed notion that text, tabular and metadata satisfy, so a single masking
+implementation serves all three. Image and audio replacements have no
+meaningful character-level definition, so each has operators of its own.
+`Cover` and `Remove` are implemented per modality, for each that can give them:
+every modality can be covered, and every one but image can have a value
+removed. This keeps the catalogue honest: every operator has a meaningful
+definition in every modality it serves.
 
 ## 5. Reversibility as a Design Choice
 
