@@ -24,9 +24,9 @@
 //! - **Refused**: a part the table does not recognize, or one it recognizes but
 //!   cannot redact.
 //! - **Without a schema**: a kept XML part whose content type names no root
-//!   element of the schemas this crate holds (a chart style, a SmartArt
-//!   drawing, a threaded or modern comment) cannot be rebuilt, so it is
-//!   removed as [`ApplicationData`](HiddenContent::ApplicationData).
+//!   element of the schemas this crate holds cannot be rebuilt, so it is
+//!   removed as [`ApplicationData`](HiddenContent::ApplicationData). Every
+//!   kind classified today has one.
 //!
 //! Removing a part removes every relationship that targets it, and every
 //! element that names a removed relationship, so no reference dangles. The
@@ -34,8 +34,9 @@
 //! recorded by what it is: revision marks, comment anchors, editor
 //! fingerprints. Last, each kept XML part but the manifest, the relationships,
 //! and the properties is rebuilt from its schema ([`schema`]): an element or
-//! attribute its parent's type does not allow, an extension, and markup
-//! compatibility's choices go, so nothing the schema does not name ships.
+//! attribute its parent's type does not allow, an extension (but for one
+//! referencing a kept part), and markup compatibility's choices go, so
+//! nothing the schema does not name ships.
 
 use std::collections::{HashMap, HashSet};
 
@@ -506,20 +507,9 @@ mod tests {
     }
 
     /// A part kept and rebuilt needs a schema root, or it is dropped whole as
-    /// application data. The few kept without one are listed: each is
-    /// dropped on purpose until its schema is reviewed.
+    /// application data: every kind kept has one.
     #[test]
     fn every_kept_xml_kind_has_a_schema_root() {
-        const DROPPED: &[&str] = &[
-            "application/vnd.ms-office.chartstyle+xml",
-            "application/vnd.ms-office.chartcolorstyle+xml",
-            "application/vnd.ms-office.chartex+xml",
-            "application/vnd.ms-office.drawingml.diagramdrawing+xml",
-            "application/vnd.ms-excel.threadedcomments+xml",
-            "application/vnd.ms-powerpoint.comments+xml",
-            "application/vnd.ms-excel.person+xml",
-            "application/vnd.ms-powerpoint.authors+xml",
-        ];
         let policy = HiddenContentPolicy::default()
             .with_metadata(Disposition::ScanAsContent)
             .with_collaboration(Disposition::ScanAsContent);
@@ -533,11 +523,9 @@ mod tests {
                 rootless.push(content_type.as_str().to_owned());
             }
         }
-        rootless.sort();
-        let mut dropped: Vec<String> = DROPPED.iter().map(|&ct| ct.to_owned()).collect();
-        dropped.sort();
-        // Both ways: a new kept type needs a root, and a listed one that gained
-        // a root (or stopped being kept) comes off the list.
-        assert_eq!(rootless, dropped);
+        assert!(
+            rootless.is_empty(),
+            "kept with no schema root: {rootless:?}"
+        );
     }
 }

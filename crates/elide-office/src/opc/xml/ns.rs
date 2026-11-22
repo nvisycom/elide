@@ -75,9 +75,17 @@ pub(crate) const XR3: &str = "http://schemas.microsoft.com/office/spreadsheetml/
 pub(crate) const XR6: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision6";
 /// The Excel 2016 revision ids (`xr10:`).
 pub(crate) const XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
-/// Excel's threaded comments.
+/// Excel's threaded comments and their people.
 pub(crate) const THREADED: &str =
     "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
+/// PowerPoint's modern comments and their authors (`p188:`).
+pub(crate) const P188: &str = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
+/// The PowerPoint commands (`pc:`), whose slide monikers anchor a modern
+/// comment.
+pub(crate) const PC: &str = "http://schemas.microsoft.com/office/powerpoint/2013/main/command";
+/// The DrawingML commands (`ac:`), whose shape monikers anchor a modern
+/// comment.
+pub(crate) const AC: &str = "http://schemas.microsoft.com/office/drawing/2013/main/command";
 
 /// DrawingML (`a:`).
 pub(crate) const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -85,6 +93,12 @@ pub(crate) const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/mai
 pub(crate) const C: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 /// DrawingML diagrams, SmartArt (`dgm:`).
 pub(crate) const DGM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+/// The Office 2014 charts, waterfall and sunburst among them (`cx:`).
+pub(crate) const CX: &str = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+/// The Office 2012 chart styles and color styles (`cs:`).
+pub(crate) const CS: &str = "http://schemas.microsoft.com/office/drawing/2012/chartStyle";
+/// The Office 2008 SmartArt drawing, a diagram's shapes as drawn (`dsp:`).
+pub(crate) const DSP: &str = "http://schemas.microsoft.com/office/drawing/2008/diagram";
 /// DrawingML pictures (`pic:`).
 pub(crate) const PIC: &str = "http://schemas.openxmlformats.org/drawingml/2006/picture";
 /// DrawingML locked canvases (`lc:`).

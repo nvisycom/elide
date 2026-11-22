@@ -1,10 +1,10 @@
 //! [`rebuild`]: write an OOXML part from what its schema allows.
 //!
 //! The allowlist is generated from the ISO/IEC 29500-4 transitional schemas
-//! (ECMA-376 Part 4) and the [MS-DOCX] extension schemas by
-//! `scripts/office/gen-ooxml-schema.py` into [`table`]: each element type, the child
-//! elements it allows (each with its own type), the attributes it declares,
-//! and whether it holds text. A part's content type names the root element it
+//! (ECMA-376 Part 4) and the [MS-DOCX], [MS-ODRAWXML], [MS-XLSX], and
+//! [MS-PPTX] extension schemas by `scripts/office/gen-ooxml-schema.py` into
+//! [`table`]: each element type, the child elements it allows (each with its
+//! own type), the attributes it declares, and whether it holds text. A part's content type names the root element it
 //! must have ([`root`]), and from there each element is copied only if its
 //! parent's type allows it, keeping only the attributes its own type declares:
 //!
@@ -12,7 +12,9 @@
 //!   does one whose type holds nothing but a schema wildcard (an extension's
 //!   payload, `a:ext` and its kin); an `a:graphicData` keeps only the payload
 //!   its `uri` names (a picture, chart, diagram, locked canvas, table, or OLE
-//!   object);
+//!   object), and an extension keeps the one payload its `uri` names when
+//!   that payload references a kept part (a slide's modern comments, a
+//!   SmartArt drawing), going whole otherwise;
 //! - the attributes of a VML drawing's `<xml>` root go, but for its namespace
 //!   declarations;
 //! - an attribute its type does not declare goes; namespace declarations stay,
@@ -41,6 +43,30 @@
 //! A strict part is read against the transitional schema, its namespaces
 //! mapped onto the transitional ones.
 
+/// A schema [`Type`] as the generated [`table`] writes it: its flags, `text`
+/// and `wildcard`, named when set, then its attributes as `(namespace,
+/// local)` and its children as `(namespace, local, type)`.
+macro_rules! ty {
+    (text wildcard $($rest:tt)*) => { ty!(@ true, true, $($rest)*) };
+    (text $($rest:tt)*) => { ty!(@ true, false, $($rest)*) };
+    (wildcard $($rest:tt)*) => { ty!(@ false, true, $($rest)*) };
+    ([$($attributes:tt)*] [$($children:tt)*]) => {
+        ty!(@ false, false, [$($attributes)*] [$($children)*])
+    };
+    (
+        @ $text:literal, $wildcard:literal,
+        [$(($an:literal, $al:literal)),*]
+        [$(($cn:literal, $cl:literal, $ct:literal)),*]
+    ) => {
+        Type {
+            text: $text,
+            wildcard: $wildcard,
+            attributes: &[$(($an, $al)),*],
+            children: &[$(Child($cn, $cl, $ct)),*],
+        }
+    };
+}
+
 #[rustfmt::skip]
 mod table;
 
@@ -56,14 +82,14 @@ use quick_xml::events::{BytesStart, Event};
 
 use self::table::{NAMESPACES, ROOTS, TYPES};
 use crate::opc::package::archive::MAX_PART_BYTES;
-use crate::opc::package::content_types::{self, ContentType, DML, PML, SML, WML};
+use crate::opc::package::content_types::{ContentType, DML, PML, SML, WML};
 use crate::opc::xml::edit::{
     Cut, Growth, Name, Skipped, SpannedReader, attribute_extent, declarations, namespace_of,
     push_joined, redeclared, refuse_doctype, splice_with,
 };
 use crate::opc::xml::ns::{
-    A, C, DGM, LC, MC, P, PIC, R, VML, VML_EXCEL, VML_OFFICE, VML_POWERPOINT, VML_WORD, W, W15,
-    W16CEX, W16CID, X, XDR, transitional,
+    A, C, CS, CX, DGM, DSP, LC, MC, P, P188, PIC, R, THREADED, VML, VML_EXCEL, VML_OFFICE,
+    VML_POWERPOINT, VML_WORD, W, W15, W16CEX, W16CID, X, XDR, transitional,
 };
 use crate::opc::{attribute_value, malformed_xml};
 
@@ -205,98 +231,117 @@ pub(crate) enum Root {
     Vml,
 }
 
+/// The root each content type names, as a table: each family's content types
+/// under its shared prefix, with the prefix stripped, then under `_` the
+/// content types named whole. Each entry maps the content types it lists to
+/// the root element's (namespace, local name).
+macro_rules! roots {
+    (
+        $content_type:expr;
+        $( $prefix:ident { $( $($name:literal)|+ => ($ns:expr, $local:literal), )* } )*
+        _ { $( $($whole:literal)|+ => ($whole_ns:expr, $whole_local:literal), )* }
+    ) => {{
+        let content_type: &str = $content_type;
+        let element = |namespace, local| Some(Root::Element { namespace, local });
+        $(
+            if let Some(name) = content_type.strip_prefix($prefix) {
+                return match name {
+                    $( $($name)|+ => element($ns, $local), )*
+                    _ => None,
+                };
+            }
+        )*
+        match content_type {
+            $( $($whole)|+ => element($whole_ns, $whole_local), )*
+            _ => None,
+        }
+    }};
+}
+
 /// The root a part of `content_type` must have, or `None` when no schema this
 /// crate holds describes the part, so it cannot be rebuilt.
 pub(crate) fn root(content_type: &ContentType) -> Option<Root> {
-    let content_type = content_type.as_str();
-    let element = |namespace, local| Some(Root::Element { namespace, local });
-    if let Some(name) = content_type.strip_prefix(WML) {
-        return match name {
-            "document.main+xml" | "template.main+xml" => element(W, "document"),
-            "header+xml" => element(W, "hdr"),
-            "footer+xml" => element(W, "ftr"),
-            "footnotes+xml" => element(W, "footnotes"),
-            "endnotes+xml" => element(W, "endnotes"),
-            "document.glossary+xml" => element(W, "glossaryDocument"),
-            "comments+xml" => element(W, "comments"),
-            "styles+xml" => element(W, "styles"),
-            "settings+xml" => element(W, "settings"),
-            "websettings+xml" => element(W, "webSettings"),
-            "fonttable+xml" => element(W, "fonts"),
-            "numbering+xml" => element(W, "numbering"),
-            _ => None,
-        };
+    if content_type.is_vml_drawing() {
+        return Some(Root::Vml);
     }
-    if let Some(name) = content_type.strip_prefix(PML) {
-        return match name {
-            "presentation.main+xml" | "slideshow.main+xml" | "template.main+xml" => {
-                element(P, "presentation")
-            }
-            "slide+xml" => element(P, "sld"),
-            "slidelayout+xml" => element(P, "sldLayout"),
-            "slidemaster+xml" => element(P, "sldMaster"),
-            "notesslide+xml" => element(P, "notes"),
-            "notesmaster+xml" => element(P, "notesMaster"),
-            "handoutmaster+xml" => element(P, "handoutMaster"),
-            "comments+xml" => element(P, "cmLst"),
-            "commentauthors+xml" => element(P, "cmAuthorLst"),
-            "presprops+xml" => element(P, "presentationPr"),
-            "viewprops+xml" => element(P, "viewPr"),
-            "tablestyles+xml" => element(A, "tblStyleLst"),
-            _ => None,
-        };
-    }
-    if let Some(name) = content_type.strip_prefix(SML) {
-        return match name {
-            "sheet.main+xml" | "template.main+xml" => element(X, "workbook"),
-            "worksheet+xml" => element(X, "worksheet"),
-            "chartsheet+xml" => element(X, "chartsheet"),
-            "dialogsheet+xml" => element(X, "dialogsheet"),
-            "sharedstrings+xml" => element(X, "sst"),
-            "comments+xml" => element(X, "comments"),
-            "styles+xml" => element(X, "styleSheet"),
-            "calcchain+xml" => element(X, "calcChain"),
-            "table+xml" => element(X, "table"),
-            "sheetmetadata+xml" => element(X, "metadata"),
-            "volatiledependencies+xml" => element(X, "volTypes"),
-            _ => None,
-        };
-    }
-    if let Some(name) = content_type.strip_prefix(DML) {
-        return match name {
-            "chart+xml" => element(C, "chartSpace"),
-            "chartshapes+xml" => element(C, "userShapes"),
-            "diagramdata+xml" => element(DGM, "dataModel"),
-            "diagramlayout+xml" => element(DGM, "layoutDef"),
-            "diagramstyle+xml" => element(DGM, "styleDef"),
-            "diagramcolors+xml" => element(DGM, "colorsDef"),
-            _ => None,
-        };
-    }
-    match content_type {
-        "application/vnd.openxmlformats-officedocument.theme+xml" => element(A, "theme"),
-        "application/vnd.openxmlformats-officedocument.themeoverride+xml" => {
-            element(A, "themeOverride")
+    roots! {
+        content_type.as_str();
+        WML {
+            "document.main+xml" | "template.main+xml" => (W, "document"),
+            "header+xml" => (W, "hdr"),
+            "footer+xml" => (W, "ftr"),
+            "footnotes+xml" => (W, "footnotes"),
+            "endnotes+xml" => (W, "endnotes"),
+            "document.glossary+xml" => (W, "glossaryDocument"),
+            "comments+xml" => (W, "comments"),
+            "styles+xml" => (W, "styles"),
+            "settings+xml" => (W, "settings"),
+            "websettings+xml" => (W, "webSettings"),
+            "fonttable+xml" => (W, "fonts"),
+            "numbering+xml" => (W, "numbering"),
         }
-        "application/vnd.openxmlformats-officedocument.drawing+xml" => element(XDR, "wsDr"),
-        content_types::VML_DRAWING => Some(Root::Vml),
-        "application/vnd.ms-word.styleswitheffects+xml" => element(W, "styles"),
-        "application/vnd.ms-word.commentsextended+xml" => element(W15, "commentsEx"),
-        "application/vnd.ms-word.commentsids+xml" => element(W16CID, "commentsIds"),
-        "application/vnd.ms-word.commentsextensible+xml" => element(W16CEX, "commentsExtensible"),
-        "application/vnd.ms-word.people+xml" => element(W15, "people"),
-        "application/vnd.ms-word.document.macroenabled.main+xml"
-        | "application/vnd.ms-word.template.macroenabledtemplate.main+xml" => {
-            element(W, "document")
+        PML {
+            "presentation.main+xml"
+            | "slideshow.main+xml"
+            | "template.main+xml" => (P, "presentation"),
+            "slide+xml" => (P, "sld"),
+            "slidelayout+xml" => (P, "sldLayout"),
+            "slidemaster+xml" => (P, "sldMaster"),
+            "notesslide+xml" => (P, "notes"),
+            "notesmaster+xml" => (P, "notesMaster"),
+            "handoutmaster+xml" => (P, "handoutMaster"),
+            "comments+xml" => (P, "cmLst"),
+            "commentauthors+xml" => (P, "cmAuthorLst"),
+            "presprops+xml" => (P, "presentationPr"),
+            "viewprops+xml" => (P, "viewPr"),
+            "tablestyles+xml" => (A, "tblStyleLst"),
         }
-        "application/vnd.ms-powerpoint.presentation.macroenabled.main+xml"
-        | "application/vnd.ms-powerpoint.slideshow.macroenabled.main+xml"
-        | "application/vnd.ms-powerpoint.template.macroenabled.main+xml" => {
-            element(P, "presentation")
+        SML {
+            "sheet.main+xml" | "template.main+xml" => (X, "workbook"),
+            "worksheet+xml" => (X, "worksheet"),
+            "chartsheet+xml" => (X, "chartsheet"),
+            "dialogsheet+xml" => (X, "dialogsheet"),
+            "sharedstrings+xml" => (X, "sst"),
+            "comments+xml" => (X, "comments"),
+            "styles+xml" => (X, "styleSheet"),
+            "calcchain+xml" => (X, "calcChain"),
+            "table+xml" => (X, "table"),
+            "sheetmetadata+xml" => (X, "metadata"),
+            "volatiledependencies+xml" => (X, "volTypes"),
         }
-        "application/vnd.ms-excel.sheet.macroenabled.main+xml"
-        | "application/vnd.ms-excel.template.macroenabled.main+xml" => element(X, "workbook"),
-        _ => None,
+        DML {
+            "chart+xml" => (C, "chartSpace"),
+            "chartshapes+xml" => (C, "userShapes"),
+            "diagramdata+xml" => (DGM, "dataModel"),
+            "diagramlayout+xml" => (DGM, "layoutDef"),
+            "diagramstyle+xml" => (DGM, "styleDef"),
+            "diagramcolors+xml" => (DGM, "colorsDef"),
+        }
+        _ {
+            "application/vnd.openxmlformats-officedocument.theme+xml" => (A, "theme"),
+            "application/vnd.openxmlformats-officedocument.themeoverride+xml" => (A, "themeOverride"),
+            "application/vnd.openxmlformats-officedocument.drawing+xml" => (XDR, "wsDr"),
+            "application/vnd.ms-word.styleswitheffects+xml" => (W, "styles"),
+            "application/vnd.ms-word.commentsextended+xml" => (W15, "commentsEx"),
+            "application/vnd.ms-word.commentsids+xml" => (W16CID, "commentsIds"),
+            "application/vnd.ms-word.commentsextensible+xml" => (W16CEX, "commentsExtensible"),
+            "application/vnd.ms-word.people+xml" => (W15, "people"),
+            "application/vnd.ms-excel.threadedcomments+xml" => (THREADED, "ThreadedComments"),
+            "application/vnd.ms-excel.person+xml" => (THREADED, "personList"),
+            "application/vnd.ms-powerpoint.comments+xml" => (P188, "cmLst"),
+            "application/vnd.ms-powerpoint.authors+xml" => (P188, "authorLst"),
+            "application/vnd.ms-office.chartex+xml" => (CX, "chartSpace"),
+            "application/vnd.ms-office.chartstyle+xml" => (CS, "chartStyle"),
+            "application/vnd.ms-office.chartcolorstyle+xml" => (CS, "colorStyle"),
+            "application/vnd.ms-office.drawingml.diagramdrawing+xml" => (DSP, "drawing"),
+            "application/vnd.ms-word.document.macroenabled.main+xml"
+            | "application/vnd.ms-word.template.macroenabledtemplate.main+xml" => (W, "document"),
+            "application/vnd.ms-powerpoint.presentation.macroenabled.main+xml"
+            | "application/vnd.ms-powerpoint.slideshow.macroenabled.main+xml"
+            | "application/vnd.ms-powerpoint.template.macroenabled.main+xml" => (P, "presentation"),
+            "application/vnd.ms-excel.sheet.macroenabled.main+xml"
+            | "application/vnd.ms-excel.template.macroenabled.main+xml" => (X, "workbook"),
+        }
     }
 }
 
@@ -315,6 +360,9 @@ enum Frame {
     Typed(u16),
     /// An `a:graphicData` of this type, holding the payload its `uri` names.
     Graphic(u16, Option<Payload>),
+    /// An extension of this type, holding the payload its `uri` names; it goes
+    /// whole if that payload does not stay.
+    Extension(u16, Payload),
     /// The root of a VML drawing.
     Vml,
     /// An `mc:AlternateContent`, read in this scope.
@@ -330,6 +378,8 @@ enum Scope {
     Typed(u16),
     /// An `a:graphicData`'s type, allowing only this payload.
     Graphic(u16, Option<Payload>),
+    /// An extension, allowing only this payload.
+    Extension(Payload),
     /// The top of a VML drawing.
     Vml,
     /// Nothing yet: before the root.
@@ -341,6 +391,7 @@ impl Frame {
         match self {
             Self::Typed(ty) => Scope::Typed(ty),
             Self::Graphic(ty, payload) => Scope::Graphic(ty, payload),
+            Self::Extension(_, payload) => Scope::Extension(payload),
             Self::Vml => Scope::Vml,
             Self::Alternate(scope) | Self::Fallback(scope) => scope,
         }
@@ -424,14 +475,20 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
                     root_frame(root, namespace.as_deref(), local)?
                 } else {
                     let parent = rebuild.open.last().map(|open| open.frame);
-                    decide(scope, namespace.as_deref(), local, parent)
+                    // An empty extension holds no payload to keep.
+                    let extension = if is_start && local == "ext" {
+                        extension_payload(e)?
+                    } else {
+                        None
+                    };
+                    decide(scope, namespace.as_deref(), local, parent, extension)
                 };
                 let decision = match decision {
                     Decision::Keep(Frame::Typed(ty))
                         if namespace_index(namespace.as_deref()) == drawingml
                             && local == "graphicData" =>
                     {
-                        Decision::Keep(Frame::Graphic(ty, payload(e)?))
+                        Decision::Keep(Frame::Graphic(ty, graphic_payload(e)?))
                     }
                     decision => decision,
                 };
@@ -452,6 +509,13 @@ fn rebuild_within(raw: &str, root: Root, limit: u64) -> Result<Option<Rebuilt>> 
 #[derive(Debug, Clone, Copy)]
 struct Open {
     frame: Frame,
+    /// Where its start tag begins.
+    start: usize,
+    /// Where in [`Rebuild::cuts`] its own cuts begin.
+    cuts_from: usize,
+    /// Whether a child element of it is kept, read through the unwrapped
+    /// frames between.
+    holds: bool,
     /// Where the declarations its children declare again begin: those the
     /// unwrapped frames around it carried, for an unwrapped frame.
     carried_from: usize,
@@ -536,8 +600,19 @@ impl<'a> Rebuild<'a> {
         };
         let own_from = self.carried.len();
         let mut carried_from = own_from;
+        let start = span.start;
+        let cuts_from = self.cuts.len();
+        if !frame.unwrapped()
+            && let Some(parent) = self
+                .open
+                .iter_mut()
+                .rev()
+                .find(|open| !open.frame.unwrapped())
+        {
+            parent.holds = true;
+        }
         match frame {
-            Frame::Typed(ty) | Frame::Graphic(ty, _) => {
+            Frame::Typed(ty) | Frame::Graphic(ty, _) | Frame::Extension(ty, _) => {
                 self.cut_attributes(reader, e, Some(ty))?;
                 let missing = redeclared(&self.carried, around, raw, e)?;
                 if !missing.is_empty() {
@@ -565,6 +640,9 @@ impl<'a> Rebuild<'a> {
         if is_start {
             self.open.push(Open {
                 frame,
+                start,
+                cuts_from,
+                holds: false,
                 carried_from,
                 own_from,
             });
@@ -576,8 +654,15 @@ impl<'a> Rebuild<'a> {
     fn close(&mut self, span: Range<usize>) {
         if let Some(open) = self.open.pop() {
             self.carried.truncate(open.own_from);
-            if open.frame.unwrapped() {
-                self.cuts.push(Cut::remove(span));
+            match open.frame {
+                frame if frame.unwrapped() => self.cuts.push(Cut::remove(span)),
+                // An extension whose payload went, with the part it named,
+                // goes whole: what it held is already counted.
+                Frame::Extension(..) if !open.holds => {
+                    self.cuts.truncate(open.cuts_from);
+                    self.cuts.push(Cut::remove(open.start..span.end));
+                }
+                _ => {}
             }
         }
     }
@@ -693,29 +778,63 @@ const PAYLOADS: &[PayloadUri] = &[
     PayloadUri::new("presentationml", "ole", P, "oleObj"),
 ];
 
+/// The payloads an extension may hold, by the `uri` naming them: those that
+/// reference a part the rebuild keeps, a slide's modern comments ([MS-PPTX])
+/// and a SmartArt data model's drawing ([MS-ODRAWXML]). Each is a global
+/// element of the schemas, read as its type there.
+const EXTENSIONS: &[(&str, &str, &str)] = &[
+    ("{6950BFC3-D8DA-4A85-94F7-54DA5524770B}", P188, "commentRel"),
+    (
+        "http://schemas.microsoft.com/office/drawing/2008/diagram",
+        DSP,
+        "dataModelExt",
+    ),
+];
+
 /// The payload the `uri` of the `a:graphicData` `e` names, transitional or
 /// strict, or `None` for one this rebuild does not keep.
-fn payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+fn graphic_payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+    named_payload(e, |uri| {
+        PAYLOADS
+            .iter()
+            .find(|payload| payload.named_by(uri))
+            .map(|payload| (payload.namespace, payload.local))
+    })
+}
+
+/// The payload the `uri` of the extension `e` names, or `None` for one this
+/// rebuild does not keep.
+fn extension_payload(e: &BytesStart<'_>) -> Result<Option<Payload>> {
+    named_payload(e, |uri| {
+        EXTENSIONS
+            .iter()
+            .find(|&&(named, ..)| named == uri)
+            .map(|&(_, namespace, local)| (namespace, local))
+    })
+}
+
+/// The payload `select` finds for the `uri` of `e`, or `None` if `e` has no
+/// `uri` or `select` finds none.
+fn named_payload(
+    e: &BytesStart<'_>,
+    select: impl FnOnce(&str) -> Option<(&'static str, &'static str)>,
+) -> Result<Option<Payload>> {
     let uri = e.try_get_attribute("uri").map_err(malformed_xml)?;
     let Some(uri) = uri else {
         return Ok(None);
     };
     // A reference in the value stands for the character it names.
     let uri = attribute_value(&uri.value)?;
-    let uri: &str = &uri;
-    Ok(PAYLOADS
-        .iter()
-        .find(|payload| payload.named_by(uri))
-        .and_then(|payload| {
-            namespace_index(Some(payload.namespace)).map(|index| Payload(index, payload.local))
-        }))
+    Ok(select(&uri).and_then(|(namespace, local)| {
+        namespace_index(Some(namespace)).map(|index| Payload(index, local))
+    }))
 }
 
 /// Whether text is shown in `scope`.
 fn holds_text(scope: Scope) -> bool {
     match scope {
         Scope::Typed(index) | Scope::Graphic(index, _) => ty(index).text,
-        Scope::Vml | Scope::Document => false,
+        Scope::Extension(_) | Scope::Vml | Scope::Document => false,
     }
 }
 
@@ -759,8 +878,15 @@ fn root_frame(root: Root, namespace: Option<&str>, local: &str) -> Result<Decisi
 }
 
 /// What the rebuild does with the element `local` in `namespace` met in
-/// `scope`, inside the `parent` frame.
-fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Frame>) -> Decision {
+/// `scope`, inside the `parent` frame, the payload its `uri` names being
+/// `extension` if it is an extension.
+fn decide(
+    scope: Scope,
+    namespace: Option<&str>,
+    local: &str,
+    parent: Option<Frame>,
+    extension: Option<Payload>,
+) -> Decision {
     if namespace == Some(MC) {
         return match (local, parent) {
             ("AlternateContent", _) => Decision::Keep(Frame::Alternate(scope)),
@@ -784,14 +910,23 @@ fn decide(scope: Scope, namespace: Option<&str>, local: &str, parent: Option<Fra
             ty(parent).child(index, local)
         }
         Scope::Graphic(..) => None,
+        // An extension holds the global element its `uri` names.
+        Scope::Extension(Payload(namespace, name)) if (namespace, name) == (index, local) => {
+            root_type(index, local)
+        }
+        Scope::Extension(_) => None,
         // A VML drawing holds the global VML shapes.
         Scope::Vml if namespace.is_some_and(|namespace| VML_SHAPES.contains(&namespace)) => {
             root_type(index, local)
         }
         Scope::Vml | Scope::Document => None,
     };
-    match ty {
-        Some(index) if !self::ty(index).only_wildcard() => Decision::Keep(Frame::Typed(index)),
+    match (ty, extension) {
+        (Some(index), _) if !self::ty(index).only_wildcard() => Decision::Keep(Frame::Typed(index)),
+        // An extension keeps the payload its `uri` names, or goes whole.
+        (Some(index), Some(payload)) if local == "ext" => {
+            Decision::Keep(Frame::Extension(index, payload))
+        }
         _ => Decision::Drop(HiddenContent::ApplicationData),
     }
 }

@@ -228,15 +228,17 @@ impl PartKind {
             }
             "application/vnd.openxmlformats-officedocument.theme+xml"
             | "application/vnd.openxmlformats-officedocument.themeoverride+xml"
-            | "application/vnd.ms-office.chartstyle+xml"
-            | "application/vnd.ms-office.chartcolorstyle+xml"
             | "application/vnd.openxmlformats-officedocument.drawingml.diagramlayout+xml"
             | "application/vnd.openxmlformats-officedocument.drawingml.diagramstyle+xml"
             | "application/vnd.openxmlformats-officedocument.drawingml.diagramcolors+xml"
             | "application/vnd.ms-word.styleswitheffects+xml" => Self::Structure,
             "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
             | "application/vnd.openxmlformats-officedocument.drawingml.chartshapes+xml"
-            | "application/vnd.ms-office.chartex+xml" => Self::Chart,
+            | "application/vnd.ms-office.chartex+xml"
+            // A chart style holds a number or two (a line width scale), read
+            // as a chart's text is rather than shipped unread.
+            | "application/vnd.ms-office.chartstyle+xml"
+            | "application/vnd.ms-office.chartcolorstyle+xml" => Self::Chart,
             "application/vnd.openxmlformats-officedocument.drawingml.diagramdata+xml"
             | "application/vnd.ms-office.drawingml.diagramdrawing+xml" => Self::Diagram,
             "application/vnd.openxmlformats-officedocument.drawing+xml"

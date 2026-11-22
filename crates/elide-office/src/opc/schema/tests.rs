@@ -392,3 +392,83 @@ fn a_namespace_written_with_a_reference_is_read_decoded() {
     );
     assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
 }
+
+/// The newer Microsoft parts each read against their own schema: a modern
+/// chart, a chart style and color style, and a SmartArt drawing, written as
+/// Office writes them, pass unchanged.
+#[test]
+fn the_newer_microsoft_parts_pass_unchanged() {
+    let element = |namespace, local| Root::Element { namespace, local };
+    let parts = [
+        (
+            element(CX, "chartSpace"),
+            format!(
+                r#"<cx:chartSpace xmlns:cx="{CX}" xmlns:a="{A}" xmlns:r="{R}"><cx:chartData><cx:data id="0"><cx:strDim type="cat"><cx:f>Sheet1!$A$2:$A$3</cx:f><cx:lvl ptCount="2"><cx:pt idx="0">North</cx:pt><cx:pt idx="1">South</cx:pt></cx:lvl></cx:strDim><cx:numDim type="val"><cx:f>Sheet1!$B$2:$B$3</cx:f><cx:lvl ptCount="2" formatCode="General"><cx:pt idx="0">10</cx:pt><cx:pt idx="1">-4</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData><cx:chart><cx:title pos="t" align="ctr" overlay="0"><cx:tx><cx:txData><cx:v>Sales by region</cx:v></cx:txData></cx:tx></cx:title><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="waterfall" uniqueId="{{1}}"><cx:tx><cx:txData><cx:f>Sheet1!$B$1</cx:f><cx:v>Sales</cx:v></cx:txData></cx:tx><cx:dataId val="0"/></cx:series></cx:plotAreaRegion></cx:plotArea></cx:chart></cx:chartSpace>"#
+            ),
+        ),
+        (
+            element(CS, "chartStyle"),
+            format!(
+                r#"<cs:chartStyle xmlns:cs="{CS}" xmlns:a="{A}" id="395"><cs:axisTitle><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:defRPr sz="1330"/></cs:axisTitle></cs:chartStyle>"#
+            ),
+        ),
+        (
+            element(CS, "colorStyle"),
+            format!(
+                r#"<cs:colorStyle xmlns:cs="{CS}" xmlns:a="{A}" meth="cycle" id="10"><a:schemeClr val="accent1"/><cs:variation/><cs:variation><a:lumMod val="60000"/></cs:variation></cs:colorStyle>"#
+            ),
+        ),
+        (
+            element(DSP, "drawing"),
+            format!(
+                r#"<dsp:drawing xmlns:dsp="{DSP}" xmlns:a="{A}"><dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/><dsp:sp modelId="{{1}}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr><dsp:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr><dsp:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>Jane Roe</a:t></a:r></a:p></dsp:txBody><dsp:txXfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></dsp:txXfrm></dsp:sp></dsp:spTree></dsp:drawing>"#
+            ),
+        ),
+    ];
+    for (root, raw) in parts {
+        let out = rebuild(&raw, root).unwrap();
+        assert!(out.is_none(), "{root:?}: {out:?}");
+    }
+}
+
+/// An extension keeps the payload its `uri` names where that payload
+/// references a part the rebuild keeps: a slide's modern comments.
+/// Every other extension goes whole, including one left empty, one holding
+/// something else, and one naming another payload.
+#[test]
+fn an_extension_keeps_only_the_payload_its_uri_names() {
+    const SLIDE: Root = Root::Element {
+        namespace: P,
+        local: "sld",
+    };
+    let slide = |extensions: &str| {
+        format!(
+            r#"<p:sld xmlns:p="{P}" xmlns:r="{R}" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" xmlns:p188="{P188}"><p:cSld/><p:extLst>{extensions}</p:extLst></p:sld>"#
+        )
+    };
+    let comments = r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"><p188:commentRel r:id="rId1"/></p:ext>"#;
+    assert!(rebuild(&slide(comments), SLIDE).unwrap().is_none());
+    for other in [
+        r#"<p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:creationId val="42"/></p:ext>"#,
+        r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"/>"#,
+        r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"> </p:ext>"#,
+        r#"<p:ext uri="{6950BFC3-D8DA-4A85-94F7-54DA5524770B}"><p14:creationId val="42"/></p:ext>"#,
+        r#"<p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p188:commentRel r:id="rId1"/></p:ext>"#,
+    ] {
+        let (text, _) = rebuilt(&slide(&format!("{other}{comments}")), SLIDE);
+        assert_eq!(text, slide(comments), "{other}");
+    }
+}
+
+/// A SmartArt data model keeps the extension that locates its drawing.
+#[test]
+fn a_data_model_keeps_its_drawing_reference() {
+    let raw = format!(
+        r#"<dgm:dataModel xmlns:dgm="{DGM}" xmlns:a="{A}" xmlns:dsp="{DSP}"><dgm:ptLst/><dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt relId="rId6" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext></dgm:extLst></dgm:dataModel>"#
+    );
+    let root = Root::Element {
+        namespace: DGM,
+        local: "dataModel",
+    };
+    assert!(rebuild(&raw, root).unwrap().is_none());
+}
