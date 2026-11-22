@@ -107,20 +107,24 @@ Section 5.
 ## 3. The Leak Profile
 
 Every operator must declare a leak profile, a three-way classification of how
-much of the original value or its shape survives the transformation. This is the
-property a privacy engineer most needs to reason about, so the toolkit makes it
-part of the operator contract rather than an emergent property of configuration.
-The three levels are concepts, not configuration knobs:
+much of the original value survives the transformation: its content, or its
+extent. Where the value sat (which sentence, cell, or second of audio) is not
+counted, since every treatment keeps its surroundings. This is the property a
+privacy engineer most needs to reason about, so the toolkit makes it part of the
+operator contract rather than an emergent property of configuration. The three
+levels are concepts, not configuration knobs:
 
-- **Irrecoverable.** No trace of the original value or its shape remains. The
-  removal operator is irrecoverable: the span is gone, and the surrounding bytes
-  carry no record of its former length or position once the document closes
-  around it. A hash approaches this for the value itself, though see below.
-- **Partial.** The original value is gone, but observable shape leaks: position,
-  length, a bounding box, cell coordinates, or a known silence on a timeline.
-  Masking and template substitution are partial. A masked value is unreadable
-  but its length and offset survive; a templated replacement reveals that _some_
-  entity of a given label was there.
+- **Irrecoverable.** Nothing of the value survives, neither its content nor its
+  extent. The removal operator is irrecoverable: the span is gone, and the
+  document closes around it, so nothing records its former length. A table
+  cell emptied of its value is irrecoverable too: the cell keeps its place, but
+  nothing of the value it held. A hash approaches this for the value itself,
+  though see below.
+- **Partial.** Part of the value survives by design: some of its content, or its
+  extent (a cover's length, a box's size, a known silence on a timeline).
+  Masking, covering and template substitution are partial. A masked value is
+  unreadable but its length survives; a templated replacement reveals that
+  _some_ entity of a given label was there.
 - **Recoverable.** The original is recoverable from the output given the right
   metadata: an encryption key, a token vault, a pseudonym map, or, in the case
   of an unsalted hash over a small plaintext space, a candidate list to brute

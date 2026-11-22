@@ -46,8 +46,9 @@ in every one that can make a value vanish. `Remove` leaves nothing that marks
 where the value was: text closes up, and audio is cut. An image can't lose its
 pixels, so `Remove` doesn't apply to it; use `Cover`, which hides a value in
 place and keeps its extent: text is covered, audio silenced, an image region
-covered in black, or in the colour given to `Cover::new(color)`. A custom modality implements `Operator` for `Remove` and
-`Cover` itself, for whichever it can give.
+covered in black, or in the colour given to `Cover::new(color)`. A custom
+modality implements `Operator` for `Remove` and `Cover` itself, for whichever
+it can give.
 
 ## Leak profiles
 
