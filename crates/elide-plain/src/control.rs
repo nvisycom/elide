@@ -9,76 +9,66 @@
 //! [`strip`] removes every such sequence and character, so what ships is the
 //! text as both read it.
 //!
-//! Removed, each counted once:
+//! A terminal's own parser decides what a sequence takes: [`strip`] reads the
+//! text with [`anstream`]'s, the VT500 state machine terminals follow, and
+//! keeps what it prints. Removed:
 //!
-//! - an escape sequence, introduced by `ESC` (U+001B): a control sequence
-//!   (`ESC [`, CSI) through its final byte; a command string (`ESC ]` OSC,
-//!   `ESC P` DCS, `ESC X` SOS, `ESC ^` PM, `ESC _` APC) through its
-//!   terminator, BEL or `ESC \`, or, unterminated, to the end of its line; any
-//!   other escape through its final byte. As a terminal does, a sequence reads
-//!   on past a control inside it, which takes effect (a line break stays), ends
-//!   at CAN or SUB, which cancel it, and ends before an `ESC`, which starts
-//!   the next;
+//! - an escape sequence: a control sequence (`ESC [`, CSI), a command string
+//!   (`ESC ]` OSC, `ESC P` DCS, `ESC X` SOS, `ESC ^` PM, `ESC _` APC), or any
+//!   other escape, read as a terminal reads it: a control inside one takes
+//!   effect, CAN or SUB cancels it, and an `ESC` starts the next;
 //! - every other C0 control but tab, line feed, form feed, and carriage
 //!   return, which a terminal shows as space and line breaks; DEL; and each C1
-//!   control (U+0080–U+009F) alone.
+//!   control (U+0080–U+009F).
 //!
-//! A terminal reading UTF-8 does not start a sequence at a C1 control, and one
-//! is what Windows-1252 text read as Latin-1 leaves for `ž` or `Ÿ`, so it never
-//! takes the text after it. Nor does an unterminated command string take more
-//! than its line: a terminal would swallow on, but text detection reads and no
-//! one sees costs at most a redaction, where a stray `ESC ]` taking the rest of
-//! a file loses it.
+//! Each run of removed characters counts once.
+//!
+//! The parser starts afresh on each line, and a line break always stays: a
+//! terminal would let an unterminated command string swallow on, but text
+//! detection reads and no one sees costs at most a redaction, where a stray
+//! `ESC ]` taking the rest of a file loses it. A C1 control goes alone, never
+//! starting a sequence: a terminal reading UTF-8 does not start one there, and
+//! one is what Windows-1252 text read as Latin-1 leaves for `ž` or `Ÿ`.
 
 use std::borrow::Cow;
-use std::iter::Peekable;
-use std::ops::RangeInclusive;
-use std::str::Chars;
 
+use anstream::adapter::strip_str;
 use elide_codec::StrippedContent;
 use elide_core::redaction::HiddenContent;
 
-/// `ESC`, which introduces an escape sequence.
-const ESC: char = '\u{1b}';
-/// `BEL`, which ends a command string.
-const BEL: char = '\u{07}';
-/// `CAN` and `SUB`, which cancel a sequence.
-const CAN: char = '\u{18}';
-const SUB: char = '\u{1a}';
-
 /// `text` without its terminal control sequences and control characters, and
-/// how many were removed; borrowed when there are none.
+/// how many runs of them were removed; borrowed when there are none.
 pub(crate) fn strip(text: &str) -> (Cow<'_, str>, usize) {
     if !text.chars().any(is_control) {
         return (Cow::Borrowed(text), 0);
     }
     let mut out = String::with_capacity(text.len());
     let mut removed = 0;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if !is_control(c) {
-            out.push(c);
-            continue;
+    for line in text.split_inclusive(['\n', '\r']) {
+        let body = line.trim_end_matches(['\n', '\r']);
+        // Where the last kept piece ended, in `body`.
+        let mut kept = 0;
+        for piece in strip_str(body) {
+            let at = piece.as_ptr() as usize - body.as_ptr() as usize;
+            removed += usize::from(at > kept);
+            kept = at + piece.len();
+            for c in piece.chars() {
+                if is_c1(c) {
+                    removed += 1;
+                } else {
+                    out.push(c);
+                }
+            }
         }
-        removed += 1;
-        if c != ESC {
-            continue;
-        }
-        match introduced(&mut chars, &mut out) {
-            // Parameters (`0`–`?`) and intermediates (space–`/`), then the
-            // final byte (`@`–`~`).
-            Some(Introducer::Control) => skip_sequence(&mut chars, &mut out, ' '..='?'),
-            Some(Introducer::String) => skip_string(&mut chars),
-            // Intermediates (space–`/`), then the final byte (`0`–`~`).
-            Some(Introducer::Escape) => skip_sequence(&mut chars, &mut out, ' '..='/'),
-            None => {}
-        }
+        removed += usize::from(kept < body.len());
+        out.push_str(&line[body.len()..]);
     }
     (Cow::Owned(out), removed)
 }
 
 /// [`strip`] over an owned `text`, handed back unchanged when it holds no
 /// control.
+#[cfg(any(feature = "txt", feature = "csv"))]
 pub(crate) fn strip_owned(text: String) -> (String, usize) {
     match strip(&text) {
         (Cow::Owned(stripped), removed) => (stripped, removed),
@@ -86,8 +76,8 @@ pub(crate) fn strip_owned(text: String) -> (String, usize) {
     }
 }
 
-/// The record of `removed` control sequences and characters stripped, as
-/// [`Undisplayed`](HiddenContent::Undisplayed) content.
+/// The record of `removed` runs of control sequences and characters stripped,
+/// as [`Undisplayed`](HiddenContent::Undisplayed) content.
 pub(crate) fn recorded(removed: usize) -> StrippedContent {
     let mut stripped = StrippedContent::new();
     stripped.record(HiddenContent::Undisplayed, None, removed);
@@ -100,85 +90,9 @@ fn is_control(c: char) -> bool {
     c.is_control() && !matches!(c, '\t' | '\n' | '\x0c' | '\r')
 }
 
-/// What follows an escape's introducer.
-enum Introducer {
-    /// A control sequence (CSI): parameters, intermediates, a final byte.
-    Control,
-    /// A command string (OSC, DCS, SOS, PM, APC), up to its terminator.
-    String,
-    /// Any other escape: intermediates, a final byte.
-    Escape,
-}
-
-/// The sequence an `ESC` introduces, consuming its second character when that
-/// names the kind, or `None` for a lone `ESC`.
-fn introduced(chars: &mut Peekable<Chars<'_>>, out: &mut String) -> Option<Introducer> {
-    match peek_through(chars, out)? {
-        '[' => chars.next().map(|_| Introducer::Control),
-        ']' | 'P' | 'X' | '^' | '_' => chars.next().map(|_| Introducer::String),
-        // Its next character is an intermediate or the final one.
-        ' '..='~' => Some(Introducer::Escape),
-        _ => None,
-    }
-}
-
-/// Skip a sequence's characters in `body` through the printable ASCII one
-/// after them, its final byte, stopping before anything else.
-fn skip_sequence(chars: &mut Peekable<Chars<'_>>, out: &mut String, body: RangeInclusive<char>) {
-    while let Some(c) = peek_through(chars, out) {
-        chars.next_if(|_| matches!(c, ' '..='~'));
-        if !body.contains(&c) {
-            return;
-        }
-    }
-}
-
-/// The next character of an escape or control sequence, unconsumed, past the
-/// controls a terminal acts on inside one: tab, line feed, form feed, and
-/// carriage return go to `out`, every other C0 control and DEL go. `None` at
-/// the end, at CAN or SUB, consumed as they cancel the sequence, and at `ESC`,
-/// left to start the next.
-fn peek_through(chars: &mut Peekable<Chars<'_>>, out: &mut String) -> Option<char> {
-    while let Some(&c) = chars.peek() {
-        match c {
-            ESC => return None,
-            CAN | SUB => {
-                chars.next();
-                return None;
-            }
-            '\t' | '\n' | '\x0c' | '\r' => out.push(c),
-            '\0'..='\x1f' | '\x7f' => {}
-            _ => return Some(c),
-        }
-        chars.next();
-    }
-    None
-}
-
-/// Skip a command string through its terminator: BEL, `ESC \`, or CAN or SUB,
-/// which cancel it. Any other `ESC` ends it unconsumed, starting the next
-/// sequence, and, unterminated, it ends with its line, keeping the line break.
-fn skip_string(chars: &mut Peekable<Chars<'_>>) {
-    while let Some(&c) = chars.peek() {
-        match c {
-            '\n' | '\r' => return,
-            ESC => {
-                let mut ahead = chars.clone();
-                ahead.next();
-                if ahead.next() == Some('\\') {
-                    *chars = ahead;
-                }
-                return;
-            }
-            BEL | CAN | SUB => {
-                chars.next();
-                return;
-            }
-            _ => {
-                chars.next();
-            }
-        }
-    }
+/// Whether `c` is a C1 control, which the parser, reading UTF-8, prints.
+fn is_c1(c: char) -> bool {
+    matches!(c, '\u{80}'..='\u{9f}')
 }
 
 #[cfg(test)]
@@ -214,14 +128,14 @@ mod tests {
     }
 
     /// A control inside a sequence takes effect and the sequence reads on;
-    /// CAN cancels it, and an `ESC` starts the next.
+    /// CAN cancels it, an `ESC` starts the next, and a line break ends it.
     #[test]
     fn controls_inside_a_sequence_act() {
         assert_eq!(stripped("Ja\u{1b}[\0mne"), ("Jane".into(), 1));
-        assert_eq!(stripped("Ja\u{1b}[1\n;2mne"), ("Ja\nne".into(), 1));
         assert_eq!(stripped("Ja\u{1b}(\u{7}Bne"), ("Jane".into(), 1));
         assert_eq!(stripped("Ja\u{1b}[1\u{18}mne"), ("Jamne".into(), 1));
-        assert_eq!(stripped("Ja\u{1b}[1\u{1b}[mne"), ("Jane".into(), 2));
+        assert_eq!(stripped("Ja\u{1b}[1\u{1b}[mne"), ("Jane".into(), 1));
+        assert_eq!(stripped("Ja\u{1b}[1\n;2mne"), ("Ja\n;2mne".into(), 1));
     }
 
     #[test]
@@ -237,7 +151,7 @@ mod tests {
             stripped("before\u{1b}]0;title\u{18}after\n"),
             ("beforeafter\n".into(), 1)
         );
-        assert_eq!(stripped("\u{1b}]0;title\u{1b}[mJane"), ("Jane".into(), 2));
+        assert_eq!(stripped("\u{1b}]0;title\u{1b}[mJane"), ("Jane".into(), 1));
         // Unterminated, it ends with its line.
         assert_eq!(stripped("Jane\u{1b}]0;Roe"), ("Jane".into(), 1));
         assert_eq!(
@@ -248,13 +162,14 @@ mod tests {
 
     #[test]
     fn other_escapes_and_controls_go() {
-        // A character-set designation, a reset, a backspace, a bell, DEL.
+        // A character-set designation, a reset, a backspace, and a bell and
+        // DEL, one run.
         assert_eq!(stripped("\u{1b}(BJane"), ("Jane".into(), 1));
         assert_eq!(stripped("\u{1b}cJane"), ("Jane".into(), 1));
-        assert_eq!(stripped("Janx\u{8}e\u{7}\u{7f}"), ("Janxe".into(), 3));
+        assert_eq!(stripped("Janx\u{8}e\u{7}\u{7f}"), ("Janxe".into(), 2));
         // A lone ESC at the end, and one before a control.
         assert_eq!(stripped("Jane\u{1b}"), ("Jane".into(), 1));
-        assert_eq!(stripped("Jane\u{1b}\u{1b}[m"), ("Jane".into(), 2));
+        assert_eq!(stripped("Jane\u{1b}\u{1b}[m"), ("Jane".into(), 1));
     }
 
     /// A C1 control goes alone: a terminal reading UTF-8 starts no sequence

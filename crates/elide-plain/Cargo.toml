@@ -25,10 +25,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 ## Individual text formats.
-txt = []
-json = []
+txt = ["dep:anstream"]
+json = ["dep:anstream"]
 ## CSV cells are addressed as the `Tabular` modality.
-csv = ["elide-core/tabular", "dep:csv"]
+csv = ["elide-core/tabular", "dep:csv", "dep:anstream"]
 
 [dependencies]
 # Internal crates
@@ -37,6 +37,9 @@ elide-codec = { workspace = true, features = [] }
 
 # (De)serialization
 csv = { workspace = true, features = [], optional = true }
+
+# Text processing
+anstream = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
