@@ -12,7 +12,7 @@ mod scope;
 pub(crate) use self::matrix::Matrix;
 pub(crate) use self::name_tree::{NameTree, Node};
 pub(crate) use self::object::{
-    DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, ObjectExt, StreamExt,
+    DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, ObjectExt, StreamExt, parse_content,
 };
 pub(crate) use self::page::{
     DeviceRect, GlyphRect, PRINT_BOXES, PageBoxes, PageFrame, PageGeometry, normalize_rect,

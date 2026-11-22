@@ -41,7 +41,7 @@ fixtures = []
 ## Render pages to images via the native PDFium shared library: scanned pages
 ## for OCR, and every page under `RasterMode::Always`, each replaced by its
 ## redacted image. Requires the PDFium `.so`/`.dylib` at runtime (see
-## `scripts/install-pdfium.sh`); pulls `pdfium-render`, `rayon`, and
+## `scripts/install/pdfium.sh`); pulls `pdfium-render`, `rayon`, and
 ## `elide-image`, whose image modality a scanned page is surfaced as.
 render = ["dep:pdfium-render", "dep:rayon", "dep:elide-image", "elide-image/png"]
 

@@ -20,8 +20,8 @@ use lopdf::{Document, Object, ObjectId};
 #[cfg(doc)]
 use super::OffsetMap;
 use super::{Address, Detection, GlyphBytes, StreamTarget, TextBlock};
-use crate::pdf::reader::{DocumentExt, StreamExt};
-use crate::pdf::writer::scrub;
+use crate::pdf::reader::{DocumentExt, StreamExt, parse_content};
+use crate::pdf::writer::{encoded, scrub};
 use crate::pdf::{Edit, Pdf};
 
 /// Glyph byte ranges to delete: grouped first by the content stream object
@@ -62,11 +62,28 @@ pub(super) fn delete(
     detections: &[Detection],
 ) -> Result<()> {
     let pristine = source.doc();
-    // The codes deleted from each font's `/ToUnicode`, and those surviving
-    // text still draws: a code is scrubbed only if no surviving glyph
-    // anywhere uses it, as fonts and their CMaps are shared and the same code
-    // recurs in text that stays. Fonts without a `/ToUnicode` contribute
-    // nothing (there is no code-to-Unicode table to leak).
+    let to_delete = deletions(pristine, blocks, detections)?;
+    let (deleted, surviving) = codes(pristine, blocks, &to_delete)?;
+    let doc = edit.doc_mut();
+    rewrite(pristine, doc, &to_delete)?;
+    // The deleted codes are scrubbed from each font's `/ToUnicode` CMap,
+    // sparing any code surviving text still draws, so the removed text can't
+    // be recovered through the code-to-Unicode table.
+    scrub(doc, &deleted, &surviving)
+}
+
+/// The glyphs of `blocks`, read from `pristine`, that `detections` delete,
+/// by the content stream each is drawn in.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) as
+/// [`Streams::of`].
+fn deletions(
+    pristine: &Document,
+    blocks: &[TextBlock],
+    detections: &[Detection],
+) -> Result<Deletions> {
     let mut to_delete = Deletions::new();
     for block in blocks {
         let mut stream = Streams::new(pristine, block.page_id);
@@ -81,9 +98,27 @@ pub(super) fn delete(
             }
         }
     }
-    // A glyph is deleted whole, wherever it is drawn: one drawing a ligature
-    // some of whose characters are detected is gone, and so is one in a form
-    // another page's detection deletes from, so its code survives in no text.
+    Ok(to_delete)
+}
+
+/// The codes each font's glyphs in `blocks` draw, split into those
+/// `to_delete` deletes and those surviving text still draws. A code is
+/// scrubbed only if no surviving glyph anywhere uses it, as fonts and their
+/// CMaps are shared and the same code recurs in text that stays; a font
+/// without a `/ToUnicode` contributes nothing, having no code-to-Unicode
+/// table to leak. A glyph is deleted whole, wherever it is drawn: one drawing
+/// a ligature some of whose characters are detected is gone, and so is one
+/// in a form another page's detection deletes from, so its code survives in
+/// no text.
+///
+/// # Errors
+///
+/// As [`Streams::of`] and [`record_code`].
+fn codes(
+    pristine: &Document,
+    blocks: &[TextBlock],
+    to_delete: &Deletions,
+) -> Result<(Codes, Codes)> {
     let deleted: BTreeSet<(ObjectId, Address, usize, usize)> = to_delete
         .iter()
         .flat_map(|(&stream, sites)| {
@@ -113,9 +148,20 @@ pub(super) fn delete(
             record_code(block, &glyph, codes)?;
         }
     }
+    Ok((deleted_codes, surviving_codes))
+}
 
-    let doc = edit.doc_mut();
-    for (id, sites) in &to_delete {
+/// Write each stream of `to_delete` in `doc` once, from its `pristine`
+/// bytes, with every deletion in it.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a stream
+/// changed since it was read; as [`apply_deletions`]; and
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// one can't be decoded or encoded.
+fn rewrite(pristine: &Document, doc: &mut Document, to_delete: &Deletions) -> Result<()> {
+    for (id, sites) in to_delete {
         let bytes = stream_content(pristine, *id)?;
         if stream_content(doc, *id)? != bytes {
             return Err(Error::redaction(format!(
@@ -123,19 +169,12 @@ pub(super) fn delete(
                  cannot be located"
             )));
         }
-        let mut content = Content::decode(&bytes)
-            .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
+        let mut content = parse_content(&bytes)?;
         apply_deletions(&mut content, sites)?;
-        let new_content = content
-            .encode()
-            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
+        let new_content = encoded(&content)?;
         doc.set_stream_content(*id, new_content)?;
     }
-
-    // Scrub the deleted codes from each affected font's `/ToUnicode` CMap
-    // (sparing any code still used by surviving text), so the removed text
-    // can't be recovered through the code-to-Unicode table.
-    scrub(doc, &deleted_codes, &surviving_codes)
+    Ok(())
 }
 
 /// The content stream each glyph of one page is drawn in: the page's one
@@ -251,55 +290,16 @@ fn apply_deletions(
     // drained, in one pass however many lost glyphs.
     let mut edges: BTreeMap<(usize, usize), Edges> = BTreeMap::new();
     for (address, ranges) in sites {
-        let Address {
-            op, operand, item, ..
-        } = *address;
-        let bytes = content
-            .operations
-            .get_mut(op)
-            .and_then(|op| match (op.operands.get_mut(operand)?, item) {
-                (Object::String(bytes, _), None) => Some(bytes),
-                (Object::Array(items), Some(k)) => match items.get_mut(k)? {
-                    Object::String(bytes, _) => Some(bytes),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .ok_or_else(|| missing_glyph(address))?;
-        // The same glyph range can be collected more than once (a ligature
-        // whose one code spans several detected characters, or overlapping
-        // detections). Merge overlapping/adjacent ranges so each byte span
-        // is drained exactly once, draining a span twice would corrupt the
-        // string by consuming later, still-valid bytes.
-        let mut merged: Vec<(usize, usize)> = ranges.clone();
-        merged.sort_unstable();
-        merged.dedup();
-        let mut coalesced: Vec<(usize, usize)> = Vec::with_capacity(merged.len());
-        for (s, e) in merged {
-            match coalesced.last_mut() {
-                Some(last) if s <= last.1 => last.1 = last.1.max(e),
-                _ => coalesced.push((s, e)),
-            }
-        }
-        let len = bytes.len();
-        if coalesced.last().is_some_and(|&(_, end)| end > len) {
-            return Err(missing_glyph(address));
-        }
-        let lost_first = coalesced.first().is_some_and(|&(start, _)| start == 0);
-        let lost_last = coalesced.last().is_some_and(|&(_, end)| end == len);
-        // Drain high-to-low so earlier offsets stay valid.
-        for &(s, e) in coalesced.iter().rev() {
-            bytes.drain(s..e);
-        }
-
-        if let Some(k) = item {
-            let lost = edges
-                .entry((op, operand))
+        let bytes = string_at(content, address).ok_or_else(|| missing_glyph(address))?;
+        let lost = drain(bytes, ranges).ok_or_else(|| missing_glyph(address))?;
+        if let Some(k) = address.item {
+            let edge = edges
+                .entry((address.op, address.operand))
                 .or_default()
                 .entry(k)
                 .or_default();
-            lost.first |= lost_first;
-            lost.last |= lost_last;
+            edge.first |= lost.first;
+            edge.last |= lost.last;
         }
     }
     for ((op, operand), edges) in &edges {
@@ -308,6 +308,55 @@ fn apply_deletions(
         }
     }
     Ok(())
+}
+
+/// The bytes of the string `address` names in `content`: an operand, or an
+/// element of a `TJ` array; `None` when it names no string.
+fn string_at<'c>(content: &'c mut Content, address: &Address) -> Option<&'c mut Vec<u8>> {
+    let operand = content
+        .operations
+        .get_mut(address.op)?
+        .operands
+        .get_mut(address.operand)?;
+    match (operand, address.item) {
+        (Object::String(bytes, _), None) => Some(bytes),
+        (Object::Array(items), Some(k)) => match items.get_mut(k)? {
+            Object::String(bytes, _) => Some(bytes),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Drain the byte `ranges` from `bytes`, high to low so earlier offsets stay
+/// valid, returning which of its ends it lost; `None` when a range is past
+/// its end. The same glyph range can be collected more than once (a ligature
+/// whose one code spans several detected characters, or overlapping
+/// detections), so overlapping and adjacent ranges are merged first: each
+/// span is drained exactly once, as draining one twice would consume later,
+/// still-valid bytes.
+fn drain(bytes: &mut Vec<u8>, ranges: &[(usize, usize)]) -> Option<Lost> {
+    let mut merged = ranges.to_vec();
+    merged.sort_unstable();
+    let mut coalesced: Vec<(usize, usize)> = Vec::with_capacity(merged.len());
+    for (start, end) in merged {
+        match coalesced.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => coalesced.push((start, end)),
+        }
+    }
+    let len = bytes.len();
+    if coalesced.last().is_some_and(|&(_, end)| end > len) {
+        return None;
+    }
+    let lost = Lost {
+        first: coalesced.first().is_some_and(|&(start, _)| start == 0),
+        last: coalesced.last().is_some_and(|&(_, end)| end == len),
+    };
+    for &(start, end) in coalesced.iter().rev() {
+        bytes.drain(start..end);
+    }
+    Some(lost)
 }
 
 /// What a `TJ` string lost: its first glyph, its last, or both.
@@ -332,35 +381,28 @@ type Edges = BTreeMap<usize, Lost>;
 /// an element would invalidate those indices. A zero adjustment draws nothing
 /// and carries no position information.
 fn zero_kerns(items: &mut [Object], edges: &Edges) {
-    let zero = |item: &mut Object| match item {
-        Object::Real(_) => *item = Object::Real(0.0),
-        Object::Integer(_) => *item = Object::Integer(0),
-        _ => {}
-    };
-    // Whether the string at `index` drew a glyph before any deletion: a
-    // string that lost one did.
-    let drew = |index: usize, item: &Object| {
-        edges.contains_key(&index) || matches!(item, Object::String(bytes, _) if !bytes.is_empty())
-    };
+    zero_beyond(items.iter_mut().enumerate(), edges, |lost| lost.last);
+    zero_beyond(items.iter_mut().enumerate().rev(), edges, |lost| lost.first);
+}
+
+/// One pass of [`zero_kerns`] over `items` in the order given: the numbers
+/// following a string whose glyph at the `end` facing them was deleted are
+/// zeroed, up to the next string that drew a glyph before any deletion.
+fn zero_beyond<'a>(
+    items: impl Iterator<Item = (usize, &'a mut Object)>,
+    edges: &Edges,
+    end: impl Fn(&Lost) -> bool,
+) {
     let mut zeroing = false;
-    for (index, item) in items.iter_mut().enumerate() {
+    for (index, item) in items {
         match item {
-            Object::Integer(_) | Object::Real(_) if zeroing => zero(item),
+            Object::Integer(_) if zeroing => *item = Object::Integer(0),
+            Object::Real(_) if zeroing => *item = Object::Real(0.0),
             Object::Integer(_) | Object::Real(_) => {}
-            Object::String(..) if drew(index, item) => {
-                zeroing = edges.get(&index).is_some_and(|lost| lost.last);
-            }
-            Object::String(..) => {}
-            _ => zeroing = false,
-        }
-    }
-    zeroing = false;
-    for (index, item) in items.iter_mut().enumerate().rev() {
-        match item {
-            Object::Integer(_) | Object::Real(_) if zeroing => zero(item),
-            Object::Integer(_) | Object::Real(_) => {}
-            Object::String(..) if drew(index, item) => {
-                zeroing = edges.get(&index).is_some_and(|lost| lost.first);
+            // A string drew a glyph before any deletion if it lost one or
+            // still has bytes.
+            Object::String(bytes, _) if edges.contains_key(&index) || !bytes.is_empty() => {
+                zeroing = edges.get(&index).is_some_and(&end);
             }
             Object::String(..) => {}
             _ => zeroing = false,

@@ -1,5 +1,7 @@
-//! Synthetic font programs: an sfnt and a bare CFF program holding only what
-//! a reader takes advance widths and glyph names from.
+//! Synthetic font programs: an sfnt, a bare CFF and a Type 1 program holding
+//! only what a reader takes advance widths and glyph names from, every glyph
+//! empty, laid out whole enough that FreeType loads them as a renderer
+//! would.
 
 use lopdf::{Dictionary, Document, Stream, dictionary};
 
@@ -52,8 +54,13 @@ impl Sfnt {
         let mut hhea = vec![0; 36];
         hhea[0..4].copy_from_slice(&0x0001_0000_u32.to_be_bytes());
         hhea[34..36].copy_from_slice(&count.to_be_bytes());
-        let mut maxp = 0x0000_5000_u32.to_be_bytes().to_vec();
+        // Version 1.0, as a font of `glyf` outlines has: one zone, and no
+        // glyph with points.
+        let mut maxp = 0x0001_0000_u32.to_be_bytes().to_vec();
         maxp.extend(count.to_be_bytes());
+        maxp.extend([0; 8]);
+        maxp.extend(1_u16.to_be_bytes());
+        maxp.extend([0; 16]);
         let hmtx: Vec<u8> = self
             .glyphs
             .iter()
@@ -94,11 +101,16 @@ impl Sfnt {
             post.extend(name.as_bytes());
         }
 
-        let tables: [(&[u8; 4], Vec<u8>); 6] = [
+        // Every glyph is empty: `loca` gives each no outline in `glyf`.
+        let loca = vec![0; 2 * (usize::from(count) + 1)];
+        let glyf = vec![0; 4];
+        let tables: [(&[u8; 4], Vec<u8>); 8] = [
             (b"cmap", cmap),
+            (b"glyf", glyf),
             (b"head", head),
             (b"hhea", hhea),
             (b"hmtx", hmtx),
+            (b"loca", loca),
             (b"maxp", maxp),
             (b"post", post),
         ];
@@ -238,20 +250,26 @@ impl Type1 {
     }
 
     /// The program's bytes: its font dictionary in the clear, its private
-    /// dictionary eexec-encrypted as hex, and its charstrings unencrypted.
+    /// dictionary eexec-encrypted as hex, its charstrings unencrypted, and
+    /// the trailer of zeros.
     pub(crate) fn build(&self) -> Vec<u8> {
         let mut base = String::from(
-            "%!PS-AdobeFont-1.0: Test\n/FontName /Test def \
-             /FontMatrix [0.001 0 0 0.001 0 0] readonly def\n\
+            "%!PS-AdobeFont-1.0: Test\n12 dict begin\n/FontType 1 def /PaintType 0 def\n\
+             /FontName /Test def /FontMatrix [0.001 0 0 0.001 0 0] readonly def\n\
+             /FontBBox {0 0 1000 1000} readonly def\n\
              /Encoding 256 array 0 1 255 {1 index exch /.notdef put} for\n",
         );
         for (code, name) in &self.codes {
             base.push_str(&format!("dup {code} /{name} put\n"));
         }
-        base.push_str("readonly def\ncurrentfile eexec\n");
+        base.push_str("readonly def\ncurrentdict end\ncurrentfile eexec\n");
 
         let mut private = format!(
-            "/lenIV -1 def /CharStrings {} dict dup begin\n",
+            "dup /Private 8 dict dup begin\n\
+             /RD {{string currentfile exch readstring pop}} executeonly def\n\
+             /ND {{noaccess def}} executeonly def\n/NP {{noaccess put}} executeonly def\n\
+             /lenIV -1 def /BlueValues [] def /password 5839 def\n/Subrs 0 array ND\n\
+             2 index /CharStrings {} dict dup begin\n",
             self.glyphs.len()
         )
         .into_bytes();
@@ -264,7 +282,10 @@ impl Type1 {
             private.extend(charstring);
             private.extend(b" ND\n");
         }
-        private.extend(b"end");
+        private.extend(
+            b"end\nend\nreadonly put\nnoaccess put\n\
+              dup /FontName get exch definefont pop\nmark currentfile closefile\n",
+        );
 
         let mut out = base.into_bytes();
         let mut key: u32 = 55665;
@@ -276,8 +297,59 @@ impl Type1 {
                 & 0xFFFF;
             out.extend(format!("{cipher:02x}").as_bytes());
         }
+        out.extend(TYPE1_TRAILER.as_bytes());
         out
     }
+}
+
+/// What follows a Type 1 program's encrypted part: 512 zeros, and
+/// `cleartomark`.
+const TYPE1_TRAILER: &str = concat!(
+    "\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "0000000000000000000000000000000000000000000000000000000000000000\n",
+    "cleartomark\n",
+);
+
+/// The lengths of the three parts of the Type 1 program `program`: in the
+/// clear up to `eexec`, encrypted, and the trailer.
+fn type1_lengths(program: &[u8]) -> Option<[usize; 3]> {
+    let marker = b"eexec\n";
+    let clear = program.windows(marker.len()).position(|w| w == marker)? + marker.len();
+    let trailer = TYPE1_TRAILER.len();
+    let encrypted = program.len().checked_sub(clear + trailer)?;
+    program
+        .ends_with(TYPE1_TRAILER.as_bytes())
+        .then_some([clear, encrypted, trailer])
+}
+
+/// The Type 1 program a PFB file holds, its segments joined, and the
+/// lengths of its clear, encrypted and trailing parts.
+fn pfb(file: &[u8]) -> (Vec<u8>, [usize; 3]) {
+    let mut program = Vec::new();
+    let mut lengths = [0; 3];
+    let mut at = 0;
+    let mut part = 0;
+    while let [0x80, kind @ (1 | 2), a, b, c, d, ..] = file[at..] {
+        let len = u32::from_le_bytes([a, b, c, d]) as usize;
+        let segment = &file[at + 6..at + 6 + len];
+        // ASCII and binary segments alternate: clear, encrypted, trailer.
+        if kind == 2 {
+            part = 1;
+        } else if part == 1 {
+            part = 2;
+        }
+        lengths[part] += len;
+        program.extend(segment);
+        at += 6 + len;
+    }
+    (program, lengths)
 }
 
 /// A Type 1 charstring number.
@@ -337,6 +409,9 @@ pub(crate) enum FontFile {
     OpenType,
     /// `/FontFile3` of subtype `Type1C`: a bare CFF program.
     Cff,
+    /// `/FontFile3` of subtype `CIDFontType0C`: a bare CID-keyed CFF program.
+    #[cfg(feature = "render")]
+    CidCff,
     /// `/FontFile`: a Type 1 program.
     Type1,
 }
@@ -345,16 +420,19 @@ impl FontFile {
     /// The descriptor key the program is under, and its stream's subtype.
     fn key(self) -> (&'static str, Option<&'static str>) {
         match self {
-            FontFile::TrueType => ("FontFile2", None),
-            FontFile::OpenType => ("FontFile3", Some("OpenType")),
-            FontFile::Cff => ("FontFile3", Some("Type1C")),
-            FontFile::Type1 => ("FontFile", None),
+            Self::TrueType => ("FontFile2", None),
+            Self::OpenType => ("FontFile3", Some("OpenType")),
+            Self::Cff => ("FontFile3", Some("Type1C")),
+            #[cfg(feature = "render")]
+            Self::CidCff => ("FontFile3", Some("CIDFontType0C")),
+            Self::Type1 => ("FontFile", None),
         }
     }
 }
 
-/// A simple font of `subtype` whose descriptor, flagged `flags`, embeds
-/// `program` in `doc` as `file`.
+/// A font of `subtype` whose descriptor, flagged `flags`, embeds
+/// `program` in `doc` as `file`. A Type 1 program, as built here or from a
+/// PFB file's segments, is given the lengths of its three parts.
 pub(crate) fn embedding(
     doc: &mut Document,
     subtype: &str,
@@ -366,6 +444,23 @@ pub(crate) fn embedding(
     let mut dict = Dictionary::new();
     if let Some(kind) = kind {
         dict.set("Subtype", kind);
+    }
+    let (program, lengths) = match file {
+        FontFile::Type1 if program.first() == Some(&0x80) => {
+            let (program, lengths) = pfb(&program);
+            (program, Some(lengths))
+        }
+        FontFile::Type1 => {
+            let lengths = type1_lengths(&program);
+            (program, lengths)
+        }
+        _ => (program, None),
+    };
+    for (key, length) in ["Length1", "Length2", "Length3"]
+        .into_iter()
+        .zip(lengths.into_iter().flatten())
+    {
+        dict.set(key, length as i64);
     }
     let program = doc.add_object(Stream::new(dict, program));
     let mut descriptor = dictionary! {

@@ -285,14 +285,11 @@ fn embeds_files(doc: &Document, object: &Object, depth: usize) -> bool {
         return false;
     }
     let embeds = |dict: &Dictionary| {
-        dict.get(b"EF")
-            .ok()
-            .and_then(|files| doc.resolve_dict(files))
-            .is_some_and(|files| {
-                files
-                    .iter()
-                    .any(|(_, file)| matches!(doc.resolve(file), Some(Object::Stream(_))))
-            })
+        dict.resolved_dict(doc, b"EF").is_some_and(|files| {
+            files
+                .iter()
+                .any(|(_, file)| matches!(doc.resolve(file), Some(Object::Stream(_))))
+        })
     };
     // A stream's dictionary holds values (an image's `/AF`) as any other.
     let holds = |dict: &Dictionary| {
@@ -464,9 +461,7 @@ mod tests {
         let mut doc = doc.clone();
         doc.encrypt(&state).unwrap();
         let id = doc.trailer.get(b"Encrypt").unwrap().as_reference().unwrap();
-        doc.get_dictionary_mut(id)
-            .unwrap()
-            .set("Note", Object::Name(b"endobj".to_vec()));
+        doc.get_dictionary_mut(id).unwrap().set("Note", "endobj");
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes).unwrap();
         let error = Pdf::open(&bytes).expect_err("an undecrypted PDF");

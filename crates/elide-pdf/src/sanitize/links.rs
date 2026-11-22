@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Document, Object};
+use lopdf::{Dictionary, Document, Object, dictionary};
 
 use super::copy::At;
 use super::keys::Kind;
@@ -26,11 +26,7 @@ impl<'a> Builder<'a> {
             self.record(record::annotation(self.source, dict));
             return Ok(None);
         };
-        let mut link = Dictionary::from_iter([
-            ("Type", Object::Name(b"Annot".to_vec())),
-            ("Subtype", Object::Name(b"Link".to_vec())),
-            ("Dest", dest),
-        ]);
+        let mut link = dictionary! { "Type" => "Annot", "Subtype" => "Link", "Dest" => dest };
         let scope = Scope::default();
         let fields: [(&[u8], Kind); 7] = [
             (b"Rect", Kind::Value),
@@ -77,14 +73,10 @@ impl<'a> Builder<'a> {
         if !dict.is_subtype(source, b"Link") {
             return None;
         }
-        let target = match dict.get(b"A").ok().and_then(|a| source.resolve_dict(a)) {
+        let target = match dict.resolved_dict(source, b"A") {
             Some(action) => {
-                let go_to = action
-                    .get(b"S")
-                    .ok()
-                    .and_then(|s| source.resolve(s))
-                    .and_then(|s| s.as_name().ok())
-                    == Some(b"GoTo");
+                let go_to =
+                    action.resolved(source, b"S").and_then(|s| s.as_name().ok()) == Some(b"GoTo");
                 if !go_to || action.get(b"Next").is_ok() {
                     return None;
                 }
@@ -134,9 +126,7 @@ impl<'a> Builder<'a> {
         source
             .catalog()
             .ok()?
-            .get(b"Dests")
-            .ok()
-            .and_then(|d| source.resolve_dict(d))?
+            .resolved_dict(source, b"Dests")?
             .get(name)
             .ok()
     }

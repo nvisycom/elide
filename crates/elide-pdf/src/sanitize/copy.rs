@@ -8,8 +8,9 @@ use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Dictionary, Object, ObjectId, Stream};
 
 use super::keys::{self, FORM, Kind, SHADING_PATTERN, STREAM, TILING, TO_UNICODE};
-use super::{Builder, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST};
+use super::{Builder, CopyKey, MAX_COPIED_BYTES, MAX_NESTING, ScopedCopy, VALUE_COST};
 use crate::content::image;
+use crate::pdf::reader::font::SymbolText;
 use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt, Scope, StreamExt};
 use crate::pdf::writer::{UnicodeMap, compressed};
 
@@ -61,6 +62,10 @@ impl<'c, 's> At<'c, 's> {
         }
     }
 }
+
+/// The entries of a stream a copy that re-encodes its data writes afresh:
+/// how the data was encoded, and its decoded length.
+pub(super) const REENCODED: [&[u8]; 3] = [b"Filter", b"DecodeParms", b"DL"];
 
 impl<'a> Builder<'a> {
     /// `value` copied as `kind` at `at`, its names resolved in its scope
@@ -161,16 +166,7 @@ impl<'a> Builder<'a> {
         let drawn_in = at.scope.dictionaries();
         // A form's copy also depends on whether its caller's font is lost.
         let key = (target, kind, kind == Kind::Form && at.no_font);
-        let scopes = &self.scopes;
-        let fits = |(index, _): &&ScopedCopy| {
-            index.is_none_or(|index| scopes[index].iter().eq(drawn_in.iter().copied()))
-        };
-        if let Some(&(index, copy)) = self
-            .copies
-            .get(&key)
-            .and_then(|copies| copies.iter().find(fits))
-        {
-            self.scoped |= index.is_some();
+        if let Some(copy) = self.copied(key, drawn_in) {
             return Ok(Some(Object::Reference(copy)));
         }
         // The copy's id is taken first, so an object that refers back to
@@ -184,26 +180,42 @@ impl<'a> Builder<'a> {
         let scoped = borrows || self.scoped;
         self.scoped = outer || scoped;
         if scoped && index.is_none() {
-            let index = self.scope_index(drawn_in);
-            if let Some(entry) = self
-                .copies
-                .get_mut(&key)
-                .and_then(|copies| copies.iter_mut().find(|(_, id)| *id == copy))
-            {
-                entry.0 = Some(index);
-            }
+            self.scope_copy(key, copy, drawn_in);
         }
-        match copied {
-            Some(object) => {
-                self.out.objects.insert(copy, object);
-                Ok(Some(Object::Reference(copy)))
+        if let Some(object) = copied {
+            self.out.objects.insert(copy, object);
+            Ok(Some(Object::Reference(copy)))
+        } else {
+            if let Some(copies) = self.copies.get_mut(&key) {
+                copies.retain(|(_, id)| *id != copy);
             }
-            None => {
-                if let Some(copies) = self.copies.get_mut(&key) {
-                    copies.retain(|(_, id)| *id != copy);
-                }
-                Ok(None)
-            }
+            Ok(None)
+        }
+    }
+
+    /// The copy already made of the object `key` names that fits the scope
+    /// `drawn_in`: one copied once, or one copied for that scope. Using a
+    /// scoped copy makes what holds it scoped too.
+    fn copied(&mut self, key: CopyKey, drawn_in: &[&Dictionary]) -> Option<ObjectId> {
+        let scopes = &self.scopes;
+        let fits = |(index, _): &&ScopedCopy| {
+            index.is_none_or(|index| scopes[index].iter().eq(drawn_in.iter().copied()))
+        };
+        let &(index, copy) = self.copies.get(&key)?.iter().find(fits)?;
+        self.scoped |= index.is_some();
+        Some(copy)
+    }
+
+    /// Mark `copy`, made of the object `key` names, as the copy for the
+    /// scope `drawn_in`: what it holds turned out to resolve names there.
+    fn scope_copy(&mut self, key: CopyKey, copy: ObjectId, drawn_in: &[&Dictionary]) {
+        let index = self.scope_index(drawn_in);
+        if let Some(entry) = self
+            .copies
+            .get_mut(&key)
+            .and_then(|copies| copies.iter_mut().find(|(_, id)| *id == copy))
+        {
+            entry.0 = Some(index);
         }
     }
 
@@ -257,7 +269,9 @@ impl<'a> Builder<'a> {
             (Kind::Form, Object::Stream(stream)) => self.form(stream, FORM, at),
             (Kind::Pattern, _) => self.pattern(value, at),
             (Kind::FileSpec, Object::Dictionary(dict)) => self.file_spec(dict),
-            (Kind::ToUnicode, Object::Stream(stream)) => self.unicode_map(stream, at),
+            (Kind::ToUnicode(symbol), Object::Stream(stream)) => {
+                self.unicode_map(stream, symbol, at)
+            }
             (Kind::Image | Kind::Mask, Object::Stream(stream))
                 if !image::is_surfaceable(self.source, stream) =>
             {
@@ -267,7 +281,7 @@ impl<'a> Builder<'a> {
             (Kind::Image | Kind::Mask, Object::Stream(stream)) => self.image(kind, id, stream, at),
             (Kind::Map(inner), Object::Dictionary(dict)) => {
                 let mut out = Dictionary::new();
-                for (key, value) in dict.iter() {
+                for (key, value) in dict {
                     if let Some(value) = self.copy(*inner, value, at.deeper())? {
                         out.set(key.clone(), value);
                     }
@@ -285,13 +299,14 @@ impl<'a> Builder<'a> {
                     at,
                 )?)))
             }
-            _ => match keys::fields(kind) {
-                Some(fields) => self.table(value, fields, at),
-                None => {
+            _ => {
+                if let Some(fields) = keys::fields(kind) {
+                    self.table(value, fields, at)
+                } else {
                     self.residue += 1;
                     Ok(None)
                 }
-            },
+            }
         }
     }
 
@@ -359,12 +374,7 @@ impl<'a> Builder<'a> {
                     }
                 };
                 self.charge(data.len())?;
-                let dict = self.stream_keys(
-                    &stream.dict,
-                    fields,
-                    &[b"Filter", b"DecodeParms", b"DL"],
-                    at,
-                )?;
+                let dict = self.stream_keys(&stream.dict, fields, &REENCODED, at)?;
                 Object::Stream(compressed(dict, data)?)
             }
             _ => return Ok(None),
@@ -376,9 +386,7 @@ impl<'a> Builder<'a> {
     pub(super) fn external(&self, dict: &Dictionary) -> bool {
         let source = self.source;
         let crypt = dict
-            .get(b"Filter")
-            .ok()
-            .and_then(|filter| source.resolve(filter))
+            .resolved(source, b"Filter")
             .is_some_and(|filter| match filter {
                 Object::Name(name) => name == b"Crypt",
                 Object::Array(names) => names.iter().any(|name| {
@@ -402,7 +410,7 @@ impl<'a> Builder<'a> {
         'a: 's,
     {
         let mut out = Dictionary::new();
-        for (key, value) in dict.iter() {
+        for (key, value) in dict {
             if handled.contains(&key.as_slice()) {
                 continue;
             }
@@ -466,8 +474,9 @@ impl<'a> Builder<'a> {
 
     /// A `/ToUnicode` CMap `stream` written anew from what lopdf, which
     /// detection decodes text with, reads of it, its destinations written as
-    /// the text detection reads; dropped as unreadable when lopdf can't read
-    /// it, so a viewer reads no text detection did not.
+    /// the text detection reads in a font whose symbol range reads as
+    /// `symbol` says; dropped as unreadable when lopdf can't read it, so a
+    /// viewer reads no text detection did not.
     ///
     /// # Errors
     ///
@@ -475,7 +484,12 @@ impl<'a> Builder<'a> {
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the CMaps written across the document take more than
     /// [`MAX_CONTENT_BYTES`](crate::pdf::reader::MAX_CONTENT_BYTES).
-    fn unicode_map<'s>(&mut self, stream: &'s Stream, at: At<'_, 's>) -> Result<Option<Object>>
+    fn unicode_map<'s>(
+        &mut self,
+        stream: &'s Stream,
+        symbol: SymbolText,
+        at: At<'_, 's>,
+    ) -> Result<Option<Object>>
     where
         'a: 's,
     {
@@ -483,17 +497,12 @@ impl<'a> Builder<'a> {
             self.record(HiddenContent::Unreadable);
             return Ok(None);
         };
-        let content = map.readable()?.write();
+        let content = map.readable(symbol)?.write();
         self.cmap_budget = self
             .cmap_budget
             .checked_sub(content.len())
             .ok_or_else(|| Error::resource_limit("the /ToUnicode CMaps pass their size limit"))?;
-        let dict = self.stream_keys(
-            &stream.dict,
-            TO_UNICODE,
-            &[b"Filter", b"DecodeParms", b"DL"],
-            at,
-        )?;
+        let dict = self.stream_keys(&stream.dict, TO_UNICODE, &REENCODED, at)?;
         Ok(Some(Object::Stream(compressed(dict, content)?)))
     }
 

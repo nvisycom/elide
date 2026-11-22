@@ -2,6 +2,7 @@
 //! crate's modules share, as methods on the types they read.
 
 use elide_core::{Error, Result};
+use lopdf::content::Content;
 use lopdf::{
     DecompressError, Dictionary, Document, Error as PdfError, Object, ObjectId, Stream,
     decode_text_string,
@@ -14,6 +15,16 @@ pub(crate) const MAX_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 
 /// How far a `/Parent` inheritance walk goes, against a cyclic page tree.
 const MAX_PARENT_WALK: u32 = 64;
+
+/// The operations of the content stream `bytes`.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// they cannot be decoded.
+pub(crate) fn parse_content(bytes: &[u8]) -> Result<Content> {
+    Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))
+}
 
 /// Reads and writes over a whole [`Document`].
 pub(crate) trait DocumentExt {
@@ -244,6 +255,26 @@ const FILE_KEYS: [&[u8]; 5] = [b"UF", b"F", b"DOS", b"Mac", b"Unix"];
 
 /// Reads and writes of one [`Dictionary`].
 pub(crate) trait DictionaryExt {
+    /// The value the dictionary holds under `key`, following a reference
+    /// into `doc`.
+    fn resolved<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a Object>;
+
+    /// The dictionary the dictionary holds under `key`, following a
+    /// reference into `doc`.
+    fn resolved_dict<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a Dictionary>;
+
+    /// The array the dictionary holds under `key`, following a reference
+    /// into `doc`.
+    fn resolved_array<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a Vec<Object>>;
+
+    /// The number the dictionary holds under `key`, following a reference
+    /// into `doc`.
+    fn resolved_number(&self, doc: &Document, key: &[u8]) -> Option<f64>;
+
+    /// The `N` numbers the dictionary holds under `key` (a rectangle, a
+    /// matrix), following references into `doc`.
+    fn resolved_numbers<const N: usize>(&self, doc: &Document, key: &[u8]) -> Option<[f64; N]>;
+
     /// The name the dictionary holds under `key`, following a reference
     /// into `doc`.
     fn name<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a [u8]>;
@@ -267,8 +298,28 @@ pub(crate) trait DictionaryExt {
 }
 
 impl DictionaryExt for Dictionary {
+    fn resolved<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a Object> {
+        doc.resolve(self.get(key).ok()?)
+    }
+
+    fn resolved_dict<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a Dictionary> {
+        doc.resolve_dict(self.get(key).ok()?)
+    }
+
+    fn resolved_array<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a Vec<Object>> {
+        doc.resolve_array(self.get(key).ok()?)
+    }
+
+    fn resolved_number(&self, doc: &Document, key: &[u8]) -> Option<f64> {
+        doc.resolve_number(self.get(key).ok()?)
+    }
+
+    fn resolved_numbers<const N: usize>(&self, doc: &Document, key: &[u8]) -> Option<[f64; N]> {
+        doc.resolve_numbers(self.get(key).ok()?)
+    }
+
     fn name<'a>(&'a self, doc: &'a Document, key: &[u8]) -> Option<&'a [u8]> {
-        let value = doc.resolve(self.get(key).ok()?)?;
+        let value = self.resolved(doc, key)?;
         value.as_name().ok()
     }
 
@@ -282,13 +333,13 @@ impl DictionaryExt for Dictionary {
 
     fn file_name(&self, doc: &Document) -> Option<String> {
         FILE_KEYS.iter().find_map(|key| {
-            let name = doc.resolve(self.get(key).ok()?)?;
+            let name = self.resolved(doc, key)?;
             decode_text_string(name).ok()
         })
     }
 
     fn embedded_file(&self, doc: &Document) -> Option<(ObjectId, Option<String>)> {
-        let files = doc.resolve_dict(self.get(b"EF").ok()?)?;
+        let files = self.resolved_dict(doc, b"EF")?;
         // The stream is named by the object its reference chain ends at, so
         // two references to one stream name it alike.
         let (key, stream) = FILE_KEYS.iter().find_map(|&key| {
@@ -305,7 +356,7 @@ impl DictionaryExt for Dictionary {
             key => &[key],
         };
         let named = names.iter().find_map(|key| {
-            let name = doc.resolve(self.get(key).ok()?)?;
+            let name = self.resolved(doc, key)?;
             decode_text_string(name).ok()
         });
         Some((stream, named.or_else(|| self.file_name(doc))))

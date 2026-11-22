@@ -149,6 +149,37 @@ impl<'a> Tokens<'a> {
         Self { data, at: 0 }
     }
 
+    /// Move past whitespace.
+    fn skip_whitespace(&mut self) {
+        while self.data.get(self.at).is_some_and(u8::is_ascii_whitespace) {
+            self.at += 1;
+        }
+    }
+
+    /// Move past the array whose `[` was just read. Its contents are tokens
+    /// too, so a `]` in a comment or a string inside it does not end it;
+    /// nested arrays are counted rather than recursed into.
+    fn past_array(&mut self) {
+        let mut depth = 1usize;
+        while depth > 0 {
+            self.skip_whitespace();
+            match self.data.get(self.at) {
+                None => break,
+                Some(b']') => {
+                    depth -= 1;
+                    self.at += 1;
+                }
+                Some(b'[') => {
+                    depth += 1;
+                    self.at += 1;
+                }
+                Some(_) => {
+                    self.next();
+                }
+            }
+        }
+    }
+
     /// The index past the literal string opening at `start`: its balancing
     /// `)`, past escaped bytes and nested parentheses.
     fn past_string(&self, start: usize) -> usize {
@@ -177,9 +208,7 @@ impl<'a> Iterator for Tokens<'a> {
 
     fn next(&mut self) -> Option<Token<'a>> {
         let data = self.data;
-        while self.at < data.len() && data[self.at].is_ascii_whitespace() {
-            self.at += 1;
-        }
+        self.skip_whitespace();
         let start = self.at;
         let byte = *data.get(start)?;
         Some(match byte {
@@ -198,30 +227,8 @@ impl<'a> Iterator for Tokens<'a> {
                 Token::Other
             }
             b'[' => {
-                // The array's contents are tokens too, so a `]` in a comment
-                // or a string inside it does not end it. Nested arrays are
-                // counted rather than recursed into.
                 self.at += 1;
-                let mut depth = 1usize;
-                while depth > 0 {
-                    while self.at < data.len() && data[self.at].is_ascii_whitespace() {
-                        self.at += 1;
-                    }
-                    match data.get(self.at) {
-                        None => break,
-                        Some(b']') => {
-                            depth -= 1;
-                            self.at += 1;
-                        }
-                        Some(b'[') => {
-                            depth += 1;
-                            self.at += 1;
-                        }
-                        Some(_) => {
-                            self.next();
-                        }
-                    }
-                }
+                self.past_array();
                 Token::Array
             }
             b'<' => {

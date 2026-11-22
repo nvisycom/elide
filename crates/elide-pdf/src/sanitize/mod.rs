@@ -56,7 +56,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use elide_codec::StrippedContent;
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, dictionary};
 
 pub(crate) use self::check::Check;
 use self::copy::At;
@@ -64,7 +64,7 @@ use self::files::Files;
 use self::keys::Kind;
 use self::layers::Layers;
 use self::links::destinations;
-use crate::pdf::reader::{DocumentExt, MAX_CONTENT_BYTES, ObjectExt, Scope};
+use crate::pdf::reader::{DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, ObjectExt, Scope};
 use crate::pdf::{Edit, Pdf, Read};
 
 /// How deep forms, patterns, and glyph procedures may nest in one another.
@@ -128,6 +128,10 @@ fn rebuild(source: &Document) -> Result<(Document, StrippedContent)> {
 /// scope it was copied for, when it depends on that scope, and its id.
 type ScopedCopy = (Option<usize>, ObjectId);
 
+/// What a copy is made for: the source object, the kind it is copied as,
+/// and, for a form, whether its caller's font is lost.
+type CopyKey = (ObjectId, Kind, bool);
+
 /// The state of one rebuild.
 struct Builder<'a> {
     source: &'a Document,
@@ -136,7 +140,7 @@ struct Builder<'a> {
     /// for a form, whether its caller's font is lost): one per scope for an
     /// object whose copy depends on the scope it is drawn in, and one for
     /// anything else.
-    copies: HashMap<(ObjectId, Kind, bool), Vec<ScopedCopy>>,
+    copies: HashMap<CopyKey, Vec<ScopedCopy>>,
     /// Each scope a copy depends on, its resource dictionaries kept once:
     /// equal resources resolve every name alike, so they share copies.
     scopes: Vec<Vec<Dictionary>>,
@@ -199,9 +203,36 @@ impl<'a> Builder<'a> {
         self.record(record::entry(key));
     }
 
+    /// The rebuild: what the source holds outside its pages recorded, its
+    /// pages copied under a fresh page tree and catalog, and the resources
+    /// its pages list but never draw recorded.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// for a source with no catalog; as [`page`](Self::page) and
+    /// [`copy`](Self::copy).
     fn run(&mut self) -> Result<()> {
         let source = self.source;
+        let catalog = source
+            .catalog()
+            .map_err(|e| Error::malformed(format!("PDF has no catalog: {e}")))?;
         let reachable = reachable(source);
+        self.record_unread(catalog, &reachable);
+        // The attachment tree is copied first, so a file it and an `/AF`
+        // both name takes the tree's name.
+        let tree = self.attachment_tree()?;
+        let pages = self.page_tree()?;
+        self.catalog(catalog, pages, tree)?;
+        self.record_undisplayed(&reachable);
+        Ok(())
+    }
+
+    /// Record what the rebuild leaves behind outside the pages: the objects
+    /// no `reachable` reference reaches (prior revisions), and the trailer's,
+    /// `catalog`'s and its name trees' entries it doesn't carry.
+    fn record_unread(&mut self, catalog: &Dictionary, reachable: &HashSet<ObjectId>) {
+        let source = self.source;
         let unreachable = source
             .objects
             .iter()
@@ -209,16 +240,12 @@ impl<'a> Builder<'a> {
             .count();
         self.stripped
             .record(HiddenContent::PriorRevision, None, unreachable);
-        for (key, _) in source.trailer.iter() {
+        for (key, _) in &source.trailer {
             if let Some(held) = record::trailer(key) {
                 self.record(held);
             }
         }
-
-        let catalog = source
-            .catalog()
-            .map_err(|e| Error::malformed(format!("PDF has no catalog: {e}")))?;
-        for (key, value) in catalog.iter() {
+        for (key, value) in catalog {
             if key == b"Names" {
                 for (tree, _) in source
                     .resolve_dict(value)
@@ -233,10 +260,16 @@ impl<'a> Builder<'a> {
                 self.record(held);
             }
         }
+    }
 
-        // The attachment tree is copied first, so a file it and an `/AF`
-        // both name takes the tree's name.
-        let tree = self.attachment_tree()?;
+    /// Copy every page of the source under one fresh page-tree node,
+    /// returning its id.
+    ///
+    /// # Errors
+    ///
+    /// As [`page`](Self::page).
+    fn page_tree(&mut self) -> Result<ObjectId> {
+        let source = self.source;
         let pages_id = self.out.new_object_id();
         let source_pages = source.get_pages();
         for &id in source_pages.values() {
@@ -252,17 +285,25 @@ impl<'a> Builder<'a> {
         let count = kids.len() as i64;
         self.out.objects.insert(
             pages_id,
-            Object::Dictionary(Dictionary::from_iter([
-                ("Type", Object::Name(b"Pages".to_vec())),
-                ("Kids", Object::Array(kids)),
-                ("Count", Object::Integer(count)),
-            ])),
+            Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => count }),
         );
+        Ok(pages_id)
+    }
 
-        let mut new_catalog = Dictionary::from_iter([
-            ("Type", Object::Name(b"Catalog".to_vec())),
-            ("Pages", Object::Reference(pages_id)),
-        ]);
+    /// Write the rebuilt catalog over the page tree `pages`: the source
+    /// `catalog`'s associated files and output intents, and the attachment
+    /// `tree`.
+    ///
+    /// # Errors
+    ///
+    /// As [`copy`](Self::copy).
+    fn catalog(
+        &mut self,
+        catalog: &Dictionary,
+        pages: ObjectId,
+        tree: Option<Dictionary>,
+    ) -> Result<()> {
+        let mut new_catalog = dictionary! { "Type" => "Catalog", "Pages" => pages };
         if let Some(af) = catalog
             .get(b"AF")
             .ok()
@@ -277,17 +318,18 @@ impl<'a> Builder<'a> {
             new_catalog.set("OutputIntents", intents);
         }
         if let Some(tree) = tree {
-            new_catalog.set(
-                "Names",
-                Dictionary::from_iter([("EmbeddedFiles", Object::Dictionary(tree))]),
-            );
+            new_catalog.set("Names", dictionary! { "EmbeddedFiles" => tree });
         }
         let catalog_id = self.out.add_object(new_catalog);
         self.out.trailer.set("Root", catalog_id);
+        Ok(())
+    }
 
-        // A resource a resource dictionary lists (a font, form, image,
-        // graphics state, shading, pattern or colour space) but no content
-        // uses.
+    /// Record the resources a resource dictionary lists (a font, form,
+    /// image, graphics state, shading, pattern or colour space), `reachable`
+    /// in the source, that no content copied uses.
+    fn record_undisplayed(&mut self, reachable: &HashSet<ObjectId>) {
+        let source = self.source;
         let copied: HashSet<ObjectId> = self
             .copies
             .iter()
@@ -304,7 +346,6 @@ impl<'a> Builder<'a> {
             .count();
         self.stripped
             .record(HiddenContent::Undisplayed, None, undisplayed);
-        Ok(())
     }
 }
 
@@ -314,8 +355,7 @@ fn version(source: &Document) -> String {
     let catalog = source
         .catalog()
         .ok()
-        .and_then(|catalog| catalog.get(b"Version").ok())
-        .and_then(|version| source.resolve(version))
+        .and_then(|catalog| catalog.resolved(source, b"Version"))
         .and_then(|version| version.as_name().ok())
         .and_then(|version| str::from_utf8(version).ok())
         .and_then(|version| Some((version, parse_version(version)?)));
@@ -354,7 +394,7 @@ fn listed_resources(doc: &Document, object: &Object, depth: usize, out: &mut Has
         return;
     };
     for category in USED_CATEGORIES {
-        if let Some(entries) = dict.get(category).ok().and_then(|e| doc.resolve_dict(e)) {
+        if let Some(entries) = dict.resolved_dict(doc, category) {
             out.extend(
                 entries
                     .iter()
@@ -368,7 +408,7 @@ fn listed_resources(doc: &Document, object: &Object, depth: usize, out: &mut Has
             );
         }
     }
-    for (_, value) in dict.iter() {
+    for (_, value) in dict {
         listed_resources(doc, value, depth + 1, out);
     }
 }

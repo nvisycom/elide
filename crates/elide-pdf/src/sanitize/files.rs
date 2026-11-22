@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
-use lopdf::{Dictionary, Object, ObjectId};
+use lopdf::{Dictionary, Object, ObjectId, dictionary};
 
 use super::Builder;
 use super::content::Fresh;
@@ -77,10 +77,7 @@ impl Builder<'_> {
             .into_iter()
             .flat_map(|(name, spec)| [Object::string_literal(name), spec])
             .collect();
-        Ok(Some(Dictionary::from_iter([(
-            "Names",
-            Object::Array(leaf),
-        )])))
+        Ok(Some(dictionary! { "Names" => leaf }))
     }
 
     /// The `/AF` value `af`, each of its file specifications copied, or
@@ -117,7 +114,7 @@ impl Builder<'_> {
             self.residue += 1;
             return Ok(None);
         };
-        for (key, _) in spec.iter() {
+        for (key, _) in spec {
             if !SPEC_KEYS.contains(&key.as_slice()) {
                 self.drop_key(key);
             }
@@ -127,19 +124,14 @@ impl Builder<'_> {
             return Ok(None);
         };
         let neutral = self.neutral(&name);
-        let mut copy = Dictionary::from_iter([
-            ("Type", Object::Name(b"Filespec".to_vec())),
-            ("F", Object::string_literal(neutral.clone())),
-            ("UF", Object::string_literal(neutral)),
-            (
-                "EF",
-                Object::Dictionary(Dictionary::from_iter([("F", file)])),
-            ),
-        ]);
+        let mut copy = dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::string_literal(neutral.clone()),
+            "UF" => Object::string_literal(neutral),
+            "EF" => dictionary! { "F" => file },
+        };
         if let Some(relationship) = spec
-            .get(b"AFRelationship")
-            .ok()
-            .and_then(|r| self.source.resolve(r))
+            .resolved(self.source, b"AFRelationship")
             .filter(|r| r.as_name().is_ok())
         {
             copy.set("AFRelationship", relationship.clone());

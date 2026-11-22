@@ -3,7 +3,7 @@
 
 use lopdf::{Document, Object};
 
-use crate::pdf::reader::DocumentExt;
+use crate::pdf::reader::DictionaryExt;
 use crate::pdf::reader::name_tree::{Node, node_dict};
 
 /// Drop from the tree `tree` of `doc`, at each of its `nodes`, every pair
@@ -20,8 +20,7 @@ pub(crate) fn retain(
     let kept_by_node: Vec<(Node, Vec<bool>)> = nodes
         .iter()
         .filter_map(|&node| {
-            let names = node_dict(doc, tree, node)?.get(b"Names").ok()?;
-            let names = doc.resolve_array(names)?;
+            let names = node_dict(doc, tree, node)?.resolved_array(doc, b"Names")?;
             let (pairs, _) = names.as_chunks::<2>();
             let kept = pairs
                 .iter()

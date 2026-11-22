@@ -255,6 +255,33 @@ pub(crate) fn shown(text: impl Into<Vec<u8>>) -> Vec<Operation> {
     self::text("F1", 12, text)
 }
 
+/// A `/ToUnicode` CMap of the codespace ranges `codespace` (each a low and
+/// a high code, as `<00> <FF>`), mapping the codes of each `bfchar` entry of
+/// `chars` (as `<41> <004A>`) and each `bfrange` entry of `ranges` (as
+/// `<41> <45> <0041>`).
+pub(crate) fn to_unicode_cmap(codespace: &[&str], chars: &[&str], ranges: &[&str]) -> Vec<u8> {
+    let section = |name: &str, entries: &[&str]| {
+        if entries.is_empty() {
+            return String::new();
+        }
+        format!(
+            "{} begin{name}\n{}\nend{name}\n",
+            entries.len(),
+            entries.join("\n")
+        )
+    };
+    format!(
+        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
+         /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
+         /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
+         {}{}{}endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n",
+        section("codespacerange", codespace),
+        section("bfchar", chars),
+        section("bfrange", ranges),
+    )
+    .into_bytes()
+}
+
 /// A simple Type1 font naming `base_font`, embedding no program.
 pub(crate) fn type1(base_font: &str) -> Dictionary {
     dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base_font }

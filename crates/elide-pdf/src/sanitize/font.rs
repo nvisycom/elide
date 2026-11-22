@@ -2,6 +2,8 @@
 //! rebuilt as content, and a simple font's glyphs and widths pinned, so
 //! every viewer selects and places them as the reader does.
 
+use std::iter;
+
 use elide_core::Result;
 use elide_core::redaction::HiddenContent;
 use lopdf::{Dictionary, Object, dictionary};
@@ -9,7 +11,7 @@ use lopdf::{Dictionary, Object, dictionary};
 use super::copy::At;
 use super::keys::{FONT, Kind};
 use super::{Builder, VALUE_COST};
-use crate::pdf::reader::font::{Program, Standard, has_own_widths};
+use crate::pdf::reader::font::{Program, Standard, SymbolText, has_own_widths};
 use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
 use crate::pdf::writer::compressed;
 
@@ -28,23 +30,30 @@ impl<'a> Builder<'a> {
         let subtype = dict.name(self.source, b"Subtype");
         let standard = Standard::of(source, dict);
         let handled: &[&[u8]] = match subtype {
-            Some(b"Type3") => &[b"CharProcs", b"Resources"],
-            Some(b"Type0") => &[b"Encoding"],
+            Some(b"Type3") => &[b"CharProcs", b"Resources", b"ToUnicode"],
+            Some(b"Type0") => &[b"Encoding", b"ToUnicode"],
             // A pinned font's descriptor is its own (see `pin`).
-            _ if standard.is_some() => &[b"FontDescriptor"],
-            _ => &[],
+            _ if standard.is_some() => &[b"FontDescriptor", b"ToUnicode"],
+            _ => &[b"ToUnicode"],
         };
         let mut out = self.keys(dict, FONT, handled, at)?;
-        if subtype == Some(b"Type0") {
-            if let Ok(encoding) = dict.get(b"Encoding")
-                && let Some(encoding) = self.copy(Kind::CMap, encoding, at.deeper())?
-            {
-                out.set("Encoding", encoding);
+        // The text a viewer copies is written as the reader reads the font's.
+        if let Ok(map) = dict.get(b"ToUnicode") {
+            let kind = Kind::ToUnicode(SymbolText::of(source, dict));
+            if let Some(map) = self.copy(kind, map, at.deeper())? {
+                out.set("ToUnicode", map);
             }
-            return Ok(Object::Dictionary(out));
         }
-        if subtype != Some(b"Type3") {
-            match standard {
+        match subtype {
+            Some(b"Type0") => {
+                if let Ok(encoding) = dict.get(b"Encoding")
+                    && let Some(encoding) = self.copy(Kind::CMap, encoding, at.deeper())?
+                {
+                    out.set("Encoding", encoding);
+                }
+            }
+            Some(b"Type3") => self.glyph_procedures(dict, &mut out, at)?,
+            _ => match standard {
                 Some(standard) => {
                     self.pin(standard, dict, &mut out, at)?;
                     if !has_own_widths(source, dict) {
@@ -52,19 +61,34 @@ impl<'a> Builder<'a> {
                     }
                 }
                 None => self.pin_program(dict, &mut out)?,
-            }
-            return Ok(Object::Dictionary(out));
+            },
         }
+        Ok(Object::Dictionary(out))
+    }
+
+    /// Rebuild the Type3 font `dict`'s glyph procedures, copied as `out`, as
+    /// content with names resolved in its own resources, else in `at`'s
+    /// scope. The procedures share one resource dictionary, so the names
+    /// they are rebuilt with are given across all of them.
+    ///
+    /// # Errors
+    ///
+    /// As [`content`](Self::content) and [`charge`](Self::charge).
+    fn glyph_procedures<'s>(
+        &mut self,
+        dict: &'s Dictionary,
+        out: &mut Dictionary,
+        at: At<'_, 's>,
+    ) -> Result<()>
+    where
+        'a: 's,
+    {
+        let source = self.source;
         let inner = at.scope.inner(source, dict);
         let scoped = self.scoped;
-        // The glyph procedures share one resource dictionary, so the names
-        // they are rebuilt with are given across all of them.
         let mut resources = Dictionary::new();
         let mut procs = Dictionary::new();
-        let glyphs = dict
-            .get(b"CharProcs")
-            .ok()
-            .and_then(|p| source.resolve_dict(p));
+        let glyphs = dict.resolved_dict(source, b"CharProcs");
         for (name, glyph) in glyphs.into_iter().flat_map(Dictionary::iter) {
             let Some(Object::Stream(glyph)) = source.resolve(glyph) else {
                 self.residue += 1;
@@ -88,7 +112,7 @@ impl<'a> Builder<'a> {
         self.own_scope(dict, scoped);
         out.set("CharProcs", procs);
         out.set("Resources", resources);
-        Ok(Object::Dictionary(out))
+        Ok(())
     }
 
     /// Pin the glyphs of `font`, which names the standard face `standard` and
@@ -116,8 +140,8 @@ impl<'a> Builder<'a> {
         let names = standard.names(source, font);
         self.differences(names.iter().copied(), out)?;
 
-        let descriptor = match font.get(b"FontDescriptor").ok().map(|d| source.resolve(d)) {
-            Some(Some(descriptor @ Object::Dictionary(_))) => {
+        let descriptor = match font.resolved(source, b"FontDescriptor") {
+            Some(descriptor @ Object::Dictionary(_)) => {
                 match self.copy(Kind::FontDescriptor, descriptor, at.deeper())? {
                     Some(Object::Dictionary(mut copy)) => {
                         let flags = copy.get(b"Flags").and_then(Object::as_i64).unwrap_or(0);
@@ -190,8 +214,7 @@ impl<'a> Builder<'a> {
     ) -> Result<()> {
         let named: usize = names.clone().map(|name| name.map_or(7, str::len)).sum();
         self.charge((256 + 1) * VALUE_COST + named)?;
-        let differences = [Object::Integer(0)]
-            .into_iter()
+        let differences = iter::once(Object::Integer(0))
             .chain(names.map(|name| Object::Name(name.unwrap_or(".notdef").as_bytes().to_vec())))
             .collect::<Vec<_>>();
         out.set(

@@ -1,6 +1,6 @@
 //! Rendering a PDF through PDFium, behind the `render` feature: its pages as
 //! pixels. It requires the PDFium shared library at runtime (see
-//! `scripts/install-pdfium.sh`).
+//! `scripts/install/pdfium.sh`).
 
 mod pdfium;
 
@@ -34,3 +34,6 @@ impl Read for Renders {
         pdfium::render_pages(pdf, &self.pages, self.scale)
     }
 }
+
+#[cfg(test)]
+mod differential;

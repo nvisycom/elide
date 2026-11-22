@@ -8,7 +8,7 @@ use lopdf::content::Operation;
 use lopdf::{Dictionary, Document, ObjectId};
 
 use super::stream::operand_f64;
-use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix};
+use crate::pdf::reader::{DeviceRect, DictionaryExt, Matrix};
 
 /// The tiling pattern a fill or stroke paints with, and the space of the
 /// stream that selected it, which its `/Matrix` lays its tiles out in.
@@ -123,46 +123,52 @@ impl Painting {
                 operand_f64(&operation.operands, index + 1),
             )
         };
-        let (fills, strokes) = match operation.operator.as_str() {
-            "m" | "l" => return self.extend(ctm, &[at(0)]),
-            "c" => return self.extend(ctm, &[at(0), at(2), at(4)]),
-            "v" | "y" => return self.extend(ctm, &[at(0), at(2)]),
+        match operation.operator.as_str() {
+            "m" | "l" => self.extend(ctm, &[at(0)]),
+            "c" => self.extend(ctm, &[at(0), at(2), at(4)]),
+            "v" | "y" => self.extend(ctm, &[at(0), at(2)]),
             "re" => {
                 let (x, y) = at(0);
                 let (w, h) = at(2);
-                return self.extend(ctm, &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)]);
+                self.extend(ctm, &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)])
             }
-            "h" => return Some(Vec::new()),
+            "h" => Some(Vec::new()),
             "W" | "W*" => {
                 self.clips = true;
-                return Some(Vec::new());
+                Some(Vec::new())
             }
             "w" => {
                 self.line.width = operand_f64(&operation.operands, 0).abs();
-                return Some(Vec::new());
+                Some(Vec::new())
             }
             "M" => {
                 self.line.miter_limit = operand_f64(&operation.operands, 0).max(1.0);
-                return Some(Vec::new());
+                Some(Vec::new())
             }
             "j" => {
                 self.line.mitred = operand_f64(&operation.operands, 0) == 0.0;
-                return Some(Vec::new());
+                Some(Vec::new())
             }
             "J" => {
                 self.line.projecting = operand_f64(&operation.operands, 0) == 2.0;
-                return Some(Vec::new());
+                Some(Vec::new())
             }
             "Tr" => {
                 self.render = u8::try_from(operation.operands.first()?.as_i64().ok()?).ok()?;
-                return Some(Vec::new());
+                Some(Vec::new())
             }
-            "n" => (false, false),
-            "f" | "F" | "f*" => (true, false),
-            "S" | "s" => (false, true),
-            "B" | "B*" | "b" | "b*" => (true, true),
-            _ => return None,
-        };
+            "n" => Some(self.end_path(false, false, ctm)),
+            "f" | "F" | "f*" => Some(self.end_path(true, false, ctm)),
+            "S" | "s" => Some(self.end_path(false, true, ctm)),
+            "B" | "B*" | "b" | "b*" => Some(self.end_path(true, true, ctm)),
+            _ => None,
+        }
+    }
+
+    /// End the path, drawn under `ctm`, painting it as it `fills` and
+    /// `strokes`: each region a fill or stroke with a pattern paints, within
+    /// the clip. A clip the path sets bounds only what comes after (8.5.4).
+    fn end_path(&mut self, fills: bool, strokes: bool, ctm: Matrix) -> Vec<Painted> {
         let mut painted = Vec::new();
         if let Some(path) = self.path.take() {
             let stroked = self.stroke_extent(path, ctm);
@@ -177,14 +183,12 @@ impl Painting {
                     painted.push(Painted { paint, region });
                 }
             }
-            // The clip is set once the path is painted, so it bounds only
-            // what comes after (8.5.4).
             if self.clips {
                 self.clip = self.clipped(path).map_or(Clip::Nothing, Clip::Within);
             }
         }
         self.clips = false;
-        Some(painted)
+        painted
     }
 
     /// Clip what is painted to `area` too, as a form's `/BBox` does.
@@ -259,7 +263,7 @@ impl Painting {
     /// Take the line style the graphics state `state` sets (`/LW`, `/ML`,
     /// `/LJ`, `/LC`), and its opacities (`/ca`, `/CA`).
     pub(super) fn state(&mut self, doc: &Document, state: &Dictionary) {
-        let number = |key: &[u8]| doc.resolve_number(state.get(key).ok()?);
+        let number = |key: &[u8]| state.resolved_number(doc, key);
         if let Some(width) = number(b"LW") {
             self.line.width = width.abs();
         }
@@ -283,7 +287,7 @@ impl Painting {
     /// The patterns, clip and line style `saved` holds restored, as `Q`
     /// restores them; the path being built and the text object's pending
     /// clip are not graphics state, so they stay.
-    pub(super) fn restore(&mut self, saved: Painting) {
+    pub(super) fn restore(&mut self, saved: Self) {
         *self = Self {
             path: self.path,
             clips: self.clips,

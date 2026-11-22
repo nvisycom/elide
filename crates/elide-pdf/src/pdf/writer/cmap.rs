@@ -17,7 +17,7 @@ use std::fmt::Write;
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Encoding, Object, ObjectId, Stream};
 
-use crate::pdf::reader::font::{readable, to_unicode};
+use crate::pdf::reader::font::{SymbolText, readable, to_unicode};
 
 /// The most UTF-16 units a CMap's destinations hold together, so the map
 /// held while a CMap is written, and the CMap written, stay bounded.
@@ -68,11 +68,7 @@ impl UnicodeMap {
                     let Some(units) = cmap.get(code, len).filter(|units| !units.is_empty()) else {
                         continue;
                     };
-                    units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
-                        Error::resource_limit(format!(
-                            "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
-                        ))
-                    })?;
+                    charge_units(&mut units_left, units.len())?;
                     codes.insert((len, code), units);
                 }
             }
@@ -80,28 +76,24 @@ impl UnicodeMap {
         Ok(Some(Self { codes }))
     }
 
-    /// Each destination written as [`readable`] text; one that is not UTF-16
-    /// stays as it is.
+    /// Each destination written as [`readable`] text, in a font whose symbol
+    /// range reads as `symbol` says; one that is not UTF-16 stays as it is.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if
     /// the destinations, so written, hold more than [`MAX_UNITS`] UTF-16
     /// units together, so the map written would not be read again.
-    pub(crate) fn readable(mut self) -> Result<Self> {
+    pub(crate) fn readable(mut self, symbol: SymbolText) -> Result<Self> {
         let mut units_left = MAX_UNITS;
         for units in self.codes.values_mut() {
             if let Ok(text) = String::from_utf16(units) {
-                let written = readable(&text);
+                let written = readable(&symbol.read(&text));
                 if written != text {
                     *units = written.encode_utf16().collect();
                 }
             }
-            units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
-                Error::resource_limit(format!(
-                    "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
-                ))
-            })?;
+            charge_units(&mut units_left, units.len())?;
         }
         Ok(self)
     }
@@ -319,6 +311,21 @@ fn with_byte(code: u32, shift: u32, byte: u32) -> u32 {
     code & !(0xFF << shift) | byte << shift
 }
 
+/// Charge `units` UTF-16 units against `left` of [`MAX_UNITS`].
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) past
+/// the limit.
+fn charge_units(left: &mut usize, units: usize) -> Result<()> {
+    *left = left.checked_sub(units).ok_or_else(|| {
+        Error::resource_limit(format!(
+            "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
+        ))
+    })?;
+    Ok(())
+}
+
 /// A `len`-byte `code` as a `<hex>` string.
 fn code_hex(len: u8, code: u32) -> String {
     format!("<{code:0width$X}>", width = 2 * usize::from(len))
@@ -326,8 +333,12 @@ fn code_hex(len: u8, code: u32) -> String {
 
 /// UTF-16 `units` as a `<hex>` string.
 fn units_hex(units: &[u16]) -> String {
-    let digits: String = units.iter().map(|unit| format!("{unit:04X}")).collect();
-    format!("<{digits}>")
+    let mut hex = String::from("<");
+    for unit in units {
+        let _ = write!(hex, "{unit:04X}");
+    }
+    hex.push('>');
+    hex
 }
 
 #[cfg(test)]
@@ -387,7 +398,7 @@ mod tests {
     /// ideograph, a ligature as its letters.
     #[test]
     fn destinations_are_written_as_readable_text() {
-        let map = read(&source()).readable().unwrap();
+        let map = read(&source()).readable(SymbolText::Plain).unwrap();
         assert_eq!(text(&map, 2, 0x20).as_deref(), Some("山"));
         assert_eq!(text(&map, 2, 0x04).as_deref(), Some("fi"));
         assert_eq!(read(&map.write()), map);
@@ -472,7 +483,7 @@ mod tests {
         let map = read(&cmap(&format!(
             "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n{sections}"
         )));
-        let error = map.readable().unwrap_err();
+        let error = map.readable(SymbolText::Plain).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     }
 

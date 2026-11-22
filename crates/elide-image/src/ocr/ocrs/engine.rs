@@ -3,7 +3,7 @@
 //! This layer owns *all* interaction with the `ocrs` recognizer and the RTen
 //! runtime, so the backend layer ([`super`]) never has to. It locates and loads
 //! the two model files (the [`OCRS_MODELS_DIR_ENV`] directory and the file names
-//! within it, as produced by `scripts/install-ocrs.sh`), runs the detect ->
+//! within it, as produced by `scripts/install/ocrs.sh`), runs the detect ->
 //! find-lines -> recognize pipeline over an image, and adapts the recognizer's
 //! `ocrs`/`rten` output (`TextLine`, `Rect<i32>`) into the core layout types
 //! ([`LayoutRegion`]/[`ImageLocation`]).
@@ -64,7 +64,7 @@ impl Engine {
     }
 
     /// Load the two models from `dir`, expecting [`DETECTION_MODEL`] and
-    /// [`RECOGNITION_MODEL`] (as produced by `scripts/install-ocrs.sh`).
+    /// [`RECOGNITION_MODEL`] (as produced by `scripts/install/ocrs.sh`).
     ///
     /// # Errors
     ///

@@ -2,7 +2,7 @@
 //!
 //! The allowlist is generated from the ISO/IEC 29500-4 transitional schemas
 //! (ECMA-376 Part 4) and the [MS-DOCX] extension schemas by
-//! `scripts/gen-ooxml-schema.py` into [`table`]: each element type, the child
+//! `scripts/office/gen-ooxml-schema.py` into [`table`]: each element type, the child
 //! elements it allows (each with its own type), the attributes it declares,
 //! and whether it holds text. A part's content type names the root element it
 //! must have ([`root`]), and from there each element is copied only if its

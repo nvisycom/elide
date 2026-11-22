@@ -2,6 +2,10 @@
 
 use std::cmp::Ordering;
 
+use lopdf::{Dictionary, Document};
+
+use super::DictionaryExt;
+
 /// A 2×3 affine transform `[a b c d e f]`, mapping a point `(x, y)` to
 /// `(a·x + c·y + e, b·x + d·y + f)`. Row-vector convention, as PDF uses.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16,7 +20,7 @@ pub(crate) struct Matrix {
 
 impl Matrix {
     /// The identity transform.
-    pub(crate) const IDENTITY: Matrix = Matrix {
+    pub(crate) const IDENTITY: Self = Self {
         a: 1.0,
         b: 0.0,
         c: 0.0,
@@ -25,9 +29,16 @@ impl Matrix {
         f: 0.0,
     };
 
+    /// The `/Matrix` of the form or pattern `dict` in `doc` (8.10.1,
+    /// 8.7.3.1): the identity when it is absent or not six numbers.
+    pub(crate) fn of(doc: &Document, dict: &Dictionary) -> Self {
+        dict.resolved_numbers(doc, b"Matrix")
+            .map_or(Self::IDENTITY, Self::from)
+    }
+
     /// A pure translation by `(tx, ty)`.
-    pub(crate) fn translation(tx: f64, ty: f64) -> Matrix {
-        Matrix {
+    pub(crate) fn translation(tx: f64, ty: f64) -> Self {
+        Self {
             a: 1.0,
             b: 0.0,
             c: 0.0,
@@ -39,8 +50,8 @@ impl Matrix {
 
     /// `self × other` (apply `self` first, then `other`), the composition PDF text
     /// positioning uses for `Tlm ← translate · Tlm`.
-    pub(crate) fn then(self, other: Matrix) -> Matrix {
-        Matrix {
+    pub(crate) fn then(self, other: Self) -> Self {
+        Self {
             a: self.a * other.a + self.b * other.c,
             b: self.a * other.b + self.b * other.d,
             c: self.c * other.a + self.d * other.c,
@@ -66,7 +77,7 @@ impl Matrix {
     /// The matrix undoing this one, or `None` when it flattens the plane
     /// and has none. Whether it flattens is judged against its own scale, so
     /// a uniformly tiny matrix still inverts.
-    pub(crate) fn inverse(self) -> Option<Matrix> {
+    pub(crate) fn inverse(self) -> Option<Self> {
         let det = self.a * self.d - self.b * self.c;
         let scale = (self.a * self.d).abs().max((self.b * self.c).abs());
         // A NaN determinant fails the comparison too.
@@ -74,7 +85,7 @@ impl Matrix {
             return None;
         }
         let (a, b, c, d) = (self.d / det, -self.b / det, -self.c / det, self.a / det);
-        let inverse = Matrix {
+        let inverse = Self {
             a,
             b,
             c,

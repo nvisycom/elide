@@ -20,7 +20,7 @@ use ::image::{DynamicImage, GrayImage, ImageFormat, RgbImage};
 use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, Stream};
 
-use crate::pdf::reader::DocumentExt;
+use crate::pdf::reader::{DictionaryExt, DocumentExt};
 
 /// The largest image accepted, in bytes, both as packed samples and as the
 /// pixels they decode to: a sample stream may claim any size, and a 1-bit
@@ -105,9 +105,7 @@ impl Layout {
 /// Whether the image XObject `dict` is a stencil mask: its samples say where
 /// to paint, not what colour.
 pub(crate) fn is_stencil(doc: &Document, dict: &Dictionary) -> bool {
-    dict.get(b"ImageMask")
-        .ok()
-        .and_then(|mask| doc.resolve(mask))
+    dict.resolved(doc, b"ImageMask")
         .and_then(|mask| mask.as_bool().ok())
         .unwrap_or(false)
 }
@@ -122,67 +120,74 @@ pub(crate) fn is_supported(doc: &Document, dict: &Dictionary) -> bool {
 /// module does not decode, or they or their pixels take more than
 /// [`MAX_SAMPLE_BYTES`].
 fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
-    let integer = |key: &[u8]| doc.resolve(dict.get(key).ok()?)?.as_i64().ok();
-    let width = u32::try_from(integer(b"Width")?).ok()?;
-    let height = u32::try_from(integer(b"Height")?).ok()?;
+    let width = u32::try_from(integer(doc, dict, b"Width")?).ok()?;
+    let height = u32::try_from(integer(doc, dict, b"Height")?).ok()?;
     if width == 0 || height == 0 {
         return None;
     }
-    let layout = if is_stencil(doc, dict) {
-        // A stencil mask's samples are 1 bit, a 0 painting under the default
-        // decode array (8.9.6.2): as gray, the painted samples are black.
-        let bits = integer(b"BitsPerComponent").unwrap_or(1);
-        if bits != 1 {
-            return None;
-        }
-        Layout {
-            width,
-            height,
-            bits: 1,
-            space: Space::Gray {
-                inverted: decode_array(doc, dict)?,
-            },
-        }
+    let (bits, space) = if is_stencil(doc, dict) {
+        stencil_samples(doc, dict)?
     } else {
-        let bits = integer(b"BitsPerComponent")?;
-        if ![1, 2, 4, 8].contains(&bits) {
-            return None;
-        }
-        let colours = doc.resolve(dict.get(b"ColorSpace").ok()?)?;
-        let indexed = colours.as_array().is_ok_and(|array| {
-            array
-                .first()
-                .and_then(|family| doc.resolve(family)?.as_name().ok())
-                .is_some_and(|family| matches!(family, b"Indexed" | b"I"))
-        });
-        // An index's decode array is `[0 2^bits-1]` unless it says otherwise
-        // (8.9.5.2), not a colour's `[0 1]`; one that maps indexes elsewhere
-        // is not read.
-        let inverted = if indexed {
-            Some(false)
-        } else {
-            decode_array(doc, dict)
-        };
-        let space = space(doc, colours, inverted)?;
-        if indexed && let Ok(decode) = dict.get(b"Decode") {
-            let identity = [0.0, ((1u32 << bits) - 1) as f64];
-            let values: Option<Vec<f64>> = doc
-                .resolve_array(decode)
-                .and_then(|values| values.iter().map(|v| doc.resolve_number(v)).collect());
-            if values.as_deref() != Some(&identity[..]) {
-                return None;
-            }
-        }
-        Layout {
-            width,
-            height,
-            bits: bits as usize,
-            space,
-        }
+        colour_samples(doc, dict)?
+    };
+    let layout = Layout {
+        width,
+        height,
+        bits,
+        space,
     };
     let samples = layout.row_bytes().checked_mul(height as usize)?;
     let pixels = layout.pixel_bytes()?;
     (samples <= MAX_SAMPLE_BYTES && pixels <= MAX_SAMPLE_BYTES).then_some(layout)
+}
+
+/// The integer `dict` holds under `key`.
+fn integer(doc: &Document, dict: &Dictionary, key: &[u8]) -> Option<i64> {
+    dict.resolved(doc, key)?.as_i64().ok()
+}
+
+/// The bits and space of the stencil mask `dict`'s samples: 1 bit each, a 0
+/// painting under the default decode array (8.9.6.2), so as gray the painted
+/// samples are black.
+fn stencil_samples(doc: &Document, dict: &Dictionary) -> Option<(usize, Space)> {
+    if integer(doc, dict, b"BitsPerComponent").unwrap_or(1) != 1 {
+        return None;
+    }
+    let inverted = decode_array(doc, dict)?;
+    Some((1, Space::Gray { inverted }))
+}
+
+/// The bits and space of the colour image `dict`'s samples. An index's
+/// decode array is `[0 2^bits-1]` unless it says otherwise (8.9.5.2), not a
+/// colour's `[0 1]`; one that maps indexes elsewhere is not read.
+fn colour_samples(doc: &Document, dict: &Dictionary) -> Option<(usize, Space)> {
+    let bits = integer(doc, dict, b"BitsPerComponent")?;
+    if ![1, 2, 4, 8].contains(&bits) {
+        return None;
+    }
+    let colours = dict.resolved(doc, b"ColorSpace")?;
+    let indexed = colours.as_array().is_ok_and(|array| {
+        array
+            .first()
+            .and_then(|family| doc.resolve(family)?.as_name().ok())
+            .is_some_and(|family| matches!(family, b"Indexed" | b"I"))
+    });
+    let inverted = if indexed {
+        Some(false)
+    } else {
+        decode_array(doc, dict)
+    };
+    let space = space(doc, colours, inverted)?;
+    if indexed && let Ok(decode) = dict.get(b"Decode") {
+        let identity = [0.0, ((1u32 << bits) - 1) as f64];
+        let values: Option<Vec<f64>> = doc
+            .resolve_array(decode)
+            .and_then(|values| values.iter().map(|v| doc.resolve_number(v)).collect());
+        if values.as_deref() != Some(&identity[..]) {
+            return None;
+        }
+    }
+    Some((bits as usize, space))
 }
 
 /// The pixels of the raw-sample image XObject `stream` in `doc`. Samples
@@ -227,9 +232,7 @@ pub(crate) fn samples(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
     // a keyed image's samples are kept as they are.
     let keyed = stream
         .dict
-        .get(b"Mask")
-        .ok()
-        .and_then(|mask| doc.resolve(mask))
+        .resolved(doc, b"Mask")
         .is_some_and(|mask| matches!(mask, Object::Array(_)));
     if !keyed && let Some(last) = layout.space.last_index() {
         let count = layout.width as usize * layout.space.components();
@@ -513,8 +516,8 @@ mod tests {
             dictionary! {
                 "Width" => 2, "Height" => 1, "BitsPerComponent" => 8,
                 "ColorSpace" => vec![
-                    Object::Name(b"Indexed".to_vec()),
-                    Object::Name(b"DeviceRGB".to_vec()),
+                    Object::from("Indexed"),
+                    Object::from("DeviceRGB"),
                     1.into(),
                     Object::String(vec![255, 0, 0, 0, 0, 255], StringFormat::Hexadecimal),
                 ],
@@ -533,8 +536,8 @@ mod tests {
             dictionary! {
                 "Width" => 2, "Height" => 1, "BitsPerComponent" => 8,
                 "ColorSpace" => vec![
-                    Object::Name(b"Indexed".to_vec()),
-                    Object::Name(b"DeviceRGB".to_vec()),
+                    Object::from("Indexed"),
+                    Object::from("DeviceRGB"),
                     1.into(),
                     Object::String(vec![255, 0, 0, 0, 0, 255], StringFormat::Hexadecimal),
                 ],
@@ -547,8 +550,8 @@ mod tests {
             dictionary! {
                 "Width" => 4, "Height" => 1, "BitsPerComponent" => 2,
                 "ColorSpace" => vec![
-                    Object::Name(b"Indexed".to_vec()),
-                    Object::Name(b"DeviceGray".to_vec()),
+                    Object::from("Indexed"),
+                    Object::from("DeviceGray"),
                     1.into(),
                     Object::String(vec![0, 255], StringFormat::Hexadecimal),
                 ],

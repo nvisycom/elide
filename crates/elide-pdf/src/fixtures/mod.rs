@@ -19,7 +19,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 
 pub(crate) use self::builder::{DocBuilder, Page};
 #[cfg(test)]
-pub(crate) use self::builder::{blank, encoded, shown, text, tm, type1};
+pub(crate) use self::builder::{blank, encoded, shown, text, tm, to_unicode_cmap, type1};
 #[cfg(test)]
 pub(crate) use self::font::{Cff, FontFile, Sfnt, Type1, embedding};
 use crate::pdf::reader::DictionaryExt;

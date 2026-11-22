@@ -46,7 +46,7 @@ thread_local! {
 }
 
 /// Run `task` with `pdf` loaded on the PDFium thread.
-fn with_document<T: Send>(
+pub(super) fn with_document<T: Send>(
     pdf: &Pdf,
     task: impl FnOnce(&PdfDocument<'_>) -> Result<T> + Send,
 ) -> Result<T> {

@@ -39,7 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Adobe Core14 AFM files
 
-`elide-pdf` reads the widths of the standard 14 fonts from Adobe's Core14 AFM files, shipped unmodified in `crates/elide-pdf/assets/afm` with Adobe's `MustRead.html`. Any binary built with `elide-pdf` contains them.
+`elide-pdf` takes the metrics of the standard 14 fonts from Adobe's Core14 AFM files: each glyph's width and built-in code, and each face's vertical extent, bounding box, italic angle and stem. They are generated, modified as the file notes, into `crates/elide-pdf/src/pdf/reader/font/standard/metrics.rs` by `scripts/pdf/gen-metrics.mjs`, with Adobe's `MustRead.html` unmodified beside it. Any binary built with `elide-pdf` contains them.
 
 ```text
 Copyright (c) 1985, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1997 Adobe
