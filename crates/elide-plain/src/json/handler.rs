@@ -15,6 +15,7 @@
 //! redacted string, stay byte-identical to the source. The partial-leaf
 //! offset translation is a single per-leaf walk of its escape table.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
@@ -28,6 +29,7 @@ use elide_core::{Error, Result};
 use super::JsonLoader;
 use super::escape::{decode_escape, json_escape};
 use super::parser::parse_slots;
+use crate::control;
 use crate::slice::slice;
 
 /// Stable [`FormatId`] for the JSON codec.
@@ -35,7 +37,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
 /// The JSON [`Format`], resolved by `.json` and `application/json`.
 pub fn format() -> Format {
-    Format::new(FORMAT_ID, JsonLoader)
+    Format::with_document_loader(FORMAT_ID, JsonLoader)
         .with_extensions(["json"])
         .with_content_types(["application/json"])
 }
@@ -541,6 +543,40 @@ impl JsonHandler {
         let slots = parse_slots(source)?;
         let offsets = offsets(&slots);
         Ok(Self { slots, offsets })
+    }
+
+    /// This handler with the terminal control sequences each key and string
+    /// value decodes to stripped ([`control`]), and how many went. A changed
+    /// string is written again, escaped; the rest of the source stays as
+    /// written.
+    pub(super) fn strip_controls(self) -> Result<(Self, usize)> {
+        let mut removed = 0;
+        let mut source = String::new();
+        for slot in &self.slots {
+            let leaf = match slot {
+                Slot::Leaf(leaf) if leaf.is_quoted() => leaf,
+                Slot::Leaf(Leaf {
+                    serialized: text, ..
+                })
+                | Slot::Passthrough(text) => {
+                    source.push_str(text);
+                    continue;
+                }
+            };
+            match control::strip(&leaf.value) {
+                (Cow::Owned(value), count) => {
+                    removed += count;
+                    source.push('"');
+                    source.push_str(&json_escape(&value));
+                    source.push('"');
+                }
+                (Cow::Borrowed(_), _) => source.push_str(&leaf.serialized),
+            }
+        }
+        if removed == 0 {
+            return Ok((self, 0));
+        }
+        Ok((Self::parse(&source)?, removed))
     }
 
     /// The slots that can hold offset `at` in one coordinate space, in order:

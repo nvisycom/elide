@@ -8,6 +8,7 @@
 //! plus an optional intra-cell byte range.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::ops::Range;
 
 use csv::Terminator;
@@ -21,6 +22,7 @@ use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use super::loader::CsvLoader;
+use crate::control;
 use crate::slice::slice;
 
 /// Stable [`FormatId`] for the CSV codec.
@@ -50,7 +52,7 @@ pub fn format_with(has_headers: bool, delimiter: Option<u8>) -> Format {
 
 /// Build the CSV [`Format`] from a configured loader.
 fn format_from(loader: CsvLoader) -> Format {
-    Format::new(FORMAT_ID, loader)
+    Format::with_document_loader(FORMAT_ID, loader)
         .with_extensions(["csv"])
         .with_content_types(["text/csv"])
 }
@@ -70,6 +72,28 @@ pub(crate) struct CsvData {
     pub trailing_newline: bool,
     /// Whether the original's records end in `\r\n` rather than `\n`.
     pub crlf: bool,
+}
+
+impl CsvData {
+    /// Every cell, the header row's first.
+    fn cells_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        self.headers
+            .iter_mut()
+            .flatten()
+            .chain(self.rows.iter_mut().flatten())
+    }
+
+    /// Strip the terminal control sequences from every cell, returning how
+    /// many went.
+    pub(super) fn strip_controls(&mut self) -> usize {
+        self.cells_mut()
+            .map(|cell| {
+                let (stripped, removed) = control::strip_owned(mem::take(cell));
+                *cell = stripped;
+                removed
+            })
+            .sum()
+    }
 }
 
 /// Handler for parsed CSV content. Each cell is independently addressable
@@ -403,18 +427,18 @@ fn no_cell(location: &TabularLocation) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::Loader;
     use elide_core::ErrorKind;
     use elide_core::primitive::Color;
+    use elide_core::redaction::HiddenContent;
 
     use super::super::loader::CsvLoader;
     use super::*;
 
     async fn load(text: &str) -> CsvHandler {
         CsvLoader::default()
-            .decode(ContentData::from_text(text))
-            .await
+            .load(ContentData::from_text(text))
             .unwrap()
+            .0
     }
 
     #[tokio::test]
@@ -567,9 +591,8 @@ mod tests {
     #[tokio::test]
     async fn options_disable_headers_so_the_first_row_is_data() {
         // With `has_headers = false`, row 0 is an ordinary data row.
-        let mut handler = CsvLoader::new(false, None)
-            .decode(ContentData::from_text("a@x.test,b\nc,d\n"))
-            .await
+        let (mut handler, _) = CsvLoader::new(false, None)
+            .load(ContentData::from_text("a@x.test,b\nc,d\n"))
             .unwrap();
         let first = handler.chunks().unwrap().into_iter().next().unwrap();
         assert_eq!(first.location.row_index, 0);
@@ -588,11 +611,28 @@ mod tests {
     async fn options_set_the_delimiter_the_sniffer_would_miss() {
         // A single-column-looking TSV: auto-detect would read it as one comma
         // field; an explicit tab splits it into two columns.
-        let handler = CsvLoader::new(true, Some(b'\t'))
-            .decode(ContentData::from_text("name\temail\nAlice\ta@x.test\n"))
-            .await
+        let (handler, _) = CsvLoader::new(true, Some(b'\t'))
+            .load(ContentData::from_text("name\temail\nAlice\ta@x.test\n"))
             .unwrap();
         assert_eq!(handler.row_cells(1).unwrap(), &["Alice", "a@x.test"]);
+    }
+
+    /// A control sequence in a cell goes at decode, and the strip is recorded;
+    /// a formula stays as written.
+    #[test]
+    fn terminal_control_sequences_are_stripped() -> Result<()> {
+        let src = "name,note\nJa\u{1b}[mne Roe,=SUM(1;2)\n";
+        let (handler, stripped) = CsvLoader::default().load(ContentData::from_text(src))?;
+        assert_eq!(
+            handler.encode()?.decode()?,
+            "name,note\nJane Roe,=SUM(1;2)\n"
+        );
+        let stripped: Vec<_> = stripped
+            .iter()
+            .map(|entry| (entry.content, entry.count))
+            .collect();
+        assert_eq!(stripped, [(HiddenContent::Undisplayed, 1)]);
+        Ok(())
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ written back into:
 
 - **TXT** is one `Text` stream chunked by paragraph, so a multi-line match (a
   PEM block) is one chunk. Redaction splices the text in place, and every other
-  byte is kept.
+  byte is kept, bar what decoding strips (below).
 - **JSON** is one `Text` stream with a chunk per key, string and scalar, each
   with its enclosing key as a context hint. A redaction is spliced into the
   source at the escaped position, so formatting and escapes outside it are
@@ -29,6 +29,16 @@ written back into:
   column header. Cells are redacted in place, or a row or column dropped, and
   the table is written back with its delimiter and line endings. Quoting is
   normalized: a field is quoted only where it needs to be.
+
+Decoding strips **terminal control sequences** from TXT, from each CSV cell,
+and from what a JSON key or string decodes to: an escape sequence (a colour, a
+cursor move, a window title) and every other control character but tab, form
+feed and line endings. A viewer that renders them (`less -R`, a CI log) shows
+`jane.\e[31mroe\e[m@example.com` as one address, which detection, reading the
+bytes, would miss; stripped, detection reads what the viewer shows. An
+unterminated window title ends with its line, and a C1 control goes alone, so a
+stray byte never takes the rest of the file. Each strip is recorded on the
+document as `Undisplayed`.
 
 A location a document cannot take (out of range, splitting a character, a cell
 it doesn't have) fails the write rather than being skipped.

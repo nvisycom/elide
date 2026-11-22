@@ -2,6 +2,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+#[cfg(any(feature = "txt", feature = "json", feature = "csv"))]
+mod control;
 #[cfg(feature = "csv")]
 mod csv;
 #[cfg(feature = "json")]
