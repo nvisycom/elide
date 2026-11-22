@@ -18,8 +18,8 @@ use lopdf::{Document, Object, ObjectId, Stream, dictionary};
 use super::ImageReplacement;
 use super::samples::is_stencil;
 use crate::pdf::Edit;
-use crate::pdf::reader::{DictionaryExt, Scope};
-use crate::pdf::writer::compressed;
+use crate::pdf::reader::{DictionaryExt, Scope, parse_content};
+use crate::pdf::writer::{compressed, encoded};
 
 /// Replace the embedded images named in `replacements` in `doc` with redacted
 /// images.
@@ -128,8 +128,7 @@ fn is_image(doc: &Document, id: ObjectId) -> bool {
 /// content stream cannot be decoded or encoded.
 pub(super) fn remove(edit: &mut Edit, images: &HashSet<ObjectId>) -> Result<usize> {
     let cuts = edit.rewrite_contents(|doc, bytes, scope| {
-        let content =
-            Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
+        let content = parse_content(bytes)?;
         let before = content.operations.len();
         let kept: Vec<Operation> = content
             .operations
@@ -140,10 +139,7 @@ pub(super) fn remove(edit: &mut Edit, images: &HashSet<ObjectId>) -> Result<usiz
         if cut == 0 {
             return Ok(None);
         }
-        let encoded = Content { operations: kept }
-            .encode()
-            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
-        Ok(Some((encoded, cut)))
+        Ok(Some((encoded(&Content { operations: kept })?, cut)))
     })?;
     edit.drop_xobjects(images);
     drop_masks(edit, images);

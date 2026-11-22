@@ -208,7 +208,7 @@ fn copied_images_are_image_xobjects_with_named_filters() {
             dictionary! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 8,
                 "BitsPerComponent" => 8, "ColorSpace" => "DeviceRGB",
-                "Filter" => vec![Object::Name(b"DCTDecode".to_vec())],
+                "Filter" => vec![Object::from("DCTDecode")],
                 "DecodeParms" => parameters,
                 "SMask" => mask,
             },
@@ -228,7 +228,7 @@ fn copied_images_are_image_xobjects_with_named_filters() {
     };
     assert_eq!(
         image.dict.get(b"Filter").unwrap(),
-        &Object::Name(b"DCTDecode".to_vec())
+        &Object::from("DCTDecode")
     );
     let parameters = image
         .dict
@@ -374,7 +374,7 @@ fn an_images_indirect_encoding_is_followed() {
     );
     image.compress().unwrap();
     assert!(image.dict.get(b"Filter").is_ok());
-    let filter = doc.add_object(Object::Name(b"FlateDecode".to_vec()));
+    let filter = doc.add_object(Object::from("FlateDecode"));
     let parms = doc.add_object(dictionary! { "Predictor" => 15, "Colors" => 1, "Columns" => 2 });
     let width = doc.add_object(2);
     image.dict.set("Filter", filter);
@@ -665,7 +665,7 @@ fn an_internal_link_is_resolved_to_its_page() {
         Object::Dictionary(dictionary! {
             "Subtype" => "Link",
             "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
-            "Dest" => Object::Name(b"chapter".to_vec()),
+            "Dest" => Object::from("chapter"),
             "Contents" => Object::string_literal("ask Jane Roe"),
         }),
         Object::Dictionary(dictionary! {
@@ -781,7 +781,7 @@ fn links_resolve_in_their_own_namespace_and_hidden_ones_are_dropped() {
             "Dest" => dest,
         }
     };
-    let mut hidden = link(Object::Name(b"chapter".to_vec()));
+    let mut hidden = link(Object::from("chapter"));
     hidden.set("OC", layer);
     doc.get_dictionary_mut(page).unwrap().set(
         "Annots",
@@ -1145,10 +1145,7 @@ fn a_truetype_font_without_a_descriptor_is_given_one() {
         .resolve_dict(font.get(b"FontDescriptor").unwrap())
         .unwrap();
     assert_eq!(descriptor.get(b"Flags").unwrap(), &Object::Integer(32));
-    assert_eq!(
-        descriptor.get(b"FontName").unwrap(),
-        &Object::Name(b"Arial".to_vec())
-    );
+    assert_eq!(descriptor.get(b"FontName").unwrap(), &Object::from("Arial"));
     assert_eq!(descriptor.get(b"CapHeight").unwrap(), &Object::Real(718.0));
 }
 
@@ -1753,7 +1750,7 @@ fn default_spaces_travel_and_postscript_is_cut() {
         dictionary! {
             "ColorSpace" => dictionary! {
                 "DefaultGray" => vec![
-                    Object::Name(b"CalGray".to_vec()),
+                    Object::from("CalGray"),
                     Object::Dictionary(dictionary! { "WhitePoint" => vec![1.into(), 1.into(), 1.into()] }),
                 ],
             },
@@ -1786,17 +1783,17 @@ fn nested_dictionaries_keep_their_keys() {
         "C0" => vec![0.into()], "C1" => vec![1.into()], "N" => 1,
     });
     let device_n = vec![
-        Object::Name(b"DeviceN".to_vec()),
-        vec![Object::Name(b"Spot".to_vec())].into(),
-        Object::Name(b"DeviceGray".to_vec()),
+        Object::from("DeviceN"),
+        vec![Object::from("Spot")].into(),
+        Object::from("DeviceGray"),
         tint.clone(),
         Object::Dictionary(dictionary! {
             "Subtype" => "NChannel",
             "Colorants" => dictionary! {
                 "Spot" => vec![
-                    Object::Name(b"Separation".to_vec()),
-                    Object::Name(b"Spot".to_vec()),
-                    Object::Name(b"DeviceGray".to_vec()),
+                    Object::from("Separation"),
+                    Object::from("Spot"),
+                    Object::from("DeviceGray"),
                     tint,
                 ],
             },
@@ -2218,7 +2215,7 @@ fn type3_rebuilt(
         "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
         "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
         "CharProcs" => dictionary! { "a" => glyph },
-        "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::Name(b"a".to_vec())] },
+        "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::from("a")] },
         "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
     };
     if let Some(resources) = resources(doc, font) {
@@ -2330,7 +2327,7 @@ fn type3_glyphs_selecting_different_state_fonts_keep_them_apart() {
         "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
         "CharProcs" => dictionary! { "a" => a, "b" => b },
         "Encoding" => dictionary! {
-            "Differences" => vec![97.into(), Object::Name(b"a".to_vec()), Object::Name(b"b".to_vec())],
+            "Differences" => vec![97.into(), Object::from("a"), Object::from("b")],
         },
         "FirstChar" => 97, "LastChar" => 98, "Widths" => vec![1.into(), 1.into()],
         "Resources" => dictionary! {

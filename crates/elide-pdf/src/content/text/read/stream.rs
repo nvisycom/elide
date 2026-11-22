@@ -8,7 +8,7 @@ use std::{array, slice};
 
 use elide_core::{Error, Result};
 use lopdf::Object;
-use lopdf::content::Content;
+use lopdf::content::{Content, Operation};
 
 use super::geometry::{Cursor, TextState};
 use super::paint::{Paint, Painting};
@@ -25,8 +25,7 @@ use crate::pdf::reader::{
 pub(super) fn operand_f64(operands: &[Object], index: usize) -> f64 {
     operands
         .get(index)
-        .map(|o| o.as_number().unwrap_or(0.0))
-        .unwrap_or(0.0)
+        .map_or(0.0, |o| o.as_number().unwrap_or(0.0))
 }
 
 /// Whether the text-showing `operands` draw a glyph: a string of them, or
@@ -103,29 +102,21 @@ impl Fonts {
     }
 }
 
-/// The caller's graphics state passed into a `Do`-invoked Form XObject: the
-/// font it had selected, its parametric text state (with the form's
-/// `/Matrix` already composed onto the CTM), and what it paints with, so the
-/// form's text is decoded with that font before its own `Tf`, positioned in
-/// the page's space, and a fill it makes before its own colour paints the
-/// caller's pattern.
-pub(super) struct Inherited<'a> {
-    /// The caller's selected font, or `None` when it had selected none.
+/// The graphics state text is drawn under (8.4): the selected font, the
+/// parametric text state, and what it paints with. `q` saves it and `Q`
+/// restores it; the text matrices are not part of it, as they reset at `BT`.
+/// A `Do`-invoked Form XObject starts from its caller's, with the form's
+/// `/Matrix` composed onto the CTM, so the form's text is decoded with that
+/// font before its own `Tf`, positioned in the page's space, and a fill it
+/// makes before its own colour paints the caller's pattern.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Graphics<'a> {
+    /// The selected font, or `None` before any is.
     pub(super) font: Option<Font<'a>>,
-    /// The caller's text state, CTM composed with the form's `/Matrix`.
+    /// The parametric text state, the CTM included.
     pub(super) state: TextState,
-    /// The caller's patterns, clip and line style.
+    /// The patterns, clip and line style.
     pub(super) painting: Painting,
-}
-
-/// A graphics-state snapshot pushed by `q` and restored by `Q`: the parametric
-/// text state, the patterns painted with, and the selected font, all graphics
-/// state (8.4). The text matrix is *not* graphics state (it
-/// resets at `BT`), so it is not saved.
-struct SavedState<'a> {
-    state: TextState,
-    painting: Painting,
-    font: Option<Font<'a>>,
 }
 
 /// What a content stream is walked with: the stream its glyphs are stamped
@@ -136,7 +127,7 @@ pub(super) struct Frame<'s, 'i, 'd> {
     pub(super) stream: StreamTarget,
     pub(super) scope: &'s Scope<'d>,
     pub(super) depth: u8,
-    pub(super) inherited: Option<Inherited<'i>>,
+    pub(super) inherited: Option<Graphics<'i>>,
 }
 
 impl<'d> Walk<'_, 'd> {
@@ -219,50 +210,39 @@ impl<'d> Walk<'_, 'd> {
             inherited,
         } = frame;
         let fonts = self.fonts(scope)?;
-        // The selected font: the caller's, if any, until a `Tf` here selects
-        // one of this scope's.
-        let mut font: Option<Font<'_>> = inherited.as_ref().and_then(|inh| inh.font);
-        // The text geometry: the matrix cursor (reset at `BT`) and the
-        // parametric text state, the caller's at a `Do` (its CTM already
-        // carries the form's `/Matrix`). The pen, where the last glyph left
+        // The graphics state: the caller's at a `Do` (its CTM already carries
+        // the form's `/Matrix`, and its path stays behind), else a fresh one.
+        let mut graphics = inherited.map_or_else(Graphics::default, |caller| Graphics {
+            painting: caller.painting.inherited(),
+            ..caller
+        });
+        let mut saved: Vec<Graphics<'_>> = Vec::new();
+        // The text matrices, reset at `BT`. The pen, where the last glyph left
         // off, is shared across this stream and every form it draws, so a word
         // gap is judged consistently across a `Do` boundary.
         let mut cursor = Cursor::new();
-        let mut state = inherited
-            .as_ref()
-            .map_or_else(TextState::default, |inh| inh.state);
-        let mut gs_stack: Vec<SavedState<'_>> = Vec::new();
-        // The patterns fills and strokes paint with, the clip, and the path
-        // being built, so the region each pattern paints is known; and the
-        // space a pattern this stream selects is laid out in (8.7.3.1).
-        let mut painting = inherited
-            .as_ref()
-            .map_or_else(Painting::default, |inh| inh.painting.inherited());
-        let pattern_space = state.ctm;
+        // The space a pattern this stream selects is laid out in (8.7.3.1).
+        let pattern_space = graphics.state.ctm;
 
         for (op_idx, op) in content.operations.iter().enumerate() {
-            if let Some(painted) = painting.path(op, state.ctm) {
+            if let Some(painted) = graphics.painting.path(op, graphics.state.ctm) {
                 self.paint(painted);
                 continue;
             }
             match op.operator.as_str() {
                 // Graphics-state save/restore. A `Q` with an empty stack is a
                 // malformed balance we ignore.
-                "q" => gs_stack.push(SavedState {
-                    state,
-                    painting,
-                    font,
-                }),
+                "q" => saved.push(graphics),
                 "Q" => {
-                    if let Some(saved) = gs_stack.pop() {
-                        state = saved.state;
-                        painting.restore(saved.painting);
-                        font = saved.font;
+                    if let Some(restored) = saved.pop() {
+                        graphics.state = restored.state;
+                        graphics.painting.restore(restored.painting);
+                        graphics.font = restored.font;
                     }
                 }
                 "cm" => {
                     if let Some(m) = read_matrix(&op.operands, 0) {
-                        state.ctm = m.then(state.ctm);
+                        graphics.state.ctm = m.then(graphics.state.ctm);
                     }
                 }
 
@@ -275,21 +255,21 @@ impl<'d> Walk<'_, 'd> {
                 // the pen here would run every field into the next.
                 "BT" => {
                     cursor = Cursor::new();
-                    painting.begin_text();
+                    graphics.painting.begin_text();
                 }
-                "ET" => painting.end_text(),
+                "ET" => graphics.painting.end_text(),
 
                 // Text state parameters.
-                "Tc" => state.char_spacing = operand_f64(&op.operands, 0),
-                "Tw" => state.word_spacing = operand_f64(&op.operands, 0),
-                "Tz" => state.h_scale = operand_f64(&op.operands, 0) / 100.0,
-                "TL" => state.leading = operand_f64(&op.operands, 0),
-                "Ts" => state.rise = operand_f64(&op.operands, 0),
+                "Tc" => graphics.state.char_spacing = operand_f64(&op.operands, 0),
+                "Tw" => graphics.state.word_spacing = operand_f64(&op.operands, 0),
+                "Tz" => graphics.state.h_scale = operand_f64(&op.operands, 0) / 100.0,
+                "TL" => graphics.state.leading = operand_f64(&op.operands, 0),
+                "Ts" => graphics.state.rise = operand_f64(&op.operands, 0),
                 "Tf" => {
                     if let Some(Object::Name(name)) = op.operands.first() {
-                        font = Some(fonts.select(name, font));
+                        graphics.font = Some(fonts.select(name, graphics.font));
                     }
-                    state.font_size = operand_f64(&op.operands, 1);
+                    graphics.state.font_size = operand_f64(&op.operands, 1);
                 }
 
                 // Text positioning: move the line/text matrix.
@@ -298,7 +278,7 @@ impl<'d> Walk<'_, 'd> {
                 "TD" => {
                     // `TD tx ty` also sets leading to `-ty`.
                     let ty = operand_f64(&op.operands, 1);
-                    state.leading = -ty;
+                    graphics.state.leading = -ty;
                     cursor.next_line_offset(operand_f64(&op.operands, 0), ty);
                 }
                 "Tm" => {
@@ -306,110 +286,22 @@ impl<'d> Walk<'_, 'd> {
                         cursor.set_matrix(m);
                     }
                 }
-                "T*" => cursor.next_line_offset(0.0, -state.leading),
+                "T*" => cursor.next_line_offset(0.0, -graphics.state.leading),
 
                 // Text showing. `'` is an implicit `T*` then show; `"`
                 // additionally sets word and character spacing from its first
                 // two operands, then shows its third.
                 "Tj" | "TJ" | "'" | "\"" => {
-                    if op.operator == "'" {
-                        cursor.next_line_offset(0.0, -state.leading);
-                    } else if op.operator == "\"" {
-                        state.word_spacing = operand_f64(&op.operands, 0);
-                        state.char_spacing = operand_f64(&op.operands, 1);
-                        cursor.next_line_offset(0.0, -state.leading);
-                    }
-                    let Some(selected) = font else {
-                        return Err(Error::redaction(format!(
-                            "page {} draws text before selecting a font; \
-                             its text cannot be decoded for redaction",
-                            self.page
-                        )));
-                    };
-                    let Some(text) = selected.text else {
-                        return Err(Error::redaction(format!(
-                            "page {} draws text with a font whose encoding \
-                             could not be decoded or was not found in the page \
-                             resources; its text cannot be redacted",
-                            self.page
-                        )));
-                    };
-                    let (operands, base): (&[Object], usize) = if op.operator == "\"" {
-                        match op.operands.get(2) {
-                            Some(s) => (slice::from_ref(s), 2),
-                            None => (&[], 0),
-                        }
-                    } else {
-                        (&op.operands, 0)
-                    };
-                    // Vertical writing is not laid out, so a page drawing it is
-                    // redacted from its render, and its text, which may map to
-                    // nothing readable, is not read.
-                    if text.is_vertical() {
-                        self.unplaced |= draws_glyphs(operands);
-                        continue;
-                    }
-                    let shown = self.accum.rects.len();
-                    // A short-lived run so its borrow of `accum` ends before
-                    // the `Do` arm needs `accum` again.
-                    let mut run = TextRun {
-                        text: self.accum.text,
-                        runs: self.accum.runs,
-                        next_char: self.accum.next_char,
-                        rects: self.accum.rects,
-                        cursor: &mut cursor,
-                        pen: &mut self.pen,
-                        state,
-                        widths: selected.widths,
-                        metrics: selected.metrics,
-                        stream,
-                        font: selected.slot,
-                    };
-                    run.show(text, operands, op_idx, base)?;
-                    if self.accum.rects.len() > shown
-                        && matches!(selected.widths, WidthSource::Unknown)
-                    {
-                        self.unplaced = true;
-                    }
-                    // Text drawn with a pattern paints it where it shows,
-                    // its stroke reaching past glyphs the clip hides.
-                    let extent = self.accum.rects[shown..]
-                        .iter()
-                        .map(|glyph| glyph.rect)
-                        .reduce(DeviceRect::union);
-                    // A glyph shows only where the clip lets it, a form's or
-                    // a pattern cell's `/BBox` included; one it hides has no
-                    // box, though its text is still read.
-                    let shown_glyphs: Vec<GlyphRect> = self
-                        .accum
-                        .rects
-                        .drain(shown..)
-                        .filter_map(|glyph| {
-                            Some(GlyphRect {
-                                rect: painting.visible(glyph.rect)?,
-                                ..glyph
-                            })
-                        })
-                        .collect();
-                    self.accum.rects.extend(shown_glyphs);
-                    if let Some(extent) = extent {
-                        let painted = painting.text(extent, state.ctm, selected.outlines);
-                        self.paint(painted);
-                    }
+                    self.show_text(op, op_idx, &mut graphics, &mut cursor, stream)?;
                 }
 
                 // A `Do` may draw a Form XObject, whose content draws text in
                 // its own stream and resources: walk it under the current
-                // graphics state, the selected font and the text state, onto
-                // whose CTM `walk_xobject` composes the form's `/Matrix`.
+                // graphics state, onto whose CTM `walk_xobject` composes the
+                // form's `/Matrix`.
                 "Do" => {
                     if let Some(Object::Name(name)) = op.operands.first() {
-                        let inherited = Inherited {
-                            font,
-                            state,
-                            painting,
-                        };
-                        self.walk_xobject(name, scope, depth, inherited)?;
+                        self.walk_xobject(name, scope, depth, graphics)?;
                     }
                 }
 
@@ -427,26 +319,139 @@ impl<'d> Walk<'_, 'd> {
                         space: pattern_space,
                     });
                     if op.operator == "scn" {
-                        painting.fill = paint;
+                        graphics.painting.fill = paint;
                     } else {
-                        painting.stroke = paint;
+                        graphics.painting.stroke = paint;
                     }
                 }
                 "gs" => {
                     if let Some(Object::Name(name)) = op.operands.first()
-                        && let Some(graphics) = scope
+                        && let Some(parameters) = scope
                             .lookup(self.doc, b"ExtGState", name)
-                            .and_then(|graphics| self.doc.resolve_dict(graphics))
+                            .and_then(|parameters| self.doc.resolve_dict(parameters))
                     {
-                        painting.state(self.doc, graphics);
-                        self.select_soft_mask(graphics, state.ctm, depth);
+                        graphics.painting.state(self.doc, parameters);
+                        self.select_soft_mask(parameters, graphics.state.ctm, depth);
                     }
                 }
-                "sc" | "g" | "rg" | "k" | "cs" => painting.fill = None,
-                "SC" | "G" | "RG" | "K" | "CS" => painting.stroke = None,
+                "sc" | "g" | "rg" | "k" | "cs" => graphics.painting.fill = None,
+                "SC" | "G" | "RG" | "K" | "CS" => graphics.painting.stroke = None,
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// Show the text the text-showing operation `operation`, the `index`th of
+    /// its stream, draws in the font `graphics` selects: `'` moves to the
+    /// next line first, and `"` also sets word and character spacing from its
+    /// first two operands before showing its third. Its glyphs are placed
+    /// from `cursor` under the text state, kept only where the clip shows
+    /// them, and painted with the patterns.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if no font
+    /// is selected or its codes can't be read; as [`TextRun::show`].
+    fn show_text(
+        &mut self,
+        operation: &Operation,
+        index: usize,
+        graphics: &mut Graphics<'_>,
+        cursor: &mut Cursor,
+        stream: StreamTarget,
+    ) -> Result<()> {
+        if operation.operator == "'" {
+            cursor.next_line_offset(0.0, -graphics.state.leading);
+        } else if operation.operator == "\"" {
+            graphics.state.word_spacing = operand_f64(&operation.operands, 0);
+            graphics.state.char_spacing = operand_f64(&operation.operands, 1);
+            cursor.next_line_offset(0.0, -graphics.state.leading);
+        }
+        let Some(selected) = graphics.font else {
+            return Err(Error::redaction(format!(
+                "page {} draws text before selecting a font; \
+                 its text cannot be decoded for redaction",
+                self.page
+            )));
+        };
+        let Some(text) = selected.text else {
+            return Err(Error::redaction(format!(
+                "page {} draws text with a font whose encoding \
+                 could not be decoded or was not found in the page \
+                 resources; its text cannot be redacted",
+                self.page
+            )));
+        };
+        let (operands, base) = shown_operands(operation);
+        // Vertical writing is not laid out, so a page drawing it is
+        // redacted from its render, and its text, which may map to
+        // nothing readable, is not read.
+        if text.is_vertical() {
+            self.unplaced |= draws_glyphs(operands);
+            return Ok(());
+        }
+        let shown = self.accum.rects.len();
+        let mut run = TextRun {
+            text: self.accum.text,
+            runs: self.accum.runs,
+            next_char: self.accum.next_char,
+            rects: self.accum.rects,
+            cursor,
+            pen: &mut self.pen,
+            state: graphics.state,
+            widths: selected.widths,
+            metrics: selected.metrics,
+            stream,
+            font: selected.slot,
+        };
+        run.show(text, operands, index, base)?;
+        if self.accum.rects.len() > shown && matches!(selected.widths, WidthSource::Unknown) {
+            self.unplaced = true;
+        }
+        self.clip_shown(shown, graphics, selected.outlines);
+        Ok(())
+    }
+
+    /// Clip the glyphs placed from the `from`th on to what `graphics`' clip
+    /// shows, a form's or a pattern cell's `/BBox` included: one it hides
+    /// has no box, though its text is still read. Text drawn with a pattern
+    /// paints it where the glyphs are, its stroke reaching past those the
+    /// clip hides, so their extent is painted first; `outlines` says whether
+    /// a clipping rendering mode clips to them.
+    fn clip_shown(&mut self, from: usize, graphics: &mut Graphics<'_>, outlines: bool) {
+        let extent = self.accum.rects[from..]
+            .iter()
+            .map(|glyph| glyph.rect)
+            .reduce(DeviceRect::union);
+        let shown: Vec<GlyphRect> = self
+            .accum
+            .rects
+            .drain(from..)
+            .filter_map(|glyph| {
+                Some(GlyphRect {
+                    rect: graphics.painting.visible(glyph.rect)?,
+                    ..glyph
+                })
+            })
+            .collect();
+        self.accum.rects.extend(shown);
+        if let Some(extent) = extent {
+            let painted = graphics.painting.text(extent, graphics.state.ctm, outlines);
+            self.paint(painted);
+        }
+    }
+}
+
+/// The operands of the text-showing `operation` that show text, and the
+/// index of the first among all its operands: `"`'s third, after the word
+/// and character spacing it sets; every other operator's all.
+fn shown_operands(operation: &Operation) -> (&[Object], usize) {
+    if operation.operator != "\"" {
+        return (&operation.operands, 0);
+    }
+    match operation.operands.get(2) {
+        Some(shown) => (slice::from_ref(shown), 2),
+        None => (&[], 0),
     }
 }

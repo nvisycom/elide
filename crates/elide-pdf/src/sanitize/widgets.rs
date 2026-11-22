@@ -16,7 +16,7 @@ use lopdf::{Dictionary, Object, dictionary};
 use super::Builder;
 use super::copy::At;
 use super::keys::Kind;
-use crate::pdf::reader::{DeviceRect, DocumentExt, Matrix, Scope, normalize_rect};
+use crate::pdf::reader::{DeviceRect, DictionaryExt, DocumentExt, Matrix, Scope, normalize_rect};
 
 /// The annotation flags that keep a widget from being shown (12.5.3): Hidden
 /// and NoView.
@@ -52,9 +52,7 @@ impl<'a> Builder<'a> {
     ) -> Result<Option<Flattened>> {
         let source = self.source;
         let flags = dict
-            .get(b"F")
-            .ok()
-            .and_then(|f| source.resolve(f))
+            .resolved(source, b"F")
             .and_then(|f| f.as_i64().ok())
             .unwrap_or(0);
         if self.layers.hides(dict) {
@@ -84,12 +82,7 @@ impl<'a> Builder<'a> {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
-        let matrix = stream
-            .dict
-            .get(b"Matrix")
-            .ok()
-            .and_then(|matrix| source.resolve_numbers(matrix))
-            .map_or(Matrix::IDENTITY, Matrix::from);
+        let matrix = Matrix::of(source, &stream.dict);
         let Some(mut matrix) = placement(bbox, matrix, rect) else {
             self.record(HiddenContent::FormField);
             return Ok(None);
@@ -98,52 +91,59 @@ impl<'a> Builder<'a> {
             matrix = matrix.then(upright(rect, rotate));
         }
 
-        // An appearance without resources of its own resolves names in the
-        // page's it is drawn on (7.8.3), then, for a name the page does not
-        // define, in the form's default resources.
-        let defaults = source
-            .catalog()
-            .ok()
-            .and_then(|catalog| catalog.get(b"AcroForm").ok())
-            .and_then(|form| source.resolve_dict(form))
-            .and_then(|form| form.get(b"DR").ok())
-            .and_then(|resources| source.resolve_dict(resources));
-        let defaults = Scope::new(page.dictionaries().iter().copied().chain(defaults));
-        let Some(form) = self.copy(Kind::Form, appearance, At::top(&defaults))? else {
+        let scope = self.appearance_scope(page);
+        let Some(form) = self.copy(Kind::Form, appearance, At::top(&scope))? else {
             self.record(HiddenContent::FormField);
             return Ok(None);
         };
         let state = self.compositing(dict)?;
-        let mut form = form;
-        if let Object::Reference(id) = form
-            && let Ok(Object::Stream(copy)) = self.out.get_object_mut(id)
-        {
-            copy.dict.set("Type", Object::Name(b"XObject".to_vec()));
-            copy.dict.set("Subtype", Object::Name(b"Form".to_vec()));
-            // The annotation is composited as a group; the copy may also be
-            // drawn by page content, which must not be, so the group is set
-            // on a copy of its own, one for every widget showing the form.
-            if state.is_some() && copy.dict.get(b"Group").is_err() {
-                let grouped = match self.grouped.get(&id) {
-                    Some(&grouped) => grouped,
-                    None => {
-                        let mut grouped = copy.clone();
-                        grouped
-                            .dict
-                            .set("Group", dictionary! { "S" => "Transparency" });
-                        let grouped = self.out.add_object(grouped);
-                        self.grouped.insert(id, grouped);
-                        grouped
-                    }
-                };
-                form = Object::Reference(grouped);
-            }
-        }
         Ok(Some(Flattened {
-            form,
+            form: self.drawn_form(form, state.is_some()),
             matrix,
             state,
         }))
+    }
+
+    /// The scope an appearance without resources of its own resolves names
+    /// in: the `page`'s it is drawn on (7.8.3), then, for a name the page
+    /// does not define, the interactive form's default resources.
+    fn appearance_scope(&self, page: &Scope<'a>) -> Scope<'a> {
+        let source = self.source;
+        let defaults = source
+            .catalog()
+            .ok()
+            .and_then(|catalog| catalog.resolved_dict(source, b"AcroForm"))
+            .and_then(|form| form.resolved_dict(source, b"DR"));
+        Scope::new(page.dictionaries().iter().copied().chain(defaults))
+    }
+
+    /// The copied appearance `form` as the form a flattened widget draws:
+    /// typed as a Form XObject, and, where the widget is `composited` as a
+    /// group, a copy of it set as one. The copy may also be drawn by page
+    /// content, which must not be grouped, so the group is set on a copy of
+    /// its own, one for every widget showing the form.
+    fn drawn_form(&mut self, form: Object, composited: bool) -> Object {
+        let Object::Reference(id) = form else {
+            return form;
+        };
+        let Ok(Object::Stream(copy)) = self.out.get_object_mut(id) else {
+            return form;
+        };
+        copy.dict.set("Type", "XObject");
+        copy.dict.set("Subtype", "Form");
+        if !composited || copy.dict.get(b"Group").is_ok() {
+            return form;
+        }
+        if let Some(&grouped) = self.grouped.get(&id) {
+            return Object::Reference(grouped);
+        }
+        let mut grouped = copy.clone();
+        grouped
+            .dict
+            .set("Group", dictionary! { "S" => "Transparency" });
+        let grouped = self.out.add_object(grouped);
+        self.grouped.insert(id, grouped);
+        Object::Reference(grouped)
     }
 
     /// The graphics state the widget `dict`'s appearance is composited in
@@ -157,11 +157,7 @@ impl<'a> Builder<'a> {
     /// As [`copy`](Self::copy).
     fn compositing(&mut self, dict: &'a Dictionary) -> Result<Option<Dictionary>> {
         let source = self.source;
-        let opacity = |key: &[u8]| {
-            dict.get(key)
-                .ok()
-                .and_then(|value| source.resolve_number(value))
-        };
+        let opacity = |key: &[u8]| dict.resolved_number(source, key);
         let stroking = opacity(b"CA");
         let nonstroking = opacity(b"ca").or(stroking);
         let blend = match dict.get(b"BM") {
@@ -192,11 +188,11 @@ impl<'a> Builder<'a> {
     /// one its appearance state (`/AS`) selects among several.
     fn appearance(&self, dict: &'a Dictionary) -> Option<&'a Object> {
         let source = self.source;
-        let normal = source.resolve_dict(dict.get(b"AP").ok()?)?.get(b"N").ok()?;
+        let normal = dict.resolved_dict(source, b"AP")?.get(b"N").ok()?;
         match source.resolve(normal)? {
             Object::Stream(_) => Some(normal),
             Object::Dictionary(states) => {
-                let state = source.resolve(dict.get(b"AS").ok()?)?.as_name().ok()?;
+                let state = dict.resolved(source, b"AS")?.as_name().ok()?;
                 states.get(state).ok()
             }
             _ => None,

@@ -68,11 +68,7 @@ impl UnicodeMap {
                     let Some(units) = cmap.get(code, len).filter(|units| !units.is_empty()) else {
                         continue;
                     };
-                    units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
-                        Error::resource_limit(format!(
-                            "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
-                        ))
-                    })?;
+                    charge_units(&mut units_left, units.len())?;
                     codes.insert((len, code), units);
                 }
             }
@@ -97,11 +93,7 @@ impl UnicodeMap {
                     *units = written.encode_utf16().collect();
                 }
             }
-            units_left = units_left.checked_sub(units.len()).ok_or_else(|| {
-                Error::resource_limit(format!(
-                    "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
-                ))
-            })?;
+            charge_units(&mut units_left, units.len())?;
         }
         Ok(self)
     }
@@ -319,6 +311,21 @@ fn with_byte(code: u32, shift: u32, byte: u32) -> u32 {
     code & !(0xFF << shift) | byte << shift
 }
 
+/// Charge `units` UTF-16 units against `left` of [`MAX_UNITS`].
+///
+/// # Errors
+///
+/// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) past
+/// the limit.
+fn charge_units(left: &mut usize, units: usize) -> Result<()> {
+    *left = left.checked_sub(units).ok_or_else(|| {
+        Error::resource_limit(format!(
+            "a /ToUnicode CMap maps to more than {MAX_UNITS} UTF-16 units"
+        ))
+    })?;
+    Ok(())
+}
+
 /// A `len`-byte `code` as a `<hex>` string.
 fn code_hex(len: u8, code: u32) -> String {
     format!("<{code:0width$X}>", width = 2 * usize::from(len))
@@ -326,8 +333,12 @@ fn code_hex(len: u8, code: u32) -> String {
 
 /// UTF-16 `units` as a `<hex>` string.
 fn units_hex(units: &[u16]) -> String {
-    let digits: String = units.iter().map(|unit| format!("{unit:04X}")).collect();
-    format!("<{digits}>")
+    let mut hex = String::from("<");
+    for unit in units {
+        let _ = write!(hex, "{unit:04X}");
+    }
+    hex.push('>');
+    hex
 }
 
 #[cfg(test)]

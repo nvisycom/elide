@@ -410,6 +410,7 @@ pub(crate) enum FontFile {
     /// `/FontFile3` of subtype `Type1C`: a bare CFF program.
     Cff,
     /// `/FontFile3` of subtype `CIDFontType0C`: a bare CID-keyed CFF program.
+    #[cfg(feature = "render")]
     CidCff,
     /// `/FontFile`: a Type 1 program.
     Type1,
@@ -419,11 +420,12 @@ impl FontFile {
     /// The descriptor key the program is under, and its stream's subtype.
     fn key(self) -> (&'static str, Option<&'static str>) {
         match self {
-            FontFile::TrueType => ("FontFile2", None),
-            FontFile::OpenType => ("FontFile3", Some("OpenType")),
-            FontFile::Cff => ("FontFile3", Some("Type1C")),
-            FontFile::CidCff => ("FontFile3", Some("CIDFontType0C")),
-            FontFile::Type1 => ("FontFile", None),
+            Self::TrueType => ("FontFile2", None),
+            Self::OpenType => ("FontFile3", Some("OpenType")),
+            Self::Cff => ("FontFile3", Some("Type1C")),
+            #[cfg(feature = "render")]
+            Self::CidCff => ("FontFile3", Some("CIDFontType0C")),
+            Self::Type1 => ("FontFile", None),
         }
     }
 }

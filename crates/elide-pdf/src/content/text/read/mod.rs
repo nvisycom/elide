@@ -27,7 +27,7 @@ use lopdf::{Document, ObjectId};
 use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
-use self::stream::{Frame, Inherited, ScopeFont};
+use self::stream::{Frame, Graphics, ScopeFont};
 use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
 use crate::pdf::reader::{DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Scope, page_frame};
@@ -74,8 +74,6 @@ pub(super) fn text_blocks(source: &Pdf) -> Result<Vec<TextBlock>> {
 /// XObjects it draws) in operator order, so a character offset maps to the glyph
 /// that drew it.
 ///
-/// The per-page primitive [`text_blocks`] loops over.
-///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the page's
@@ -92,29 +90,14 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut next_char = 0usize;
     let mut rects: Vec<GlyphRect> = Vec::new();
     let mut fonts: Vec<FontEntry> = Vec::new();
-    let mut walk = Walk {
-        doc,
-        accum: TextAccum {
-            text: &mut text,
-            runs: &mut runs,
-            next_char: &mut next_char,
-            rects: &mut rects,
-            fonts: &mut fonts,
-        },
-        pen: None,
-        active: BTreeSet::new(),
-        patterns: BTreeSet::new(),
-        selected: Vec::new(),
-        masks: Vec::new(),
-        painted: Vec::new(),
-        cell: None,
-        cells: BTreeMap::new(),
-        page,
-        walks_remaining: MAX_XOBJECT_WALKS,
-        decoded_remaining: MAX_WALKED_BYTES,
-        read_fonts: HashMap::new(),
-        unplaced: false,
+    let accum = TextAccum {
+        text: &mut text,
+        runs: &mut runs,
+        next_char: &mut next_char,
+        rects: &mut rects,
+        fonts: &mut fonts,
     };
+    let mut walk = Walk::new(doc, page, accum);
 
     let scope = Scope::page(doc, page_id);
     walk.walk_stream(
@@ -126,21 +109,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
             inherited: None,
         },
     )?;
-    // The text tiling patterns and soft mask groups draw is read once the
-    // page's is, each apart, and what they select in turn after them.
-    loop {
-        let selected = mem::take(&mut walk.selected);
-        let masks = mem::take(&mut walk.masks);
-        if selected.is_empty() && masks.is_empty() {
-            break;
-        }
-        for pattern in selected {
-            walk.walk_pattern(pattern)?;
-        }
-        for mask in masks {
-            walk.walk_soft_mask(mask)?;
-        }
-    }
+    walk.walk_selected()?;
     walk.place_tiles()?;
     let unplaced = walk.unplaced;
 
@@ -218,6 +187,54 @@ struct Walk<'a, 'd> {
     /// Whether a glyph was drawn that can't be placed: in a font whose
     /// advances can't be known, or written vertically.
     unplaced: bool,
+}
+
+impl<'a, 'd> Walk<'a, 'd> {
+    /// A walk of page `page` of `doc`, appending to `accum`, with nothing
+    /// walked yet and the page's whole budget left.
+    fn new(doc: &'d Document, page: u32, accum: TextAccum<'a>) -> Self {
+        Self {
+            doc,
+            accum,
+            pen: None,
+            active: BTreeSet::new(),
+            patterns: BTreeSet::new(),
+            selected: Vec::new(),
+            masks: Vec::new(),
+            painted: Vec::new(),
+            cell: None,
+            cells: BTreeMap::new(),
+            page,
+            walks_remaining: MAX_XOBJECT_WALKS,
+            decoded_remaining: MAX_WALKED_BYTES,
+            read_fonts: HashMap::new(),
+            unplaced: false,
+        }
+    }
+
+    /// Walk the tiling patterns and soft mask groups the page selected, once
+    /// its own text is read, each apart, and what they select in turn after
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// As [`walk_pattern`](Self::walk_pattern) and
+    /// [`walk_soft_mask`](Self::walk_soft_mask).
+    fn walk_selected(&mut self) -> Result<()> {
+        loop {
+            let selected = mem::take(&mut self.selected);
+            let masks = mem::take(&mut self.masks);
+            if selected.is_empty() && masks.is_empty() {
+                return Ok(());
+            }
+            for pattern in selected {
+                self.walk_pattern(pattern)?;
+            }
+            for mask in masks {
+                self.walk_soft_mask(mask)?;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -330,10 +347,7 @@ mod tests {
             .into_iter()
             .flat_map(|chars| geometry.rects_for(chars))
             .collect();
-        let mut chars: Vec<usize> = geometry
-            .glyphs_in(&regions)
-            .flat_map(|range| range.collect::<Vec<_>>())
-            .collect();
+        let mut chars: Vec<usize> = geometry.glyphs_in(&regions).flatten().collect();
         chars.sort_unstable();
         assert_eq!(chars, [0, 1, 2, 3, 9, 10, 11]);
     }

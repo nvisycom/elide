@@ -45,7 +45,7 @@ pub(super) struct TextState {
 
 impl Default for TextState {
     fn default() -> Self {
-        TextState {
+        Self {
             font_size: 0.0,
             char_spacing: 0.0,
             word_spacing: 0.0,
@@ -68,8 +68,8 @@ pub(super) struct Cursor {
 
 impl Cursor {
     /// A cursor at the text-object origin, as `BT` establishes.
-    pub(super) fn new() -> Cursor {
-        Cursor {
+    pub(super) fn new() -> Self {
+        Self {
             tm: Matrix::IDENTITY,
             tlm: Matrix::IDENTITY,
         }
@@ -118,7 +118,7 @@ impl Cursor {
     /// zero.
     pub(super) fn writing_axis(&self, ctm: Matrix) -> ((f64, f64), f64) {
         let m = self.tm.then(ctm);
-        let len = (m.a * m.a + m.b * m.b).sqrt();
+        let len = m.a.hypot(m.b);
         if len <= f64::MIN_POSITIVE {
             ((1.0, 0.0), 0.0)
         } else {

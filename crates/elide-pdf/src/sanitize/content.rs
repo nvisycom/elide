@@ -27,7 +27,8 @@ use lopdf::{Dictionary, Object, ObjectId};
 use super::copy::At;
 use super::keys::Kind;
 use super::{Builder, MAX_NESTING};
-use crate::pdf::reader::{DictionaryExt, DocumentExt};
+use crate::pdf::reader::{DictionaryExt, DocumentExt, parse_content};
+use crate::pdf::writer::encoded;
 
 /// Every content operator the PDF specification defines, but the inline image
 /// and marked-content operators the rebuild handles itself.
@@ -142,8 +143,7 @@ impl<'a> Builder<'a> {
         // Reading the content costs its bytes, whatever it writes: one stream
         // many glyphs or scopes draw is read each time.
         self.charge(bytes.len())?;
-        let content =
-            Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
+        let content = parse_content(bytes)?;
         let mut copy = ContentCopy {
             builder: self,
             at,
@@ -256,7 +256,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             return Ok(());
         }
         match operator {
-            "BDC" | "DP" => self.marked(operation),
+            "BDC" | "DP" => self.marked(&operation),
             "BMC" => {
                 self.push(Marked::Written);
                 self.kept.push(operation);
@@ -271,18 +271,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             "MP" => self.kept.push(operation),
             "BI" => self.builder.unreadable(None),
             "Tf" => self.font_lost = !self.resource(operation, Resource::Font)?,
-            "gs" => {
-                let font = self.state_font(&operation)?;
-                self.resource(operation, Resource::ExtGState)?;
-                match font {
-                    StateFont::Unset => {}
-                    StateFont::Selected(tf) => {
-                        self.font_lost = false;
-                        self.kept.push(tf);
-                    }
-                    StateFont::Lost => self.font_lost = true,
-                }
-            }
+            "gs" => self.graphics_state(operation)?,
             "sh" => {
                 self.resource(operation, Resource::Shading)?;
             }
@@ -300,7 +289,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 }
                 _ => self.kept.push(operation),
             },
-            "Do" => self.draw(operation)?,
+            "Do" => self.draw(&operation)?,
             "BX" | "EX" => {}
             "q" => {
                 self.font_saves.push(self.font_lost);
@@ -326,6 +315,26 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             }
             _ if OPERATORS.contains(&operator) => self.kept.push(operation),
             _ => self.builder.residue += 1,
+        }
+        Ok(())
+    }
+
+    /// A `gs` `operation`, its graphics state copied, and the font it sets,
+    /// if any, selected after it by a `Tf` of its own, or lost.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::copy`].
+    fn graphics_state(&mut self, operation: Operation) -> Result<()> {
+        let font = self.state_font(&operation)?;
+        self.resource(operation, Resource::ExtGState)?;
+        match font {
+            StateFont::Unset => {}
+            StateFont::Selected(tf) => {
+                self.font_lost = false;
+                self.kept.push(tf);
+            }
+            StateFont::Lost => self.font_lost = true,
         }
         Ok(())
     }
@@ -374,7 +383,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
     /// A `BDC` or `DP` `operation`: its property list dropped (`BDC` becomes
     /// `BMC`, `DP` becomes `MP`), and a sequence in a layer hidden by default
     /// cut whole; alternate text the list carried is recorded.
-    fn marked(&mut self, operation: Operation) {
+    fn marked(&mut self, operation: &Operation) {
         let builder = &mut *self.builder;
         let is_sequence = operation.operator == "BDC";
         let [Object::Name(tag), properties] = operation.operands.as_slice() else {
@@ -382,7 +391,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             if is_sequence {
                 self.push(Marked::Written);
                 self.kept
-                    .push(Operation::new("BMC", vec![Object::Name(b"Span".to_vec())]));
+                    .push(Operation::new("BMC", vec![Object::from("Span")]));
             }
             return;
         };
@@ -466,13 +475,43 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
         Ok(true)
     }
 
+    /// The name the XObject the source names `name` is drawn under as its
+    /// copy `copy` (object `copied`): `name` itself unless the rebuilt
+    /// resources already give it to another copy (one drawn where the
+    /// caller's font is kept, say), else a fresh name, the same each time.
+    fn drawn_name(&mut self, name: &[u8], copy: &Object, copied: ObjectId) -> Vec<u8> {
+        let key = (name.to_vec(), copied);
+        if let Some(given) = self.drawn_names.get(&key) {
+            return given.clone();
+        }
+        let existing = self
+            .resources
+            .get(b"XObject")
+            .and_then(Object::as_dict)
+            .ok()
+            .and_then(|entries| entries.get(name).ok());
+        let given = match existing {
+            Some(existing) if existing != copy => {
+                let (resources, scope, source) =
+                    (&*self.resources, self.at.scope, self.builder.source);
+                self.drawn.name(|name| {
+                    has(resources, b"XObject", name)
+                        || scope.lookup(source, b"XObject", name).is_some()
+                })
+            }
+            _ => name.to_vec(),
+        };
+        self.drawn_names.insert(key, given.clone());
+        given
+    }
+
     /// Keep the `Do` `operation` when its XObject is kept: an image a codec
     /// reads, or a form, neither in a hidden layer.
     ///
     /// # Errors
     ///
     /// As [`Builder::copy`].
-    fn draw(&mut self, operation: Operation) -> Result<()> {
+    fn draw(&mut self, operation: &Operation) -> Result<()> {
         let builder = &mut *self.builder;
         let source = builder.source;
         let Some(Object::Name(name)) = operation.operands.first() else {
@@ -517,32 +556,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             builder.residue += 1;
             return Ok(());
         };
-        let key = (name.clone(), copied);
-        let name = match self.drawn_names.get(&key) {
-            Some(given) => given.clone(),
-            None => {
-                let existing = self
-                    .resources
-                    .get(b"XObject")
-                    .and_then(Object::as_dict)
-                    .ok()
-                    .and_then(|entries| entries.get(name).ok());
-                let given = match existing {
-                    None => name.clone(),
-                    Some(existing) if *existing == copy => name.clone(),
-                    Some(_) => {
-                        let resources = &*self.resources;
-                        let scope = self.at.scope;
-                        self.drawn.name(|name| {
-                            has(resources, b"XObject", name)
-                                || scope.lookup(source, b"XObject", name).is_some()
-                        })
-                    }
-                };
-                self.drawn_names.insert(key, given.clone());
-                given
-            }
-        };
+        let name = self.drawn_name(name, &copy, copied);
         insert(self.resources, b"XObject", &name, copy);
         self.kept
             .push(Operation::new("Do", vec![Object::Name(name)]));
@@ -595,8 +609,7 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
             .and_then(Object::as_dict)
             .ok()
             .and_then(|fonts| fonts.iter().find(|(_, value)| **value == font))
-            .map(|(name, _)| name.clone())
-            .unwrap_or_else(|| self.state_fonts.name(taken));
+            .map_or_else(|| self.state_fonts.name(taken), |(name, _)| name.clone());
         insert(self.resources, b"Font", &name, font);
         Ok(StateFont::Selected(Operation::new(
             "Tf",
@@ -642,11 +655,9 @@ impl<'a: 's, 's> ContentCopy<'_, 'a, 's> {
                 insert(self.resources, b"ColorSpace", name, space);
             }
         }
-        Content {
+        encoded(&Content {
             operations: self.kept,
-        }
-        .encode()
-        .map_err(|e| Error::malformed(format!("encode content: {e}")))
+        })
     }
 }
 

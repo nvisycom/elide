@@ -234,18 +234,15 @@ fn hidden_groups(doc: &Document) -> Option<HashSet<ObjectId>> {
     let Some(properties) = doc
         .catalog()
         .ok()
-        .and_then(|catalog| catalog.get(b"OCProperties").ok())
-        .and_then(|p| doc.resolve_dict(p))
+        .and_then(|catalog| catalog.resolved_dict(doc, b"OCProperties"))
     else {
         return Some(HashSet::new());
     };
-    let Some(config) = properties.get(b"D").ok().and_then(|d| doc.resolve_dict(d)) else {
+    let Some(config) = properties.resolved_dict(doc, b"D") else {
         return Some(HashSet::new());
     };
     let ids = |key: &[u8], dict: &Dictionary| -> HashSet<ObjectId> {
-        dict.get(key)
-            .ok()
-            .and_then(|array| doc.resolve_array(array))
+        dict.resolved_array(doc, key)
             .map(|array| array.iter().filter_map(|o| o.as_reference().ok()).collect())
             .unwrap_or_default()
     };
@@ -280,11 +277,7 @@ fn hidden_groups(doc: &Document) -> Option<HashSet<ObjectId>> {
 /// name or an array of names (empty when it is an empty array), `/View`
 /// when it has none.
 fn intents(doc: &Document, dict: &Dictionary) -> Vec<Vec<u8>> {
-    match dict
-        .get(b"Intent")
-        .ok()
-        .and_then(|intent| doc.resolve(intent))
-    {
+    match dict.resolved(doc, b"Intent") {
         Some(Object::Name(name)) => vec![name.clone()],
         Some(Object::Array(names)) => names
             .iter()
@@ -324,7 +317,7 @@ mod tests {
         let membership = |expression: Object| {
             Object::Dictionary(dictionary! { "Type" => "OCMD", "VE" => expression })
         };
-        let not = |operand: Object| Object::Array(vec![Object::Name(b"Not".to_vec()), operand]);
+        let not = |operand: Object| Object::Array(vec![Object::from("Not"), operand]);
         assert!(!layers.is_hidden(&membership(not(5.into()))));
         assert!(!layers.is_hidden(&membership(not(layer.into()))));
         assert!(layers.is_hidden(&membership(not(not(layer.into())))));
@@ -335,9 +328,10 @@ mod tests {
     #[test]
     fn a_membership_named_again_is_evaluated_once() {
         let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
-        let expression = doc.add_object(vec![Object::Name(b"Not".to_vec()), layer.into()]);
-        let membership =
-            doc.add_object(dictionary! { "Type" => "OCMD", "VE" => vec![Object::Name(b"Not".to_vec()), expression.into()] });
+        let expression = doc.add_object(vec![Object::from("Not"), layer.into()]);
+        let membership = doc.add_object(
+            dictionary! { "Type" => "OCMD", "VE" => vec![Object::from("Not"), expression.into()] },
+        );
         let layers = Layers::read(&doc);
         for _ in 0..3 {
             assert!(layers.is_hidden(&Object::Reference(membership)));
@@ -375,7 +369,7 @@ mod tests {
         assert!(!layers.is_hidden(&Object::Reference(layer)));
         let negated = Object::Dictionary(dictionary! {
             "Type" => "OCMD",
-            "VE" => vec![Object::Name(b"Not".to_vec()), layer.into()],
+            "VE" => vec![Object::from("Not"), layer.into()],
         });
         assert!(!layers.is_hidden(&negated));
     }
@@ -390,17 +384,13 @@ mod tests {
         // Hidden were it evaluated whole: every operand is the hidden layer.
         let mut shared = layer;
         for _ in 0..30 {
-            shared = doc.add_object(vec![
-                Object::Name(b"And".to_vec()),
-                shared.into(),
-                shared.into(),
-            ]);
+            shared = doc.add_object(vec![Object::from("And"), shared.into(), shared.into()]);
         }
         let layers = Layers::read(&doc);
         let membership = |expression: Object| {
             Object::Dictionary(dictionary! { "Type" => "OCMD", "VE" => expression })
         };
-        let not_plain = vec![Object::Name(b"Not".to_vec()), plain.into()];
+        let not_plain = vec![Object::from("Not"), plain.into()];
         assert!(!layers.is_hidden(&membership(Object::Array(not_plain))));
         assert!(!layers.is_hidden(&membership(shared.into())));
     }
@@ -415,7 +405,7 @@ mod tests {
     #[test]
     fn a_cached_expression_is_held_to_the_depth_limit() {
         let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
-        let and = |operand: Object| Object::Array(vec![Object::Name(b"And".to_vec()), operand]);
+        let and = |operand: Object| Object::Array(vec![Object::from("And"), operand]);
         let hidden = doc.add_object(and(layer.into()));
         let mut deep = Object::Reference(hidden);
         for _ in 0..MAX_EXPRESSION_DEPTH {
@@ -431,11 +421,11 @@ mod tests {
     #[test]
     fn a_cached_expression_is_charged_its_work() {
         let (mut doc, layer) = document(dictionary! { "Type" => "OCG" }, Dictionary::new());
-        let and = |operand: Object| Object::Array(vec![Object::Name(b"And".to_vec()), operand]);
+        let and = |operand: Object| Object::Array(vec![Object::from("And"), operand]);
         let children: Vec<ObjectId> = (0..MAX_EXPRESSION_WORK / 2)
             .map(|_| doc.add_object(and(layer.into())))
             .collect();
-        let mut wide = vec![Object::Name(b"And".to_vec())];
+        let mut wide = vec![Object::from("And")];
         wide.extend(children.iter().map(|&child| Object::Reference(child)));
         let layers = Layers::read(&doc);
         assert!(layers.is_hidden(&membership(children[0].into())));

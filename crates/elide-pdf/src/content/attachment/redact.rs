@@ -37,37 +37,49 @@ pub(super) fn replace(
     }
 
     for replacement in replacements {
-        let Ok(Object::Stream(stream)) = edit.doc_mut().get_object_mut(replacement.id.object())
-        else {
-            return Err(Error::malformed(format!(
-                "attachment ({}, {}) is not a stream",
-                replacement.id.number, replacement.id.generation
-            )));
-        };
-        stream.set_plain_content(replacement.bytes.clone());
-        // Best effort: an uncompressible file is stored plain.
-        let _ = stream.compress();
-        let size = Object::Integer(replacement.bytes.len() as i64);
-        let params = match stream.dict.get_mut(b"Params") {
-            Ok(Object::Dictionary(params)) => Some(params),
-            Ok(Object::Reference(id)) => {
-                let id = *id;
-                edit.doc_mut()
-                    .get_object_mut(id)
-                    .ok()
-                    .and_then(|params| params.as_dict_mut().ok())
-            }
-            _ => None,
-        };
-        if let Some(params) = params {
-            params.set("Size", size);
-        }
+        write_back(edit, replacement)?;
     }
 
     let removed: HashSet<ObjectId> = removed.iter().map(|id| id.object()).collect();
     if !removed.is_empty() {
         drop_entries(edit, &nodes, &removed);
         drop_associated(edit, &removed);
+    }
+    Ok(())
+}
+
+/// Write `replacement`'s bytes into its embedded-file stream in `edit`,
+/// compressed where they compress, and its `/Params` `/Size` to their length.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// the attachment is not a stream.
+fn write_back(edit: &mut Edit, replacement: &AttachmentReplacement) -> Result<()> {
+    let id = replacement.id;
+    let Ok(Object::Stream(stream)) = edit.doc_mut().get_object_mut(id.object()) else {
+        return Err(Error::malformed(format!(
+            "attachment ({}, {}) is not a stream",
+            id.number, id.generation
+        )));
+    };
+    stream.set_plain_content(replacement.bytes.clone());
+    // Best effort: an uncompressible file is stored plain.
+    let _ = stream.compress();
+    let size = Object::Integer(replacement.bytes.len() as i64);
+    let params = match stream.dict.get_mut(b"Params") {
+        Ok(Object::Dictionary(params)) => Some(params),
+        Ok(Object::Reference(params)) => {
+            let params = *params;
+            edit.doc_mut()
+                .get_object_mut(params)
+                .ok()
+                .and_then(|params| params.as_dict_mut().ok())
+        }
+        _ => None,
+    };
+    if let Some(params) = params {
+        params.set("Size", size);
     }
     Ok(())
 }

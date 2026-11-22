@@ -97,27 +97,27 @@ impl Face {
     /// Every face, in declaration order (each one's index into
     /// [`metrics::FACES`]).
     #[cfg(test)]
-    const ALL: [Face; 14] = [
-        Face::Courier,
-        Face::CourierBold,
-        Face::CourierOblique,
-        Face::CourierBoldOblique,
-        Face::Helvetica,
-        Face::HelveticaBold,
-        Face::HelveticaOblique,
-        Face::HelveticaBoldOblique,
-        Face::TimesRoman,
-        Face::TimesBold,
-        Face::TimesItalic,
-        Face::TimesBoldItalic,
-        Face::Symbol,
-        Face::ZapfDingbats,
+    const ALL: [Self; 14] = [
+        Self::Courier,
+        Self::CourierBold,
+        Self::CourierOblique,
+        Self::CourierBoldOblique,
+        Self::Helvetica,
+        Self::HelveticaBold,
+        Self::HelveticaOblique,
+        Self::HelveticaBoldOblique,
+        Self::TimesRoman,
+        Self::TimesBold,
+        Self::TimesItalic,
+        Self::TimesBoldItalic,
+        Self::Symbol,
+        Self::ZapfDingbats,
     ];
 
     /// Whether the face is Symbol or ZapfDingbats, whose glyphs no Latin
     /// encoding names.
     fn is_symbolic(self) -> bool {
-        matches!(self, Face::Symbol | Face::ZapfDingbats)
+        matches!(self, Self::Symbol | Self::ZapfDingbats)
     }
 
     /// The face's metrics.
@@ -127,47 +127,47 @@ impl Face {
 
     /// The face a `/BaseFont` names, by its own name or an alias. A subset
     /// prefix (`ABCDEF+`, 9.9.2) is ignored.
-    fn named(base_font: &[u8]) -> Option<Face> {
+    fn named(base_font: &[u8]) -> Option<Self> {
         Some(match subset_free(base_font) {
-            b"Courier" | b"CourierNew" | b"CourierNewPSMT" => Face::Courier,
+            b"Courier" | b"CourierNew" | b"CourierNewPSMT" => Self::Courier,
             b"Courier-Bold" | b"Courier,Bold" | b"CourierNew,Bold" | b"CourierNewPS-BoldMT" => {
-                Face::CourierBold
+                Self::CourierBold
             }
             b"Courier-Oblique"
             | b"Courier,Italic"
             | b"CourierNew,Italic"
-            | b"CourierNewPS-ItalicMT" => Face::CourierOblique,
+            | b"CourierNewPS-ItalicMT" => Self::CourierOblique,
             b"Courier-BoldOblique"
             | b"Courier,BoldItalic"
             | b"CourierNew,BoldItalic"
-            | b"CourierNewPS-BoldItalicMT" => Face::CourierBoldOblique,
-            b"Helvetica" | b"Arial" | b"ArialMT" => Face::Helvetica,
+            | b"CourierNewPS-BoldItalicMT" => Self::CourierBoldOblique,
+            b"Helvetica" | b"Arial" | b"ArialMT" => Self::Helvetica,
             b"Helvetica-Bold" | b"Helvetica,Bold" | b"Arial,Bold" | b"Arial-BoldMT" => {
-                Face::HelveticaBold
+                Self::HelveticaBold
             }
             b"Helvetica-Oblique" | b"Helvetica,Italic" | b"Arial,Italic" | b"Arial-ItalicMT" => {
-                Face::HelveticaOblique
+                Self::HelveticaOblique
             }
             b"Helvetica-BoldOblique"
             | b"Helvetica,BoldItalic"
             | b"Arial,BoldItalic"
-            | b"Arial-BoldItalicMT" => Face::HelveticaBoldOblique,
-            b"Times-Roman" | b"Times" | b"TimesNewRoman" | b"TimesNewRomanPSMT" => Face::TimesRoman,
+            | b"Arial-BoldItalicMT" => Self::HelveticaBoldOblique,
+            b"Times-Roman" | b"Times" | b"TimesNewRoman" | b"TimesNewRomanPSMT" => Self::TimesRoman,
             b"Times-Bold" | b"Times,Bold" | b"TimesNewRoman,Bold" | b"TimesNewRomanPS-BoldMT" => {
-                Face::TimesBold
+                Self::TimesBold
             }
             b"Times-Italic"
             | b"Times,Italic"
             | b"TimesNewRoman,Italic"
-            | b"TimesNewRomanPS-ItalicMT" => Face::TimesItalic,
+            | b"TimesNewRomanPS-ItalicMT" => Self::TimesItalic,
             b"Times-BoldItalic"
             | b"Times,BoldItalic"
             | b"TimesNewRoman,BoldItalic"
-            | b"TimesNewRomanPS-BoldItalicMT" => Face::TimesBoldItalic,
+            | b"TimesNewRomanPS-BoldItalicMT" => Self::TimesBoldItalic,
             b"Symbol" | b"SymbolMT" | b"Symbol,Bold" | b"Symbol,Italic" | b"Symbol,BoldItalic" => {
-                Face::Symbol
+                Self::Symbol
             }
-            b"ZapfDingbats" => Face::ZapfDingbats,
+            b"ZapfDingbats" => Self::ZapfDingbats,
             _ => return None,
         })
     }
@@ -231,7 +231,7 @@ pub(crate) fn symbol_text() -> &'static [Option<String>; 256] {
 impl Standard {
     /// The standard face `font` names, when it is a Type1 or TrueType font
     /// that embeds no font program.
-    pub(crate) fn of(doc: &Document, font: &Dictionary) -> Option<Standard> {
+    pub(crate) fn of(doc: &Document, font: &Dictionary) -> Option<Self> {
         if !matches!(font.name(doc, b"Subtype"), Some(b"Type1" | b"TrueType")) {
             return None;
         }
@@ -239,7 +239,7 @@ impl Standard {
             return None;
         }
         let face = Face::named(font.name(doc, b"BaseFont")?)?;
-        Some(Standard { face })
+        Some(Self { face })
     }
 
     /// The glyph each code of `font` selects, `None` for a code that

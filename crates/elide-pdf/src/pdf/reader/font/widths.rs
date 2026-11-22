@@ -20,13 +20,12 @@
 //! positional move as a word boundary rather than failing.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::mem;
 
 use lopdf::{Dictionary, Document, Object};
 
-use super::descendant;
 use super::standard::Standard;
-use crate::pdf::reader::{DictionaryExt, DocumentExt, ObjectExt};
+use super::{descendant, descriptor};
+use crate::pdf::reader::{DictionaryExt, ObjectExt};
 
 /// The default glyph width (glyph-space thousandths) when a font declares none:
 /// the PDF default for a composite font's `/DW`, and a reasonable stand-in for a
@@ -69,7 +68,7 @@ impl WidthSource {
     /// A `/Type0` font's widths live on its descendant CIDFont; any other font is
     /// treated as simple (`/Widths` + `/FirstChar`). Anything missing or
     /// unreadable yields [`Unknown`](WidthSource::Unknown).
-    pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> WidthSource {
+    pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> Self {
         if font.is_subtype(doc, b"Type0") {
             Self::from_type0(doc, font)
         } else {
@@ -81,7 +80,7 @@ impl WidthSource {
     /// table cannot answer (so the caller falls back to gap-presence).
     pub(crate) fn advance(&self, code: u32) -> Option<f64> {
         match self {
-            WidthSource::Simple {
+            Self::Simple {
                 first_char,
                 widths,
                 missing,
@@ -93,7 +92,7 @@ impl WidthSource {
                     .copied();
                 Some(within.unwrap_or(*missing))
             }
-            WidthSource::Composite { dw, w, ranges } => {
+            Self::Composite { dw, w, ranges } => {
                 // Explicit per-CID width first, then a covering range, then the
                 // default.
                 if let Some(width) = w.get(&code) {
@@ -105,7 +104,7 @@ impl WidthSource {
                     .map(|range| range.width);
                 Some(in_range.unwrap_or(*dw))
             }
-            WidthSource::Unknown => None,
+            Self::Unknown => None,
         }
     }
 
@@ -113,11 +112,11 @@ impl WidthSource {
     /// `/FontDescriptor` `/MissingWidth` as the out-of-range fallback, scaled
     /// by its `/FontMatrix` for a Type3 font; else, for a standard font, the
     /// face's own.
-    fn from_simple(doc: &Document, font: &Dictionary) -> WidthSource {
+    fn from_simple(doc: &Document, font: &Dictionary) -> Self {
         let scale = if font.is_subtype(doc, b"Type3") {
             match type3_scale(doc, font) {
                 Some(scale) => scale.0 * 1000.0,
-                None => return WidthSource::Unknown,
+                None => return Self::Unknown,
             }
         } else {
             1.0
@@ -125,7 +124,7 @@ impl WidthSource {
         if let Some(widths) = Self::from_widths(doc, font, scale) {
             return widths;
         }
-        Standard::of(doc, font).map_or(WidthSource::Unknown, |standard| WidthSource::Simple {
+        Standard::of(doc, font).map_or(Self::Unknown, |standard| Self::Simple {
             first_char: 0,
             widths: standard.widths(doc, font).to_vec(),
             missing: 0.0,
@@ -133,20 +132,16 @@ impl WidthSource {
     }
 
     /// `/Widths` + `/FirstChar` of a simple font, each width times `scale`.
-    fn from_widths(doc: &Document, font: &Dictionary, scale: f64) -> Option<WidthSource> {
+    fn from_widths(doc: &Document, font: &Dictionary, scale: f64) -> Option<Self> {
         let (first_char, widths) = own_widths(doc, font)?;
         let widths = widths
             .iter()
             .map(|o| o.as_number().unwrap_or(0.0) * scale)
             .collect();
-        let missing = font
-            .get(b"FontDescriptor")
-            .ok()
-            .and_then(|o| doc.resolve_dict(o))
-            .and_then(|fd| fd.get(b"MissingWidth").ok())
-            .map(|o| o.as_number().unwrap_or(0.0) * scale)
-            .unwrap_or(0.0);
-        Some(WidthSource::Simple {
+        let missing = descriptor(doc, font)
+            .and_then(|descriptor| descriptor.get(b"MissingWidth").ok())
+            .map_or(0.0, |o| o.as_number().unwrap_or(0.0) * scale);
+        Some(Self::Simple {
             first_char,
             widths,
             missing,
@@ -154,31 +149,30 @@ impl WidthSource {
     }
 
     /// `/W` + `/DW` of a Type0 font's descendant CIDFont.
-    fn from_type0(doc: &Document, font: &Dictionary) -> WidthSource {
+    fn from_type0(doc: &Document, font: &Dictionary) -> Self {
         let Some(cid_font) = descendant(doc, font) else {
-            return WidthSource::Unknown;
+            return Self::Unknown;
         };
 
         let dw = cid_font
             .get(b"DW")
             .ok()
-            .map(|o| o.as_number().unwrap_or(0.0))
-            .unwrap_or(DEFAULT_WIDTH);
+            .map_or(DEFAULT_WIDTH, |o| o.as_number().unwrap_or(0.0));
 
         let mut w = BTreeMap::new();
         let mut ranges = Vec::new();
-        if let Some(entries) = cid_font.get(b"W").ok().and_then(|o| doc.resolve_array(o)) {
+        if let Some(entries) = cid_font.resolved_array(doc, b"W") {
             parse_w_array(entries, &mut w, &mut ranges);
         }
-        WidthSource::Composite { dw, w, ranges }
+        Self::Composite { dw, w, ranges }
     }
 }
 
 /// The `/FirstChar` and `/Widths` the simple `font` gives, when it gives
 /// both.
 fn own_widths<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<(i64, &'a [Object])> {
-    let first_char = doc.resolve(font.get(b"FirstChar").ok()?)?.as_i64().ok()?;
-    let widths = doc.resolve_array(font.get(b"Widths").ok()?)?;
+    let first_char = font.resolved(doc, b"FirstChar")?.as_i64().ok()?;
+    let widths = font.resolved_array(doc, b"Widths")?;
     Some((first_char, widths))
 }
 
@@ -223,7 +217,7 @@ pub(crate) struct GlyphMetrics {
 impl Default for GlyphMetrics {
     fn default() -> Self {
         // A plausible Latin em box when a font declares no metrics.
-        GlyphMetrics {
+        Self {
             top: 0.7,
             bottom: -0.2,
         }
@@ -234,8 +228,8 @@ impl GlyphMetrics {
     /// Read the glyph box extent from a font dictionary, best-effort (defaults on
     /// any missing piece). A `/Type0` font's descriptor is on its descendant
     /// CIDFont.
-    pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> GlyphMetrics {
-        let default = GlyphMetrics::default();
+    pub(crate) fn from_font(doc: &Document, font: &Dictionary) -> Self {
+        let default = Self::default();
         let unit = if font.is_subtype(doc, b"Type3") {
             match type3_scale(doc, font) {
                 Some((_, vertical)) => vertical,
@@ -244,7 +238,7 @@ impl GlyphMetrics {
         } else {
             0.001
         };
-        let descriptor = font_descriptor(doc, font);
+        let descriptor = descriptor(doc, font);
         let standard = Standard::of(doc, font);
         // Each value with the scale into an em fraction: the descriptor's in
         // glyph space, the standard face's in thousandths.
@@ -277,7 +271,7 @@ impl GlyphMetrics {
             .map_or(default.bottom * flip, |(v, scale)| -v.abs() * scale);
         // Under a flipped matrix the two ends swap sides of the baseline.
         let (top, bottom) = (top.max(bottom), top.min(bottom));
-        GlyphMetrics { top, bottom }
+        Self { top, bottom }
     }
 }
 
@@ -285,22 +279,8 @@ impl GlyphMetrics {
 /// from glyph space to text space; `None` when it has none readable, or one
 /// that turns a glyph's advance off the baseline.
 fn type3_scale(doc: &Document, font: &Dictionary) -> Option<(f64, f64)> {
-    let [a, b, _, d, _, _] = doc.resolve_numbers::<6>(font.get(b"FontMatrix").ok()?)?;
+    let [a, b, _, d, _, _] = font.resolved_numbers::<6>(doc, b"FontMatrix")?;
     (b == 0.0 && a.is_finite() && d.is_finite()).then_some((a, d))
-}
-
-/// Resolve a font's `/FontDescriptor`, following a `/Type0` font to its
-/// descendant CIDFont (whose descriptor carries the metrics).
-fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Dictionary> {
-    let owner = if font.is_subtype(doc, b"Type0") {
-        descendant(doc, font)?
-    } else {
-        font
-    };
-    owner
-        .get(b"FontDescriptor")
-        .ok()
-        .and_then(|o| doc.resolve_dict(o))
 }
 
 /// Parse a Type0 `/W` array into explicit per-CID widths plus compact ranges.
@@ -352,7 +332,7 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
             None => break,
         }
     }
-    *ranges = disjoint(mem::take(ranges));
+    *ranges = disjoint(ranges);
 }
 
 /// `ranges`, in the order a `/W` array gives them, as disjoint ranges sorted
@@ -361,7 +341,7 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
 /// A sweep over the ranges' ends keeps the ranges covering each span between
 /// two ends by their order, the first of them giving its width, so ranges
 /// that overlap any number of others are split in `O(n log n)`.
-fn disjoint(ranges: Vec<CidRange>) -> Vec<CidRange> {
+fn disjoint(ranges: &[CidRange]) -> Vec<CidRange> {
     let mut starts: Vec<(u32, usize)> = ranges
         .iter()
         .enumerate()

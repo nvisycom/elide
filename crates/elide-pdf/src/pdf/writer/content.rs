@@ -52,10 +52,7 @@ pub(super) fn plan<C>(
                 streams.push((id, stream, Scope::own(doc, &stream.dict)));
             }
             Object::Dictionary(font) if font.is_subtype(doc, b"Type3") => {
-                let procs = font
-                    .get(b"CharProcs")
-                    .ok()
-                    .and_then(|procs| doc.resolve_dict(procs));
+                let procs = font.resolved_dict(doc, b"CharProcs");
                 for (_, glyph) in procs.into_iter().flat_map(Dictionary::iter) {
                     if let Ok(id) = glyph.as_reference()
                         && let Ok(Object::Stream(stream)) = doc.get_object(id)
@@ -97,10 +94,7 @@ pub(super) fn apply<C>(doc: &mut Document, edits: Vec<(Target, Vec<u8>, C)>) -> 
 
 /// Whether the stream `dict` is a tiling pattern's.
 fn is_tiling(doc: &Document, dict: &Dictionary) -> bool {
-    dict.get(b"PatternType")
-        .ok()
-        .and_then(|kind| doc.resolve_number(kind))
-        == Some(1.0)
+    dict.resolved_number(doc, b"PatternType") == Some(1.0)
 }
 
 /// Drop every entry naming one of the `hidden` XObjects from the `/XObject`

@@ -9,11 +9,24 @@ use std::collections::HashSet;
 
 use bytes::Bytes;
 use elide_core::{Error, Result};
+use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 pub(crate) use self::cmap::{UnicodeMap, scrub};
 use super::reader::{Node, ObjectExt, Scope};
 use super::{Pdf, Redact};
+
+/// `content` encoded as a content stream's bytes.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
+/// it cannot be encoded.
+pub(crate) fn encoded(content: &Content) -> Result<Vec<u8>> {
+    content
+        .encode()
+        .map_err(|e| Error::malformed(format!("encode content: {e}")))
+}
 
 /// A stream of `dict` holding `content`, compressed.
 ///

@@ -89,7 +89,7 @@ pub(super) enum Kind {
     /// A dictionary whose every value is of the kind given: a CIDFont's
     /// per-class font descriptors, DeviceN colorants, mixing solidities and
     /// dot gains.
-    Map(&'static Kind),
+    Map(&'static Self),
 }
 
 impl Kind {
@@ -101,20 +101,20 @@ impl Kind {
         match value {
             Object::Null => true,
             Object::Integer(_) | Object::Real(_) | Object::Boolean(_) => {
-                matches!(self, Kind::Value | Kind::Mask)
+                matches!(self, Self::Value | Self::Mask)
             }
             Object::Name(_) => matches!(
                 self,
-                Kind::Value
-                    | Kind::Label
-                    | Kind::Encoding
-                    | Kind::CMap
-                    | Kind::ToUnicode(_)
-                    | Kind::SoftMask
-                    | Kind::ColorSpace
-                    | Kind::Function
+                Self::Value
+                    | Self::Label
+                    | Self::Encoding
+                    | Self::CMap
+                    | Self::ToUnicode(_)
+                    | Self::SoftMask
+                    | Self::ColorSpace
+                    | Self::Function
             ),
-            Object::String(..) => matches!(self, Kind::Label | Kind::Data),
+            Object::String(..) => matches!(self, Self::Label | Self::Data),
             _ => false,
         }
     }

@@ -12,12 +12,11 @@ use super::geometry::TextState;
 use super::paint::{Painted, Painting};
 use super::run::gap;
 use super::stream::Frame;
-use super::{Inherited, MAX_WALKED_BYTES, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
+use super::{Graphics, MAX_WALKED_BYTES, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Walk};
 use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
 use crate::pdf::reader::{
-    DeviceRect, DictionaryExt, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt,
-    normalize_rect,
+    DeviceRect, DictionaryExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt, normalize_rect,
 };
 
 /// A soft mask group queued to be walked once the page's own text is: the
@@ -95,22 +94,14 @@ impl Selected<'_> {
     fn layout(&self, doc: &Document) -> Option<Layout> {
         let dict = &self.stream.dict;
         let step = |key: &[u8]| {
-            dict.get(key)
-                .ok()
-                .and_then(|value| doc.resolve_number(value))
+            dict.resolved_number(doc, key)
                 .map(f64::abs)
                 .filter(|step| *step > f64::EPSILON)
         };
         Some(Layout {
-            matrix: dict
-                .get(b"Matrix")
-                .ok()
-                .and_then(|matrix| doc.resolve_numbers(matrix))
-                .map_or(Matrix::IDENTITY, Matrix::from),
+            matrix: Matrix::of(doc, dict),
             cell: dict
-                .get(b"BBox")
-                .ok()
-                .and_then(|bbox| doc.resolve_numbers::<4>(bbox))
+                .resolved_numbers::<4>(doc, b"BBox")
                 .map(normalize_rect)?,
             x_step: step(b"XStep")?,
             y_step: step(b"YStep")?,
@@ -136,27 +127,14 @@ impl Layout {
         let Some(to_cell) = self.matrix.then(space).inverse() else {
             return Some(placed);
         };
-        let cell = self.cell;
         // A region painted again counts once.
         let mut seen = BTreeSet::new();
         for region in regions {
-            let key = [region.min_x, region.min_y, region.max_x, region.max_y].map(f64::to_bits);
-            if !seen.insert(key) {
+            if !seen.insert(region.array().map(f64::to_bits)) {
                 continue;
             }
-            // The region in pattern space, and the tiles whose cell overlaps it.
-            let area = region.mapped(to_cell);
-            // The first and last tile indices along an axis, as floats until
-            // they are known to be few and placeable.
-            let span = |low: f64, high: f64, low_cell: f64, high_cell: f64, step: f64| {
-                let first = ((low - high_cell) / step).floor() + 1.0;
-                let last = ((high - low_cell) / step).ceil() - 1.0;
-                (first, last)
-            };
-            let (first_column, last_column) =
-                span(area.min_x, area.max_x, cell[0], cell[2], self.x_step);
-            let (first_row, last_row) = span(area.min_y, area.max_y, cell[1], cell[3], self.y_step);
-            let bounds = [first_column, last_column, first_row, last_row];
+            let bounds = self.overlapped(region.mapped(to_cell));
+            let [first_column, last_column, first_row, last_row] = bounds;
             if !bounds.iter().all(|v| v.is_finite()) {
                 return None;
             }
@@ -171,19 +149,30 @@ impl Layout {
             }
             for column in first_column as i64..=last_column as i64 {
                 for row in first_row as i64..=last_row as i64 {
-                    match placed.get_mut(&(column, row)) {
-                        Some(coverage) => coverage.push(*region),
-                        None => {
-                            placed.insert((column, row), vec![*region]);
-                            if placed.len() > limit {
-                                return None;
-                            }
-                        }
+                    placed.entry((column, row)).or_default().push(*region);
+                    if placed.len() > limit {
+                        return None;
                     }
                 }
             }
         }
         Some(placed)
+    }
+
+    /// The first and last column, then the first and last row, of the tiles
+    /// whose cell overlaps `area`, in pattern space: as floats until they
+    /// are known to be few and placeable.
+    fn overlapped(&self, area: DeviceRect) -> [f64; 4] {
+        let [low_x, low_y, high_x, high_y] = self.cell;
+        let span = |low: f64, high: f64, low_cell: f64, high_cell: f64, step: f64| {
+            [
+                ((low - high_cell) / step).floor() + 1.0,
+                ((high - low_cell) / step).ceil() - 1.0,
+            ]
+        };
+        let [first_column, last_column] = span(area.min_x, area.max_x, low_x, high_x, self.x_step);
+        let [first_row, last_row] = span(area.min_y, area.max_y, low_y, high_y, self.y_step);
+        [first_column, last_column, first_row, last_row]
     }
 
     /// The transform taking the cell as walked (in pattern space, through
@@ -207,7 +196,7 @@ impl<'d> Walk<'_, 'd> {
         name: &[u8],
         scope: &Scope<'d>,
         depth: u8,
-        inherited: Inherited<'_>,
+        inherited: Graphics<'_>,
     ) -> Result<()> {
         let doc = self.doc;
         let Some(id) = scope
@@ -225,23 +214,15 @@ impl<'d> Walk<'_, 'd> {
         if stream.dict.is_subtype(doc, b"Image") {
             let stencil = stream
                 .dict
-                .get(b"ImageMask")
-                .ok()
-                .and_then(|mask| doc.resolve(mask))
+                .resolved(doc, b"ImageMask")
                 .is_some_and(|mask| matches!(mask.as_bool(), Ok(true)));
             // The samples are read only when the fill paints a pattern.
             if stencil
                 && inherited.painting.fills_pattern()
-                && let Some([min_x, min_y, max_x, max_y]) = stencil_extent(doc, stream)
-                && let Some(painted) = inherited.painting.fill_area(
-                    DeviceRect {
-                        min_x,
-                        min_y,
-                        max_x,
-                        max_y,
-                    }
-                    .mapped(inherited.state.ctm),
-                )
+                && let Some(extent) = stencil_extent(doc, stream)
+                && let Some(painted) = inherited
+                    .painting
+                    .fill_area(DeviceRect::of_array(extent).mapped(inherited.state.ctm))
             {
                 self.paint(vec![painted]);
             }
@@ -294,9 +275,7 @@ impl<'d> Walk<'_, 'd> {
     pub(super) fn select_soft_mask(&mut self, graphics: &'d Dictionary, ctm: Matrix, depth: u8) {
         let doc = self.doc;
         let Some(id) = graphics
-            .get(b"SMask")
-            .ok()
-            .and_then(|mask| doc.resolve_dict(mask))
+            .resolved_dict(doc, b"SMask")
             .and_then(|mask| mask.get(b"G").ok()?.as_reference().ok())
         else {
             return;
@@ -320,7 +299,7 @@ impl<'d> Walk<'_, 'd> {
     ///
     /// As [`walk_nested`](Self::walk_nested).
     pub(super) fn walk_soft_mask(&mut self, mask: Mask<'d>) -> Result<()> {
-        let inherited = Inherited {
+        let inherited = Graphics {
             font: None,
             state: TextState {
                 ctm: mask.ctm,
@@ -381,7 +360,7 @@ impl<'d> Walk<'_, 'd> {
     ///
     /// As [`walk_nested`](Self::walk_nested).
     pub(super) fn walk_pattern(&mut self, pattern: Selected<'d>) -> Result<()> {
-        let inherited = Inherited {
+        let inherited = Graphics {
             font: None,
             state: TextState::default(),
             painting: Painting::default(),
@@ -464,9 +443,9 @@ impl<'d> Walk<'_, 'd> {
         Ok(())
     }
 
-    /// Each tile pattern `id` paints, kept in `placed`; `nesting` patterns deep in the cells
-    /// that paint it. A pattern painted, through other cells, in its own
-    /// cell paints nothing more through that.
+    /// Each tile pattern `id` paints, kept in `placed`, `nesting` patterns
+    /// deep in the cells that paint it. A pattern painted, through other
+    /// cells, in its own cell paints nothing more through that.
     ///
     /// # Errors
     ///
@@ -478,14 +457,8 @@ impl<'d> Walk<'_, 'd> {
         if placed.done.contains_key(&id) || !placed.active.insert(id) {
             return Ok(());
         }
-        let over = |what: &str| {
-            Error::resource_limit(format!(
-                "page {} tiles a pattern {what}; its text cannot be placed",
-                self.page
-            ))
-        };
         if nesting > usize::from(MAX_XOBJECT_DEPTH) {
-            return Err(over("painted through too many other patterns' cells"));
+            return Err(self.over_tiled("painted through too many other patterns' cells"));
         }
         let Some(cell) = self.cells.get(&id) else {
             placed.active.remove(&id);
@@ -493,47 +466,10 @@ impl<'d> Walk<'_, 'd> {
         };
         let mut tiles = Vec::new();
         if let Some(layout) = cell.pattern.layout(self.doc) {
-            // The regions painted with it, by the space each was painted in.
-            let mut by_space: BTreeMap<[u64; 6], (Matrix, Vec<DeviceRect>)> = BTreeMap::new();
-            let mut add = |space: Matrix, region: DeviceRect| {
-                by_space
-                    .entry(space.values().map(f64::to_bits))
-                    .or_insert_with(|| (space, Vec::new()))
-                    .1
-                    .push(region);
-            };
-            for &(in_cell, painted) in self.painted.iter().filter(|(_, p)| p.paint.pattern == id) {
-                let Some(outer) = in_cell else {
-                    add(painted.paint.space, painted.region);
-                    continue;
-                };
-                self.placements(outer, placed, nesting + 1)?;
-                let outer_tiles = placed
-                    .done
-                    .get(&outer)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default();
-                // Each region an outer tile shows is a region of its own.
-                let regions: usize = outer_tiles.iter().map(|tile| tile.coverage.len()).sum();
-                placed.candidates += regions as f64;
-                if placed.candidates > MAX_TILE_CANDIDATES {
-                    return Err(over("on more tiles than are counted"));
-                }
-                // Painted in the outer cell, it paints on each of its tiles,
-                // as far as that tile shows.
-                for outer_tile in outer_tiles {
-                    let region = painted.region.mapped(outer_tile.transform);
-                    for coverage in &outer_tile.coverage {
-                        if let Some(region) = region.intersection(*coverage) {
-                            add(painted.paint.space.then(outer_tile.transform), region);
-                        }
-                    }
-                }
-            }
-            for (space, regions) in by_space.into_values() {
+            for (space, regions) in self.regions(id, placed, nesting)? {
                 let found = layout
                     .tiles(space, &regions, MAX_TILED_GLYPHS, &mut placed.candidates)
-                    .ok_or_else(|| over("on more tiles than are placed"))?;
+                    .ok_or_else(|| self.over_tiled("on more tiles than are placed"))?;
                 tiles.extend(found.into_iter().filter_map(|(tile, coverage)| {
                     Some(Tile {
                         transform: layout.placement(space, tile)?,
@@ -541,13 +477,72 @@ impl<'d> Walk<'_, 'd> {
                     })
                 }));
                 if tiles.len() > MAX_TILED_GLYPHS {
-                    return Err(over("on more tiles than are placed"));
+                    return Err(self.over_tiled("on more tiles than are placed"));
                 }
             }
         }
         placed.active.remove(&id);
         placed.done.insert(id, tiles);
         Ok(())
+    }
+
+    /// The regions painted with pattern `id`, grouped by the space each was
+    /// painted in: on the page directly, or, painted in another pattern's cell, on
+    /// each of that pattern's tiles as far as the tile shows, `nesting`
+    /// patterns deep.
+    ///
+    /// # Errors
+    ///
+    /// As [`placements`](Self::placements).
+    fn regions(
+        &self,
+        id: ObjectId,
+        placed: &mut Placements,
+        nesting: usize,
+    ) -> Result<Vec<(Matrix, Vec<DeviceRect>)>> {
+        let mut by_space: BTreeMap<[u64; 6], (Matrix, Vec<DeviceRect>)> = BTreeMap::new();
+        let mut add = |space: Matrix, region: DeviceRect| {
+            by_space
+                .entry(space.values().map(f64::to_bits))
+                .or_insert_with(|| (space, Vec::new()))
+                .1
+                .push(region);
+        };
+        for &(in_cell, painted) in self.painted.iter().filter(|(_, p)| p.paint.pattern == id) {
+            let Some(outer) = in_cell else {
+                add(painted.paint.space, painted.region);
+                continue;
+            };
+            self.placements(outer, placed, nesting + 1)?;
+            let outer_tiles = placed
+                .done
+                .get(&outer)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            // Each region an outer tile shows is a region of its own.
+            let regions: usize = outer_tiles.iter().map(|tile| tile.coverage.len()).sum();
+            placed.candidates += regions as f64;
+            if placed.candidates > MAX_TILE_CANDIDATES {
+                return Err(self.over_tiled("on more tiles than are counted"));
+            }
+            for outer_tile in outer_tiles {
+                let region = painted.region.mapped(outer_tile.transform);
+                for coverage in &outer_tile.coverage {
+                    if let Some(region) = region.intersection(*coverage) {
+                        add(painted.paint.space.then(outer_tile.transform), region);
+                    }
+                }
+            }
+        }
+        Ok(by_space.into_values().collect())
+    }
+
+    /// The error for a page that tiles a pattern `what`.
+    fn over_tiled(&self, what: &str) -> Error {
+        Error::resource_limit(format!(
+            "page {} tiles a pattern {what}; its text cannot be placed",
+            self.page
+        ))
     }
 
     /// Walk the content of the form or tiling pattern `stream` (object `id`),
@@ -562,7 +557,7 @@ impl<'d> Walk<'_, 'd> {
         id: ObjectId,
         stream: &'d Stream,
         depth: u8,
-        mut inherited: Inherited<'_>,
+        mut inherited: Graphics<'_>,
     ) -> Result<()> {
         let doc = self.doc;
         if self.active.contains(&id) {
@@ -576,61 +571,12 @@ impl<'d> Walk<'_, 'd> {
             )));
         }
         let decoded = stream.decoded()?;
-        self.decoded_remaining = self
-            .decoded_remaining
-            .checked_sub(decoded.len())
-            .ok_or_else(|| {
-                Error::resource_limit(format!(
-                    "page {} draws forms and patterns decoding to more than \
-                     {MAX_WALKED_BYTES} bytes; its text cannot be walked",
-                    self.page
-                ))
-            })?;
+        self.charge_walk(decoded.len())?;
         let content = Content::decode(&decoded)
             .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
-
         // Its own resources: in a rebuild, every form and pattern has them.
         let inner_scope = Scope::new(Scope::own(doc, &stream.dict));
-
-        // Charge the total-walk budget. Exhausting it means a page fans out to
-        // more walks than any legitimate document, so fail closed rather than let
-        // the walk run away.
-        let Some(remaining) = self.walks_remaining.checked_sub(1) else {
-            return Err(Error::resource_limit(format!(
-                "page {} draws more than {MAX_XOBJECT_WALKS} forms and patterns; \
-                 its text cannot be walked within the resource budget",
-                self.page
-            )));
-        };
-        self.walks_remaining = remaining;
-
-        // The `/Matrix` maps its content into the space it is drawn in (8.10.1,
-        // 8.7.3.1); absent or malformed, it is the identity.
-        let matrix = stream
-            .dict
-            .get(b"Matrix")
-            .ok()
-            .and_then(|matrix| doc.resolve_numbers(matrix))
-            .map_or(Matrix::IDENTITY, Matrix::from);
-        inherited.state.ctm = matrix.then(inherited.state.ctm);
-        // Its content is clipped to its `/BBox`, in the space it is drawn
-        // in, within whatever clips its caller (8.10.1).
-        if let Some(bbox) = stream
-            .dict
-            .get(b"BBox")
-            .ok()
-            .and_then(|bbox| doc.resolve_numbers::<4>(bbox))
-            .map(normalize_rect)
-        {
-            let [min_x, min_y, max_x, max_y] = bbox;
-            let area = DeviceRect {
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-            };
-            inherited.painting.clip_to(area.mapped(inherited.state.ctm));
-        }
+        drawn_in(doc, stream, &mut inherited);
 
         self.active.insert(id);
         let result = self.walk_stream(
@@ -644,6 +590,48 @@ impl<'d> Walk<'_, 'd> {
         );
         self.active.remove(&id);
         result
+    }
+
+    /// Charge one walk, of content decoding to `decoded` bytes, against the
+    /// page's budgets. Exhausting either means a page fans out further than
+    /// any legitimate document, so the walk fails closed rather than run away.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit)
+    /// past [`MAX_WALKED_BYTES`] decoded or [`MAX_XOBJECT_WALKS`] walks.
+    fn charge_walk(&mut self, decoded: usize) -> Result<()> {
+        let Some(bytes) = self.decoded_remaining.checked_sub(decoded) else {
+            return Err(Error::resource_limit(format!(
+                "page {} draws forms and patterns decoding to more than \
+                 {MAX_WALKED_BYTES} bytes; its text cannot be walked",
+                self.page
+            )));
+        };
+        let Some(walks) = self.walks_remaining.checked_sub(1) else {
+            return Err(Error::resource_limit(format!(
+                "page {} draws more than {MAX_XOBJECT_WALKS} forms and patterns; \
+                 its text cannot be walked within the resource budget",
+                self.page
+            )));
+        };
+        self.decoded_remaining = bytes;
+        self.walks_remaining = walks;
+        Ok(())
+    }
+}
+
+/// `graphics` as the form or tiling pattern `stream` draws its content
+/// under: its `/Matrix` (the identity when absent or malformed) composed onto
+/// the CTM, mapping its content into the space it is drawn in (8.10.1,
+/// 8.7.3.1), and clipped to its `/BBox` in that space, within whatever clips
+/// its caller (8.10.1).
+fn drawn_in(doc: &Document, stream: &Stream, graphics: &mut Graphics<'_>) {
+    let matrix = Matrix::of(doc, &stream.dict);
+    graphics.state.ctm = matrix.then(graphics.state.ctm);
+    if let Some(bbox) = stream.dict.resolved_numbers::<4>(doc, b"BBox") {
+        let area = DeviceRect::of_array(normalize_rect(bbox));
+        graphics.painting.clip_to(area.mapped(graphics.state.ctm));
     }
 }
 

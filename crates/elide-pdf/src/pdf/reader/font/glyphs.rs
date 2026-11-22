@@ -21,7 +21,7 @@ use super::cmap::{Codespace, mapped_codes};
 use super::encoding::{self, BaseEncoding, NONSYMBOLIC, SYMBOLIC};
 use super::standard::{names_symbol, symbol_text};
 use super::{Standard, descendant, font_file, subset_free};
-use crate::pdf::reader::{DictionaryExt, DocumentExt, StreamExt};
+use crate::pdf::reader::{DictionaryExt, StreamExt};
 
 /// One decoded glyph within an operand's bytes.
 pub(crate) struct Glyph {
@@ -107,7 +107,7 @@ impl SymbolText {
         if names.into_iter().any(|name| names_symbol(&name)) {
             return Self::Symbol;
         }
-        let flags = encoding::flags(doc, descendant.unwrap_or(font));
+        let flags = encoding::flags(doc, font);
         if flags & SYMBOLIC != 0 && flags & NONSYMBOLIC == 0 {
             Self::Symbolic
         } else {
@@ -116,7 +116,7 @@ impl SymbolText {
     }
 
     /// `text` as it reads in such a font.
-    pub(crate) fn read<'t>(self, text: &'t str) -> Cow<'t, str> {
+    pub(crate) fn read(self, text: &str) -> Cow<'_, str> {
         let symbol_range = |c: char| (0xF020..=0xF0FF).contains(&u32::from(c));
         if self == Self::Plain || !text.chars().any(symbol_range) {
             return Cow::Borrowed(text);
@@ -190,7 +190,7 @@ impl FontText {
     ///
     /// As [`to_unicode`].
     pub(crate) fn of(doc: &Document, font: &Dictionary) -> Result<Option<Self>> {
-        let to_unicode = match font.get(b"ToUnicode").ok().and_then(|c| doc.resolve(c)) {
+        let to_unicode = match font.resolved(doc, b"ToUnicode") {
             Some(Object::Stream(stream)) => to_unicode(doc, stream)?,
             _ => None,
         };
@@ -211,7 +211,7 @@ impl FontText {
             }))));
         }
         // A composite encoding is no simple font's.
-        let base = match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
+        let base = match font.resolved(doc, b"Encoding") {
             Some(Object::Dictionary(dict)) => dict.name(doc, b"BaseEncoding"),
             Some(Object::Name(name)) => Some(name.as_slice()),
             _ => None,
@@ -242,7 +242,7 @@ impl FontText {
     pub(crate) fn is_vertical(&self) -> bool {
         matches!(
             self,
-            FontText::Composite(composite)
+            Self::Composite(composite)
                 if composite.encoding.metadata().writing_mode == Some(WritingMode::Vertical)
         )
     }
@@ -259,38 +259,31 @@ impl FontText {
 /// embedded CMap decodes past the content limit.
 fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Codespace)>> {
     let read = |data: &[u8]| Some((CMap::parse(data, load_embedded)?, Codespace::read(data)?));
-    Ok(
-        match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
-            Some(Object::Name(name)) => match name.as_slice() {
-                b"Identity-H" => Some((CMap::identity_h(), Codespace::identity())),
-                b"Identity-V" => Some((CMap::identity_v(), Codespace::identity())),
-                name => load_embedded(CMapName::from_bytes(name)).and_then(read),
-            },
-            // A base CMap the stream's dictionary names (`/UseCMap`, 9.7.5.3)
-            // is followed as the `usecmap` the stream itself could have
-            // written, when it is predefined. One given as a stream is not:
-            // hayro-cmap resolves a base by name alone, so the font's codes
-            // are not read without it.
-            Some(Object::Stream(stream)) => {
-                let base = match stream
-                    .dict
-                    .get(b"UseCMap")
-                    .ok()
-                    .and_then(|b| doc.resolve(b))
-                {
-                    None | Some(Object::Null) => Vec::new(),
-                    Some(Object::Name(name)) => [b"/", name.as_slice(), b" usecmap\n"].concat(),
-                    Some(_) => return Ok(None),
-                };
-                match stream.decoded() {
-                    Ok(data) => read(&[base, data].concat()),
-                    Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
-                    Err(_) => None,
-                }
-            }
-            _ => None,
+    Ok(match font.resolved(doc, b"Encoding") {
+        Some(Object::Name(name)) => match name.as_slice() {
+            b"Identity-H" => Some((CMap::identity_h(), Codespace::identity())),
+            b"Identity-V" => Some((CMap::identity_v(), Codespace::identity())),
+            name => load_embedded(CMapName::from_bytes(name)).and_then(read),
         },
-    )
+        // A base CMap the stream's dictionary names (`/UseCMap`, 9.7.5.3)
+        // is followed as the `usecmap` the stream itself could have
+        // written, when it is predefined. One given as a stream is not:
+        // hayro-cmap resolves a base by name alone, so the font's codes
+        // are not read without it.
+        Some(Object::Stream(stream)) => {
+            let base = match stream.dict.resolved(doc, b"UseCMap") {
+                None | Some(Object::Null) => Vec::new(),
+                Some(Object::Name(name)) => [b"/", name.as_slice(), b" usecmap\n"].concat(),
+                Some(_) => return Ok(None),
+            };
+            match stream.decoded() {
+                Ok(data) => read(&[base, data].concat()),
+                Err(e) if e.kind() == ErrorKind::ResourceLimit => return Err(e),
+                Err(_) => None,
+            }
+        }
+        _ => None,
+    })
 }
 
 /// The CMap giving the text of each CID in the composite `font`'s character
@@ -299,9 +292,9 @@ fn encoding_cmap(doc: &Document, font: &Dictionary) -> Result<Option<(CMap, Code
 /// collection with no such CMap (`Adobe-Identity`, or one of its own).
 fn collection_text(doc: &Document, font: &Dictionary, encoding: &CMap) -> Option<CMap> {
     let named = descendant(doc, font)
-        .and_then(|cid_font| doc.resolve_dict(cid_font.get(b"CIDSystemInfo").ok()?))
+        .and_then(|cid_font| cid_font.resolved_dict(doc, b"CIDSystemInfo"))
         .and_then(|info| {
-            let text = |key: &[u8]| doc.resolve(info.get(key).ok()?)?.as_str().ok();
+            let text = |key: &[u8]| info.resolved(doc, key)?.as_str().ok();
             Some(CidFamily::from_registry_ordering(
                 text(b"Registry")?,
                 text(b"Ordering")?,
@@ -438,121 +431,124 @@ fn mapped_text(units: &[u16], symbol: SymbolText) -> Result<String> {
 /// refused rather than leaving that text silently in place.
 pub(crate) fn decode_glyphs(font: &FontText, bytes: &[u8]) -> Result<Vec<Glyph>> {
     match font {
-        // Codes split by the encoding: each the shortest run of bytes its
-        // ranges map, read through `/ToUnicode`, else as UTF-16 under a
-        // Unicode encoding.
-        FontText::Composite(composite) => {
-            let Composite {
-                encoding,
-                codespace,
-                to_unicode,
-                unicode,
-                collection,
-                symbol,
-            } = &**composite;
-            let number = |code: &[u8]| code.iter().fold(0, |code, &b| code << 8 | u32::from(b));
-            // A code is as long as the codespace range it falls in, mapped to
-            // a CID or not; a code no range of the font's own holds is as
-            // long as the mapping a predefined CMap gives it.
-            let code_len = |rest: &[u8]| {
-                codespace.code_len(rest).or_else(|| {
-                    (1..=4u8).find_map(|len| {
-                        let code = rest.get(..usize::from(len))?;
-                        encoding
-                            .lookup_cid_code(number(code), len)
-                            .map(|_| usize::from(len))
-                    })
+        FontText::Composite(composite) => composite.glyphs(bytes),
+        FontText::Simple(simple) => simple.glyphs(bytes),
+    }
+}
+
+impl Composite {
+    /// The glyphs `bytes` draw: codes split by the encoding, each the
+    /// shortest run of bytes its ranges map, read through `/ToUnicode`, else
+    /// as UTF-16 under a Unicode encoding, else as its CID's text in the
+    /// font's character collection.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a code
+    /// outside the codespace, or one none of those reads.
+    fn glyphs(&self, bytes: &[u8]) -> Result<Vec<Glyph>> {
+        let number = |code: &[u8]| code.iter().fold(0, |code, &b| code << 8 | u32::from(b));
+        // A code is as long as the codespace range it falls in, mapped to a
+        // CID or not; a code no range of the font's own holds is as long as
+        // the mapping a predefined CMap gives it.
+        let code_len = |rest: &[u8]| {
+            self.codespace.code_len(rest).or_else(|| {
+                (1..=4u8).find_map(|len| {
+                    let code = rest.get(..usize::from(len))?;
+                    self.encoding
+                        .lookup_cid_code(number(code), len)
+                        .map(|_| usize::from(len))
                 })
+            })
+        };
+        let mut glyphs = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            let Some(len) = code_len(&bytes[i..]) else {
+                return Err(Error::redaction(
+                    "text drawn with a code outside its font's codespace; its glyph cannot \
+                     be located for redaction",
+                ));
             };
-            let mut glyphs = Vec::new();
-            let mut i = 0;
-            while i < bytes.len() {
-                let Some(len) = code_len(&bytes[i..]) else {
+            let code_bytes = &bytes[i..i + len];
+            let code = number(code_bytes);
+            // A code the encoding maps to no CID draws the missing glyph.
+            let cid = self.encoding.lookup_cid_code(code, len as u8).unwrap_or(0);
+            let mapped = match &self.to_unicode {
+                Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(code, len as u8),
+                _ => None,
+            };
+            let cid_text = || match self.collection.as_ref()?.lookup_bf_string(cid)? {
+                BfString::Char(c) => Some(c.encode_utf16(&mut [0; 2]).to_vec()),
+                BfString::String(text) => Some(text.encode_utf16().collect()),
+            };
+            let units = match mapped {
+                Some(units) => units,
+                None if self.unicode && len.is_multiple_of(2) => code_bytes
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|&pair| u16::from_be_bytes(pair))
+                    .collect(),
+                None if let Some(units) = cid_text() => units,
+                None => {
                     return Err(Error::redaction(
-                        "text drawn with a code outside its font's codespace; its \
-                         glyph cannot be located for redaction",
+                        "text drawn with a code that has no CMap mapping; its glyph cannot \
+                         be located for redaction",
                     ));
-                };
-                let code_bytes = &bytes[i..i + len];
-                let code = number(code_bytes);
-                // A code the encoding maps to no CID draws the missing glyph.
-                let cid = encoding.lookup_cid_code(code, len as u8).unwrap_or(0);
-                let mapped = match to_unicode {
-                    Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(code, len as u8),
+                }
+            };
+            glyphs.push(Glyph {
+                byte_start: i,
+                byte_end: i + len,
+                code,
+                width_key: cid,
+                text: mapped_text(&units, self.symbol)?,
+            });
+            i += len;
+        }
+        Ok(glyphs)
+    }
+}
+
+impl Simple {
+    /// The glyphs `bytes` draw: one byte each, read through `/ToUnicode`
+    /// where it maps the byte, else through the encoding.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a byte
+    /// neither reads.
+    fn glyphs(&self, bytes: &[u8]) -> Result<Vec<Glyph>> {
+        bytes
+            .iter()
+            .enumerate()
+            .map(|(i, &b)| {
+                let mapped = match &self.to_unicode {
+                    Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(u32::from(b), 1),
                     _ => None,
                 };
-                let cid_text = || match collection.as_ref()?.lookup_bf_string(cid)? {
-                    BfString::Char(c) => Some(c.encode_utf16(&mut [0; 2]).to_vec()),
-                    BfString::String(text) => Some(text.encode_utf16().collect()),
+                let text = match mapped {
+                    Some(units) => mapped_text(&units, self.symbol)?,
+                    None => self.codes[usize::from(b)]
+                        .as_deref()
+                        .map(readable)
+                        .ok_or_else(|| {
+                            Error::redaction(
+                                "text drawn with a byte that does not decode under its font; \
+                                 its glyph cannot be located for redaction",
+                            )
+                        })?,
                 };
-                let units = match mapped {
-                    Some(units) => units,
-                    None if *unicode && len.is_multiple_of(2) => code_bytes
-                        .as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|&pair| u16::from_be_bytes(pair))
-                        .collect(),
-                    None if let Some(units) = cid_text() => units,
-                    None => {
-                        return Err(Error::redaction(
-                            "text drawn with a code that has no CMap mapping; its glyph \
-                             cannot be located for redaction",
-                        ));
-                    }
-                };
-                glyphs.push(Glyph {
+                Ok(Glyph {
                     byte_start: i,
-                    byte_end: i + len,
-                    code,
-                    width_key: cid,
-                    text: mapped_text(&units, *symbol)?,
-                });
-                i += len;
-            }
-            Ok(glyphs)
-        }
-        // Simple font: one byte per glyph, read through `/ToUnicode` where it
-        // maps the byte, else the encoding; a byte neither decodes is likewise
-        // an unmatchable glyph.
-        FontText::Simple(simple) => {
-            let Simple {
-                codes,
-                to_unicode,
-                symbol,
-            } = &**simple;
-            bytes
-                .iter()
-                .enumerate()
-                .map(|(i, &b)| {
-                    let mapped = match to_unicode {
-                        Some(Encoding::UnicodeMapEncoding(cmap)) => cmap.get(u32::from(b), 1),
-                        _ => None,
-                    };
-                    let text = match mapped {
-                        Some(units) => mapped_text(&units, *symbol)?,
-                        None => {
-                            codes[usize::from(b)]
-                                .as_deref()
-                                .map(readable)
-                                .ok_or_else(|| {
-                                    Error::redaction(
-                                        "text drawn with a byte that does not decode under its \
-                                 font; its glyph cannot be located for redaction",
-                                    )
-                                })?
-                        }
-                    };
-                    Ok(Glyph {
-                        byte_start: i,
-                        byte_end: i + 1,
-                        code: u32::from(b),
-                        width_key: u32::from(b),
-                        text,
-                    })
+                    byte_end: i + 1,
+                    code: u32::from(b),
+                    width_key: u32::from(b),
+                    text,
                 })
-                .collect()
-        }
+            })
+            .collect()
     }
 }
 

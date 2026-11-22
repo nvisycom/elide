@@ -44,7 +44,7 @@ pub(super) fn verify(doc: &Document) -> Result<()> {
     for (&id, object) in &doc.objects {
         faults.object(doc, id, object, 0);
     }
-    for (_, value) in doc.trailer.iter() {
+    for (_, value) in &doc.trailer {
         faults.references(doc, None, value, 0);
     }
     for page in doc.get_pages().into_values() {
@@ -126,7 +126,7 @@ impl Faults {
         if dict.is_subtype(doc, b"Type3") {
             self.own_resources(dict, &format!("Type3 font in {id:?}"));
         }
-        for (_, value) in dict.iter() {
+        for (_, value) in dict {
             self.object(doc, id, value, depth + 1);
         }
     }
@@ -150,7 +150,7 @@ impl Faults {
                 }
             }
             Object::Dictionary(dict) => {
-                for (_, value) in dict.iter() {
+                for (_, value) in dict {
                     self.references(doc, id, value, depth + 1);
                 }
             }
@@ -184,7 +184,7 @@ impl Faults {
             self.push(format!("{what} has no /Resources of its own"));
             return;
         };
-        for (category, entries) in resources.iter() {
+        for (category, entries) in resources {
             if category != b"ProcSet" && !matches!(entries, Object::Dictionary(_)) {
                 let category = String::from_utf8_lossy(category);
                 self.push(format!(
@@ -195,7 +195,7 @@ impl Faults {
         let Ok(Object::Dictionary(fonts)) = resources.get(b"Font") else {
             return;
         };
-        for (name, font) in fonts.iter() {
+        for (name, font) in fonts {
             if !matches!(font, Object::Reference(_)) {
                 let name = String::from_utf8_lossy(name);
                 self.push(format!("{what}'s font {name} is not an object of its own"));

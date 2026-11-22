@@ -10,7 +10,8 @@ use lopdf::{Dictionary, Document, Object};
 
 use self::encodings::{MAC_EXPERT, MAC_OS_ROMAN, MAC_ROMAN, STANDARD, WIN_ANSI};
 pub(crate) use self::glyph_list::text;
-use crate::pdf::reader::DocumentExt;
+use super::descriptor;
+use crate::pdf::reader::{DictionaryExt, DocumentExt};
 
 /// A code's glyph name in a 256-code simple-font encoding.
 pub(crate) type GlyphNames<'a> = [Option<&'a str>; 256];
@@ -36,11 +37,11 @@ impl BaseEncoding {
     /// The encoding's table, `""` for a code with no glyph.
     fn table(self) -> &'static [&'static str; 256] {
         match self {
-            BaseEncoding::Standard => &STANDARD,
-            BaseEncoding::WinAnsi => &WIN_ANSI,
-            BaseEncoding::MacRoman => &MAC_ROMAN,
-            BaseEncoding::MacOsRoman => &MAC_OS_ROMAN,
-            BaseEncoding::MacExpert => &MAC_EXPERT,
+            Self::Standard => &STANDARD,
+            Self::WinAnsi => &WIN_ANSI,
+            Self::MacRoman => &MAC_ROMAN,
+            Self::MacOsRoman => &MAC_OS_ROMAN,
+            Self::MacExpert => &MAC_EXPERT,
         }
     }
 
@@ -62,10 +63,8 @@ impl BaseEncoding {
 
 /// The `/Flags` of `font`'s descriptor, 0 when it has none.
 pub(crate) fn flags(doc: &Document, font: &Dictionary) -> i64 {
-    font.get(b"FontDescriptor")
-        .ok()
-        .and_then(|descriptor| doc.resolve_dict(descriptor))
-        .and_then(|descriptor| doc.resolve_number(descriptor.get(b"Flags").ok()?))
+    descriptor(doc, font)
+        .and_then(|descriptor| descriptor.resolved_number(doc, b"Flags"))
         .map_or(0, |flags| flags as i64)
 }
 
@@ -89,22 +88,16 @@ pub(crate) struct Encoding<'a> {
 impl<'a> Encoding<'a> {
     /// The `/Encoding` of `font`.
     pub(crate) fn of(doc: &'a Document, font: &'a Dictionary) -> Self {
-        match font.get(b"Encoding").ok().and_then(|e| doc.resolve(e)) {
+        match font.resolved(doc, b"Encoding") {
             Some(Object::Name(name)) => Self {
                 base: Some(name),
                 differences: None,
             },
             Some(Object::Dictionary(dict)) => Self {
                 base: dict
-                    .get(b"BaseEncoding")
-                    .ok()
-                    .and_then(|base| doc.resolve(base))
+                    .resolved(doc, b"BaseEncoding")
                     .and_then(|base| base.as_name().ok()),
-                differences: dict
-                    .get(b"Differences")
-                    .ok()
-                    .and_then(|d| doc.resolve_array(d))
-                    .map(Vec::as_slice),
+                differences: dict.resolved_array(doc, b"Differences").map(Vec::as_slice),
             },
             _ => Self {
                 base: None,

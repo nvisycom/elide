@@ -97,13 +97,15 @@ impl DocumentLoader for PdfDocumentLoader {
         }));
 
         #[cfg(feature = "render")]
-        let (state, rendered) = self.pages(&pdf)?;
+        let document = {
+            let (state, rendered) = self.pages(&pdf)?;
+            Self::document(pdf, state, rendered, blobs)
+        };
         #[cfg(not(feature = "render"))]
-        let state = PdfState::new(placed(pdf.read(Text)?)?);
-        #[cfg(feature = "render")]
-        let document = Self::document(pdf, state, rendered, blobs);
-        #[cfg(not(feature = "render"))]
-        let document = Self::document(pdf, state, blobs);
+        let document = {
+            let state = PdfState::new(placed(pdf.read(Text)?)?);
+            Self::document(pdf, state, blobs)
+        };
         Ok(document.with_stripped(stripped))
     }
 }

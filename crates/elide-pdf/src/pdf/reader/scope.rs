@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
-use crate::pdf::reader::DocumentExt;
+use crate::pdf::reader::{DictionaryExt, DocumentExt};
 
 /// The resource dictionaries a content stream's names (`Tf`, `Do`, `gs`,
 /// `scn`, `BDC`, ...) resolve in, nearest first: a page's own and those it
@@ -39,9 +39,7 @@ impl<'a> Scope<'a> {
     /// The resources of the content `dict` (a form, tiling pattern or Type3
     /// font): its `/Resources`, when that is a dictionary it can use.
     pub(crate) fn own(doc: &'a Document, dict: &'a Dictionary) -> Option<&'a Dictionary> {
-        dict.get(b"Resources")
-            .ok()
-            .and_then(|resources| doc.resolve_dict(resources))
+        dict.resolved_dict(doc, b"Resources")
     }
 
     /// The scope the content `dict` drawn in this one resolves its names in:
@@ -63,10 +61,7 @@ impl<'a> Scope<'a> {
         name: &[u8],
     ) -> Option<&'a Object> {
         self.0.iter().find_map(|resources| {
-            let entries = resources
-                .get(category)
-                .ok()
-                .and_then(|entries| doc.resolve_dict(entries))?;
+            let entries = resources.resolved_dict(doc, category)?;
             entries
                 .get(name)
                 .ok()
@@ -83,10 +78,7 @@ impl<'a> Scope<'a> {
     ) -> BTreeMap<&'a [u8], &'a Object> {
         let mut out = BTreeMap::new();
         for resources in &self.0 {
-            let entries = resources
-                .get(category)
-                .ok()
-                .and_then(|entries| doc.resolve_dict(entries));
+            let entries = resources.resolved_dict(doc, category);
             for (name, value) in entries.into_iter().flat_map(Dictionary::iter) {
                 if !matches!(doc.resolve(value), None | Some(Object::Null)) {
                     out.entry(name.as_slice()).or_insert(value);

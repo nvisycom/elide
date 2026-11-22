@@ -118,9 +118,10 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 fn documents_are_placed_as_pdfium_places_them() {
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     // A relative path is the workspace's, where the fetch script writes.
-    let fetched = env::var_os(CORPUS)
-        .map(|dir| crate_dir.join("../..").join(dir))
-        .unwrap_or_else(|| panic!("{CORPUS} names no directory: run scripts/pdf/fetch-corpus.py"));
+    let Some(fetched) = env::var_os(CORPUS) else {
+        panic!("{CORPUS} names no directory: run scripts/pdf/fetch-corpus.py");
+    };
+    let fetched = crate_dir.join("../..").join(fetched);
     let fetched = files(&fetched);
     assert!(
         !fetched.is_empty(),

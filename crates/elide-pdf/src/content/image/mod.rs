@@ -190,7 +190,7 @@ mod tests {
             "FontBBox" => vec![0.into(), 0.into(), 1.into(), 1.into()],
             "FontMatrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 0.into()],
             "CharProcs" => dictionary! { "a" => glyph },
-            "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::Name(b"a".to_vec())] },
+            "Encoding" => dictionary! { "Differences" => vec![97.into(), Object::from("a")] },
             "FirstChar" => 97, "LastChar" => 97, "Widths" => vec![1.into()],
             "Resources" => resources(),
         });

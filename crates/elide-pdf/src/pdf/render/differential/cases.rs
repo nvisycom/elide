@@ -1,5 +1,7 @@
 //! Documents built for one kind of font or text state each.
 
+use std::iter;
+
 use lopdf::content::Operation;
 use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
 use read_fonts::types::Tag;
@@ -680,7 +682,7 @@ fn real() -> Vec<Case> {
         .map(|data| data.as_bytes().to_vec())
         .expect("the OpenType font holds a CFF table");
     // The bold mathematical capitals, past the BMP, over À onwards.
-    let capitals: Vec<Object> = std::iter::once(0xC0.into())
+    let capitals: Vec<Object> = iter::once(0xC0.into())
         .chain((0x1D400..0x1D41A).map(|c: u32| Object::Name(format!("u{c:X}").into_bytes())))
         .collect();
     let math = dictionary! {

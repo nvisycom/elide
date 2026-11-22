@@ -59,9 +59,7 @@ const SCAN_DPI: Dpi = Dpi::OCR;
 /// raster mode [`Auto`](crate::primitive::RasterMode::Auto); build the format
 /// with `pdf_format_with` for another mode.
 pub fn pdf_format() -> Format {
-    Format::with_document_loader(FORMAT_ID, PdfDocumentLoader::default())
-        .with_extensions(["pdf"])
-        .with_content_types(["application/pdf"])
+    format(PdfDocumentLoader::default())
 }
 
 /// The PDF [`Format`] under an explicit [`RasterMode`].
@@ -72,7 +70,12 @@ pub fn pdf_format() -> Format {
 #[cfg(feature = "render")]
 #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
 pub fn pdf_format_with(raster: RasterMode) -> Format {
-    Format::with_document_loader(FORMAT_ID, PdfDocumentLoader::new(raster))
+    format(PdfDocumentLoader::new(raster))
+}
+
+/// The PDF [`Format`] decoding through `loader`.
+fn format(loader: PdfDocumentLoader) -> Format {
+    Format::with_document_loader(FORMAT_ID, loader)
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
 }

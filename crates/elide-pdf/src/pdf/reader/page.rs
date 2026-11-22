@@ -7,7 +7,7 @@ use std::ops::Range;
 use elide_core::primitive::UnitBoundingBox;
 use lopdf::{Document, ObjectId};
 
-use super::{DocumentExt, Matrix};
+use super::{DictionaryExt, DocumentExt, Matrix};
 
 /// One glyph's box and the decoded character range it drew, so a detected
 /// character span can be resolved back to the page rectangles it covers.
@@ -34,10 +34,10 @@ pub(crate) struct DeviceRect {
 impl DeviceRect {
     /// The axis-aligned bounds of four device-space corners (a glyph quad mapped
     /// through a possibly-rotated matrix is not axis-aligned; take its extent).
-    pub(crate) fn of_corners(corners: [(f64, f64); 4]) -> DeviceRect {
+    pub(crate) fn of_corners(corners: [(f64, f64); 4]) -> Self {
         let xs = corners.map(|(x, _)| x);
         let ys = corners.map(|(_, y)| y);
-        DeviceRect {
+        Self {
             min_x: xs.iter().copied().fold(f64::INFINITY, f64::min),
             min_y: ys.iter().copied().fold(f64::INFINITY, f64::min),
             max_x: xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
@@ -47,15 +47,15 @@ impl DeviceRect {
 
     /// The part of the box `other` also covers, or `None` when they share
     /// no area; boxes that only touch share none.
-    pub(crate) fn intersection(self, other: DeviceRect) -> Option<DeviceRect> {
+    pub(crate) fn intersection(self, other: Self) -> Option<Self> {
         let out = self.clamped(other);
         (out.min_x < out.max_x && out.min_y < out.max_y).then_some(out)
     }
 
     /// The box clamped to `other`'s bounds, empty or inverted where they
     /// share none.
-    fn clamped(self, other: DeviceRect) -> DeviceRect {
-        DeviceRect {
+    fn clamped(self, other: Self) -> Self {
+        Self {
             min_x: self.min_x.max(other.min_x),
             min_y: self.min_y.max(other.min_y),
             max_x: self.max_x.min(other.max_x),
@@ -64,8 +64,8 @@ impl DeviceRect {
     }
 
     /// The box of the rectangle `[min_x, min_y, max_x, max_y]`.
-    fn of_array([min_x, min_y, max_x, max_y]: [f64; 4]) -> DeviceRect {
-        DeviceRect {
+    pub(crate) fn of_array([min_x, min_y, max_x, max_y]: [f64; 4]) -> Self {
+        Self {
             min_x,
             min_y,
             max_x,
@@ -74,7 +74,7 @@ impl DeviceRect {
     }
 
     /// The box as a rectangle `[min_x, min_y, max_x, max_y]`.
-    fn array(self) -> [f64; 4] {
+    pub(crate) fn array(self) -> [f64; 4] {
         [self.min_x, self.min_y, self.max_x, self.max_y]
     }
 
@@ -82,7 +82,7 @@ impl DeviceRect {
     /// must overlap `clip` along each axis it extends along, while along an
     /// axis it has no extent (a glyph whose advance is unknown) lying on or
     /// inside `clip` is enough. A box only touching `clip`'s edge is outside.
-    pub(crate) fn within(self, clip: DeviceRect) -> Option<DeviceRect> {
+    pub(crate) fn within(self, clip: Self) -> Option<Self> {
         let out = self.clamped(clip);
         let overlaps = |extent: f64, low: f64, high: f64| {
             if extent > 0.0 {
@@ -97,8 +97,8 @@ impl DeviceRect {
     }
 
     /// The box covering this one once `matrix` maps it.
-    pub(crate) fn mapped(self, matrix: Matrix) -> DeviceRect {
-        DeviceRect::of_corners(
+    pub(crate) fn mapped(self, matrix: Matrix) -> Self {
+        Self::of_corners(
             [
                 (self.min_x, self.min_y),
                 (self.max_x, self.min_y),
@@ -110,8 +110,8 @@ impl DeviceRect {
     }
 
     /// The union covering both boxes, for merging a line's glyphs into one rect.
-    pub(crate) fn union(self, other: DeviceRect) -> DeviceRect {
-        DeviceRect {
+    pub(crate) fn union(self, other: Self) -> Self {
+        Self {
             min_x: self.min_x.min(other.min_x),
             min_y: self.min_y.min(other.min_y),
             max_x: self.max_x.max(other.max_x),
@@ -260,16 +260,12 @@ pub(crate) fn page_boxes(doc: &Document, page_id: ObjectId) -> Option<PageBoxes>
     let unit = doc
         .get_dictionary(page_id)
         .ok()
-        .and_then(|page| page.get(b"UserUnit").ok())
-        .and_then(|unit| doc.resolve_number(unit))
+        .and_then(|page| page.resolved_number(doc, b"UserUnit"))
         .filter(|unit| *unit > 0.0)
         .unwrap_or(1.0);
     let print = PRINT_BOXES.map(|key| {
         let page = doc.get_dictionary(page_id).ok()?;
-        intersect(
-            normalize_rect(doc.resolve_numbers(page.get(key).ok()?)?),
-            media,
-        )
+        intersect(normalize_rect(page.resolved_numbers(doc, key)?), media)
     });
     Some(PageBoxes {
         media,
@@ -530,7 +526,7 @@ mod tests {
             "CropBox" => vec![
                 0.into(),
                 0.into(),
-                Object::Name(b"oops".to_vec()),
+                Object::from("oops"),
                 792.into(),
             ],
         });
