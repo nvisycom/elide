@@ -19,11 +19,16 @@ same `<schemas>` directory, and from it the same table, comes back every time:
   listed below: a listed namespace that is missing, or found twice, is an
   error, as is a schema that does not parse.
 
+Every source is fetched and checked before anything is written; the two
+directories are then replaced whole, so no schema an earlier run left
+behind reaches the generator.
+
 Python's standard library only.
 """
 
 import hashlib
 import io
+import shutil
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -152,18 +157,17 @@ def main():
         sys.exit(__doc__)
     base = Path(sys.argv[1])
 
-    ecma_dir = base / "ecma-376-4"
-    ecma_dir.mkdir(parents=True, exist_ok=True)
+    # Each directory's schemas, by file name, written only once all are in.
+    fetched = {"ecma-376-4": {}, "microsoft": {}}
+
     with zipfile.ZipFile(io.BytesIO(fetch(*ECMA))) as ecma:
         inner = ecma.read(ECMA_SCHEMAS)
     with zipfile.ZipFile(io.BytesIO(inner)) as transitional:
-        names = [name for name in transitional.namelist() if name.endswith(".xsd")]
-        for name in names:
-            (ecma_dir / Path(name).name).write_bytes(transitional.read(name))
-    print(f"{ecma_dir}: {len(names)} schemas from ECMA-376 Part 4")
+        for name in transitional.namelist():
+            if name.endswith(".xsd"):
+                fetched["ecma-376-4"][Path(name).name] = transitional.read(name)
+    print(f"{len(fetched['ecma-376-4'])} schemas from ECMA-376 Part 4")
 
-    microsoft = base / "microsoft"
-    microsoft.mkdir(parents=True, exist_ok=True)
     for spec, version, sha256, wanted in MICROSOFT:
         url = f"{SPECS}/{spec}/%5b{spec}%5d-{version}.docx"
         published = schemas(fetch(url, sha256))
@@ -172,9 +176,16 @@ def main():
             if namespace not in published:
                 sys.exit(f"[{spec}] {version} has no schema for {namespace}")
             name = namespace.removeprefix(MS).replace("/", "-") + ".xsd"
-            (microsoft / name).write_text(published[namespace])
-        print(f"{microsoft}: {len(wanted)} schemas from [{spec}] {version}")
+            fetched["microsoft"][name] = published[namespace].encode()
+        print(f"{len(wanted)} schemas from [{spec}] {version}")
 
+    for directory, files in fetched.items():
+        path = base / directory
+        shutil.rmtree(path, ignore_errors=True)
+        path.mkdir(parents=True)
+        for name, data in files.items():
+            (path / name).write_bytes(data)
+        print(f"{path}: {len(files)} schemas")
 
 if __name__ == "__main__":
     main()
