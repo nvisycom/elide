@@ -15,7 +15,10 @@
 //!   (`ESC [`, CSI) through its final byte; a command string (`ESC ]` OSC,
 //!   `ESC P` DCS, `ESC X` SOS, `ESC ^` PM, `ESC _` APC) through its
 //!   terminator, BEL or `ESC \`, or, unterminated, to the end of its line; any
-//!   other escape through its final byte;
+//!   other escape through its final byte. As a terminal does, a sequence reads
+//!   on past a control inside it, which takes effect (a line break stays), ends
+//!   at CAN or SUB, which cancel it, and ends before an `ESC`, which starts
+//!   the next;
 //! - every other C0 control but tab, line feed, form feed, and carriage
 //!   return, which a terminal shows as space and line breaks; DEL; and each C1
 //!   control (U+0080–U+009F) alone.
@@ -29,6 +32,7 @@
 
 use std::borrow::Cow;
 use std::iter::Peekable;
+use std::ops::RangeInclusive;
 use std::str::Chars;
 
 use elide_codec::StrippedContent;
@@ -38,6 +42,9 @@ use elide_core::redaction::HiddenContent;
 const ESC: char = '\u{1b}';
 /// `BEL`, which ends a command string.
 const BEL: char = '\u{07}';
+/// `CAN` and `SUB`, which cancel a sequence.
+const CAN: char = '\u{18}';
+const SUB: char = '\u{1a}';
 
 /// `text` without its terminal control sequences and control characters, and
 /// how many were removed; borrowed when there are none.
@@ -57,10 +64,13 @@ pub(crate) fn strip(text: &str) -> (Cow<'_, str>, usize) {
         if c != ESC {
             continue;
         }
-        match introduced(&mut chars) {
-            Some(Introducer::Control) => skip_control(&mut chars),
+        match introduced(&mut chars, &mut out) {
+            // Parameters (`0`–`?`) and intermediates (space–`/`), then the
+            // final byte (`@`–`~`).
+            Some(Introducer::Control) => skip_sequence(&mut chars, &mut out, ' '..='?'),
             Some(Introducer::String) => skip_string(&mut chars),
-            Some(Introducer::Escape) => skip_escape(&mut chars),
+            // Intermediates (space–`/`), then the final byte (`0`–`~`).
+            Some(Introducer::Escape) => skip_sequence(&mut chars, &mut out, ' '..='/'),
             None => {}
         }
     }
@@ -102,8 +112,8 @@ enum Introducer {
 
 /// The sequence an `ESC` introduces, consuming its second character when that
 /// names the kind, or `None` for a lone `ESC`.
-fn introduced(chars: &mut Peekable<Chars<'_>>) -> Option<Introducer> {
-    match chars.peek()? {
+fn introduced(chars: &mut Peekable<Chars<'_>>, out: &mut String) -> Option<Introducer> {
+    match peek_through(chars, out)? {
         '[' => chars.next().map(|_| Introducer::Control),
         ']' | 'P' | 'X' | '^' | '_' => chars.next().map(|_| Introducer::String),
         // Its next character is an intermediate or the final one.
@@ -112,29 +122,61 @@ fn introduced(chars: &mut Peekable<Chars<'_>>) -> Option<Introducer> {
     }
 }
 
-/// Skip a control sequence's parameters (`0`–`?`) and intermediates
-/// (space–`/`) through its final byte (`@`–`~`), stopping before anything
-/// else.
-fn skip_control(chars: &mut Peekable<Chars<'_>>) {
-    while chars.next_if(|c| matches!(c, '0'..='?')).is_some() {}
-    skip_escape(chars);
+/// Skip a sequence's characters in `body` through the printable ASCII one
+/// after them, its final byte, stopping before anything else.
+fn skip_sequence(chars: &mut Peekable<Chars<'_>>, out: &mut String, body: RangeInclusive<char>) {
+    while let Some(c) = peek_through(chars, out) {
+        chars.next_if(|_| matches!(c, ' '..='~'));
+        if !body.contains(&c) {
+            return;
+        }
+    }
 }
 
-/// Skip an escape's intermediates (space–`/`) through its final byte
-/// (`0`–`~`), stopping before anything else.
-fn skip_escape(chars: &mut Peekable<Chars<'_>>) {
-    while chars.next_if(|c| matches!(c, ' '..='/')).is_some() {}
-    chars.next_if(|c| matches!(c, '0'..='~'));
-}
-
-/// Skip a command string through its terminator, BEL or `ESC \`, or,
-/// unterminated, to the end of its line, keeping the line break.
-fn skip_string(chars: &mut Peekable<Chars<'_>>) {
-    while let Some(c) = chars.next_if(|c| !matches!(c, '\n' | '\r')) {
+/// The next character of an escape or control sequence, unconsumed, past the
+/// controls a terminal acts on inside one: tab, line feed, form feed, and
+/// carriage return go to `out`, every other C0 control and DEL go. `None` at
+/// the end, at CAN or SUB, consumed as they cancel the sequence, and at `ESC`,
+/// left to start the next.
+fn peek_through(chars: &mut Peekable<Chars<'_>>, out: &mut String) -> Option<char> {
+    while let Some(&c) = chars.peek() {
         match c {
-            BEL => return,
-            ESC if chars.next_if_eq(&'\\').is_some() => return,
-            _ => {}
+            ESC => return None,
+            CAN | SUB => {
+                chars.next();
+                return None;
+            }
+            '\t' | '\n' | '\x0c' | '\r' => out.push(c),
+            '\0'..='\x1f' | '\x7f' => {}
+            _ => return Some(c),
+        }
+        chars.next();
+    }
+    None
+}
+
+/// Skip a command string through its terminator: BEL, `ESC \`, or CAN or SUB,
+/// which cancel it. Any other `ESC` ends it unconsumed, starting the next
+/// sequence, and, unterminated, it ends with its line, keeping the line break.
+fn skip_string(chars: &mut Peekable<Chars<'_>>) {
+    while let Some(&c) = chars.peek() {
+        match c {
+            '\n' | '\r' => return,
+            ESC => {
+                let mut ahead = chars.clone();
+                ahead.next();
+                if ahead.next() == Some('\\') {
+                    *chars = ahead;
+                }
+                return;
+            }
+            BEL | CAN | SUB => {
+                chars.next();
+                return;
+            }
+            _ => {
+                chars.next();
+            }
         }
     }
 }
@@ -171,6 +213,17 @@ mod tests {
         assert_eq!(stripped("\u{1b}[?25l"), (String::new(), 1));
     }
 
+    /// A control inside a sequence takes effect and the sequence reads on;
+    /// CAN cancels it, and an `ESC` starts the next.
+    #[test]
+    fn controls_inside_a_sequence_act() {
+        assert_eq!(stripped("Ja\u{1b}[\0mne"), ("Jane".into(), 1));
+        assert_eq!(stripped("Ja\u{1b}[1\n;2mne"), ("Ja\nne".into(), 1));
+        assert_eq!(stripped("Ja\u{1b}(\u{7}Bne"), ("Jane".into(), 1));
+        assert_eq!(stripped("Ja\u{1b}[1\u{18}mne"), ("Jamne".into(), 1));
+        assert_eq!(stripped("Ja\u{1b}[1\u{1b}[mne"), ("Jane".into(), 2));
+    }
+
     #[test]
     fn command_strings_go_through_their_terminator() {
         // A window title, ended by BEL; a hyperlink, ended by ST.
@@ -179,6 +232,12 @@ mod tests {
             stripped("\u{1b}]8;;https://example.com\u{1b}\\Jane\u{1b}]8;;\u{1b}\\"),
             ("Jane".into(), 2)
         );
+        // CAN cancels one, and another escape ends it and goes too.
+        assert_eq!(
+            stripped("before\u{1b}]0;title\u{18}after\n"),
+            ("beforeafter\n".into(), 1)
+        );
+        assert_eq!(stripped("\u{1b}]0;title\u{1b}[mJane"), ("Jane".into(), 2));
         // Unterminated, it ends with its line.
         assert_eq!(stripped("Jane\u{1b}]0;Roe"), ("Jane".into(), 1));
         assert_eq!(

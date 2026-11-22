@@ -167,6 +167,8 @@ impl CsvHandler {
             .delimiter(self.data.delimiter)
             .terminator(terminator)
             .has_headers(false)
+            // Rows may differ in width, as the loader reads them.
+            .flexible(true)
             .from_writer(Vec::new());
         let write_error = |e: csv::Error| Error::processing(format!("CSV write: {e}"));
         if let Some(headers) = &self.data.headers {
@@ -632,6 +634,15 @@ mod tests {
             .map(|entry| (entry.content, entry.count))
             .collect();
         assert_eq!(stripped, [(HiddenContent::Undisplayed, 1)]);
+        Ok(())
+    }
+
+    /// A stripped table whose rows differ in width is written back as read.
+    #[test]
+    fn a_stripped_ragged_table_encodes() -> Result<()> {
+        let src = "a,b,c\nJa\u{1b}[mne\nx,y\n";
+        let (handler, _) = CsvLoader::default().load(ContentData::from_text(src))?;
+        assert_eq!(handler.encode()?.decode()?, "a,b,c\nJane\nx,y\n");
         Ok(())
     }
 
