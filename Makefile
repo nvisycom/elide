@@ -104,6 +104,16 @@ test-pdf-placement: ## Compares elide-pdf's glyph placement with PDFium's (needs
 	@ELIDE_PDF_CORPUS="$(PDF_CORPUS)" cargo test -p elide-pdf --features render --lib render::differential -- --ignored
 	@$(call log,Glyph placement matches PDFium.)
 
+OOXML_SCHEMAS ?= $(CURDIR)/target/ooxml-schemas
+
+.PHONY: gen-office-schema
+gen-office-schema: ## Regenerates elide-office's schema allowlist from the pinned OOXML schemas.
+	@$(call log,Fetching the OOXML schemas into $(OOXML_SCHEMAS)...)
+	@python3 scripts/office/fetch-ooxml-schemas.py "$(OOXML_SCHEMAS)"
+	@$(call log,Generating the schema allowlist...)
+	@python3 scripts/office/gen-ooxml-schema.py "$(OOXML_SCHEMAS)"
+	@$(call log,Schema allowlist generated.)
+
 .PHONY: clean-testdata
 clean-testdata: ## Removes generated e2e artifacts (testdata/audits, testdata/results).
 	@$(call log,Cleaning generated e2e test artifacts...)

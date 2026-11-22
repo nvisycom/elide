@@ -9,20 +9,22 @@ it holds text.
 
 Usage:
 
+    scripts/office/fetch-ooxml-schemas.py <schemas>
     scripts/office/gen-ooxml-schema.py <schemas>
 
-where `<schemas>` holds:
+where `<schemas>`, as `fetch-ooxml-schemas.py` writes it from its pinned
+sources, holds:
 
-- `ISO-IEC29500-4_2016/`: the transitional schemas of ISO/IEC 29500-4:2016
-  (ECMA-376 Part 4), `wml.xsd`, `sml.xsd`, `pml.xsd`, `dml-*.xsd`,
-  `vml-*.xsd`, and `shared-*.xsd`;
+- `ecma-376-4/`: the transitional schemas of ECMA-376 Part 4, 5th edition
+  (adopted as ISO/IEC 29500-4:2016), `wml.xsd`, `sml.xsd`, `pml.xsd`,
+  `dml-*.xsd`, `vml-*.xsd`, and `shared-*.xsd`;
 - `microsoft/`: the extension schemas whose parts have roots of their own:
-  [MS-DOCX]'s WordprocessingML ones (`wml-2010.xsd`, `wml-2012.xsd`, ...:
-  comment extensions, people); [MS-ODRAWXML]'s chart styles, modern charts,
-  and SmartArt drawing; [MS-XLSX]'s threaded comments and people; and
-  [MS-PPTX]'s modern comments and authors, each with the schemas it imports
-  or references (the command schemas that name a comment's anchor among
-  them). Microsoft publishes these in each specification's appendix A.
+  [MS-DOCX]'s WordprocessingML ones (comment extensions, people);
+  [MS-ODRAWXML]'s chart styles, modern charts, and SmartArt drawing;
+  [MS-XLSX]'s threaded comments and people; and [MS-PPTX]'s modern comments
+  and authors, each with the schemas it imports or references (the command
+  schemas that name a comment's anchor among them). Microsoft publishes
+  these in each specification's appendix A.
 
 Markup compatibility (`mc:AlternateContent`) is resolved by the rebuild itself,
 so its schema is not read. A wildcard (`xsd:any`) that names its namespaces
@@ -454,7 +456,7 @@ def main():
         sys.exit(__doc__)
     base = Path(sys.argv[1])
     paths = []
-    for directory in ("ISO-IEC29500-4_2016", "microsoft"):
+    for directory in ("ecma-376-4", "microsoft"):
         found = sorted((base / directory).glob("*.xsd"))
         if not found:
             sys.exit(f"no schemas under {base / directory}")
