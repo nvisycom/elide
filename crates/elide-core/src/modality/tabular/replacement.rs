@@ -10,29 +10,29 @@ use crate::modality::text::TextReplacement;
 /// column.
 ///
 /// A cell holds text, so most treatments are a [`TextReplacement`] applied
-/// to the cell, carried as [`Cell`]. Structural treatments that the text
-/// model can't express, dropping a whole [`row`] or [`column`], are their
-/// own variants.
+/// to the cell, carried as [`CellRedacted`]. Structural treatments that the
+/// text model can't express, dropping a whole [`row`] or [`column`], are
+/// their own variants.
 ///
-/// [`Cell`]: TabularReplacement::Cell
-/// [`row`]: TabularReplacement::DropRow
-/// [`column`]: TabularReplacement::DropColumn
+/// [`CellRedacted`]: TabularReplacement::CellRedacted
+/// [`row`]: TabularReplacement::RowDropped
+/// [`column`]: TabularReplacement::ColumnDropped
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum TabularReplacement {
-    /// Apply a text treatment to the cell.
-    Cell(TextReplacement),
-    /// Drop the entire row the entity sits in.
-    DropRow,
-    /// Drop the entire column the entity sits in.
-    DropColumn,
+    /// The cell's text is redacted by this treatment.
+    CellRedacted(TextReplacement),
+    /// The entire row the entity sits in is dropped.
+    RowDropped,
+    /// The entire column the entity sits in is dropped.
+    ColumnDropped,
 }
 
 impl From<TextReplacement> for TabularReplacement {
     fn from(replacement: TextReplacement) -> Self {
-        Self::Cell(replacement)
+        Self::CellRedacted(replacement)
     }
 }
 
@@ -42,17 +42,13 @@ impl TryFrom<TabularReplacement> for TextReplacement {
 
     fn try_from(replacement: TabularReplacement) -> Result<Self, Self::Error> {
         match replacement {
-            TabularReplacement::Cell(text) => Ok(text),
+            TabularReplacement::CellRedacted(text) => Ok(text),
             structural => Err(structural),
         }
     }
 }
 
-impl ModalityReplacement for TabularReplacement {
-    fn removed() -> Self {
-        Self::Cell(TextReplacement::Removed)
-    }
-}
+impl ModalityReplacement for TabularReplacement {}
 
 #[cfg(test)]
 mod tests {
@@ -66,8 +62,8 @@ mod tests {
             Ok(TextReplacement::Removed)
         );
         assert_eq!(
-            TextReplacement::try_from(TabularReplacement::DropRow),
-            Err(TabularReplacement::DropRow)
+            TextReplacement::try_from(TabularReplacement::RowDropped),
+            Err(TabularReplacement::RowDropped)
         );
     }
 }

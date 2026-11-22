@@ -63,7 +63,7 @@ use elide_core::redaction::HiddenContentPolicy;
 use elide_detection::Analyzer;
 use elide_engine::{Orchestrator, RegistryDocumentExt};
 use elide_format::FormatRegistry;
-use elide_redaction::operators::Erase;
+use elide_redaction::operators::Remove;
 use elide_redaction::{Anonymizer, Rule};
 
 let registry = FormatRegistry::with_builtin();
@@ -72,7 +72,7 @@ let orchestrator = Orchestrator::new()
     .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
     .with_modality::<Text>(
         Analyzer::new().with_recognizer(EmailFinder),
-        Anonymizer::new().with(Rule::fallback(Erase)),
+        Anonymizer::new().with(Rule::fallback(Remove)),
     );
 
 let text = "Write to jane@example.com";

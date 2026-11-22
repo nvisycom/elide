@@ -54,7 +54,7 @@ let mut document = elide_plain::txt_format()
 let mut body = document.stream_mut::<Text>("body").expect("one text stream");
 body.write_at(Redactions::from([(
     TextLocation::inline(8..25),
-    TextReplacement::substituted("[EMAIL]"),
+    TextReplacement::replaced("[EMAIL]"),
 )]))
 .await?;
 

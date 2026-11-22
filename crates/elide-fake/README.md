@@ -25,7 +25,7 @@ layout, only the digits and letters change. Free-form labels (names, addresses,
 organizations) emit a fresh locale-aware fake whose length need not match. A
 label outside the supported set delegates to a fallback operator supplied at
 construction, so `Fake` slots into a policy alongside `Mask`, `Replace`, or
-`Erase` for everything it doesn't fake itself. It applies to both text and
+`Remove` for everything it doesn't fake itself. It applies to both text and
 tabular cells.
 
 ```rust,ignore

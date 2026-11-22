@@ -32,8 +32,7 @@ export interface MaskConfig {
  * A redaction operator, branded with the modalities `M` it applies to.
  *
  * Built by {@link Operator.replace}/{@link Operator.mask} (text and tabular),
- * {@link Operator.blackbox} ({@link Image}), {@link Operator.silence}
- * ({@link Audio}), or {@link Operator.erase}/{@link Operator.keep} (broad), and
+ * {@link Operator.cover} (every modality), or {@link Operator.remove}/{@link Operator.keep} (broad), and
  * folded into a {@link Rule}. Using one where its modality does not apply is a
  * type error.
  */
@@ -50,13 +49,14 @@ export const Operator: {
   /** Mask the matched value per `config` (text, tabular). */
   mask(config: MaskConfig): Operator<Text | Tabular>;
   /** Remove the matched value entirely (text, tabular, audio). */
-  erase(): Operator<Text | Tabular | Audio>;
+  remove(): Operator<Text | Tabular | Audio>;
+  /**
+   * Hide the matched value in place, keeping its extent: a run of `█` in text,
+   * a black box in an image, silence in audio.
+   */
+  cover(): Operator<Text | Tabular | Image | Audio>;
   /** Leave the matched value untouched (text, tabular, image). */
   keep(): Operator<Text | Tabular | Image>;
-  /** Paint a solid box over the matched region (image). */
-  blackbox(): Operator<Image>;
-  /** Silence the matched time span (audio). */
-  silence(): Operator<Audio>;
 };
 
 /**

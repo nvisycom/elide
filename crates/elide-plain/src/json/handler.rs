@@ -484,7 +484,11 @@ impl DataWriter<Text> for JsonHandler {
         let mut plan: Vec<(LeafEdit, String)> = Vec::new();
         for (loc, replacement) in redactions.into_iter() {
             let edit = self.edit_for(&loc)?;
-            let value = replacement.value().unwrap_or_default().to_owned();
+            let original = match &self.slots[edit.slot] {
+                Slot::Leaf(leaf) => leaf.value.get(edit.value.clone()).unwrap_or_default(),
+                Slot::Passthrough(_) => "",
+            };
+            let value = replacement.written(original).into_owned();
             plan.push((edit, value));
         }
         // Apply per-leaf edits right-to-left within each leaf so earlier
@@ -761,6 +765,7 @@ mod tests {
     use elide_core::ErrorKind;
     use elide_core::modality::ModalityLocation;
     use elide_core::modality::text::TextReplacement;
+    use elide_core::primitive::Color;
 
     use super::*;
 
@@ -843,7 +848,7 @@ mod tests {
         let first = find_chunk(&h, "long value");
         h.write_at(Redactions::from([(
             first.location.clone(),
-            TextReplacement::substituted("x"),
+            TextReplacement::replaced("x"),
         )]))
         .await?;
         let next = find_chunk(&h, "next");
@@ -885,10 +890,29 @@ mod tests {
         let chunk = find_chunk(&h, "Alice");
         h.write_at(Redactions::from([(
             chunk.location.clone(),
-            TextReplacement::substituted("Bob"),
+            TextReplacement::replaced("Bob"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"name":"Bob"}"#);
+        Ok(())
+    }
+
+    /// A covered value is written as one mark per character; a covered
+    /// number becomes a string of marks, so the document stays valid JSON.
+    #[tokio::test]
+    async fn a_covered_value_is_marked_per_character() -> Result<()> {
+        let mut h = handler(r#"{"name":"Alice","age":42}"#);
+        let name = find_chunk(&h, "Alice");
+        let age = find_chunk(&h, "42");
+        h.write_at(Redactions::from([
+            (
+                name.location.clone(),
+                TextReplacement::covered(Color::BLACK),
+            ),
+            (age.location.clone(), TextReplacement::covered(Color::BLACK)),
+        ]))
+        .await?;
+        assert_eq!(encoded(&h), r#"{"name":"█████","age":"██"}"#);
         Ok(())
     }
 
@@ -906,7 +930,7 @@ mod tests {
                 chunk.location.range().unwrap().start + at
                     ..chunk.location.range().unwrap().start + at + "alice".len(),
             ),
-            TextReplacement::substituted("[USER]"),
+            TextReplacement::replaced("[USER]"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"email":"[USER]@example.com"}"#);
@@ -927,7 +951,7 @@ mod tests {
                 chunk.location.range().unwrap().start + at
                     ..chunk.location.range().unwrap().start + at + "bar".len(),
             ),
-            TextReplacement::substituted("XXX"),
+            TextReplacement::replaced("XXX"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"msg":"foo\"XXX"}"#);
@@ -971,7 +995,7 @@ mod tests {
                 chunk.location.range().unwrap().start + at
                     ..chunk.location.range().unwrap().start + at + "bar".len(),
             ),
-            TextReplacement::substituted("XXX"),
+            TextReplacement::replaced("XXX"),
         )]))
         .await?;
         // Only `bar` is replaced; the `é` escape before it is spliced through
@@ -994,7 +1018,7 @@ mod tests {
         let location = TextLocation::marked_source(SourceRef::new(raw_at..raw_at + "bar".len()));
         h.write_at(Redactions::from([(
             location,
-            TextReplacement::substituted("XXX"),
+            TextReplacement::replaced("XXX"),
         )]))
         .await?;
         assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
@@ -1032,7 +1056,7 @@ mod tests {
         let location = TextLocation::marked_source(SourceRef::new(open..close));
         h.write_at(Redactions::from([(
             location,
-            TextReplacement::substituted("X"),
+            TextReplacement::replaced("X"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
@@ -1097,7 +1121,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("part-tagged ref must be rejected");
@@ -1117,7 +1141,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("structural source must be rejected");
@@ -1138,7 +1162,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("out-of-range source must be rejected");
@@ -1161,7 +1185,7 @@ mod tests {
                 .unwrap();
         h.write_at(Redactions::from([(
             location,
-            TextReplacement::substituted("X"),
+            TextReplacement::replaced("X"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
@@ -1201,7 +1225,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("`c` lies between the refs");
@@ -1230,7 +1254,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("an invalid trailing ref must reject the whole location");
@@ -1257,7 +1281,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("refs across two values must be rejected");
@@ -1280,7 +1304,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("a delimiter-only span must be rejected");
@@ -1302,7 +1326,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("a delimiter-only span must be rejected");
@@ -1325,7 +1349,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("an empty interior span must be rejected");
@@ -1347,7 +1371,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("an empty scalar span must be rejected");
@@ -1363,7 +1387,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 TextLocation::inline(0..1),
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("must reject");
@@ -1382,7 +1406,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 TextLocation::inline(start..start + 5),
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("must reject");
@@ -1402,7 +1426,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 TextLocation::inline(start + 3..start + 4),
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("must reject");
@@ -1422,7 +1446,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 TextLocation::inline(start + 2..start),
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("must reject");
@@ -1439,11 +1463,11 @@ mod tests {
             .write_at(Redactions::from([
                 (
                     TextLocation::inline(start..start + 6),
-                    TextReplacement::substituted("[A]"),
+                    TextReplacement::replaced("[A]"),
                 ),
                 (
                     TextLocation::inline(start + 5..start + 8),
-                    TextReplacement::substituted("[B]"),
+                    TextReplacement::replaced("[B]"),
                 ),
             ]))
             .await
@@ -1454,11 +1478,11 @@ mod tests {
         h.write_at(Redactions::from([
             (
                 TextLocation::inline(start..start + 5),
-                TextReplacement::substituted("[A]"),
+                TextReplacement::replaced("[A]"),
             ),
             (
                 TextLocation::inline(start + 5..start + 8),
-                TextReplacement::substituted("[B]"),
+                TextReplacement::replaced("[B]"),
             ),
         ]))
         .await?;
@@ -1489,7 +1513,7 @@ mod tests {
         let err = h
             .write_at(Redactions::from([(
                 TextLocation::inline(decoded_len..decoded_len + 1),
-                TextReplacement::substituted("X"),
+                TextReplacement::replaced("X"),
             )]))
             .await
             .expect_err("must reject");
@@ -1503,7 +1527,7 @@ mod tests {
         let chunk = find_chunk(&h, "email");
         h.write_at(Redactions::from([(
             chunk.location.clone(),
-            TextReplacement::substituted("contact"),
+            TextReplacement::replaced("contact"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"contact":"a@b.c"}"#);
@@ -1516,7 +1540,7 @@ mod tests {
         let chunk = find_chunk(&h, "42");
         h.write_at(Redactions::from([(
             chunk.location.clone(),
-            TextReplacement::substituted("0"),
+            TextReplacement::replaced("0"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"n":0}"#);
@@ -1531,7 +1555,7 @@ mod tests {
         let chunk = find_chunk(&h, "42");
         h.write_at(Redactions::from([(
             chunk.location.clone(),
-            TextReplacement::substituted("XXX"),
+            TextReplacement::replaced("XXX"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"n":"XXX"}"#);
@@ -1555,7 +1579,7 @@ mod tests {
         assert_eq!(locs.len(), 3, "expected three string values");
         let rs = locs
             .into_iter()
-            .map(|loc| (loc, TextReplacement::substituted("X")))
+            .map(|loc| (loc, TextReplacement::replaced("X")))
             .collect();
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), r#"{"a":"X","b":"X","c":"X"}"#);
@@ -1630,7 +1654,7 @@ mod tests {
             .expect("range is in bounds");
         h.write_at(Redactions::from([(
             source_loc,
-            TextReplacement::substituted("XXX"),
+            TextReplacement::replaced("XXX"),
         )]))
         .await?;
         assert_eq!(encoded(&h), r#"{"msg":"foo\"XXX"}"#);

@@ -16,7 +16,7 @@ use elide::entity::{LabelCatalog, builtins};
 use elide::modality::metadata::Metadata;
 use elide::modality::text::Text;
 use elide::recognition::Scope;
-use elide::redaction::operators::Erase;
+use elide::redaction::operators::Remove;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Document, Orchestrator};
 use elide_office::fixtures::{pack_parts, part_names, property_fields, read_part};
@@ -50,7 +50,7 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
         // Body text: an erase pipeline (any detected text redacts; not the focus).
         .with_modality::<Text>(
             Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Erase)),
+            Anonymizer::new().with(Rule::fallback(Remove)),
         );
 
     let handle = registry

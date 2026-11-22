@@ -58,7 +58,7 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send +
 /// # use elide_core::modality::text::{Text, TextDoc};
 /// # use elide_core::primitive::ConfidenceThreshold;
 /// # use elide_core::recognition::Scope;
-/// # use elide_redaction::operators::{Erase, Keep, Mask, Replace};
+/// # use elide_redaction::operators::{Keep, Mask, Remove, Replace};
 /// # use elide_redaction::{Anonymizer, Rule};
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> elide_core::Result<()> {
@@ -75,7 +75,7 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send +
 ///     ))
 ///     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()))
 ///     .with(Rule::tag("financial", Mask::stars()))
-///     .with(Rule::fallback(Erase))
+///     .with(Rule::fallback(Remove))
 ///     .anonymize(&mut document, &mut entities, &Scope::default())
 ///     .await?;
 ///
@@ -120,13 +120,13 @@ impl<M: Modality> Anonymizer<M> {
     /// # use elide_core::entity::LabelRef;
     /// # use elide_core::entity::audit::Attribution;
     /// # use elide_core::modality::text::Text;
-    /// # use elide_redaction::operators::{Erase, Mask, Replace};
+    /// # use elide_redaction::operators::{Mask, Remove, Replace};
     /// # use elide_redaction::{Anonymizer, Rule};
     /// let gdpr = Attribution::freeform("gdpr-art-17");
     /// let anonymizer = Anonymizer::<Text>::new()
     ///     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()).because(gdpr))
     ///     .with(Rule::tag("financial", Mask::stars()))
-    ///     .with(Rule::fallback(Erase));
+    ///     .with(Rule::fallback(Remove));
     /// ```
     #[must_use]
     pub fn with(mut self, rule: Rule<M>) -> Self {
@@ -148,14 +148,14 @@ impl<M: Modality> Anonymizer<M> {
     /// # use elide_core::entity::LabelRef;
     /// # use elide_core::entity::audit::Attribution;
     /// # use elide_core::modality::text::Text;
-    /// # use elide_redaction::operators::{Clamp, Erase, Mask};
+    /// # use elide_redaction::operators::{Clamp, Mask, Remove};
     /// # use elide_redaction::{Anonymizer, Rule};
     /// let attr: Attribution = Attribution::freeform("hipaa-safe-harbor").into();
     /// let anonymizer = Anonymizer::<Text>::new().with_multiple([
     ///     Rule::label(LabelRef::new("date_of_birth"), Mask::stars()).because(attr.clone()),
     ///     Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older"))
     ///         .because(attr.clone()),
-    ///     Rule::label(LabelRef::new("person_name"), Erase).because(attr),
+    ///     Rule::label(LabelRef::new("person_name"), Remove).because(attr),
     /// ]);
     /// ```
     ///
@@ -474,7 +474,7 @@ mod tests {
     use elide_core::redaction::HiddenContentKind;
 
     use super::*;
-    use crate::operators::{Erase, Keep, Mask, Replace};
+    use crate::operators::{Keep, Mask, Remove, Replace};
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
         Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())
@@ -486,7 +486,7 @@ mod tests {
     async fn pick_records_one_selection_per_entity() {
         let mut entities = vec![entity("NAME", 0, 5), entity("URL", 10, 13)];
         let anonymizer = Anonymizer::new()
-            .with(Rule::label(LabelRef::new("NAME"), Erase))
+            .with(Rule::label(LabelRef::new("NAME"), Remove))
             .with(Rule::label(LabelRef::new("URL"), Replace::default()));
 
         anonymizer.pick(&mut entities, &Scope::default());
@@ -499,7 +499,7 @@ mod tests {
                 None => panic!("every entity records a Selection pick"),
             })
             .collect();
-        assert_eq!(names, ["erase", "replace"]);
+        assert_eq!(names, ["remove", "replace"]);
         assert!(
             entities.iter().all(|e| !e.is_redacted()),
             "pick never redacts"
@@ -513,7 +513,7 @@ mod tests {
         // same operator must not stack a second identical Selection event.
         let mut target = TextDoc::new("alice");
         let mut entities = vec![entity("NAME", 0, 5)];
-        let anonymizer = Anonymizer::new().with(Rule::label(LabelRef::new("NAME"), Erase));
+        let anonymizer = Anonymizer::new().with(Rule::label(LabelRef::new("NAME"), Remove));
 
         anonymizer.pick(&mut entities, &Scope::default());
         anonymizer
@@ -538,11 +538,11 @@ mod tests {
         let mut target = TextDoc::new("alice");
         let mut entities = vec![entity("NAME", 0, 5)];
         Anonymizer::new()
-            .with(Rule::label(LabelRef::new("NAME"), Erase))
+            .with(Rule::label(LabelRef::new("NAME"), Remove))
             .pick(&mut entities, &Scope::default());
 
         Anonymizer::new()
-            .with(Rule::fallback(Erase))
+            .with(Rule::fallback(Remove))
             .anonymize(&mut target, &mut entities, &Scope::default())
             .await
             .unwrap();
@@ -598,11 +598,11 @@ mod tests {
     /// `anonymize` applies.
     #[tokio::test]
     async fn pick_records_the_cluster_winner_on_every_member() {
-        // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
+        // NAME [0,5) → Replace (Partial); SSN [3,12) → Remove (Irrecoverable).
         let mut entities = vec![entity("NAME", 0, 5), entity("SSN", 3, 12)];
         let anonymizer = Anonymizer::new()
             .with(Rule::label(LabelRef::new("NAME"), Replace::default()))
-            .with(Rule::label(LabelRef::new("SSN"), Erase));
+            .with(Rule::label(LabelRef::new("SSN"), Remove));
 
         anonymizer.pick(&mut entities, &Scope::default());
 
@@ -610,7 +610,7 @@ mod tests {
         // operator, `erase`.
         for entity in &entities {
             match entity.audit.selection() {
-                Some(s) => assert_eq!(s.operator.name, "erase", "safest operator wins"),
+                Some(s) => assert_eq!(s.operator.name, "remove", "safest operator wins"),
                 None => panic!("every cluster member records the pick"),
             }
         }
@@ -622,7 +622,7 @@ mod tests {
     async fn anonymize_applies_the_picks() {
         let mut target = TextDoc::new("alice and bob");
         let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
 
         anonymizer
             .anonymize(&mut target, &mut entities, &Scope::default())
@@ -641,7 +641,7 @@ mod tests {
     async fn anonymize_picks_then_redacts() {
         let mut target = TextDoc::new("alice and bob");
         let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
 
         anonymizer
             .anonymize(&mut target, &mut entities, &Scope::default())
@@ -662,7 +662,7 @@ mod tests {
     /// a suppressed one) leaves the target untouched and reports `false`.
     #[tokio::test]
     async fn anonymize_reports_whether_it_wrote() {
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
         let scope = Scope::default();
         let mut target = TextDoc::new("alice and bob");
 
@@ -725,7 +725,7 @@ mod tests {
         );
         let mut entities = vec![live, suppressed];
 
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
 
         anonymizer
             .anonymize(&mut target, &mut entities, &Scope::default())
@@ -843,7 +843,7 @@ mod tests {
         );
         let mut entities = vec![live_a, bridge, live_b];
 
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
         anonymizer
             .anonymize(&mut target, &mut entities, &Scope::default())
             .await
@@ -894,7 +894,7 @@ mod tests {
     async fn a_failed_write_records_no_redaction_events() {
         let mut target = TextDoc::failing("alice and bob");
         let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
 
         let result = anonymizer
             .anonymize(&mut target, &mut entities, &Scope::default())

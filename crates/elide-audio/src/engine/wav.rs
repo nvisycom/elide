@@ -143,7 +143,7 @@ mod tests {
     fn tone_stays_within_24_bit_range() {
         let batch: Redactions<Audio> = Redactions::from([(
             AudioLocation::from_millis(0, 100),
-            AudioReplacement::Tone {
+            AudioReplacement::Beeped {
                 hz: 440.0,
                 amplitude: 1.0,
                 waveform: Waveform::Sine,

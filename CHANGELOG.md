@@ -87,14 +87,17 @@ and this project adheres to
 
 #### Redaction
 
-- Redaction operators for text (replace, mask, erase, hash, HMAC, encrypt,
-  truncate, clamp, date generalization, pseudonymize, keep), tabular cells
-  (drop row, the header row included; drop column), images (blackbox, blur,
-  pixelate), and audio (silence, beep), selected per entity by an
-  `Anonymizer`'s ordered rules;
-  `Erase` and `Keep` serve every modality, and `Keep` writes nothing, so a kept
-  entity is left exactly as it was in every format and is recorded as
-  selected, not redacted
+- Redaction operators for text (replace, mask, hash, HMAC, encrypt, truncate,
+  clamp, date generalization, pseudonymize), tabular cells (drop row, the
+  header row included; drop column), images (blur, pixelate), and audio
+  (beep), selected per entity by an `Anonymizer`'s ordered rules;
+  `Cover` and `Keep` serve every modality, and `Remove` every one that can
+  make a value vanish (an image can't lose its pixels, so it has none):
+  `Remove` leaves nothing that marks where a value was, `Cover` hides it in
+  place and keeps its extent (one `█` per character in text, a box in an
+  image, silence in audio), the box drawn in a color of the rule's choosing,
+  black by default, and `Keep` writes nothing, so a kept entity is left
+  exactly as it was in every format and is recorded as selected, not redacted
 - Coreference-aware pseudonymization with a vault for stable replacements, and
   a `Deanonymizer` for reversible operators
 - Every pipeline's anonymizer erases a flagged entity no rule covers, so

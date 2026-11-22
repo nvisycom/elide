@@ -34,7 +34,7 @@ original value.
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::text::{Text, TextDoc};
 use elide_core::recognition::Scope;
-use elide_redaction::operators::{Erase, Mask, Replace};
+use elide_redaction::operators::{Mask, Remove, Replace};
 use elide_redaction::{Anonymizer, Rule};
 
 # #[tokio::main(flavor = "current_thread")]
@@ -46,7 +46,7 @@ Anonymizer::<Text>::new()
     .with_catalog(LabelCatalog::with_builtins())
     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()))
     .with(Rule::tag("financial", Mask::stars()))
-    .with(Rule::fallback(Erase))
+    .with(Rule::fallback(Remove))
     .anonymize(&mut document, &mut entities, &Scope::default())
     .await?;
 
@@ -62,9 +62,9 @@ assert_eq!(document.text(), "write to [EMAIL_ADDRESS]");
     `GeneralizeDate` (feature `datetime`), `Sha2Hash` (`sha2`), `HmacHash`
     (`hmac`), `AesEncrypt` (`aes`), `Fake` (`fake`).
   - Tabular: `DropRow`, `DropColumn` (feature `tabular`).
-  - Image: `Blur`, `Pixelate`, `Blackbox` (feature `image`).
-  - Audio: `Silence`, `Beep` (feature `audio`).
-  - Cross-modality: `Erase`, `Keep`, and `WithFallback` for composing a
+  - Image: `Blur`, `Pixelate` (feature `image`).
+  - Audio: `Beep` (feature `audio`).
+  - Cross-modality: `Remove`, `Cover`, `Keep`, and `WithFallback` for composing a
     declining `TryOperator` with a fallback.
 - **`vault`** — the `Vault` trait and the default `InMemoryVault`, backing the
   stable per-entity surrogates `Pseudonymize` produces.

@@ -14,7 +14,7 @@ use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::redaction::HiddenContentPolicy;
 use elide::{Orchestrator, PartId, RegistryDocumentExt, Result};
 
-use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
+use crate::support::orchestrator::{TestOrchestrator, cover_anonymizer, ocr_analyzer};
 
 /// Any decodable PNG: the mock OCR backend ignores the pixels and returns its
 /// canned regions, so the fixture only has to decode to an image.
@@ -35,7 +35,7 @@ fn loc() -> ImageLocation {
 fn orchestrator(registry: FormatRegistry, backend: MockBackend) -> Result<Orchestrator> {
     Ok(TestOrchestrator::bare()
         .with_registry(registry)
-        .with_image(ocr_analyzer(backend)?, erase_anonymizer())
+        .with_image(ocr_analyzer(backend)?, cover_anonymizer())
         .build())
 }
 

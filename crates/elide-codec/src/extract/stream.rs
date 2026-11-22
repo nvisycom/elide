@@ -227,8 +227,7 @@ impl<A: Send + Sync + 'static> DataWriter<Text> for ExtractStream<A> {
         spans.ensure_disjoint()?;
         edits.sort_by_key(|(span, _)| span.start);
         for (span, replacement) in edits.into_iter().rev() {
-            self.state
-                .redact(span, replacement.value().unwrap_or_default())?;
+            self.state.redact(span, &replacement)?;
         }
         Ok(())
     }
@@ -239,6 +238,7 @@ mod tests {
     use elide_core::ErrorKind;
     use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{DataReader, ModalityLocation};
+    use elide_core::primitive::Color;
 
     use super::*;
     use crate::extract::ItemEdit;
@@ -324,7 +324,7 @@ mod tests {
         stream
             .write_at(Redactions::from([(
                 TextLocation::inline(0..29),
-                TextReplacement::substituted("[X]"),
+                TextReplacement::replaced("[X]"),
             )]))
             .await
             .unwrap();
@@ -339,11 +339,11 @@ mod tests {
             .write_at(Redactions::from([
                 (
                     TextLocation::inline(5..8),
-                    TextReplacement::substituted("[NAME]"),
+                    TextReplacement::replaced("[NAME]"),
                 ),
                 (
                     TextLocation::inline(9..29),
-                    TextReplacement::substituted("[EMAIL]"),
+                    TextReplacement::replaced("[EMAIL]"),
                 ),
             ]))
             .await
@@ -351,6 +351,24 @@ mod tests {
         assert_eq!(
             values(&stream),
             ["Jane [NAME]", "", "\n", "[EMAIL]", "", "Next"]
+        );
+    }
+
+    /// A cover marks each item's part in place, keeping every item's extent
+    /// and the separator between them.
+    #[tokio::test]
+    async fn a_cover_across_items_marks_each_in_place() {
+        let mut stream = stream();
+        stream
+            .write_at(Redactions::from([(
+                TextLocation::inline(5..29),
+                TextReplacement::covered(Color::BLACK),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(
+            values(&stream),
+            ["Jane █", "██", "\n", "█████████", "███████████", "Next"]
         );
     }
 

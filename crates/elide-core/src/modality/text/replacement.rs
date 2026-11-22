@@ -1,39 +1,76 @@
 //! [`TextReplacement`]: what a text operator produces.
 
+use std::borrow::Cow;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::modality::ModalityReplacement;
+use crate::primitive::Color;
 
-/// What a text operator produces: a substitution or a removal.
+/// What a text operator produces: a removal, a cover, or a replacement.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum TextReplacement {
-    /// Replace the span with this value.
-    Substituted(String),
-    /// Remove the span entirely.
+    /// The span is cut out and the text closes up: nothing marks where it
+    /// was.
     Removed,
+    /// The span is hidden in place: its extent is kept and visibly marked.
+    /// Each format draws the mark: one `█` per character in text, a box of
+    /// `color` where the format draws one.
+    Covered {
+        /// The color a format that draws a box draws it in.
+        color: Color,
+    },
+    /// The span is replaced by this text.
+    Replaced(String),
 }
 
 impl TextReplacement {
-    /// Substitution with the given value.
-    pub fn substituted(value: impl Into<String>) -> Self {
-        Self::Substituted(value.into())
+    /// The mark a covered span is written as in text, one per character: a
+    /// full block, `█`. A format that can't hold it draws its own.
+    pub const MARK: char = '\u{2588}';
+
+    /// A cover drawn in `color`.
+    pub const fn covered(color: Color) -> Self {
+        Self::Covered { color }
     }
 
-    /// Replacement value, or `None` for a removal.
-    pub fn value(&self) -> Option<&str> {
+    /// A replacement by `value`.
+    pub fn replaced(value: impl Into<String>) -> Self {
+        Self::Replaced(value.into())
+    }
+
+    /// The text written in place of `original`, the span it hides: nothing
+    /// for a removal, one `█` per character for a cover, the replacement
+    /// text for a replacement.
+    pub fn written(&self, original: &str) -> Cow<'_, str> {
         match self {
-            Self::Substituted(value) => Some(value),
-            Self::Removed => None,
+            Self::Removed => Cow::Borrowed(""),
+            Self::Covered { .. } => Cow::Owned(original.chars().map(|_| Self::MARK).collect()),
+            Self::Replaced(value) => Cow::Borrowed(value),
         }
     }
 }
 
-impl ModalityReplacement for TextReplacement {
-    fn removed() -> Self {
-        Self::Removed
+impl ModalityReplacement for TextReplacement {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_replacement_writes_its_text() {
+        assert_eq!(TextReplacement::Removed.written("Jane Roe"), "");
+        assert_eq!(
+            TextReplacement::covered(Color::BLACK).written("Jané Roe"),
+            "████████"
+        );
+        assert_eq!(
+            TextReplacement::replaced("[NAME]").written("Jane Roe"),
+            "[NAME]"
+        );
     }
 }

@@ -63,7 +63,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
             .expect("the pick is followed by a redaction");
         let picked = picked.operator.name.as_str();
         assert!(
-            picked == "replace" || picked == "erase" || picked == "mask",
+            picked == "replace" || picked == "remove" || picked == "mask",
             "each pick is one of the configured operators, got {picked}",
         );
         // The pick is recorded before it is applied, and the operator actually

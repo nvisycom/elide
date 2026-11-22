@@ -2,6 +2,7 @@
 //! which tags a redaction of each logical field must clear, which survive a
 //! metadata removal, and which are safe to transfer onto re-encoded pixels.
 
+use elide_core::modality::text::TextReplacement;
 use little_exif::exif_tag::ExifTag;
 use little_exif::ifd::ExifTagGroup;
 
@@ -180,11 +181,18 @@ fn own_tag(key: &str) -> Option<ExifTag> {
 /// the field cannot hold arbitrary text (a coordinate, a timestamp in its fixed
 /// format, a user comment with its character-code prefix) or `value` is blank,
 /// which is no field at all. Such a field is removed instead of overwritten.
+///
+/// The fields hold ASCII (EXIF 2.32, 4.6.2), so a covered value's marks are
+/// written as `X`, and a value that is still not ASCII, which the field
+/// can't hold as written, removes it too.
 pub(super) fn written_tag(key: &str, value: &str) -> Option<ExifTag> {
-    if value.trim().is_empty() {
+    let value: String = value
+        .chars()
+        .map(|c| if c == TextReplacement::MARK { 'X' } else { c })
+        .collect();
+    if value.trim().is_empty() || !value.is_ascii() {
         return None;
     }
-    let value = value.to_owned();
     Some(match key {
         "Make" => ExifTag::Make(value),
         "Model" => ExifTag::Model(value),
@@ -243,4 +251,26 @@ fn device_tags() -> Vec<ExifTag> {
         ExifTag::LensModel(String::new()),
         ExifTag::LensSerialNumber(String::new()),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn artist(value: &str) -> Option<String> {
+        match written_tag("Artist", value)? {
+            ExifTag::Artist(written) => Some(written),
+            other => panic!("not the artist: {other:?}"),
+        }
+    }
+
+    /// A field holds ASCII: a cover's marks are written as `X`, and a value
+    /// that is still not ASCII removes the field.
+    #[test]
+    fn a_field_is_written_in_ascii_or_removed() {
+        assert_eq!(artist("[NAME]").as_deref(), Some("[NAME]"));
+        assert_eq!(artist("████ ███").as_deref(), Some("XXXX XXX"));
+        assert_eq!(artist("Иван"), None);
+        assert_eq!(artist("  "), None);
+    }
 }

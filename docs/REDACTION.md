@@ -107,20 +107,24 @@ Section 5.
 ## 3. The Leak Profile
 
 Every operator must declare a leak profile, a three-way classification of how
-much of the original value or its shape survives the transformation. This is the
-property a privacy engineer most needs to reason about, so the toolkit makes it
-part of the operator contract rather than an emergent property of configuration.
-The three levels are concepts, not configuration knobs:
+much of the original value survives the transformation: its content, or its
+extent. Where the value sat (which sentence, cell, or second of audio) is not
+counted, since every treatment keeps its surroundings. This is the property a
+privacy engineer most needs to reason about, so the toolkit makes it part of the
+operator contract rather than an emergent property of configuration. The three
+levels are concepts, not configuration knobs:
 
-- **Irrecoverable.** No trace of the original value or its shape remains. The
-  removal operator is irrecoverable: the span is gone, and the surrounding bytes
-  carry no record of its former length or position once the document closes
-  around it. A hash approaches this for the value itself, though see below.
-- **Partial.** The original value is gone, but observable shape leaks: position,
-  length, a bounding box, cell coordinates, or a known silence on a timeline.
-  Masking and template substitution are partial. A masked value is unreadable
-  but its length and offset survive; a templated replacement reveals that _some_
-  entity of a given label was there.
+- **Irrecoverable.** Nothing of the value survives, neither its content nor its
+  extent. The removal operator is irrecoverable: the span is gone, and the
+  document closes around it, so nothing records its former length. A table
+  cell emptied of its value is irrecoverable too: the cell keeps its place, but
+  nothing of the value it held. A hash approaches this for the value itself,
+  though see below.
+- **Partial.** Part of the value survives by design: some of its content, or its
+  extent (a cover's length, a box's size, a known silence on a timeline).
+  Masking, covering and template substitution are partial. A masked value is
+  unreadable but its length survives; a templated replacement reveals that
+  _some_ entity of a given label was there.
 - **Recoverable.** The original is recoverable from the output given the right
   metadata: an encryption key, a token vault, a pseudonym map, or, in the case
   of an unsalted hash over a small plaintext space, a candidate list to brute
@@ -147,14 +151,15 @@ written back.
 ```
 Modality     Location           Replacement primitive
 --------     --------           ---------------------
-Text         byte range         substitute string, or remove
-Tabular      cell coordinate    substitute string, or remove
-Image        bounding box       blur | pixelate | block | remove
-Audio        time interval      silence | remove
+Text         byte range         replace | cover | remove
+Tabular      cell coordinate    replace | cover | remove, or drop row/column
+Image        bounding box       blur | pixelate | cover
+Audio        time interval      beep | silence | remove
 ```
 
-**Text.** A location is a half-open byte range. The replacement is either a
-substituted string or a removal. Substitution length may differ from the
+**Text.** A location is a half-open byte range. The replacement is a
+removal, a cover (one `█` per character), or a
+replacement string. A replacement's length may differ from the
 original, which is why text redaction batches require coordinate care (Section
 6).
 
@@ -168,22 +173,25 @@ described here.
 
 **Image.** A location is a bounding box. The replacement value is an image
 treatment, and its flavors are not interchangeable: a Gaussian blur preserves a
-rough silhouette, mosaic pixelation preserves coarse color statistics, a solid
-block preserves nothing, and removal excises the region. These treatments are
-produced and applied by the image codec handler, not by a text operator.
+rough silhouette, mosaic pixelation preserves coarse color statistics, and a
+cover, a solid box, preserves nothing but the region's extent. An image can't
+lose its pixels, so it has no removal: a region can only be covered in place.
+The image operators produce these treatments, and the image codec handler
+applies them.
 
 **Audio.** A location is a time interval. The replacement value silences the
-interval (its amplitude is zeroed) or removes it (the buffer shrinks and
-downstream timestamps shift). As with image, these are handled by the audio
-codec handler rather than a catalogue operator.
+interval (its amplitude is zeroed), beeps over it, or removes it (the buffer
+shrinks and downstream timestamps shift). As with image, the audio operators
+produce these treatments, and the audio codec handler applies them.
 
-The split is deliberate. The catalogue operators are text-modality operators,
-written once against a text-backed notion that both text and tabular satisfy, so
-a single masking implementation serves both. Image and audio replacements have
-no meaningful character-level definition, so they are expressed as replacement
-values the codec handler interprets, not as operators a caller binds to a label.
-This keeps the catalogue small: every catalogue operator has a meaningful
-definition in every modality it claims to serve.
+The split is deliberate. The text operators are written once against a
+text-backed notion that text, tabular and metadata satisfy, so a single masking
+implementation serves all three. Image and audio replacements have no
+meaningful character-level definition, so each has operators of its own.
+`Cover` and `Remove` are implemented per modality, for each that can give them:
+every modality can be covered, and every one but image can have a value
+removed. This keeps the catalogue honest: every operator has a meaningful
+definition in every modality it serves.
 
 ## 5. Reversibility as a Design Choice
 

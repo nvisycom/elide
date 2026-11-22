@@ -14,36 +14,21 @@ use crate::primitive::Color;
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ImageReplacement {
-    /// Gaussian blur over the region.
-    Blur {
+    /// The region is blurred with a Gaussian kernel.
+    Blurred {
         /// Standard deviation of the Gaussian kernel, in pixels.
         sigma: f32,
     },
-    /// Mosaic pixelation over the region.
-    Pixelate {
+    /// The region is pixelated into a mosaic.
+    Pixelated {
         /// Side length of each mosaic block, in pixels.
         block_size: u32,
     },
-    /// Solid-color block over the region.
-    Block {
-        /// Fill color the codec rasterizes over the region.
+    /// The region is covered by a solid colour.
+    Covered {
+        /// Fill colour the codec rasterizes over the region.
         color: Color,
     },
-    /// Remove the region entirely (cut or fully obscure).
-    Removed,
 }
 
-impl ImageReplacement {
-    /// Black block, the conservative default treatment.
-    pub const fn block() -> Self {
-        Self::Block {
-            color: Color::BLACK,
-        }
-    }
-}
-
-impl ModalityReplacement for ImageReplacement {
-    fn removed() -> Self {
-        Self::Removed
-    }
-}
+impl ModalityReplacement for ImageReplacement {}

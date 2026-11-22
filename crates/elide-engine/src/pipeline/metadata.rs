@@ -13,7 +13,7 @@
 
 use elide_core::modality::metadata::Metadata;
 use elide_detection::Analyzer;
-use elide_redaction::operators::Erase;
+use elide_redaction::operators::Remove;
 use elide_redaction::{Anonymizer, Rule};
 
 use super::ModalityPipeline;
@@ -23,6 +23,6 @@ use super::ModalityPipeline;
 pub(crate) fn pipeline() -> ModalityPipeline<Metadata> {
     ModalityPipeline::new(
         Analyzer::new(),
-        Anonymizer::new().with(Rule::fallback(Erase)),
+        Anonymizer::new().with(Rule::fallback(Remove)),
     )
 }

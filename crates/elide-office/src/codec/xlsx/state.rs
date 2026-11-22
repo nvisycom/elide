@@ -89,7 +89,7 @@ impl XlsxState {
                 .entry(index)
                 .or_insert_with(|| self.cells[index].text.clone());
             let span = location.span.clone().unwrap_or(0..text.len());
-            text.redact_range(replacement.value().unwrap_or_default(), span)?;
+            text.redact_with(replacement, span)?;
         }
 
         // Every splice succeeded: commit each cell's final text. Only a cell that

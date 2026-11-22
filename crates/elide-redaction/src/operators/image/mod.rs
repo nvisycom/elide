@@ -1,13 +1,13 @@
 //! Image-modality operators: region treatments.
 //!
-//! [`Blur`], [`Pixelate`], and [`Blackbox`] obscure the pixels of an
-//! entity's bounding box. Re-exported from [`operators`](super); this
-//! module is an internal grouping.
+//! [`Blur`] and [`Pixelate`] obscure the pixels of an entity's bounding box;
+//! [`Cover`] covers it in a color. Re-exported from
+//! [`operators`](super); this module is an internal grouping.
+//!
+//! [`Cover`]: crate::operators::Cover
 
-mod blackbox;
 mod blur;
 mod pixelate;
 
-pub use self::blackbox::Blackbox;
 pub use self::blur::Blur;
 pub use self::pixelate::Pixelate;

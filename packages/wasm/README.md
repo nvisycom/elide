@@ -34,7 +34,7 @@ const orchestrator = new Orchestrator().with(
   })),
   Anonymizer.text()
     .rule(Rule.label(Label.EmailAddress, Operator.replace("[EMAIL]")))
-    .rule(Rule.fallback(Operator.erase())),
+    .rule(Rule.fallback(Operator.remove())),
 );
 
 const bytes = new TextEncoder().encode("Email me at dana.reed@example.com.");
@@ -70,7 +70,7 @@ const analyzer = Analyzer.image()
 - **Bring your own models** — NER, OCR, and STT are async JavaScript callbacks;
   wire a remote endpoint, `transformers.js`, or a WebGPU model.
 - **Configurable pipelines** — reconcile/filter layers on the detect side,
-  label/fallback rules with `replace`/`mask`/`erase`/… operators on the redact
+  label/fallback rules with `replace`/`mask`/`remove`/`cover`/… operators on the redact
   side.
 - **Nothing leaves the page** — no network, no filesystem, no worker threads.
 

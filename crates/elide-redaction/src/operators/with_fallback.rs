@@ -78,9 +78,9 @@ pub trait TryOperator<M: Modality>: Operator<M> {
 /// for the leftover values:
 ///
 /// ```
-/// # use elide_redaction::operators::{Clamp, Erase, WithFallback};
+/// # use elide_redaction::operators::{Clamp, Remove, WithFallback};
 /// // Ages: cap at 90, and erase anything that isn't a number.
-/// let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "90 or older"), Erase);
+/// let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "90 or older"), Remove);
 /// # let _ = op;
 /// ```
 ///
@@ -102,7 +102,7 @@ impl<P, F> WithFallback<P, F> {
 impl<P: Component, F: Component> Component for WithFallback<P, F> {
     fn id(&self) -> ComponentId {
         // One composite identity naming both paths a value might take, e.g.
-        // `generalize_date@1.0.0-or-else-erase@1.0.0`. The audit records this
+        // `generalize_date@1.0.0-or-else-remove@1.0.0`. The audit records this
         // whichever branch fired, so it never falsely claims a value was
         // erased when it was reshaped, nor the reverse.
         composite_id(&self.primary.id(), &self.fallback.id())
@@ -138,7 +138,7 @@ where
 
 /// Build the composite operator id for a [`WithFallback`], naming both the
 /// primary and the fallback with their versions (e.g.
-/// `generalize_date@1.0.0-or-else-erase@1.0.0`). Folding in each operand's
+/// `generalize_date@1.0.0-or-else-remove@1.0.0`). Folding in each operand's
 /// version keeps the audit trail exact: it records which build of *both*
 /// paths a value could have taken, not just their names.
 fn composite_id(primary: &ComponentId, fallback: &ComponentId) -> ComponentId {
@@ -153,7 +153,7 @@ mod tests {
     use elide_core::primitive::Confidence;
 
     use super::*;
-    use crate::operators::{Clamp, Erase, Keep};
+    use crate::operators::{Clamp, Keep, Remove};
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::inline(0..3);
@@ -168,11 +168,11 @@ mod tests {
 
     #[tokio::test]
     async fn primary_result_is_used_when_it_applies() {
-        let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "90 or older"), Erase);
+        let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "90 or older"), Remove);
         let out = Operator::<Text>::anonymize(&op, &entity(), &TextData::new("94"))
             .await
             .unwrap();
-        assert_eq!(out, Some(TextReplacement::substituted("90 or older")));
+        assert_eq!(out, Some(TextReplacement::replaced("90 or older")));
     }
 
     #[tokio::test]
@@ -188,10 +188,10 @@ mod tests {
 
     #[tokio::test]
     async fn composite_id_names_both_paths_with_versions() {
-        let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "x"), Erase);
+        let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "x"), Remove);
         // Each operand contributes name@version, so the audit records which
         // build of both paths a value could have taken.
-        assert_eq!(op.id().name, "clamp@1.0.0-or-else-erase@1.0.0");
+        assert_eq!(op.id().name, "clamp@1.0.0-or-else-remove@1.0.0");
     }
 
     #[tokio::test]

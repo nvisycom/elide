@@ -33,7 +33,7 @@ const orchestrator = new Orchestrator().with(
   })),
   Anonymizer.text()
     .rule(Rule.label(Label.EmailAddress, Operator.replace("[EMAIL]")))
-    .rule(Rule.fallback(Operator.erase())),
+    .rule(Rule.fallback(Operator.remove())),
 );
 
 const bytes = new TextEncoder().encode("Email me at dana.reed@example.com.");

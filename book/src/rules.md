@@ -16,7 +16,7 @@ let anonymizer = Anonymizer::<Text>::new()
     ))
     .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
     .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars().with_keep_suffix(4)))
-    .with(Rule::fallback(Erase));
+    .with(Rule::fallback(Remove));
 ```
 
 | Rule | Matches |
@@ -50,7 +50,7 @@ use elide::entity::audit::Attribution;
 use elide::prelude::operators::*;
 use elide::prelude::*;
 
-let rule = Rule::<Text>::label(builtins::IBAN.to_ref(), Erase)
+let rule = Rule::<Text>::label(builtins::IBAN.to_ref(), Remove)
     .because(Attribution::freeform("gdpr-art-17"));
 ```
 

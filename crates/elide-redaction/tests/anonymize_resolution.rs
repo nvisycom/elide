@@ -10,7 +10,7 @@ use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::Scope;
-use elide_redaction::operators::{Erase, Keep, Mask, Replace};
+use elide_redaction::operators::{Keep, Mask, Remove, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::{TextDoc, anonymize_one};
 
@@ -21,7 +21,7 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
     let mut doc = TextDoc::new("call 555-867-5309 or a@b.com");
     let mut entities = vec![
         Entity::fixture("PHONE_NUMBER", (5, 17)), // "555-867-5309" -> Mask
-        Entity::fixture("EMAIL_ADDRESS", (21, 28)), // "a@b.com" -> fallback Erase
+        Entity::fixture("EMAIL_ADDRESS", (21, 28)), // "a@b.com" -> fallback Remove
     ];
 
     Anonymizer::<Text>::new()
@@ -29,12 +29,12 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
             LabelRef::new("PHONE_NUMBER"),
             Mask::stars().with_keep_suffix(4),
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
 
-    // PHONE_NUMBER masked (last 4 kept); EMAIL_ADDRESS fell back to Erase.
+    // PHONE_NUMBER masked (last 4 kept); EMAIL_ADDRESS fell back to Remove.
     assert_eq!(doc.text(), "call ********5309 or ");
 }
 
@@ -112,7 +112,7 @@ async fn anonymize_predicate_gates_on_confidence() {
     let mut doc = TextDoc::new("call 555-867-5309 or a@b.com");
     let mut entities = vec![
         Entity::fixture_conf("PHONE_NUMBER", (5, 17), Confidence::clamped(0.2)), // weak -> Keep
-        Entity::fixture_conf("EMAIL_ADDRESS", (21, 28), Confidence::MAX),        // strong -> Erase
+        Entity::fixture_conf("EMAIL_ADDRESS", (21, 28), Confidence::MAX),        // strong -> Remove
     ];
 
     // A weak detection is kept verbatim; everything else falls through to the
@@ -123,7 +123,7 @@ async fn anonymize_predicate_gates_on_confidence() {
             move |cx| !cutoff.passes(cx.entity.confidence),
             Keep,
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
@@ -137,7 +137,7 @@ async fn anonymize_selects_by_tag() {
     let mut doc = TextDoc::new("4111111111111111 and bob");
     let mut entities = vec![
         Entity::fixture("payment_card", (0, 16)), // tagged "financial" -> Mask
-        Entity::fixture("person_name", (21, 24)), // no financial tag -> fallback Erase
+        Entity::fixture("person_name", (21, 24)), // no financial tag -> fallback Remove
     ];
 
     // A catalog gives labels their tags; the tag rule then matches any entity
@@ -149,7 +149,7 @@ async fn anonymize_selects_by_tag() {
     Anonymizer::<Text>::new()
         .with_catalog(catalog)
         .with(Rule::tag("financial", Mask::stars()))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
@@ -163,7 +163,7 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
     let mut doc = TextDoc::new("4111111111111111 and bob");
     let mut entities = vec![
         Entity::fixture("payment_card", (0, 16)), // financial -> Mask
-        Entity::fixture("person_name", (21, 24)), // not financial -> fallback Erase
+        Entity::fixture("person_name", (21, 24)), // not financial -> fallback Remove
     ];
 
     let mut catalog = LabelCatalog::new();
@@ -182,7 +182,7 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
             },
             Mask::stars(),
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
@@ -252,7 +252,7 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
 
     // A bare operator via the fallback rule: matched_by is Fallback, no attribution.
     Anonymizer::<Text>::new()
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();

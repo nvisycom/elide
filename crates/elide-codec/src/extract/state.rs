@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use elide_core::modality::text::TextReplacement;
 use elide_core::{Error, Result};
 
 use super::{ExtractedItem, ItemEdit, Passage};
@@ -156,11 +157,12 @@ impl<A> SpliceState<A> {
         Ok(hull.start + span.start..hull.start + span.end)
     }
 
-    /// Splice `value` over `span`, a range of the concatenated stream.
+    /// Write `replacement` over `span`, a range of the concatenated stream.
     ///
-    /// The value takes the place of the covered text of the first item, and
-    /// the covered text of the rest is cut, so each item keeps its own markup.
-    /// Separators are never edited.
+    /// A cover marks each item's part of the span in place, so every item
+    /// keeps its extent. Any other replacement's text takes the place of the
+    /// first item's part, and the rest are cut. Either way each item keeps its
+    /// own markup, and separators are never edited.
     ///
     /// # Errors
     ///
@@ -168,7 +170,11 @@ impl<A> SpliceState<A> {
     /// character.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(super) fn redact(&mut self, span: Range<usize>, value: &str) -> Result<()> {
+    pub(super) fn redact(
+        &mut self,
+        span: Range<usize>,
+        replacement: &TextReplacement,
+    ) -> Result<()> {
         let edits: Vec<ItemEdit> = self
             .covering(span.clone())
             .ok_or_else(|| {
@@ -183,11 +189,26 @@ impl<A> SpliceState<A> {
         let Some(first) = edits.first().map(|edit| edit.item) else {
             return Ok(());
         };
+        let covered = matches!(replacement, TextReplacement::Covered { .. });
+        let written = if covered {
+            String::new()
+        } else {
+            let original = edits
+                .iter()
+                .filter_map(|edit| self.items[edit.item].value.get(edit.local.clone()))
+                .collect::<String>();
+            replacement.written(&original).into_owned()
+        };
         // Right to left, so an edit never shifts the ones still to come.
         for ItemEdit { item, local } in edits.into_iter().rev() {
-            let text = if item == first { value } else { "" };
             let before_len = self.items[item].value.len();
-            self.items[item].value.redact_range(text, local)?;
+            let value = &mut self.items[item].value;
+            if covered {
+                value.redact_with(replacement, local)?;
+            } else {
+                let text = if item == first { written.as_str() } else { "" };
+                value.redact_range(text, local)?;
+            }
             let delta = self.items[item].value.len() as isize - before_len as isize;
             self.shift_starts_after(item, delta);
         }

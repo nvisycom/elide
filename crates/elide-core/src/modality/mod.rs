@@ -176,18 +176,16 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// The instruction a codec applies to hide an entity in its modality.
 ///
 /// What an [`Operator`] produces for a modality. Hiding is
-/// modality-specific even though detection is not: text yields
-/// a substituted/removed string, an image a blur/block/pixelate region,
-/// audio a silenced/removed span. An operator computes one of these from
-/// the entity and its data; the codec writes it back into the document.
+/// modality-specific even though detection is not: text is removed, covered
+/// or replaced, an image region covered, blurred or pixelated, an audio span
+/// removed, silenced or beeped. An operator computes one of these
+/// from the entity and its data; the codec writes it back into the document.
+///
+/// A near-empty marker, like [`ModalityData`]: which replacement an entity
+/// gets is the operator's decision, never the replacement type's.
 ///
 /// [`Operator`]: crate::redaction::Operator
-pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {
-    /// The replacement that removes the entity entirely: text drops its
-    /// characters, a table cell its text, a metadata field its value, audio
-    /// its interval, an image its region.
-    fn removed() -> Self;
-}
+pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 
 /// Enrichment an [`Enricher`] derives from a payload for recognizers to read.
 ///

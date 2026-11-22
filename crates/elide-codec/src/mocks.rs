@@ -139,10 +139,10 @@ impl DataWriter<Text> for MockStream {
             let Some(range) = location.range() else {
                 continue;
             };
-            let value = replacement.value().unwrap_or_default();
-            // `redact_range` clamps the endpoints and errors on a mid-character
+            // `redact_with` errors on a range past the end or a mid-character
             // boundary rather than panicking like `String::replace_range`.
-            self.body.redact_range(value, range.start..range.end)?;
+            self.body
+                .redact_with(&replacement, range.start..range.end)?;
         }
         Ok(())
     }

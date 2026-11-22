@@ -95,7 +95,7 @@ pub(crate) fn apply<S: Default + Clone + ToneSample>(
                 *s = S::default();
             }
         }
-        AudioReplacement::Tone {
+        AudioReplacement::Beeped {
             hz,
             amplitude,
             waveform,
@@ -234,7 +234,7 @@ mod tests {
         // leaves everything outside untouched.
         let mut samples = vec![100i16; 8_000];
         let span = TimeSpan::from_millis(2, 5);
-        let tone = AudioReplacement::Tone {
+        let tone = AudioReplacement::Beeped {
             hz: 1_000.0,
             amplitude: 0.5,
             waveform: Waveform::Sine,
@@ -258,7 +258,7 @@ mod tests {
     fn square_tone_is_two_valued() {
         let mut samples = vec![0i16; 800];
         let span = TimeSpan::from_millis(0, 100);
-        let tone = AudioReplacement::Tone {
+        let tone = AudioReplacement::Beeped {
             hz: 1_000.0,
             amplitude: 0.5,
             waveform: Waveform::Square,

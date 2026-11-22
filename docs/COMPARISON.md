@@ -59,9 +59,9 @@ Elide treats five modalities as first-class, each with its own coordinate system
 
 | Modality | Location model | Detection | Redaction operators |
 | --- | --- | --- | --- |
-| Text | half-open byte range | pattern (built in), LLM (built in), NER (contract, backend supplied downstream) | mask, replace, truncate, clamp, generalize-date, hash (SHA-2/HMAC), encrypt (AES-256-GCM), pseudonymize, fake, keep, erase |
+| Text | half-open byte range | pattern (built in), LLM (built in), NER (contract, backend supplied downstream) | mask, replace, truncate, clamp, generalize-date, hash (SHA-2/HMAC), encrypt (AES-256-GCM), pseudonymize, fake, keep, remove, cover |
 | Tabular | cell coordinate (row/col, span) | reuses the text recognizers per cell | the text operators per cell, plus drop-column and drop-row |
-| Image | pixel bounding box | LLM/VLM (built in), or OCR to text (contract, backend supplied downstream) | blur, pixelate, block, remove |
+| Image | pixel bounding box | LLM/VLM (built in), or OCR to text (contract, backend supplied downstream) | blur, pixelate, fill, cover, remove |
 | Audio | half-open time span (ms) | STT to text (contract, backend supplied downstream) | silence, beep |
 | Metadata | out-of-band field | EXIF / OOXML docProps surfaced as redactable sub-parts | strip |
 
@@ -130,9 +130,9 @@ wrapping Faker).
 
 Elide ships a wider operator catalogue as first-class typed operators: `Mask`,
 `Replace`, `Truncate`, `Clamp`, `GeneralizeDate`, `Sha2Hash`, `HmacHash`,
-`AesEncrypt`, `Pseudonymize`, `Keep`, `Erase`, and a locale-aware `Fake`
+`AesEncrypt`, `Pseudonymize`, `Keep`, `Remove`, `Cover`, and a locale-aware `Fake`
 generator (synthetic replacement is built-in, not a custom hook), plus
-per-modality operators: `Blur`/`Pixelate`/`Blackbox` for images, `Beep`/`Silence`
+per-modality operators: `Blur`/`Pixelate` for images, `Beep`
 for audio, and `DropColumn`/`DropRow` for tabular data. Each operator declares a
 **leak profile** (irrecoverable / partial / recoverable), and reversibility is a
 trait boundary: `AesEncrypt` implements the reversible contract (AES-256-GCM with

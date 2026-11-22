@@ -98,7 +98,7 @@ impl<M: TextRedactable> Operator<M> for Mask {
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         let masked = self.render(data.as_ref());
-        Ok(Some(M::Replacement::from(TextReplacement::substituted(
+        Ok(Some(M::Replacement::from(TextReplacement::replaced(
             masked,
         ))))
     }

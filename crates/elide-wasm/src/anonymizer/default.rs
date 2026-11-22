@@ -15,14 +15,14 @@ pub(crate) fn tabular() -> Anonymizer<Tabular> {
     common_text(Anonymizer::new())
 }
 
-/// A pixel policy that blacks out every detected region.
+/// A pixel policy that covers every detected region in black.
 pub(crate) fn image_pixels() -> Anonymizer<Image> {
-    Anonymizer::new().with(Rule::fallback(Blackbox::default()))
+    Anonymizer::new().with(Rule::fallback(Cover::default()))
 }
 
 /// A policy that silences every detected span.
 pub(crate) fn audio() -> Anonymizer<Audio> {
-    Anonymizer::new().with(Rule::fallback(Silence))
+    Anonymizer::new().with(Rule::fallback(Cover::default()))
 }
 
 /// The shared text-shaped policy, over any modality the operators support.
@@ -31,6 +31,7 @@ where
     M: Modality,
     Replace: Operator<M>,
     Mask: Operator<M>,
+    Remove: Operator<M>,
 {
     anonymizer
         .with(Rule::predicate(
@@ -50,5 +51,5 @@ where
             builtins::PAYMENT_CARD.to_ref(),
             Mask::stars().with_keep_suffix(4),
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
 }

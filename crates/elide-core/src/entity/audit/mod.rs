@@ -518,7 +518,7 @@ mod tests {
         let applied = log.applied_selection().cloned().unwrap();
         let conf = Confidence::new(0.5).unwrap();
         let replan = Selection::new(
-            ComponentId::new("erase", "1"),
+            ComponentId::new("remove", "1"),
             LeakProfile::Irrecoverable,
             RuleMatch::Fallback,
         );

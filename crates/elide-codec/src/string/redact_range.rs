@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+use elide_core::modality::text::TextReplacement;
 use elide_core::{Error, Result};
 
 /// Splice a redaction into a string: replace a byte range with a value.
@@ -18,6 +19,15 @@ pub trait RedactRange {
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     fn redact_range(&mut self, value: &str, range: Range<usize>) -> Result<()>;
+
+    /// Replace `self[range]` with what `replacement` writes in its place:
+    /// nothing for a removal, one `█` per character for a cover, its text
+    /// for a replacement.
+    ///
+    /// # Errors
+    ///
+    /// As [`redact_range`](Self::redact_range).
+    fn redact_with(&mut self, replacement: &TextReplacement, range: Range<usize>) -> Result<()>;
 }
 
 impl RedactRange for String {
@@ -41,6 +51,13 @@ impl RedactRange for String {
         }
         self.replace_range(range, value);
         Ok(())
+    }
+
+    fn redact_with(&mut self, replacement: &TextReplacement, range: Range<usize>) -> Result<()> {
+        // A range `redact_range` refuses reads as nothing here.
+        let written = replacement.written(self.get(range.clone()).unwrap_or_default());
+        let written = written.into_owned();
+        self.redact_range(&written, range)
     }
 }
 

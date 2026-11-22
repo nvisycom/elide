@@ -41,7 +41,7 @@ let anonymizer = Anonymizer::<Text>::new()
     // Keep the last four digits of a card visible.
     .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars().with_keep_suffix(4)))
     // Anything else found is removed.
-    .with(Rule::fallback(Erase));
+    .with(Rule::fallback(Remove));
 ```
 
 ## The redaction
@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
         .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
         .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]")))
         .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars().with_keep_suffix(4)))
-        .with(Rule::fallback(Erase));
+        .with(Rule::fallback(Remove));
 
     let scope = Scope::new()
         .with_language(LanguageTag::parse("en")?)

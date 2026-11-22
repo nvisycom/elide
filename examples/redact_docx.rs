@@ -167,7 +167,7 @@ fn build_text_anonymizer() -> Anonymizer<Text> {
             builtins::PAYMENT_CARD.to_ref(),
             Mask::stars().with_keep_suffix(4),
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
 }
 
 /// Build the image analyzer backed by the mock LLM. It detects nothing
@@ -178,16 +178,12 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
     Ok(Analyzer::new().with_recognizer(recognizer))
 }
 
-/// Build the image anonymizer: blur a detected face, black out a signature,
-/// and clear anything else visual. Inert offline (the mock backend detects
-/// nothing), but it wires the image redaction operators the real backend
-/// would drive.
+/// Build the image anonymizer: blur a detected face, and black out a
+/// signature and anything else visual. Inert offline (the mock backend
+/// detects nothing), but it wires the image redaction operators the real
+/// backend would drive.
 fn build_image_anonymizer() -> Result<Anonymizer<Image>> {
     Ok(Anonymizer::new()
         .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
-        .with(Rule::label(
-            builtins::SIGNATURE.to_ref(),
-            Blackbox::default(),
-        ))
-        .with(Rule::fallback(Erase)))
+        .with(Rule::fallback(Cover::default())))
 }

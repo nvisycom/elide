@@ -103,12 +103,12 @@ impl<M: Modality> Matcher<M> {
 /// # use elide_core::entity::audit::Attribution;
 /// # use elide_core::modality::text::Text;
 /// # use elide_redaction::Rule;
-/// # use elide_redaction::operators::{Erase, Mask, Replace};
+/// # use elide_redaction::operators::{Mask, Remove, Replace};
 /// let rules: [Rule<Text>; 3] = [
 ///     Rule::label(LabelRef::new("email_address"), Replace::default())
 ///         .because(Attribution::freeform("gdpr-art-17")),
 ///     Rule::tag("financial", Mask::stars()),
-///     Rule::fallback(Erase),
+///     Rule::fallback(Remove),
 /// ];
 /// ```
 ///

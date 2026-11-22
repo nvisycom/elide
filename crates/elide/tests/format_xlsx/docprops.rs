@@ -13,7 +13,7 @@ use elide::detection::Analyzer;
 use elide::entity::LabelCatalog;
 use elide::modality::tabular::Tabular;
 use elide::recognition::Scope;
-use elide::redaction::operators::Erase;
+use elide::redaction::operators::Remove;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Document, Orchestrator};
 use elide_office::fixtures::read_part;
@@ -44,7 +44,7 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
         // Cells: an erase pipeline (not the focus, but a registered body).
         .with_modality::<Tabular>(
             Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Erase)),
+            Anonymizer::new().with(Rule::fallback(Remove)),
         );
 
     let handle = registry

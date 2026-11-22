@@ -167,7 +167,7 @@ mod tests {
 
     /// Write `replacement` over `location`.
     async fn write(doc: &mut Doc, location: TextLocation, replacement: &str) -> Result<()> {
-        let redactions = Redactions::from([(location, TextReplacement::substituted(replacement))]);
+        let redactions = Redactions::from([(location, TextReplacement::replaced(replacement))]);
         doc.stream.write_at(redactions).await
     }
 
@@ -182,7 +182,7 @@ mod tests {
                 .stream
                 .lift(&chunk, TextLocation::inline(at..at + needle.len()))
                 .expect("lifts");
-            redactions.push(location, TextReplacement::substituted(*replacement));
+            redactions.push(location, TextReplacement::replaced(*replacement));
         }
         doc.stream.write_at(redactions).await.unwrap();
     }

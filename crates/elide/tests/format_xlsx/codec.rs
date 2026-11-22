@@ -127,7 +127,7 @@ async fn redact_and_encode_removes_pii_and_de_shares() {
     // Redact only Customers!A2 (alice). Notes!A1 shares the pool entry.
     let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(1, 0).with_sheet_name("Customers"),
-        TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        TabularReplacement::CellRedacted(TextReplacement::replaced("[EMAIL]")),
     )]);
     body(&mut doc).write_at(batch).await.unwrap();
     let out = doc.encode().unwrap();
@@ -156,7 +156,7 @@ async fn structural_drops_are_refused() {
     let mut doc = decode(SAMPLE).await;
     let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(1, 0).with_sheet_name("Customers"),
-        TabularReplacement::DropRow,
+        TabularReplacement::RowDropped,
     )]);
     assert!(body(&mut doc).write_at(batch).await.is_err());
 }
@@ -170,11 +170,11 @@ async fn a_batch_with_an_unsupported_edit_leaves_the_workbook_unchanged() {
     let batch: Redactions<Tabular> = Redactions::from([
         (
             TabularLocation::new(1, 0).with_sheet_name("Customers"),
-            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+            TabularReplacement::CellRedacted(TextReplacement::replaced("[EMAIL]")),
         ),
         (
             TabularLocation::new(1, 1).with_sheet_name("Customers"),
-            TabularReplacement::DropRow,
+            TabularReplacement::RowDropped,
         ),
     ]);
     assert!(body(&mut doc).write_at(batch).await.is_err());
@@ -204,7 +204,7 @@ async fn encode_only_de_shares_redacted_cells() {
     // different, unredacted shared string.
     let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(1, 0).with_sheet_name("Customers"),
-        TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        TabularReplacement::CellRedacted(TextReplacement::replaced("[EMAIL]")),
     )]);
     body(&mut doc).write_at(batch).await.unwrap();
     let out = doc.encode().unwrap();
@@ -233,7 +233,7 @@ async fn a_sheetless_ambiguous_redaction_fails_closed() {
     let mut doc = decode(SAMPLE).await;
     let batch: Redactions<Tabular> = Redactions::from([(
         TabularLocation::new(0, 0), // no sheet name
-        TabularReplacement::Cell(TextReplacement::substituted("[X]")),
+        TabularReplacement::CellRedacted(TextReplacement::replaced("[X]")),
     )]);
     assert!(body(&mut doc).write_at(batch).await.is_err());
 }
@@ -287,7 +287,7 @@ async fn a_text_redaction_splices_into_its_comment() {
     text(&mut doc)
         .write_at(Redactions::from([(
             chunk.location,
-            TextReplacement::substituted("[EMAIL]"),
+            TextReplacement::replaced("[EMAIL]"),
         )]))
         .await
         .unwrap();

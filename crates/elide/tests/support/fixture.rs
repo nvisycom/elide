@@ -22,7 +22,7 @@ use elide::modality::text::Text;
 use elide::modality::{ChunkReader, DataReader, DataWriter, Modality, TextRecognizable};
 use elide::primitive::LanguageTag;
 use elide::recognition::Scope;
-use elide::redaction::operators::{Erase, Mask, Replace};
+use elide::redaction::operators::{Mask, Remove, Replace};
 use elide::redaction::{Anonymizer, HiddenContentPolicy, Operator, Rule};
 use elide::{Document, Error, ErrorKind, Orchestrator, RegistryDocumentExt, Report, Result};
 
@@ -219,7 +219,7 @@ impl Fixture {
     #[cfg(feature = "stt")]
     pub async fn run_audio(&self) -> Result<PipelineOutcome<Audio>> {
         use elide::enrichment::stt::{MockBackend, SttEnricher};
-        use elide::redaction::operators::{Erase, Silence};
+        use elide::redaction::operators::{Cover, Remove};
 
         let registry = FormatRegistry::with_builtin();
         let mut document = self
@@ -231,8 +231,11 @@ impl Fixture {
         let analyzer = Analyzer::new()
             .with_enricher(SttEnricher::new(MockBackend::new()).with_name("mock-stt"));
         let anonymizer = Anonymizer::new()
-            .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Silence))
-            .with(Rule::fallback(Erase));
+            .with(Rule::label(
+                builtins::PHONE_NUMBER.to_ref(),
+                Cover::default(),
+            ))
+            .with(Rule::fallback(Remove));
 
         // A built-in catalog so the analyzer runs the enricher (the mock STT
         // still transcribes nothing), the point is to drive the whole codec +
@@ -277,7 +280,7 @@ impl Fixture {
     #[cfg(feature = "ocr")]
     pub async fn run_image(&self) -> Result<PipelineOutcome<Image>> {
         use elide::enrichment::ocr::{MockBackend, OcrEnricher};
-        use elide::redaction::operators::Erase;
+        use elide::redaction::operators::Cover;
 
         let registry = FormatRegistry::with_builtin();
         let mut document = self
@@ -285,10 +288,10 @@ impl Fixture {
             .await?;
 
         // The mock OCR backend recognizes nothing, so recognition finds
-        // nothing; the anonymizer would clear any regions it did.
+        // nothing; the anonymizer would cover any regions it did.
         let analyzer = Analyzer::new()
             .with_enricher(OcrEnricher::new(MockBackend::new()).with_name("mock-ocr"));
-        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Cover::default()));
 
         // A built-in catalog so the analyzer runs the enricher (the mock OCR
         // still recognizes nothing), the point is to drive the whole codec +

@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 
 /// Drops the entire row an entity sits in, rather than editing one cell.
 ///
-/// A structural treatment, not a cell edit: where [`Erase`] blanks one
+/// A structural treatment, not a cell edit: where [`Remove`] blanks one
 /// cell's text, [`DropRow`] removes the whole record. Useful for "this row
 /// names a sanctioned individual, drop it entirely". Any match in a row
 /// drops that row, so the table shrinks by one record per matched row; a
 /// match in the header row drops the header.
 ///
-/// [`Erase`]: crate::operators::Erase
+/// [`Remove`]: crate::operators::Remove
 #[derive(Debug, Clone, Copy, Default, Component)]
 #[component(name = "drop_row", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -35,7 +35,7 @@ impl Operator<Tabular> for DropRow {
         _entity: &Entity<Tabular>,
         _data: &TextData,
     ) -> Result<Option<TabularReplacement>> {
-        Ok(Some(TabularReplacement::DropRow))
+        Ok(Some(TabularReplacement::RowDropped))
     }
 }
 
@@ -65,11 +65,11 @@ mod tests {
         let data = TextData::new("Bob");
         assert_eq!(
             DropRow.anonymize(&entity(), &data).await.unwrap(),
-            Some(TabularReplacement::DropRow)
+            Some(TabularReplacement::RowDropped)
         );
         assert_eq!(
             DropColumn.anonymize(&entity(), &data).await.unwrap(),
-            Some(TabularReplacement::DropColumn)
+            Some(TabularReplacement::ColumnDropped)
         );
     }
 }

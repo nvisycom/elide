@@ -41,14 +41,14 @@ schema = [
     "elide-audio?/schema",
 ]
 
-## The `audio` modality operators (`Silence`, `Beep`).
+## The `audio` modality operators (`Beep`).
 audio = ["dep:elide-audio"]
-## The `image` modality operators (`Blur`, `Pixelate`, `Blackbox`).
+## The `image` modality operators (`Blur`, `Pixelate`).
 image = ["dep:elide-image"]
 ## The `tabular` modality operators (`DropRow`, `DropColumn`).
 tabular = ["elide-core/tabular"]
 ## The `metadata` modality: the text operators treat a field's value, or the
-## part of it a finding covers, and `Erase` removes it.
+## part of it a finding covers, and `Remove` removes it.
 metadata = ["elide-core/metadata"]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).

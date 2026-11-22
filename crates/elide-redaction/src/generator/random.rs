@@ -19,7 +19,7 @@ pub struct RandomToken;
 
 impl<M: TextRedactable> Generator<M> for RandomToken {
     fn generate(&self, _entity: &Entity<M>, _data: &M::Data) -> M::Replacement {
-        M::Replacement::from(TextReplacement::substituted(Uuid::new_v4().to_string()))
+        M::Replacement::from(TextReplacement::replaced(Uuid::new_v4().to_string()))
     }
 }
 
@@ -47,9 +47,9 @@ mod tests {
     }
 
     #[test]
-    fn token_is_a_substituted_value() {
-        let TextReplacement::Substituted(token) = surrogate("PERSON") else {
-            panic!("expected a substituted token");
+    fn token_is_a_replaced_value() {
+        let TextReplacement::Replaced(token) = surrogate("PERSON") else {
+            panic!("expected a replaced token");
         };
         assert!(!token.is_empty());
     }
