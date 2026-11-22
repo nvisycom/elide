@@ -69,8 +69,9 @@ impl ContentType {
 pub(crate) struct ContentTypes {
     /// Lowercased extension → content type.
     defaults: HashMap<String, ContentType>,
-    /// Lowercased part path (no leading `/`) → content type.
-    overrides: HashMap<String, ContentType>,
+    /// Part path (no leading `/`) → content type; a [`PartPath`] compares
+    /// ASCII case-insensitively.
+    overrides: HashMap<PartPath, ContentType>,
 }
 
 impl ContentTypes {
@@ -111,7 +112,7 @@ impl ContentTypes {
                 }
                 "Override" => {
                     if let Some(part) = part_name {
-                        let path = part.trim_start_matches('/').to_ascii_lowercase();
+                        let path = PartPath::from(part.trim_start_matches('/'));
                         types.overrides.insert(path, content_type);
                     }
                 }
@@ -124,12 +125,10 @@ impl ContentTypes {
     /// The content type of `part`: its override, else its extension's default,
     /// else `None`.
     pub(crate) fn of(&self, part: &PartPath) -> Option<&ContentType> {
-        self.overrides
-            .get(&part.as_str().to_ascii_lowercase())
-            .or_else(|| {
-                part.extension()
-                    .and_then(|ext| self.defaults.get(&ext.to_ascii_lowercase()))
-            })
+        self.overrides.get(part).or_else(|| {
+            part.extension()
+                .and_then(|ext| self.defaults.get(&ext.to_ascii_lowercase()))
+        })
     }
 }
 
@@ -140,12 +139,8 @@ impl ContentTypes {
 ///
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the manifest is not well-formed.
 pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<String> {
-    let removed: HashSet<String> = removed
-        .iter()
-        .map(|part| part.as_str().to_ascii_lowercase())
-        .collect();
     without_entries(xml, &CONTENT_TYPES, "PartName", |name| {
-        removed.contains(name.to_ascii_lowercase().trim_start_matches('/'))
+        removed.contains(&PartPath::from(name.trim_start_matches('/')))
     })
 }
 

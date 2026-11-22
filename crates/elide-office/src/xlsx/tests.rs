@@ -1,7 +1,7 @@
 use elide_core::redaction::HiddenContentPolicy;
 
 use super::*;
-use crate::fixtures::{pack_parts, pack_typed, read_text_part};
+use crate::fixtures::{edit_part, pack_parts, pack_typed, read_text_part};
 use crate::opc::xml::ns::X;
 
 /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
@@ -425,29 +425,12 @@ fn a_sheet_relationship_of_another_kind_than_its_part_is_refused() {
 #[test]
 fn cells_in_a_chart_sheet_fail_the_check() {
     let source = workbook_with_sheet_kinds();
-    let smuggled = crate::fixtures::part_names(&source)
-        .into_iter()
-        .map(|name| {
-            let bytes = crate::fixtures::read_part(&source, &name).unwrap();
-            let bytes = if name == "xl/chartsheets/sheet1.xml" {
-                String::from_utf8(bytes)
-                    .unwrap()
-                    .replace(
-                        "<sheetViews>",
-                        r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Jane Roe</t></is></c></row></sheetData><sheetViews>"#,
-                    )
-                    .into_bytes()
-            } else {
-                bytes
-            };
-            (name, bytes)
-        })
-        .collect::<Vec<_>>();
-    let parts: Vec<(&str, &[u8])> = smuggled
-        .iter()
-        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
-        .collect();
-    let package = crate::fixtures::pack_parts(&parts);
+    let package = edit_part(&source, "xl/chartsheets/sheet1.xml", |sheet| {
+        sheet.replace(
+            "<sheetViews>",
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Jane Roe</t></is></c></row></sheetData><sheetViews>"#,
+        )
+    });
     let xlsx = Xlsx::open(&package).unwrap();
     assert!(xlsx.cells().unwrap().iter().all(|c| c.sheet == "Data"));
     let out = xlsx.rewrite(&[], &[], &[]).unwrap();
@@ -459,26 +442,10 @@ fn cells_in_a_chart_sheet_fail_the_check() {
 #[test]
 fn a_chart_sheet_target_matches_its_part_whatever_its_case() {
     let source = workbook_with_sheet_kinds();
-    let parts: Vec<(String, Vec<u8>)> = crate::fixtures::part_names(&source)
-        .into_iter()
-        .map(|name| {
-            let bytes = crate::fixtures::read_part(&source, &name).unwrap();
-            let bytes = if name == "xl/_rels/workbook.xml.rels" {
-                String::from_utf8(bytes)
-                    .unwrap()
-                    .replace("chartsheets/sheet1.xml", "ChartSheets/Sheet1.XML")
-                    .into_bytes()
-            } else {
-                bytes
-            };
-            (name, bytes)
-        })
-        .collect();
-    let parts: Vec<(&str, &[u8])> = parts
-        .iter()
-        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
-        .collect();
-    let xlsx = Xlsx::open(&crate::fixtures::pack_parts(&parts)).unwrap();
+    let package = edit_part(&source, "xl/_rels/workbook.xml.rels", |rels| {
+        rels.replace("chartsheets/sheet1.xml", "ChartSheets/Sheet1.XML")
+    });
+    let xlsx = Xlsx::open(&package).unwrap();
     assert_eq!(xlsx.sheets.len(), 1);
 }
 
