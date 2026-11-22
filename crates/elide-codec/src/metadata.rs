@@ -113,7 +113,7 @@ impl MetadataFields {
                 .ok_or_else(|| unknown_field(&location.key))?;
             let mut value = field.as_str().to_owned();
             let span = location.span.unwrap_or(0..value.len());
-            value.redact_range(replacement.value().unwrap_or_default(), span)?;
+            value.redact_with(&replacement, span)?;
             field.value = value.into();
             if !edited
                 .iter()
@@ -192,7 +192,7 @@ mod tests {
         let mut fields = fields();
         let edits = fields
             .redact(Redactions::from([
-                (part(9, 17), TextReplacement::substituted("[NAME]")),
+                (part(9, 17), TextReplacement::replaced("[NAME]")),
                 (part(21, 25), TextReplacement::Removed),
             ]))
             .unwrap();
@@ -227,7 +227,7 @@ mod tests {
     fn overlapping_redactions_of_a_field_are_an_error() {
         let mut fields = fields();
         let redactions = Redactions::from([
-            (part(9, 17), TextReplacement::substituted("[NAME]")),
+            (part(9, 17), TextReplacement::replaced("[NAME]")),
             (
                 MetadataLocation::new("description"),
                 TextReplacement::Removed,
@@ -249,7 +249,7 @@ mod tests {
     fn an_unknown_field_is_an_error_and_changes_nothing() {
         let mut fields = fields();
         let redactions = Redactions::from([
-            (part(9, 17), TextReplacement::substituted("[NAME]")),
+            (part(9, 17), TextReplacement::replaced("[NAME]")),
             (MetadataLocation::new("keywords"), TextReplacement::Removed),
             (MetadataLocation::new("title"), TextReplacement::Removed),
         ]);

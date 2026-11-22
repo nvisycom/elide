@@ -15,11 +15,11 @@ const DEFAULT_AMPLITUDE: f32 = 0.5;
 
 /// Replace the matched audio range with a tone (the broadcast "bleep").
 ///
-/// More obvious to a listener than [`Silence`] that something was removed,
+/// More obvious to a listener than [`Cover`]'s silence that something was removed,
 /// the timeline does not shift, but the redacted span is audibly marked.
 /// Defaults to a 1 kHz sine at half amplitude, the broadcast convention.
 ///
-/// [`Silence`]: crate::operators::Silence
+/// [`Cover`]: crate::operators::Cover
 #[derive(Debug, Clone, Copy, Component)]
 #[component(name = "beep", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -125,7 +125,7 @@ impl Operator<Audio> for Beep {
         _entity: &Entity<Audio>,
         _data: &AudioData,
     ) -> Result<Option<AudioReplacement>> {
-        Ok(Some(AudioReplacement::Tone {
+        Ok(Some(AudioReplacement::Beeped {
             hz: self.hz,
             amplitude: self.amplitude,
             waveform: self.waveform,
@@ -162,7 +162,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            Some(AudioReplacement::Tone {
+            Some(AudioReplacement::Beeped {
                 hz: 1000.0,
                 amplitude: 0.5,
                 waveform: Waveform::Sine,
@@ -181,7 +181,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             out,
-            Some(AudioReplacement::Tone {
+            Some(AudioReplacement::Beeped {
                 hz: 440.0,
                 amplitude: 0.25,
                 waveform: Waveform::Square,

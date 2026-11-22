@@ -23,7 +23,7 @@ use elide_format::FormatRegistry;
 use elide_image::fixtures::{has_gps, is_valid_image, jpeg_with_tags, pixel, text_tag};
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
-use elide_redaction::operators::{Erase, Keep, Replace};
+use elide_redaction::operators::{Keep, Remove, Replace};
 use elide_redaction::{Anonymizer, Rule};
 
 /// A small JPEG carrying a GPS latitude and an artist.
@@ -170,7 +170,7 @@ async fn a_kept_field_goes_with_its_group() {
                     |cx| cx.entity.location.key.as_str() != "Make",
                     Keep,
                 ))
-                .with(Rule::fallback(Erase)),
+                .with(Rule::fallback(Remove)),
         )
         .with_registry(registry.clone());
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
@@ -221,7 +221,7 @@ async fn a_flagged_field_no_rule_covers_is_erased() {
 async fn registering_a_metadata_analyzer_keeps_the_flagged_fields() {
     let orchestrator = orchestrator().with_modality::<Metadata>(
         Analyzer::new(),
-        Anonymizer::new().with(Rule::fallback(Erase)),
+        Anonymizer::new().with(Rule::fallback(Remove)),
     );
     let out = redact(&orchestrator, jpeg_with_exif()).await;
     assert!(!has_gps(&out), "GPS survived");
@@ -267,7 +267,7 @@ async fn pixel_redaction_and_gps_erasure_compose_end_to_end() {
 
     let orchestrator = orchestrator().with_modality::<Image>(
         Analyzer::new().with_recognizer(WholeFrame),
-        Anonymizer::new().with(Rule::fallback(Erase)),
+        Anonymizer::new().with(Rule::fallback(Remove)),
     );
     let out = redact(&orchestrator, original).await;
 

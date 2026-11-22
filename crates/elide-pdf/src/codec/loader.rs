@@ -216,7 +216,7 @@ mod tests {
     use elide_codec::{Blob, Document, DocumentLoader, LocalId};
     use elide_core::ErrorKind;
     use elide_core::modality::text::Text;
-    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
+    use elide_core::modality::{ChunkReader, DataReader, DataWriter, ModalityReplacement};
     use elide_core::redaction::{HiddenContentPolicy, Redactions};
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
@@ -498,7 +498,7 @@ mod tests {
         redact_page(
             &mut doc,
             region(0.0, 0.0, 300.0, 300.0),
-            ImageReplacement::block(),
+            ImageReplacement::covered(),
         )
         .await
         .unwrap();
@@ -531,7 +531,7 @@ mod tests {
         redact_page(
             &mut doc,
             region(0.0, 0.0, 30.0, 30.0),
-            ImageReplacement::block(),
+            ImageReplacement::covered(),
         )
         .await
         .unwrap();
@@ -556,7 +556,7 @@ mod tests {
         let err = redact_page(
             &mut doc,
             region(40.0, 40.0, 5.0, 5.0),
-            ImageReplacement::block(),
+            ImageReplacement::covered(),
         )
         .await
         .unwrap_err();
@@ -572,7 +572,7 @@ mod tests {
         let mut doc = scanned_document(&scanned_doc(), &png(30, 30, [200, 200, 200]), vec![]);
         let mut elsewhere = region(0.0, 0.0, 30.0, 30.0);
         elsewhere.page = Some(2);
-        let err = redact_page(&mut doc, elsewhere, ImageReplacement::block())
+        let err = redact_page(&mut doc, elsewhere, ImageReplacement::covered())
             .await
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);

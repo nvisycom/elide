@@ -131,7 +131,7 @@ mod tests {
         pixels(doc)
             .write_at(Redactions::from([(
                 bbox(0.0, 0.0, 2.0, 2.0),
-                ImageReplacement::Block {
+                ImageReplacement::Covered {
                     color: Color::BLACK,
                 },
             )]))

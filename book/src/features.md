@@ -48,7 +48,7 @@ own:
 
 ## Operators
 
-The operators without dependencies of their own (`Keep`, `Erase`, `Replace`,
+The operators without dependencies of their own (`Keep`, `Remove`, `Cover`, `Replace`,
 `Mask`, `Truncate`, `Clamp`, `Pseudonymize`, and those of each enabled
 modality) are always available. The rest are opt-in:
 

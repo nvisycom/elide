@@ -128,9 +128,9 @@ impl RasterImage {
             return false;
         };
         match replacement {
-            ImageReplacement::Blur { sigma } => self.blur(region, *sigma),
-            ImageReplacement::Pixelate { block_size } => self.pixelate(region, *block_size),
-            ImageReplacement::Block { color } => self.block(region, *color),
+            ImageReplacement::Blurred { sigma } => self.blur(region, *sigma),
+            ImageReplacement::Pixelated { block_size } => self.pixelate(region, *block_size),
+            ImageReplacement::Covered { color } => self.block(region, *color),
             ImageReplacement::Removed => self.block(region, Color::BLACK),
         }
         true

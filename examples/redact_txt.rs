@@ -135,5 +135,5 @@ fn build_anonymizer() -> Anonymizer<Text> {
             Mask::stars().with_keep_suffix(4),
         ))
         // Anything else we detect gets fully removed.
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
 }

@@ -434,7 +434,7 @@ mod tests {
                 Point::new(u32::MAX - 1, u32::MAX - 1),
                 Dimensions::new(u32::MAX, u32::MAX),
             ),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );
@@ -462,7 +462,7 @@ mod tests {
         let mut buffer = ImageBuffer::open(&png(4, 4), ImageFormat::Png).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(10, 10), Dimensions::new(4, 4)),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );
@@ -481,7 +481,7 @@ mod tests {
         // single in-bounds pixel (3,3) must turn black, and (0,0) stays red.
         buffer.redact(
             BoundingBox::from_origin(Point::new(3, 3), Dimensions::new(2, 2)),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );
@@ -514,7 +514,7 @@ mod tests {
         );
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(1, 1)),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );
@@ -552,7 +552,7 @@ mod tests {
         // Redact a pixel so the buffer is dirty (forces the re-encode path).
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );
@@ -629,7 +629,7 @@ mod tests {
         let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );
@@ -688,7 +688,7 @@ mod tests {
         buffer.strip_metadata().expect("strip");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
-            &ImageReplacement::Block {
+            &ImageReplacement::Covered {
                 color: Color::BLACK,
             },
         );

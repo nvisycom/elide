@@ -228,7 +228,7 @@ async fn a_scanned_page_region_stays_covered_over_a_removed_image() -> Result<()
     let frame = page.chunks()?.remove(0).location;
     let mut redactions = Redactions::new();
     let grey = Color::rgb(200, 200, 200);
-    redactions.push(frame, ImageReplacement::Block { color: grey });
+    redactions.push(frame, ImageReplacement::Covered { color: grey });
     page.write_at(redactions).await?;
 
     let out = doc.encode()?;

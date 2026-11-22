@@ -107,9 +107,7 @@ impl<M: TextRedactable> TryOperator<M> for Truncate {
         data: &M::Data,
     ) -> Result<Attempt<M::Replacement>> {
         Ok(match self.render(data.as_ref()) {
-            Some(text) => {
-                Attempt::Applied(M::Replacement::from(TextReplacement::substituted(text)))
-            }
+            Some(text) => Attempt::Applied(M::Replacement::from(TextReplacement::replaced(text))),
             None => Attempt::Declined,
         })
     }
@@ -160,7 +158,7 @@ mod tests {
         let out = Operator::<Text>::anonymize(&masked, &entity, &data)
             .await
             .unwrap();
-        assert_eq!(out, Some(TextReplacement::substituted("****")));
+        assert_eq!(out, Some(TextReplacement::replaced("****")));
     }
 
     #[test]

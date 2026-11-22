@@ -1,7 +1,7 @@
 //! [`TextDoc`], an in-memory [`Text`] read/write test double. Behind the
 //! `fixtures` feature; colocated with the `Text` modality it stands in for.
 
-use super::{Text, TextData, TextLocation, TextReplacement};
+use super::{Text, TextData, TextLocation};
 use crate::modality::{DataReader, DataWriter};
 use crate::redaction::Redactions;
 use crate::{Error, Result};
@@ -70,12 +70,9 @@ impl DataWriter<Text> for TextDoc {
         }
         redactions.sort_by_position();
         for (location, replacement) in redactions.iter().rev() {
-            let value = match replacement {
-                TextReplacement::Substituted(s) => s.as_str(),
-                TextReplacement::Removed => "",
-            };
             if let Some(range) = location.range() {
-                self.text.replace_range(range.clone(), value);
+                let value = replacement.written(&self.text[range.clone()]).into_owned();
+                self.text.replace_range(range.clone(), &value);
             }
         }
         Ok(())

@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 /// The soft visual treatment: the region is smeared but its rough shape
 /// and surroundings stay legible, so the document still reads naturally.
 /// Common for faces and license plates in low-stakes contexts. Contrast
-/// [`Blackbox`], which hides the region behind a solid fill.
+/// [`Fill`], which hides the region behind a solid fill.
 ///
-/// [`Blackbox`]: crate::operators::Blackbox
+/// [`Fill`]: crate::operators::Fill
 #[derive(Debug, Clone, Copy, Component)]
 #[component(name = "blur", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -86,7 +86,7 @@ impl Operator<Image> for Blur {
         _entity: &Entity<Image>,
         _data: &ImageData,
     ) -> Result<Option<ImageReplacement>> {
-        Ok(Some(ImageReplacement::Blur { sigma: self.sigma }))
+        Ok(Some(ImageReplacement::Blurred { sigma: self.sigma }))
     }
 }
 
@@ -101,7 +101,7 @@ mod tests {
     use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
-    use crate::operators::{Blackbox, Blur, Pixelate};
+    use crate::operators::{Blur, Fill, Pixelate};
 
     /// A 4x4 image entity with a small region, enough to drive an operator.
     fn image_entity() -> (Entity<Image>, ImageData) {
@@ -127,17 +127,17 @@ mod tests {
             .anonymize(&entity, &data)
             .await
             .unwrap();
-        assert_eq!(blur, Some(ImageReplacement::Blur { sigma: 8.0 }));
+        assert_eq!(blur, Some(ImageReplacement::Blurred { sigma: 8.0 }));
 
         let pix = Pixelate::new(10)
             .unwrap()
             .anonymize(&entity, &data)
             .await
             .unwrap();
-        assert_eq!(pix, Some(ImageReplacement::Pixelate { block_size: 10 }));
+        assert_eq!(pix, Some(ImageReplacement::Pixelated { block_size: 10 }));
 
-        let box_ = Blackbox::default().anonymize(&entity, &data).await.unwrap();
-        assert_matches!(box_, Some(ImageReplacement::Block { .. }));
+        let box_ = Fill::default().anonymize(&entity, &data).await.unwrap();
+        assert_matches!(box_, Some(ImageReplacement::Covered { .. }));
     }
 
     /// A blur or mosaic too fine to hide anything is rejected.

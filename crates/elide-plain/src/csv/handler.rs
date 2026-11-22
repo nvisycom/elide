@@ -186,11 +186,11 @@ impl CsvHandler {
         let mut drop_cols = BTreeSet::new();
         for (location, replacement) in redactions.iter().rev() {
             match replacement {
-                TabularReplacement::Cell(cell) => self.redact_one(location, cell)?,
-                TabularReplacement::DropRow => {
+                TabularReplacement::CellRedacted(cell) => self.redact_one(location, cell)?,
+                TabularReplacement::RowDropped => {
                     drop_rows.insert(location.row_index);
                 }
-                TabularReplacement::DropColumn => {
+                TabularReplacement::ColumnDropped => {
                     drop_cols.insert(location.column_index);
                 }
             }
@@ -221,7 +221,7 @@ impl CsvHandler {
     fn ensure_disjoint_cells(&self, redactions: &Redactions<Tabular>) -> Result<()> {
         let mut cells: BTreeMap<(u32, u32), Vec<Range<usize>>> = BTreeMap::new();
         for (location, replacement) in redactions.iter() {
-            if !matches!(replacement, TabularReplacement::Cell(_)) {
+            if !matches!(replacement, TabularReplacement::CellRedacted(_)) {
                 continue;
             }
             let cell = self
@@ -248,8 +248,7 @@ impl CsvHandler {
             .and_then(|cells| cells.get_mut(location.column_index as usize))
             .ok_or_else(|| no_cell(location))?;
         let span = location.span.clone().unwrap_or(0..cell.len());
-        let value = replacement.value().unwrap_or_default();
-        cell.redact_range(value, span)
+        cell.redact_with(replacement, span)
     }
 
     /// Drop the row at `row_index` (the same addressing as [`row_cells`]).
@@ -469,12 +468,26 @@ mod tests {
         // Row 1, col 1 = "alice@x.test"; replace the whole cell.
         h.write_at(Redactions::from([(
             TabularLocation::new(1, 1),
-            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+            TabularReplacement::CellRedacted(TextReplacement::replaced("[EMAIL]")),
         )]))
         .await
         .unwrap();
         let out = h.encode().unwrap();
         assert_eq!(out.decode().unwrap(), "name,email\nAlice,[EMAIL]\n");
+    }
+
+    /// A covered cell is written as one mark per character it held.
+    #[tokio::test]
+    async fn a_covered_cell_is_marked_per_character() {
+        let mut h = load("name,email\nAlice,alice@x.test\n").await;
+        h.write_at(Redactions::from([(
+            TabularLocation::new(1, 1),
+            TabularReplacement::CellRedacted(TextReplacement::Covered),
+        )]))
+        .await
+        .unwrap();
+        let out = h.encode().unwrap();
+        assert_eq!(out.decode().unwrap(), "name,email\nAlice,████████████\n");
     }
 
     #[tokio::test]
@@ -483,7 +496,7 @@ mod tests {
         // A match anywhere in Bob's row (row 2) drops the whole record.
         h.write_at(Redactions::from([(
             TabularLocation::new(2, 0),
-            TabularReplacement::DropRow,
+            TabularReplacement::RowDropped,
         )]))
         .await
         .unwrap();
@@ -496,8 +509,8 @@ mod tests {
         let mut h = load("n\nA\nB\nC\nD\n").await;
         // Drop rows 1 (A) and 3 (C); bottom-up removal keeps indices valid.
         h.write_at(Redactions::from([
-            (TabularLocation::new(1, 0), TabularReplacement::DropRow),
-            (TabularLocation::new(3, 0), TabularReplacement::DropRow),
+            (TabularLocation::new(1, 0), TabularReplacement::RowDropped),
+            (TabularLocation::new(3, 0), TabularReplacement::RowDropped),
         ]))
         .await
         .unwrap();
@@ -508,8 +521,8 @@ mod tests {
     async fn drop_row_drops_the_header_too() {
         let mut h = load("name,city\nAlice,NYC\nBob,LA\n").await;
         h.write_at(Redactions::from([
-            (TabularLocation::new(0, 0), TabularReplacement::DropRow),
-            (TabularLocation::new(2, 0), TabularReplacement::DropRow),
+            (TabularLocation::new(0, 0), TabularReplacement::RowDropped),
+            (TabularLocation::new(2, 0), TabularReplacement::RowDropped),
         ]))
         .await
         .unwrap();
@@ -522,7 +535,7 @@ mod tests {
         // A match in the ssn column (col 1) drops it across all rows.
         h.write_at(Redactions::from([(
             TabularLocation::new(1, 1),
-            TabularReplacement::DropColumn,
+            TabularReplacement::ColumnDropped,
         )]))
         .await
         .unwrap();
@@ -563,7 +576,7 @@ mod tests {
         handler
             .write_at(Redactions::from([(
                 TabularLocation::new(0, 0),
-                TabularReplacement::DropRow,
+                TabularReplacement::RowDropped,
             )]))
             .await
             .unwrap();
@@ -620,13 +633,16 @@ mod tests {
     /// rather than being skipped, which would leave the content unredacted.
     #[tokio::test]
     async fn a_location_outside_the_table_is_an_error() {
-        let substituted = || TabularReplacement::Cell(TextReplacement::substituted("[X]"));
+        let replaced = || TabularReplacement::CellRedacted(TextReplacement::replaced("[X]"));
         let batches = [
-            (TabularLocation::new(9, 0), substituted()),
-            (TabularLocation::new(1, 9), substituted()),
-            (TabularLocation::new(1, 0).with_span(0..99), substituted()),
-            (TabularLocation::new(9, 0), TabularReplacement::DropRow),
-            (TabularLocation::new(1, 9), TabularReplacement::DropColumn),
+            (TabularLocation::new(9, 0), replaced()),
+            (TabularLocation::new(1, 9), replaced()),
+            (TabularLocation::new(1, 0).with_span(0..99), replaced()),
+            (TabularLocation::new(9, 0), TabularReplacement::RowDropped),
+            (
+                TabularLocation::new(1, 9),
+                TabularReplacement::ColumnDropped,
+            ),
         ];
         let src = "name,city\nAlice,NYC\n";
         for (location, replacement) in batches {
@@ -635,8 +651,11 @@ mod tests {
             let error = h
                 .write_at(Redactions::from([
                     (location.clone(), replacement),
-                    (TabularLocation::new(1, 0), substituted()),
-                    (TabularLocation::new(0, 1), TabularReplacement::DropColumn),
+                    (TabularLocation::new(1, 0), replaced()),
+                    (
+                        TabularLocation::new(0, 1),
+                        TabularReplacement::ColumnDropped,
+                    ),
                 ]))
                 .await
                 .expect_err("an unwritable location must fail");
@@ -651,19 +670,16 @@ mod tests {
 
     #[tokio::test]
     async fn overlapping_edits_of_one_cell_are_an_error() {
-        let substituted =
-            |value: &str| TabularReplacement::Cell(TextReplacement::substituted(value));
+        let replaced =
+            |value: &str| TabularReplacement::CellRedacted(TextReplacement::replaced(value));
         let src = "id\nabcdef\n";
         let mut h = load(src).await;
         let error = h
             .write_at(Redactions::from([
-                (
-                    TabularLocation::new(1, 0).with_span(0..7),
-                    substituted("[A]"),
-                ),
+                (TabularLocation::new(1, 0).with_span(0..7), replaced("[A]")),
                 (
                     TabularLocation::new(1, 0).with_span(3..6),
-                    substituted("123456789"),
+                    replaced("123456789"),
                 ),
             ]))
             .await
@@ -674,24 +690,15 @@ mod tests {
         // A whole-cell edit overlaps any span of the cell; touching spans apply.
         let error = h
             .write_at(Redactions::from([
-                (TabularLocation::new(1, 0), substituted("[A]")),
-                (
-                    TabularLocation::new(1, 0).with_span(3..6),
-                    substituted("[B]"),
-                ),
+                (TabularLocation::new(1, 0), replaced("[A]")),
+                (TabularLocation::new(1, 0).with_span(3..6), replaced("[B]")),
             ]))
             .await
             .expect_err("a whole-cell edit overlaps a span of it");
         assert_eq!(error.kind(), ErrorKind::MalformedInput);
         h.write_at(Redactions::from([
-            (
-                TabularLocation::new(1, 0).with_span(0..3),
-                substituted("[A]"),
-            ),
-            (
-                TabularLocation::new(1, 0).with_span(3..6),
-                substituted("[B]"),
-            ),
+            (TabularLocation::new(1, 0).with_span(0..3), replaced("[A]")),
+            (TabularLocation::new(1, 0).with_span(3..6), replaced("[B]")),
         ]))
         .await
         .unwrap();
@@ -701,8 +708,8 @@ mod tests {
     /// A CSV file is one table: a location naming a sheet addresses another.
     #[tokio::test]
     async fn a_location_naming_a_sheet_is_an_error() {
-        let substituted =
-            |value: &str| TabularReplacement::Cell(TextReplacement::substituted(value));
+        let replaced =
+            |value: &str| TabularReplacement::CellRedacted(TextReplacement::replaced(value));
         let src = "id\nabcdef\n";
         let mut h = load(src).await;
         let sheeted = TabularLocation::new(1, 0).with_sheet_name("Z");
@@ -710,8 +717,8 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::MalformedInput);
         let error = h
             .write_at(Redactions::from([
-                (sheeted.with_span(0..1), substituted("LONG")),
-                (TabularLocation::new(1, 0).with_span(3..6), substituted("X")),
+                (sheeted.with_span(0..1), replaced("LONG")),
+                (TabularLocation::new(1, 0).with_span(3..6), replaced("X")),
             ]))
             .await
             .expect_err("a sheet-qualified location must fail");

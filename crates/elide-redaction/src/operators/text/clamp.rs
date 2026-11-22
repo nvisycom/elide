@@ -271,9 +271,7 @@ impl<M: TextRedactable> TryOperator<M> for Clamp {
         data: &M::Data,
     ) -> Result<Attempt<M::Replacement>> {
         Ok(match self.render(data.as_ref(), entity.language.as_ref()) {
-            Some(text) => {
-                Attempt::Applied(M::Replacement::from(TextReplacement::substituted(text)))
-            }
+            Some(text) => Attempt::Applied(M::Replacement::from(TextReplacement::replaced(text))),
             None => Attempt::Declined,
         })
     }

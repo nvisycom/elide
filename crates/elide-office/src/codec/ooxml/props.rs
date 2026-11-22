@@ -194,7 +194,7 @@ mod tests {
             .write_at(Redactions::from([
                 (
                     MetadataLocation::new("creator"),
-                    TextReplacement::substituted("[REDACTED]"),
+                    TextReplacement::replaced("[REDACTED]"),
                 ),
                 (MetadataLocation::new("title"), TextReplacement::Removed),
             ]))
@@ -226,7 +226,7 @@ mod tests {
         stream
             .write_at(Redactions::from([(
                 MetadataLocation::new("property/1"),
-                TextReplacement::substituted("[NAME]"),
+                TextReplacement::replaced("[NAME]"),
             )]))
             .await
             .unwrap();

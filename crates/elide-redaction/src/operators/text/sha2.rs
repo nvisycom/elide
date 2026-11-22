@@ -87,7 +87,7 @@ impl<M: TextRedactable> Operator<M> for Sha2Hash {
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         let digest = self.digest(data.as_ref());
-        Ok(Some(M::Replacement::from(TextReplacement::substituted(
+        Ok(Some(M::Replacement::from(TextReplacement::replaced(
             digest,
         ))))
     }

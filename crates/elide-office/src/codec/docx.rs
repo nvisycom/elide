@@ -172,7 +172,7 @@ mod tests {
         doc.body
             .write_at(Redactions::from([(
                 location,
-                TextReplacement::substituted("[NAME]"),
+                TextReplacement::replaced("[NAME]"),
             )]))
             .await
             .unwrap();

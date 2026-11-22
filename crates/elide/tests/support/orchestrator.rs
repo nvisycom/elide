@@ -19,7 +19,7 @@ use elide::modality::text::Text;
 use elide::modality::{ChunkReader, DataReader, DataWriter, Modality, TextRecognizable};
 use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Mask, Replace};
+use elide::redaction::operators::{Mask, Remove, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
 use elide::{Orchestrator, Result};
 
@@ -112,7 +112,7 @@ where
 /// An erase-everything [`Anonymizer`] for a modality `M`, the image default, and
 /// what OCR image tests use.
 pub fn erase_anonymizer<M: Modality>() -> Anonymizer<M> {
-    Anonymizer::new().with(Rule::fallback(Erase))
+    Anonymizer::new().with(Rule::fallback(Remove))
 }
 
 /// The default image [`Analyzer`]: a mock LLM recognizer that detects nothing,

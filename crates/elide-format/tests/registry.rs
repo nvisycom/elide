@@ -95,7 +95,7 @@ async fn decode_redact_reencode_round_trip() {
     stream
         .write_at(Redactions::from([(
             TextLocation::inline(8..26),
-            TextReplacement::substituted("[EMAIL]"),
+            TextReplacement::replaced("[EMAIL]"),
         )]))
         .await
         .expect("redacted");
@@ -126,7 +126,7 @@ async fn csv_decode_redact_reencode_round_trip() {
     stream
         .write_at(Redactions::from([(
             TabularLocation::new(1, 1),
-            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+            TabularReplacement::CellRedacted(TextReplacement::replaced("[EMAIL]")),
         )]))
         .await
         .expect("redacted");

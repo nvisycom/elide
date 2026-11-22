@@ -110,7 +110,7 @@ impl AesEncrypt {
         label: &LabelRef,
         replacement: &TextReplacement,
     ) -> Result<Option<TextData>> {
-        let TextReplacement::Substituted(encoded) = replacement else {
+        let TextReplacement::Replaced(encoded) = replacement else {
             // A `Removed` replacement carries nothing to recover.
             return Ok(None);
         };
@@ -156,7 +156,7 @@ impl<M: TextRedactable> Operator<M> for AesEncrypt {
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         let ciphertext = self.encrypt_str(&entity.label, data.as_ref())?;
-        Ok(Some(M::Replacement::from(TextReplacement::substituted(
+        Ok(Some(M::Replacement::from(TextReplacement::replaced(
             ciphertext,
         ))))
     }

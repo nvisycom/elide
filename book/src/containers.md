@@ -35,7 +35,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             Analyzer::new().with_recognizer(LlmRecognizer::with_default(vision)),
             Anonymizer::new()
                 .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
-                .with(Rule::fallback(Blackbox::default())),
+                .with(Rule::fallback(Cover)),
         );
 
     orchestrator.anonymize(&mut document).await?;

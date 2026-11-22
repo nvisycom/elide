@@ -167,7 +167,7 @@ fn build_text_anonymizer() -> Anonymizer<Text> {
             builtins::PAYMENT_CARD.to_ref(),
             Mask::stars().with_keep_suffix(4),
         ))
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
 }
 
 /// Build the image analyzer backed by the mock LLM. It detects nothing
@@ -185,9 +185,6 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
 fn build_image_anonymizer() -> Result<Anonymizer<Image>> {
     Ok(Anonymizer::new()
         .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)?))
-        .with(Rule::label(
-            builtins::SIGNATURE.to_ref(),
-            Blackbox::default(),
-        ))
-        .with(Rule::fallback(Erase)))
+        .with(Rule::label(builtins::SIGNATURE.to_ref(), Cover))
+        .with(Rule::fallback(Remove)))
 }

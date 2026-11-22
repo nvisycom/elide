@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// The "pixelated face" look: the region is reduced to coarse blocks. A
 /// common compliance default, more obviously redacted than [`Blur`] while
-/// still keeping the region's footprint visible. Contrast [`Blackbox`],
+/// still keeping the region's footprint visible. Contrast [`Fill`],
 /// which hides it behind a solid fill.
 ///
 /// [`Blur`]: crate::operators::Blur
-/// [`Blackbox`]: crate::operators::Blackbox
+/// [`Fill`]: crate::operators::Fill
 #[derive(Debug, Clone, Copy, Component)]
 #[component(name = "pixelate", version = "1.0.0")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -87,7 +87,7 @@ impl Operator<Image> for Pixelate {
         _entity: &Entity<Image>,
         _data: &ImageData,
     ) -> Result<Option<ImageReplacement>> {
-        Ok(Some(ImageReplacement::Pixelate {
+        Ok(Some(ImageReplacement::Pixelated {
             block_size: self.block_size,
         }))
     }

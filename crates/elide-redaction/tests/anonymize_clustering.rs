@@ -10,7 +10,7 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
 use elide_core::redaction::Operator;
-use elide_redaction::operators::{Erase, Replace};
+use elide_redaction::operators::{Remove, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::TextDoc;
 
@@ -32,25 +32,25 @@ async fn disjoint_entities_redact_separately() {
 }
 
 /// Overlapping entities collapse to one redaction over the union span, run by
-/// the safest (least-leaky) operator. `Erase` (Irrecoverable) beats `Replace`
+/// the safest (least-leaky) operator. `Remove` (Irrecoverable) beats `Replace`
 /// (Partial).
 #[tokio::test]
 async fn overlap_merges_under_safest_operator() {
     let mut doc = TextDoc::new("0123456789abc");
-    // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
+    // NAME [0,5) → Replace (Partial); SSN [3,12) → Remove (Irrecoverable).
     let mut entities = vec![
         Entity::fixture("NAME", (0, 5)),
         Entity::fixture("SSN", (3, 12)),
     ];
     Anonymizer::new()
         .with(Rule::label(LabelRef::new("NAME"), Replace::default()))
-        .with(Rule::label(LabelRef::new("SSN"), Erase))
+        .with(Rule::label(LabelRef::new("SSN"), Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
 
-    // One redaction over the union [0,12), by Erase → the bytes are removed
-    // (not substituted), leaving only the trailing "c".
+    // One redaction over the union [0,12), by Remove → the bytes are removed
+    // (not replaced), leaving only the trailing "c".
     assert_eq!(doc.text(), "c");
 
     // Both entities record a redaction by the winning operator.
@@ -58,7 +58,7 @@ async fn overlap_merges_under_safest_operator() {
         let redacted = entity
             .audit
             .applied_selection()
-            .is_some_and(|s| s.operator.name == "erase");
+            .is_some_and(|s| s.operator.name == "remove");
         assert!(redacted, "every member records the erase redaction");
     }
 }
@@ -74,7 +74,7 @@ async fn transitive_overlap_chain_merges() {
         Entity::fixture("C", (8, 13)),
     ];
     Anonymizer::new()
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
@@ -98,7 +98,7 @@ async fn non_coalescible_overlap_stays_separate() {
     let mut entities = vec![a, b];
 
     Anonymizer::new()
-        .with(Rule::fallback(Erase))
+        .with(Rule::fallback(Remove))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
@@ -127,7 +127,7 @@ async fn boxed_and_arced_trait_objects_are_operators() {
 
     let mut doc = TextDoc::new("alice bob");
     let boxed: Box<dyn Operator<Text>> = Box::new(Replace::default());
-    let arced: Arc<dyn Operator<Text>> = Arc::new(Erase);
+    let arced: Arc<dyn Operator<Text>> = Arc::new(Remove);
 
     let mut entities = vec![
         Entity::fixture("NAME", (0, 5)),

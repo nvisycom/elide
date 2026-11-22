@@ -27,6 +27,8 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+use crate::redaction::LeakProfile;
+
 #[cfg(feature = "metadata")]
 pub mod metadata;
 #[cfg(feature = "tabular")]
@@ -176,17 +178,34 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// The instruction a codec applies to hide an entity in its modality.
 ///
 /// What an [`Operator`] produces for a modality. Hiding is
-/// modality-specific even though detection is not: text yields
-/// a substituted/removed string, an image a blur/block/pixelate region,
-/// audio a silenced/removed span. An operator computes one of these from
-/// the entity and its data; the codec writes it back into the document.
+/// modality-specific even though detection is not: text is removed, covered
+/// or replaced, an image region removed, covered, blurred or pixelated, an
+/// audio span removed, silenced or beeped. An operator computes one of these
+/// from the entity and its data; the codec writes it back into the document.
+///
+/// Two treatments every modality has, so one operator gives them for any:
+/// [`removed`](Self::removed) and [`covered`](Self::covered).
 ///
 /// [`Operator`]: crate::redaction::Operator
 pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {
-    /// The replacement that removes the entity entirely: text drops its
-    /// characters, a table cell its text, a metadata field its value, audio
-    /// its interval, an image its region.
+    /// The replacement that removes the entity entirely, leaving nothing
+    /// that marks where it was, as far as the modality allows: text drops
+    /// its characters, a table cell its text, a metadata field its value, and
+    /// audio its interval; an image can't lose its pixels, so its region is
+    /// fully obscured.
     fn removed() -> Self;
+
+    /// How much of the entity [`removed`](Self::removed) leaves observable:
+    /// nothing, unless the modality can't cut an entity out and obscures it
+    /// in place instead, keeping its extent, as an image does.
+    fn removed_leak() -> LeakProfile {
+        LeakProfile::Irrecoverable
+    }
+
+    /// The replacement that hides the entity in place, keeping its extent
+    /// and marking it: text and its cells and fields are covered, audio
+    /// silenced for the interval, an image region covered in black.
+    fn covered() -> Self;
 }
 
 /// Enrichment an [`Enricher`] derives from a payload for recognizers to read.

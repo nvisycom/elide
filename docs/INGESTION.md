@@ -170,10 +170,10 @@ defines five modalities:
 ```
 modality   data            location            replacement
 ---------+---------------+-------------------+----------------------
-text     | text payload  | byte span         | substitute / remove
-tabular  | text payload  | row/column + span | substitute / remove
-image    | pixel buffer  | bounding box      | blur/pixelate/block
-audio    | sample stream | time span (ms)    | silence / remove
+text     | text payload  | byte span         | replace / cover / remove
+tabular  | text payload  | row/column + span | replace / cover / remove
+image    | pixel buffer  | bounding box      | blur/pixelate/cover
+audio    | sample stream | time span (ms)    | beep / silence / remove
 metadata | field value   | out-of-band key   | drop / rewrite
 ```
 

@@ -112,7 +112,7 @@ impl<M: TextRedactable> Operator<M> for HmacHash {
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         let digest = self.digest(&entity.label, data.as_ref())?;
-        Ok(Some(M::Replacement::from(TextReplacement::substituted(
+        Ok(Some(M::Replacement::from(TextReplacement::replaced(
             digest,
         ))))
     }

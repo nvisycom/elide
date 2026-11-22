@@ -13,7 +13,7 @@ use elide::entity::{LabelCatalog, builtins};
 use elide::modality::ChunkReader;
 use elide::modality::text::Text;
 use elide::recognition::Scope;
-use elide::redaction::operators::{Erase, Keep};
+use elide::redaction::operators::{Keep, Remove};
 use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
 use elide::{RegistryDocumentExt, Result};
 use elide_core::assert_label_present;
@@ -132,7 +132,7 @@ async fn kept_text_stays_in_the_pdf() -> Result<()> {
             default_text_analyzer()?,
             Anonymizer::new()
                 .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Keep))
-                .with(Rule::fallback(Erase)),
+                .with(Rule::fallback(Remove)),
         )
         .build();
     let mut document = registry

@@ -13,7 +13,7 @@ use elide::detection::Analyzer;
 use elide::entity::LabelCatalog;
 use elide::modality::image::Image;
 use elide::recognition::Scope;
-use elide::redaction::operators::Erase;
+use elide::redaction::operators::Remove;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Document, Orchestrator};
 use elide_image::fixtures::{has_gps_tiff, is_valid_image, tiff_with_gps};
@@ -30,7 +30,7 @@ async fn tiff_gps_is_stripped_through_the_facade() {
         .with_registry(registry.clone())
         .with_modality::<Image>(
             Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Erase)),
+            Anonymizer::new().with(Rule::fallback(Remove)),
         );
 
     let handle = registry

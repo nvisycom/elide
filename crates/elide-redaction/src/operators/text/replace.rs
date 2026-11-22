@@ -95,7 +95,7 @@ impl Replace {
             }
         }
         rendered.push_str(rest);
-        TextReplacement::substituted(rendered)
+        TextReplacement::replaced(rendered)
     }
 }
 
@@ -141,7 +141,7 @@ mod tests {
     fn expands_every_placeholder() {
         assert_eq!(
             render("[{label}:{coref}] was {value}", "a@b.c"),
-            TextReplacement::substituted("[EMAIL:c1] was a@b.c"),
+            TextReplacement::replaced("[EMAIL:c1] was a@b.c"),
         );
     }
 
@@ -150,11 +150,11 @@ mod tests {
     fn expands_in_one_pass() {
         assert_eq!(
             render("{value}", "x{coref}{label}"),
-            TextReplacement::substituted("x{coref}{label}"),
+            TextReplacement::replaced("x{coref}{label}"),
         );
         assert_eq!(
             render("{unknown}", "v"),
-            TextReplacement::substituted("{unknown}")
+            TextReplacement::replaced("{unknown}")
         );
     }
 

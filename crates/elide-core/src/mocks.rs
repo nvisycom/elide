@@ -56,7 +56,7 @@ impl<M: Modality> Recognizer<M> for MockRecognizer<M> {
 
 /// An operator that replaces every matched entity with a fixed string.
 ///
-/// [`Text`]-only: it produces a [`TextReplacement::Substituted`]. Its
+/// [`Text`]-only: it produces a [`TextReplacement::Replaced`]. Its
 /// [`LeakProfile`] defaults to [`Irrecoverable`](LeakProfile::Irrecoverable);
 /// override it for a test that asserts on leak reporting.
 #[derive(Debug, Clone, Component)]
@@ -95,6 +95,6 @@ impl Operator<Text> for MockOperator {
         _entity: &Entity<Text>,
         _data: &TextData,
     ) -> Result<Option<TextReplacement>, Error> {
-        Ok(Some(TextReplacement::substituted(self.replacement.clone())))
+        Ok(Some(TextReplacement::replaced(self.replacement.clone())))
     }
 }

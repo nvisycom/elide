@@ -284,7 +284,7 @@ fn operator_trait_shape() {
             _data: &TextData,
         ) -> Result<Option<TextReplacement>> {
             // Pure: computes the replacement, mutates nothing.
-            Ok(Some(TextReplacement::Substituted(format!(
+            Ok(Some(TextReplacement::Replaced(format!(
                 "[{}]",
                 entity.label.as_str()
             ))))
@@ -297,6 +297,6 @@ fn operator_trait_shape() {
     assert!(LeakProfile::Recoverable < LeakProfile::Irrecoverable);
 
     // Both replacement variants are constructible.
-    let _ = TextReplacement::Substituted("[PHONE_NUMBER]".into());
+    let _ = TextReplacement::Replaced("[PHONE_NUMBER]".into());
     let _ = TextReplacement::Removed;
 }

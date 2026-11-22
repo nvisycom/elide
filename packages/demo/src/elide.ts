@@ -28,7 +28,7 @@ function policy(): Anonymizer<"text"> {
     .rule(Rule.label(Label.PhoneNumber, Operator.replace("[PHONE]")))
     .rule(Rule.label(Label.Url, Operator.replace("[URL]")))
     .rule(Rule.label(Label.PaymentCard, Operator.mask({ keepSuffix: 4 })))
-    .rule(Rule.fallback(Operator.erase()));
+    .rule(Rule.fallback(Operator.remove()));
 }
 
 function build(sources: Sources): Orchestrator {

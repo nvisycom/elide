@@ -84,9 +84,7 @@ impl Default for FakeGenerator {
 
 impl<M: TextRedactable> Generator<M> for FakeGenerator {
     fn generate(&self, entity: &Entity<M>, data: &M::Data) -> M::Replacement {
-        M::Replacement::from(TextReplacement::substituted(
-            self.value(entity, data.as_ref()),
-        ))
+        M::Replacement::from(TextReplacement::replaced(self.value(entity, data.as_ref())))
     }
 }
 
@@ -107,10 +105,10 @@ mod tests {
     }
 
     fn surrogate(generator: &FakeGenerator, entity: &Entity<Text>, original: &str) -> String {
-        let TextReplacement::Substituted(value) =
+        let TextReplacement::Replaced(value) =
             generator.generate(entity, &TextData::new(original.to_owned()))
         else {
-            panic!("expected a substituted value");
+            panic!("expected a replaced value");
         };
         value.to_string()
     }

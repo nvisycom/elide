@@ -20,13 +20,14 @@ let analyzer = Analyzer::<Audio>::new()
 
 let anonymizer = Anonymizer::<Audio>::new()
     .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Beep::default()))
-    .with(Rule::fallback(Silence));
+    .with(Rule::fallback(Cover));
 # Ok(())
 # }
 ```
 
-`Silence` replaces the interval with silence, and `Beep` with a tone, so a
-listener can tell something was removed.
+`Cover` replaces the interval with silence, and `Beep` with a tone, so a
+listener can tell something was removed. Both keep its duration; `Remove` cuts
+the interval out instead.
 
 The speech-to-text model is a [backend](backends.md) of your own: it takes an
 `SttRequest` (the audio, its format, and a language hint) and returns the

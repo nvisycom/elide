@@ -26,15 +26,16 @@
 //! Tabular (feature `tabular`): [`DropRow`], [`DropColumn`], structural drops
 //! that remove a whole record or field rather than editing a cell.
 //!
-//! Image (feature `image`): [`Blur`], [`Pixelate`], [`Blackbox`].
+//! Image (feature `image`): [`Blur`], [`Pixelate`], [`Fill`].
 //!
-//! Audio (feature `audio`): [`Silence`], [`Beep`].
+//! Audio (feature `audio`): [`Beep`].
 //!
 //! Reversible (feature `aes`): [`AesEncrypt`] (AES-256-GCM) replaces the
 //! value with a ciphertext recoverable given the key.
 //!
-//! Cross-modality: [`Erase`] removes the entity in any modality, and
-//! [`Keep`] passes it through unchanged.
+//! Cross-modality: [`Remove`] removes the entity in any modality, leaving
+//! nothing that marks where it was; [`Cover`] hides it in place, keeping its
+//! extent; and [`Keep`] passes it through unchanged.
 //!
 //! [`Operator`]: elide_core::redaction::Operator
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
@@ -54,10 +55,11 @@ mod text;
 
 // Cross-modality and shared operator infrastructure, not tied to one
 // medium.
-mod erase;
+mod cover;
 mod keep;
 #[cfg(any(feature = "hmac", feature = "aes"))]
 mod key_provider;
+mod remove;
 #[cfg(any(feature = "sha2", feature = "hmac"))]
 mod sha2_algorithm;
 mod with_fallback;
@@ -69,17 +71,18 @@ pub use elide_fake::Fake;
 
 // Audio interval operators.
 #[cfg(feature = "audio")]
-pub use self::audio::{Beep, Silence};
+pub use self::audio::Beep;
 // Cross-modality and shared.
-pub use self::erase::Erase;
+pub use self::cover::Cover;
 // Image region operators.
 #[cfg(feature = "image")]
-pub use self::image::{Blackbox, Blur, Pixelate};
+pub use self::image::{Blur, Fill, Pixelate};
 pub use self::keep::Keep;
 /// The key-supply abstraction shared by [`HmacHash`] and [`AesEncrypt`].
 #[cfg(any(feature = "hmac", feature = "aes"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "hmac", feature = "aes"))))]
 pub use self::key_provider::{KeyProvider, StaticKey};
+pub use self::remove::Remove;
 /// The SHA-2 digest width shared by [`Sha2Hash`] and [`HmacHash`].
 #[cfg(any(feature = "sha2", feature = "hmac"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "sha2", feature = "hmac"))))]

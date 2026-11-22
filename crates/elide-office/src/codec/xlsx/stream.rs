@@ -115,11 +115,11 @@ impl DataWriter<Tabular> for XlsxStream {
         // intra-cell offsets in the same cell.
         for (location, replacement) in redactions.into_iter().rev() {
             match replacement {
-                TabularReplacement::Cell(cell) => edits.push((location, cell)),
+                TabularReplacement::CellRedacted(cell) => edits.push((location, cell)),
                 // A whole-row or whole-column drop would renumber every `r=`
                 // reference across the sheet; that structural rewrite is not yet
                 // supported, so refuse it rather than silently keep the data.
-                TabularReplacement::DropRow | TabularReplacement::DropColumn => {
+                TabularReplacement::RowDropped | TabularReplacement::ColumnDropped => {
                     return Err(Error::capability_unavailable(
                         "XLSX structural row/column drops are not yet supported",
                     ));

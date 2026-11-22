@@ -15,7 +15,7 @@ use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
 use elide_redaction::Rule;
-use elide_redaction::operators::Erase;
+use elide_redaction::operators::Remove;
 
 /// The attribution the [`erase_rule`] records on what it erases.
 const FLAGGED_ATTRIBUTION: &str = "flagged-hidden-content";
@@ -28,7 +28,7 @@ const FLAGGED_ATTRIBUTION: &str = "flagged-hidden-content";
 /// rule matching it still wins, [`Keep`](elide_redaction::operators::Keep)
 /// included.
 pub(crate) fn erase_rule<M: Modality>() -> Rule<M> {
-    Rule::predicate(|cx| cx.entity.audit.is_flagged(), Erase)
+    Rule::predicate(|cx| cx.entity.audit.is_flagged(), Remove)
         .because(Attribution::freeform(FLAGGED_ATTRIBUTION))
 }
 

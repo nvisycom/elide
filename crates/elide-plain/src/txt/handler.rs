@@ -150,8 +150,7 @@ impl TxtHandler {
     /// Splice `replacement` over `location`. A location outside the text is
     /// an error: skipping it would leave the content unredacted.
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        let value = replacement.value().unwrap_or_default();
-        self.text.redact_range(value, span(location)?.clone())
+        self.text.redact_with(replacement, span(location)?.clone())
     }
 }
 
@@ -308,10 +307,25 @@ mod tests {
         let end = src.find("-----END KEY-----").unwrap() + "-----END KEY-----".len();
         h.write_at(Redactions::from([(
             TextLocation::inline(begin..end),
-            TextReplacement::substituted("[KEY]"),
+            TextReplacement::replaced("[KEY]"),
         )]))
         .await?;
         assert_eq!(h.text(), "before\n[KEY]\nafter\n");
+        Ok(())
+    }
+
+    /// A covered span is written as one mark per character it held.
+    #[tokio::test]
+    async fn a_covered_span_is_marked_per_character() -> Result<()> {
+        let src = "Call Jané now";
+        let mut h = handler(src);
+        let start = src.find("Jané").unwrap();
+        h.write_at(Redactions::from([(
+            TextLocation::inline(start..start + "Jané".len()),
+            TextReplacement::Covered,
+        )]))
+        .await?;
+        assert_eq!(h.text(), "Call ████ now");
         Ok(())
     }
 
@@ -321,12 +335,9 @@ mod tests {
         h.write_at(Redactions::from([
             (
                 TextLocation::inline(12..19),
-                TextReplacement::substituted("[C]"),
+                TextReplacement::replaced("[C]"),
             ),
-            (
-                TextLocation::inline(0..5),
-                TextReplacement::substituted("[A]"),
-            ),
+            (TextLocation::inline(0..5), TextReplacement::replaced("[A]")),
         ]))
         .await?;
         assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
@@ -347,7 +358,7 @@ mod tests {
             let error = h
                 .write_at(Redactions::from([(
                     location.clone(),
-                    TextReplacement::substituted("nope"),
+                    TextReplacement::replaced("nope"),
                 )]))
                 .await
                 .expect_err("an unwritable location must fail");
@@ -361,14 +372,8 @@ mod tests {
         let mut h = handler("Jane Roe");
         let error = h
             .write_at(Redactions::from([
-                (
-                    TextLocation::inline(0..6),
-                    TextReplacement::substituted("[A]"),
-                ),
-                (
-                    TextLocation::inline(5..8),
-                    TextReplacement::substituted("[B]"),
-                ),
+                (TextLocation::inline(0..6), TextReplacement::replaced("[A]")),
+                (TextLocation::inline(5..8), TextReplacement::replaced("[B]")),
             ]))
             .await
             .expect_err("overlapping redactions must fail");
@@ -441,7 +446,7 @@ mod tests {
         // "contact " = 8 bytes; the email is 18 → 8..26.
         let batch = Redactions::from([(
             TextLocation::inline(8..26),
-            TextReplacement::substituted("[EMAIL]"),
+            TextReplacement::replaced("[EMAIL]"),
         )]);
         DataWriter::write_at(&mut stream, batch).await?;
 

@@ -25,7 +25,7 @@ use elide_core::{Component, Result};
 /// fields. Entity labels outside the core PII catalogue delegate to the
 /// `fallback` operator passed at construction, which needs to serve only
 /// the modality `Fake` runs in; every built-in text operator (`Mask`,
-/// `Replace`, `Erase`, `Sha2Hash`, …) serves them all.
+/// `Replace`, `Remove`, `Sha2Hash`, …) serves them all.
 ///
 /// Structured labels (IBAN, payment card, postal code, phone,
 /// date-of-birth, etc.) always pattern-preserve the original, the
@@ -99,9 +99,7 @@ where
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         match self.try_generate(entity, data.as_ref()) {
-            Some(value) => Ok(Some(M::Replacement::from(TextReplacement::substituted(
-                value,
-            )))),
+            Some(value) => Ok(Some(M::Replacement::from(TextReplacement::replaced(value)))),
             None => self.fallback.anonymize(entity, data).await,
         }
     }
@@ -153,7 +151,7 @@ mod tests {
         let source = TextData::new("hypertension");
         let entity = entity_over(diagnosis(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        assert_eq!(out, Some(TextReplacement::substituted("[redacted]")));
+        assert_eq!(out, Some(TextReplacement::replaced("[redacted]")));
     }
 
     /// A label `Fake` cannot fake takes the fallback, so a leakier fallback
@@ -178,7 +176,7 @@ mod tests {
         let source = TextData::new("hypertension");
         let entity = entity_over(diagnosis(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        assert_eq!(out, Some(TextReplacement::substituted("************")));
+        assert_eq!(out, Some(TextReplacement::replaced("************")));
     }
 
     #[tokio::test]
@@ -201,8 +199,8 @@ mod tests {
         )
         .with_language("ja".parse().unwrap());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        let Some(TextReplacement::Substituted(value)) = out else {
-            panic!("expected Substituted variant");
+        let Some(TextReplacement::Replaced(value)) = out else {
+            panic!("expected Replaced variant");
         };
         assert!(!value.is_empty(), "ja name should not be empty");
     }
@@ -213,8 +211,8 @@ mod tests {
         let source = TextData::new("name");
         let entity = entity_over(person_name(), source.as_str());
         let out = op.anonymize(&entity, &source).await.unwrap();
-        let Some(TextReplacement::Substituted(value)) = out else {
-            panic!("expected Substituted variant");
+        let Some(TextReplacement::Replaced(value)) = out else {
+            panic!("expected Replaced variant");
         };
         assert!(!value.is_empty());
     }
@@ -244,8 +242,8 @@ mod tests {
         for _ in 0..32 {
             let entity = entity_over(person_name(), source.as_str());
             let out = op.anonymize(&entity, &source).await.unwrap();
-            let Some(TextReplacement::Substituted(value)) = out else {
-                panic!("expected Substituted");
+            let Some(TextReplacement::Replaced(value)) = out else {
+                panic!("expected Replaced");
             };
             outputs.insert(value);
         }
@@ -257,7 +255,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tabular_impl_emits_cell_substituted() {
+    async fn tabular_impl_emits_cell_replaced() {
         let op = fake();
         let entity = Entity::<Tabular>::new(
             person_name(),
@@ -273,8 +271,8 @@ mod tests {
             <Fake<Mask> as Operator<Tabular>>::anonymize(&op, &entity, &TextData::new("alice"))
                 .await
                 .unwrap();
-        let Some(TabularReplacement::Cell(TextReplacement::Substituted(value))) = out else {
-            panic!("expected Cell(Substituted)");
+        let Some(TabularReplacement::CellRedacted(TextReplacement::Replaced(value))) = out else {
+            panic!("expected CellRedacted(Replaced)");
         };
         assert!(!value.is_empty());
     }

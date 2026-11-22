@@ -17,7 +17,7 @@ fn redacted_entity(label: &str) -> Entity<Text> {
     let location = TextLocation::inline(0..5);
     let conf = Confidence::new(0.9).unwrap();
     let selection = Selection::new(
-        ComponentId::new("erase", "1.0.0"),
+        ComponentId::new("remove", "1.0.0"),
         LeakProfile::Irrecoverable,
         RuleMatch::Fallback,
     );
@@ -30,7 +30,11 @@ fn redacted_entity(label: &str) -> Entity<Text> {
         ))
         .with_event(AuditEvent::selection(selection, conf));
     let picked = entity.audit.selection_event().unwrap().hash();
-    entity.with_event(AuditEvent::redaction("erase", Redaction::new(picked), conf))
+    entity.with_event(AuditEvent::redaction(
+        "remove",
+        Redaction::new(picked),
+        conf,
+    ))
 }
 
 #[test]
@@ -54,7 +58,7 @@ fn entity_audit_trail_is_reachable_and_verifies() {
             .audit
             .applied_selection()
             .map(|s| s.operator.name.as_str()),
-        Some("erase")
+        Some("remove")
     );
     assert!(entity.audit.verify().is_ok());
 }

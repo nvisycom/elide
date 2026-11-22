@@ -25,12 +25,12 @@ pub enum Waveform {
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum AudioReplacement {
-    /// Replace the range with silence, preserving its duration so the
-    /// timeline does not shift.
+    /// The range is silenced, its duration kept so the timeline does not
+    /// shift.
     Silenced,
-    /// Overlay a synthesized tone (the broadcast "bleep"), preserving the
-    /// range's duration. More obviously redacted than silence.
-    Tone {
+    /// A synthesized tone (the broadcast "bleep") is played over the range,
+    /// its duration kept. More obviously redacted than silence.
+    Beeped {
         /// Tone frequency in hertz (1000 Hz is the broadcast standard).
         hz: f32,
         /// Peak amplitude in `0.0..=1.0` of full scale.
@@ -38,12 +38,26 @@ pub enum AudioReplacement {
         /// Tone shape.
         waveform: Waveform,
     },
-    /// Cut the range out entirely, shortening the stream.
+    /// The range is cut out entirely, shortening the stream.
     Removed,
 }
 
 impl ModalityReplacement for AudioReplacement {
     fn removed() -> Self {
         Self::Removed
+    }
+
+    fn covered() -> Self {
+        Self::Silenced
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_interval_is_covered_by_silence() {
+        assert_eq!(AudioReplacement::covered(), AudioReplacement::Silenced);
     }
 }
