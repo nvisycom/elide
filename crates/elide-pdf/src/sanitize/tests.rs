@@ -992,6 +992,8 @@ fn a_to_unicode_cmap_maps_to_readable_text() {
 /// A symbol font's `/ToUnicode` is written with the text the reader reads:
 /// a symbolic font's space as a space, a code the Symbol face draws as its
 /// glyph's text; a font that isn't symbolic keeps the symbol range as it is.
+/// A standard face is read by the flags the rebuild pins, so its rebuilt
+/// text reads as its source text did.
 #[test]
 fn a_symbol_fonts_text_is_written_as_read() {
     let written = |base_font: &str, flags: i64| {
@@ -1010,6 +1012,8 @@ fn a_symbol_fonts_text_is_written_as_read() {
         let (out, _) = rebuilt(&doc);
         let pdf = Pdf::open(&saved(&doc).0).unwrap();
         let text = pdf.read(Text).unwrap()[0].text.clone();
+        let again = Pdf::open(&saved(&out).0).unwrap();
+        assert_eq!(again.read(Text).unwrap()[0].text, text, "{base_font}");
         let font = out
             .objects
             .values()
@@ -1033,6 +1037,9 @@ fn a_symbol_fonts_text_is_written_as_read() {
         cmap.contains("<20> <F020>") && cmap.contains("<6D> <F06D>"),
         "{cmap}"
     );
+    let (text, cmap) = written("ZapfDingbats", 32);
+    assert!(text.starts_with(' '), "{text:?}");
+    assert!(cmap.contains("<20> <0020>"), "{cmap}");
 }
 
 /// A `/ToUnicode` CMap mapping one-byte codes by the `bfchar` entries

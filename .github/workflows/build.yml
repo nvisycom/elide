@@ -13,6 +13,8 @@ on:
       - "rustfmt.toml"
       - ".github/workflows/build.yml"
       - "Makefile"
+      - "scripts/install/pdfium.sh"
+      - "scripts/pdf/fetch-corpus.py"
   pull_request:
     branches:
       - "main"
@@ -25,6 +27,8 @@ on:
       - "rustfmt.toml"
       - ".github/workflows/build.yml"
       - "Makefile"
+      - "scripts/install/pdfium.sh"
+      - "scripts/pdf/fetch-corpus.py"
   workflow_dispatch:
 
 env:

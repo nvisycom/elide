@@ -94,7 +94,9 @@ pub(crate) enum SymbolText {
 impl SymbolText {
     /// How `font`'s text in the symbol range reads: by whether it names the
     /// Symbol face, else whether its descriptor (a composite font's
-    /// descendant's) flags it symbolic only.
+    /// descendant's) flags it symbolic only. A standard face without a
+    /// program of its own reads by the flags the rebuild pins for it
+    /// ([`Standard::flags`]), so its text reads alike before and after.
     pub(crate) fn of(doc: &Document, font: &Dictionary) -> Self {
         let descendant = font
             .is_subtype(doc, b"Type0")
@@ -108,6 +110,7 @@ impl SymbolText {
             return Self::Symbol;
         }
         let flags = encoding::flags(doc, font);
+        let flags = Standard::of(doc, font).map_or(flags, |standard| standard.flags(flags));
         if flags & SYMBOLIC != 0 && flags & NONSYMBOLIC == 0 {
             Self::Symbolic
         } else {
@@ -668,6 +671,17 @@ mod tests {
             symbol_mapped("Icons", 32, b" m"),
             ["\u{F020}", "\u{F06D}"],
             "nonsymbolic"
+        );
+        // A standard face reads by the flags the rebuild pins for it.
+        assert_eq!(
+            symbol_mapped("ZapfDingbats", 32, b" m"),
+            [" ", "\u{F06D}"],
+            "pinned symbolic"
+        );
+        assert_eq!(
+            symbol_mapped("Arial", 4, b" m"),
+            ["\u{F020}", "\u{F06D}"],
+            "pinned nonsymbolic"
         );
     }
 

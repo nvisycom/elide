@@ -305,14 +305,16 @@ fn compare_rebuilt(
         there
     };
 
-    // Each glyph paired with a character that reads alike where it is.
+    // Each glyph paired with characters that read alike where it is, none
+    // of them paired already: a ligature's letters, each once.
     let mut unpaired = Vec::new();
     for (i, glyph) in ours.iter().enumerate() {
+        let len = glyph.text.chars().count();
         let found = there(glyph, &paired)
             .into_iter()
-            .find(|&at| reads(theirs, at, &glyph.text));
+            .find(|&at| reads(theirs, at, &glyph.text) && !paired[at..at + len].contains(&true));
         match found {
-            Some(found) => paired[found..found + glyph.text.chars().count()].fill(true),
+            Some(found) => paired[found..found + len].fill(true),
             None => unpaired.push(i),
         }
     }

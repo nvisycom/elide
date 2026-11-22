@@ -1,11 +1,13 @@
-//! Real documents: those `scripts/pdf/fetch-corpus.py` fetches into the
-//! directory `ELIDE_PDF_CORPUS` names, and those generated into
-//! `testdata/corpus`, each page compared as [`super`] compares a case's.
+//! Real documents: those `testdata/corpus/fetched.tsv` lists, which
+//! `scripts/pdf/fetch-corpus.py` fetches into the directory
+//! `ELIDE_PDF_CORPUS` names, and those generated into `testdata/corpus`,
+//! each page compared as [`super`] compares a case's.
 //!
 //! A document or page the codec doesn't read from its text layer (one it
 //! can't open or rebuild, or whose text it refuses or can't place, which it
 //! redacts from its render instead) is passed over and counted, as is a
-//! glyph placed alike but read unlike.
+//! glyph placed alike but read unlike. One PDFium can't read fails, and so
+//! does a fetched corpus none of whose pages is compared.
 
 use std::path::{Path, PathBuf};
 use std::{env, fs};
@@ -18,6 +20,10 @@ use crate::pdf::Pdf;
 
 /// The variable naming the directory the fetched corpus is in.
 const CORPUS: &str = "ELIDE_PDF_CORPUS";
+
+/// The fetched corpus's manifest: a line per document, its name first, and
+/// `#` lines of comment.
+const FETCHED: &str = include_str!("../../../../testdata/corpus/fetched.tsv");
 
 /// The most disagreements reported of one page.
 const MAX_REPORTED: usize = 5;
@@ -35,14 +41,34 @@ struct Outcome {
     readings: Vec<(u32, String)>,
 }
 
-/// Compare every page of the document `bytes`; `Err` with why when the
-/// codec doesn't read it from its text layer.
-fn document(bytes: &[u8]) -> Result<Outcome, String> {
-    let source = Pdf::open(bytes).map_err(|e| format!("it can't be opened: {e}"))?;
-    let rebuilt = rebuilt(&source)?;
-    let blocks = rebuilt
-        .read(Text)
-        .map_err(|e| format!("the reader refuses it: {e}"))?;
+/// How one document was read.
+enum Reading {
+    /// The codec doesn't read it from its text layer, and why.
+    Unread(String),
+    /// What comparing its pages came to.
+    Compared(Outcome),
+}
+
+/// Compare every page of the document `bytes`, unless the codec doesn't
+/// read it from its text layer.
+///
+/// # Errors
+///
+/// Why it can't be compared: PDFium can't read it, or reads fewer pages.
+fn document(bytes: &[u8]) -> Result<Reading, String> {
+    let unread = |why: String| Ok(Reading::Unread(why));
+    let source = match Pdf::open(bytes) {
+        Ok(source) => source,
+        Err(e) => return unread(format!("it can't be opened: {e}")),
+    };
+    let rebuilt = match rebuilt(&source) {
+        Ok(rebuilt) => rebuilt,
+        Err(why) => return unread(why),
+    };
+    let blocks = match rebuilt.read(Text) {
+        Ok(blocks) => blocks,
+        Err(e) => return unread(format!("the reader refuses it: {e}")),
+    };
     let rebuilt_pages = theirs(&rebuilt)?;
     let source_pages = if widths_alike(source.doc()) && reads_programs(source.doc()) {
         Some(theirs(&source)?)
@@ -85,7 +111,34 @@ fn document(bytes: &[u8]) -> Result<Outcome, String> {
             outcome.errors.push((page, format!("and {more} more")));
         }
     }
-    Ok(outcome)
+    Ok(Reading::Compared(outcome))
+}
+
+/// The documents [`FETCHED`] lists, in `dir`.
+///
+/// # Panics
+///
+/// If one isn't there: the fetch script fetches them.
+fn fetched(dir: &Path) -> Vec<PathBuf> {
+    let listed: Vec<PathBuf> = FETCHED
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split('\t').next())
+        .map(|name| dir.join(name))
+        .collect();
+    let missing: Vec<String> = listed
+        .iter()
+        .filter(|path| !path.is_file())
+        .map(|path| path.display().to_string())
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "run scripts/pdf/fetch-corpus.py: {CORPUS} lacks {} of the {} documents, {} among them",
+        missing.len(),
+        listed.len(),
+        missing[..missing.len().min(3)].join(", ")
+    );
+    listed
 }
 
 /// The PDF files under `dir`, by path.
@@ -118,31 +171,35 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 fn documents_are_placed_as_pdfium_places_them() {
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     // A relative path is the workspace's, where the fetch script writes.
-    let Some(fetched) = env::var_os(CORPUS) else {
+    let Some(dir) = env::var_os(CORPUS) else {
         panic!("{CORPUS} names no directory: run scripts/pdf/fetch-corpus.py");
     };
-    let fetched = crate_dir.join("../..").join(fetched);
-    let fetched = files(&fetched);
-    assert!(
-        !fetched.is_empty(),
-        "{CORPUS} names a directory with no PDF: run scripts/pdf/fetch-corpus.py"
-    );
-    let generated = crate_dir.join("testdata/corpus");
+    let fetched = fetched(&crate_dir.join("../..").join(dir));
+    let generated = files(&crate_dir.join("testdata/corpus"));
+    let fetched_count = fetched.len();
     let (mut documents, mut compared, mut passed_over, mut read_unlike) = (0, 0, 0, 0);
+    let mut fetched_compared = 0;
     let mut report = Vec::new();
     let mut failures = Vec::new();
-    for path in [fetched, files(&generated)].concat() {
+    for (index, path) in [fetched, generated].concat().into_iter().enumerate() {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let bytes = fs::read(&path).unwrap();
         documents += 1;
         let outcome = match document(&bytes) {
-            Ok(outcome) => outcome,
-            Err(why) => {
+            Ok(Reading::Compared(outcome)) => outcome,
+            Ok(Reading::Unread(why)) => {
                 report.push(format!("{name}: passed over: {why}"));
+                continue;
+            }
+            Err(why) => {
+                failures.push(format!("{name}: {why}"));
                 continue;
             }
         };
         compared += outcome.compared;
+        if index < fetched_count {
+            fetched_compared += outcome.compared;
+        }
         read_unlike += outcome.readings.len();
         for (page, reading) in &outcome.readings {
             report.push(format!("{name} p{page}: read unlike: {reading}"));
@@ -164,4 +221,8 @@ fn documents_are_placed_as_pdfium_places_them() {
         report.join("\n")
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert!(
+        fetched_compared > 0,
+        "no page of the fetched corpus was compared"
+    );
 }
