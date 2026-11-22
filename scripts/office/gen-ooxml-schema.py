@@ -16,9 +16,13 @@ where `<schemas>` holds:
 - `ISO-IEC29500-4_2016/`: the transitional schemas of ISO/IEC 29500-4:2016
   (ECMA-376 Part 4), `wml.xsd`, `sml.xsd`, `pml.xsd`, `dml-*.xsd`,
   `vml-*.xsd`, and `shared-*.xsd`;
-- `microsoft/`: the WordprocessingML extension schemas of [MS-DOCX]
-  (`wml-2010.xsd`, `wml-2012.xsd`, ...), whose parts (comment extensions,
-  people) have roots of their own.
+- `microsoft/`: the extension schemas whose parts have roots of their own:
+  [MS-DOCX]'s WordprocessingML ones (`wml-2010.xsd`, `wml-2012.xsd`, ...:
+  comment extensions, people); [MS-ODRAWXML]'s chart styles, modern charts,
+  and SmartArt drawing; [MS-XLSX]'s threaded comments and people; and
+  [MS-PPTX]'s modern comments and authors, each with the schemas it imports
+  or references (the command schemas that name a comment's anchor among
+  them). Microsoft publishes these in each specification's appendix A.
 
 Markup compatibility (`mc:AlternateContent`) is resolved by the rebuild itself,
 so its schema is not read. A wildcard (`xsd:any`) that names its namespaces
@@ -26,7 +30,9 @@ so its schema is not read. A wildcard (`xsd:any`) that names its namespaces
 to any namespace allows nothing, what it would admit being outside the schema,
 except `a:graphicData`, whose standard payloads (`PAYLOADS`) are listed here.
 `xml:space` is allowed on every element that holds text: the schemas leave it
-off SpreadsheetML's strings, where Excel writes it.
+off SpreadsheetML's strings, where Excel writes it. The moniker lists that
+anchor a modern comment are wildcards whose content an ABNF grammar gives
+(`MONIKERS`), so the monikers each grammar names are listed here.
 """
 
 import sys
@@ -37,6 +43,8 @@ XSD = "{http://www.w3.org/2001/XMLSchema}"
 MCE = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 XML = "http://www.w3.org/XML/1998/namespace"
 A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+SHARED = "http://schemas.openxmlformats.org/officeDocument/2006/sharedTypes"
 OUT = Path(__file__).resolve().parents[2] / "crates/elide-office/src/opc/schema/table.rs"
 
 # The standard payloads of `a:graphicData`, whose schema admits any element:
@@ -50,6 +58,38 @@ PAYLOADS = [
     ("http://schemas.openxmlformats.org/presentationml/2006/main", "oleObj"),
 ]
 
+# The content monikers that anchor a PowerPoint modern comment: [MS-PPTX] and
+# [MS-ODRAWXML] declare each moniker list as a wildcard and give its content
+# as an ABNF grammar instead, so the monikers each grammar names are listed
+# here, with their types.
+PC = "http://schemas.microsoft.com/office/powerpoint/2013/main/command"
+AC = "http://schemas.microsoft.com/office/drawing/2013/main/command"
+# DOCUMENTMONIKERLIST, and the slide base it leads to (SLIDEBASEMONIKERLIST:
+# a slide master, a layout, or a slide).
+SLIDE_BASE = [
+    (PC, "docMk", "CT_DocumentMoniker"),
+    (PC, "sldMasterMk", "CT_MainMasterMoniker"),
+    (PC, "sldLayoutMk", "CT_SlideLayoutMoniker"),
+    (PC, "sldMk", "CT_SlideMoniker"),
+]
+SHAPE = [(AC, "spMk", "CT_ShapeMoniker")]
+MONIKERS = {
+    # SLIDEMONIKERLIST = DOCUMENTMONIKERLIST SLIDEMONIKER
+    (PC, "CT_SlideMonikerList"): [SLIDE_BASE[0], SLIDE_BASE[3]],
+    # DRAWINGELEMENTMONIKERLIST = DRAWINGMONIKERLIST DRAWINGELEMENTMONIKER
+    (AC, "CT_DrawingElementMonikerList"): SLIDE_BASE + SHAPE + [
+        (AC, "grpSpMk", "CT_GroupShapeMoniker"),
+        (AC, "graphicFrameMk", "CT_GraphicFrameMoniker"),
+        (AC, "cxnSpMk", "CT_ConnectorMoniker"),
+        (AC, "picMk", "CT_PictureMoniker"),
+        (AC, "inkMk", "CT_InkMoniker"),
+    ],
+    # TEXTCHARRANGEMONIKERLIST = DRAWINGMONIKERLIST (SHAPEMONIKER / ac:txMk)
+    (AC, "CT_TextCharRangeMonikerList"): SLIDE_BASE + SHAPE + [
+        (AC, "txMk", "CT_TextCharRangeMoniker"),
+    ],
+}
+
 # Roots the Rust dispatch names, which a complete schema set defines.
 REQUIRED_ROOTS = [
     ("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "document"),
@@ -61,6 +101,14 @@ REQUIRED_ROOTS = [
     ("http://schemas.microsoft.com/office/word/2012/wordml", "people"),
     ("http://schemas.microsoft.com/office/word/2016/wordml/cid", "commentsIds"),
     ("http://schemas.microsoft.com/office/word/2018/wordml/cex", "commentsExtensible"),
+    ("http://schemas.microsoft.com/office/drawing/2014/chartex", "chartSpace"),
+    ("http://schemas.microsoft.com/office/drawing/2012/chartStyle", "chartStyle"),
+    ("http://schemas.microsoft.com/office/drawing/2012/chartStyle", "colorStyle"),
+    ("http://schemas.microsoft.com/office/drawing/2008/diagram", "drawing"),
+    ("http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments", "ThreadedComments"),
+    ("http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments", "personList"),
+    ("http://schemas.microsoft.com/office/powerpoint/2018/8/main", "cmLst"),
+    ("http://schemas.microsoft.com/office/powerpoint/2018/8/main", "authorLst"),
 ]
 
 
@@ -80,8 +128,10 @@ class Schema:
         self.attributes_qualified = self.root.get("attributeFormDefault") == "qualified"
 
     def qname(self, value):
-        """The (namespace, local) a QName attribute value names."""
-        prefix, _, local = value.rpartition(":")
+        """The (namespace, local) a QName attribute value names. A QName's
+        whitespace collapses, as XSD reads it: [MS-ODRAWXML] writes one type
+        name with a trailing space."""
+        prefix, _, local = value.strip().rpartition(":")
         return (self.prefixes.get(prefix, ""), local)
 
 
@@ -114,6 +164,11 @@ class Generator:
                     self.groups[key] = (schema, node)
                 elif tag == XSD + "attributeGroup":
                     self.attribute_groups[key] = (schema, node)
+        # [MS-XLSX] names `x:ST_Xstring`, where the first edition of ECMA-376
+        # declared it; ISO/IEC 29500 moved it to the shared types.
+        moved = (SML, "ST_Xstring")
+        if moved not in self.simple and (SHARED, "ST_Xstring") in self.simple:
+            self.simple[moved] = self.simple[(SHARED, "ST_Xstring")]
         # Resolved types, by key: {"text", "wildcard", "attributes", "children"}.
         self.types = {}
         self.anonymous = 0
@@ -140,6 +195,14 @@ class Generator:
             return key
         self.simple_type(name)
         return "text"
+
+    def complex_type(self, name):
+        """The type key of the complex type `name`, resolved."""
+        key = ("ct",) + name
+        if key not in self.types:
+            owner, ct = self.complex[name]
+            self.resolve(key, owner, ct)
+        return key
 
     def simple_type(self, name):
         """Check that `name` is a simple type, which holds text: a builtin or
@@ -274,6 +337,13 @@ class Generator:
             graphic_data["children"][name] = roots[name]
         graphic_data["wildcard"] = False
 
+        # The monikers each moniker list holds.
+        for name, monikers in MONIKERS.items():
+            moniker_list = self.types[("ct",) + name]
+            for ns, local, ty in monikers:
+                moniker_list["children"][(ns, local)] = self.complex_type((ns, ty))
+            moniker_list["wildcard"] = False
+
         # `xml:space` on every element holding text.
         for t in self.types.values():
             if t["text"]:
@@ -347,7 +417,8 @@ class Generator:
         out = []
         w = out.append
         w("// @generated by scripts/office/gen-ooxml-schema.py from the ISO/IEC 29500-4:2016")
-        w("// transitional schemas and the [MS-DOCX] extension schemas. Do not edit.")
+        w("// transitional schemas and the [MS-DOCX], [MS-ODRAWXML], [MS-XLSX], and")
+        w("// [MS-PPTX] extension schemas. Do not edit.")
         w("")
         w("use super::{Child, Type};")
         w("")
@@ -358,14 +429,15 @@ class Generator:
         w("];")
         w("")
         w("/// Every element type, by index; 0 holds text alone, with `xml:space`.")
+        w("/// Each is `ty!([flags] [attributes] [children])`: `text` and `wildcard` when")
+        w("/// set, each attribute `(namespace, local)`, and each child")
+        w("/// `(namespace, local, type)`.")
         w(f"pub(super) static TYPES: [Type; {len(types)}] = [")
         for text, wildcard, attributes, children in types:
+            flags = "".join(f"{flag} " for flag, on in (("text", text), ("wildcard", wildcard)) if on)
             attrs = ", ".join(f'({n}, "{l}")' for n, l in attributes)
-            kids = ", ".join(f'Child({n}, "{l}", {c})' for n, l, c in children)
-            w(
-                f"    Type {{ text: {str(text).lower()}, wildcard: {str(wildcard).lower()}, "
-                f"attributes: &[{attrs}], children: &[{kids}] }},"
-            )
+            kids = ", ".join(f'({n}, "{l}", {c})' for n, l, c in children)
+            w(f"    ty!({flags}[{attrs}] [{kids}]),")
         w("];")
         w("")
         w("/// The elements a part may have as its root, with their types.")

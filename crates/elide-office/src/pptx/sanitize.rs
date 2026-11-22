@@ -78,10 +78,11 @@ mod tests {
     use crate::opc::xml::ns::P;
     use crate::text_package::OoxmlPackage;
 
-    /// A modern comment and its authors, whose schema this crate does not
-    /// hold.
+    /// A modern comment and its authors, rebuilt from [MS-PPTX]'s schema:
+    /// kept and read when comments are scanned, its dates dropped or made
+    /// neutral, and removed when they are not.
     #[test]
-    fn modern_comments_go_under_every_policy() {
+    fn modern_comments_are_read_when_scanned() {
         const P188: &str = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
         const PC: &str = "http://schemas.microsoft.com/office/powerpoint/2013/main/command";
         let presentation = format!(r#"<?xml version="1.0"?><p:presentation xmlns:p="{P}"/>"#);
@@ -109,26 +110,46 @@ mod tests {
             ),
         ]);
         let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
+        let Sanitized { bytes: out, .. } = sanitize(&package, policy, &SlideFormat).unwrap();
+        let out = out.unwrap();
+        let comments = read_text_part(&out, "ppt/comments/modernComment1.xml");
+        assert!(
+            comments.contains(
+                r#"<pc:sldMkLst><pc:docMk/><pc:sldMk cId="1" sldId="256"/></pc:sldMkLst>"#
+            ),
+            "{comments}"
+        );
+        assert!(!comments.contains("startDate"), "{comments}");
+        assert!(!comments.contains("2024-01-0"), "{comments}");
+        crate::opc::check::check(&out, policy, &SlideFormat).unwrap();
+        let texts = OoxmlPackage::<SlideFormat>::open(&out)
+            .unwrap()
+            .extract()
+            .texts();
+        for text in [
+            "check",
+            "done",
+            "For Jane Roe",
+            "Jane Roe",
+            "JR",
+            "jane@example.com",
+        ] {
+            assert!(texts.iter().any(|t| t == text), "{text}: {texts:?}");
+        }
+
+        let policy = HiddenContentPolicy::default();
         let Sanitized {
             bytes: out,
             stripped,
         } = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
-        // No schema describes a modern comment or its authors, so neither
-        // can be rebuilt, and both go.
         let names = part_names(&out);
+        assert_eq!(names, ["[Content_Types].xml", "ppt/presentation.xml"]);
         assert!(
-            !names
+            stripped
                 .iter()
-                .any(|name| name.contains("omment") || name.contains("authors")),
-            "{names:?}"
+                .all(|entry| entry.content != HiddenContent::ApplicationData)
         );
-        let removed: usize = stripped
-            .iter()
-            .filter(|entry| entry.content == HiddenContent::ApplicationData)
-            .map(|entry| entry.count)
-            .sum();
-        assert_eq!(removed, 2);
         crate::opc::check::check(&out, policy, &SlideFormat).unwrap();
     }
 

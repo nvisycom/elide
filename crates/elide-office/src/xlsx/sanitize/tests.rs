@@ -49,8 +49,11 @@ fn count(stripped: &elide_codec::StrippedContent, content: HiddenContent) -> usi
         .sum()
 }
 
+/// A threaded comment and its people, rebuilt from [MS-XLSX]'s schema: kept
+/// and read when comments are scanned, its date and mentions dropped, and
+/// removed when they are not.
 #[test]
-fn threaded_comments_go_under_every_policy() {
+fn threaded_comments_are_read_when_scanned() {
     let workbook = format!(r#"<?xml version="1.0"?><workbook xmlns="{X}"/>"#);
     let comments = format!(
         r#"<?xml version="1.0"?><ThreadedComments xmlns="{THREADED}"><threadedComment ref="A1" dT="2024-01-02T03:04:05.00" personId="{{P}}" id="{{C}}"><text>@Jane Roe please check</text><mentions><mention mentionpersonId="{{P}}" mentionId="{{M}}" startIndex="0" length="9"/></mentions></threadedComment></ThreadedComments>"#
@@ -76,21 +79,27 @@ fn threaded_comments_go_under_every_policy() {
         ),
     ]);
     let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
+    let Sanitized { bytes: out, .. } = sanitize(&package, policy, &SheetFormat).unwrap();
+    let out = out.unwrap();
+    let comments = read_text_part(&out, "xl/threadedComments/threadedComment1.xml");
+    assert!(
+        comments.contains("<text>@Jane Roe please check</text>"),
+        "{comments}"
+    );
+    assert!(!comments.contains("dT="), "{comments}");
+    assert!(!comments.contains("mention"), "{comments}");
+    let persons = read_text_part(&out, "xl/persons/person.xml");
+    assert!(persons.contains(r#"displayName="Jane Roe""#), "{persons}");
+    crate::opc::check::check(&out, policy, &SheetFormat).unwrap();
+
+    let policy = HiddenContentPolicy::default();
     let Sanitized {
         bytes: out,
         stripped,
     } = sanitize(&package, policy, &SheetFormat).unwrap();
     let out = out.unwrap();
-    // No schema describes a threaded comment or its people, so neither
-    // can be rebuilt, and both go.
-    let names = part_names(&out);
-    assert!(
-        !names
-            .iter()
-            .any(|name| name.contains("threaded") || name.contains("person")),
-        "{names:?}"
-    );
-    assert_eq!(count(&stripped, HiddenContent::ApplicationData), 2);
+    assert_eq!(part_names(&out), ["[Content_Types].xml", "xl/workbook.xml"]);
+    assert_eq!(count(&stripped, HiddenContent::ApplicationData), 0);
     crate::opc::check::check(&out, policy, &SheetFormat).unwrap();
 }
 

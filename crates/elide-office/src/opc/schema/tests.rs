@@ -392,3 +392,41 @@ fn a_namespace_written_with_a_reference_is_read_decoded() {
     );
     assert_eq!(removed, [(HiddenContent::ApplicationData, 1)]);
 }
+
+/// The newer Microsoft parts each read against their own schema: a modern
+/// chart, a chart style and color style, and a SmartArt drawing, written as
+/// Office writes them, pass unchanged.
+#[test]
+fn the_newer_microsoft_parts_pass_unchanged() {
+    let element = |namespace, local| Root::Element { namespace, local };
+    let parts = [
+        (
+            element(CX, "chartSpace"),
+            format!(
+                r#"<cx:chartSpace xmlns:cx="{CX}" xmlns:a="{A}" xmlns:r="{R}"><cx:chartData><cx:data id="0"><cx:strDim type="cat"><cx:f>Sheet1!$A$2:$A$3</cx:f><cx:lvl ptCount="2"><cx:pt idx="0">North</cx:pt><cx:pt idx="1">South</cx:pt></cx:lvl></cx:strDim><cx:numDim type="val"><cx:f>Sheet1!$B$2:$B$3</cx:f><cx:lvl ptCount="2" formatCode="General"><cx:pt idx="0">10</cx:pt><cx:pt idx="1">-4</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData><cx:chart><cx:title pos="t" align="ctr" overlay="0"><cx:tx><cx:txData><cx:v>Sales by region</cx:v></cx:txData></cx:tx></cx:title><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="waterfall" uniqueId="{{1}}"><cx:tx><cx:txData><cx:f>Sheet1!$B$1</cx:f><cx:v>Sales</cx:v></cx:txData></cx:tx><cx:dataId val="0"/></cx:series></cx:plotAreaRegion></cx:plotArea></cx:chart></cx:chartSpace>"#
+            ),
+        ),
+        (
+            element(CS, "chartStyle"),
+            format!(
+                r#"<cs:chartStyle xmlns:cs="{CS}" xmlns:a="{A}" id="395"><cs:axisTitle><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:defRPr sz="1330"/></cs:axisTitle></cs:chartStyle>"#
+            ),
+        ),
+        (
+            element(CS, "colorStyle"),
+            format!(
+                r#"<cs:colorStyle xmlns:cs="{CS}" xmlns:a="{A}" meth="cycle" id="10"><a:schemeClr val="accent1"/><cs:variation/><cs:variation><a:lumMod val="60000"/></cs:variation></cs:colorStyle>"#
+            ),
+        ),
+        (
+            element(DSP, "drawing"),
+            format!(
+                r#"<dsp:drawing xmlns:dsp="{DSP}" xmlns:a="{A}"><dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/><dsp:sp modelId="{{1}}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr><dsp:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr><dsp:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>Jane Roe</a:t></a:r></a:p></dsp:txBody><dsp:txXfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></dsp:txXfrm></dsp:sp></dsp:spTree></dsp:drawing>"#
+            ),
+        ),
+    ];
+    for (root, raw) in parts {
+        let out = rebuild(&raw, root).unwrap();
+        assert!(out.is_none(), "{root:?}: {out:?}");
+    }
+}
