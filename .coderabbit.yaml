@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+reviews:
+  profile: assertive
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: |
+        - Comments state current behavior and invariants. Flag comments that
+          narrate a change ("no longer", "previously", "now does", "was
+          moved"); that belongs in the commit message or PR description.
+        - Flag comments that only restate what the adjacent code plainly says.
+        - Import with `use` at the top of the file and refer to bare names.
+          Flag fully qualified paths written inline in code.
+        - `error.rs` and `primitive/` are workspace layout conventions: where
+          a crate has them, they stay even when thin. Flag folding them into
+          other modules.
+        - Public items with no callers in this repository may still be used
+          by downstream crates. Don't suggest removing them for that reason.
+        - When a test disagrees with the code, the fix belongs in the code.
+          Flag tests whose assertions were loosened to pass, unless the
+          comment names the external quirk that requires it.
+    - path: "CHANGELOG.md"
+      instructions: |
+        The project is unreleased, so the changelog describes what exists
+        now. Flag change narration ("renamed", "replaced", "no longer",
+        "previously"); breaking changes are described in the PR body instead.
