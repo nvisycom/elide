@@ -217,6 +217,37 @@ mod tests {
         );
     }
 
+    /// A percent-encoded address in a link is read as whatever opens the link
+    /// reads it, and redacted over its whole raw spelling; escapes elsewhere
+    /// keep theirs.
+    #[tokio::test]
+    async fn a_percent_encoded_attribute_value_reads_decoded() {
+        let raw = concat!(
+            r#"<r><a href="mailto:jane%40example.com?subject=Hi%20there">x</a>"#,
+            r#"<a href="tel:%2B14155550142">y</a></r>"#,
+        );
+        let mut doc = load(raw);
+        redact(
+            &mut doc,
+            &[("jane@example.com", "[EMAIL]"), ("+14155550142", "[PHONE]")],
+        )
+        .await;
+        assert_eq!(
+            doc.encoded(),
+            concat!(
+                r#"<r><a href="mailto:[EMAIL]?subject=Hi%20there">x</a>"#,
+                r#"<a href="tel:[PHONE]">y</a></r>"#,
+            )
+        );
+    }
+
+    /// Text is not a URL: its `%XX` reads as written.
+    #[test]
+    fn percent_escapes_in_text_stay_as_written() {
+        let mut doc = load("<r>jane%40example.com</r>");
+        chunk_where(&mut doc, |text| text == "jane%40example.com");
+    }
+
     #[test]
     fn encode_unchanged_round_trips_verbatim() {
         let raw = "<?xml version=\"1.0\"?>\n<root attr=\"x\">\n  <name>Alice</name>\n  <!-- note -->\n</root>\n";

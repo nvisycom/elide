@@ -18,7 +18,7 @@ mod xml;
 #[cfg(feature = "html")]
 #[cfg_attr(docsrs, doc(cfg(feature = "html")))]
 pub use self::html::format as html_format;
-pub use self::references::{CharacterReferences, decode_references};
+pub use self::references::{CharacterReferences, DecodedText, decode_references};
 #[cfg(feature = "xml")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xml")))]
 pub use self::xml::format as xml_format;

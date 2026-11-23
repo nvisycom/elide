@@ -8,6 +8,7 @@ use elide_codec::extract::{ExtractedItem, ItemEdit, OffsetMap, Passage, SourceAd
 use elide_core::modality::text::SourceRef;
 use quick_xml::escape::{escape, partial_escape};
 
+use super::percent::decode_percent;
 use crate::references::{CharacterReferences, decode_references};
 
 /// A markup [`ExtractedItem`] addressed by the source bytes its `value` was read
@@ -20,7 +21,8 @@ pub(crate) type MarkupItem = ExtractedItem<MarkupSpan>;
 /// document, and how a new value is written back there.
 ///
 /// The value is the text a reader sees: a text run's or an attribute value's
-/// character references (`&amp;`, `&#64;`, HTML's `&nbsp;`) are decoded, and
+/// character references (`&amp;`, `&#64;`, HTML's `&nbsp;`) are decoded, an
+/// attribute value's percent-encoded characters (`%40`) after them, and
 /// [`offsets`](Self::offsets) maps it back onto the raw bytes.
 ///
 /// [`ExtractedItem`]: elide_codec::extract::ExtractedItem
@@ -53,15 +55,20 @@ pub(crate) enum SpanKind {
 
 impl MarkupSpan {
     /// The span of the escaped `kind` text at `range` of `raw`, its references
-    /// decoded by `references`.
+    /// decoded by `references`, and an attribute value's percent-encoded
+    /// characters too.
     pub(crate) fn escaped(
         raw: &str,
         range: Range<usize>,
         kind: SpanKind,
         references: CharacterReferences,
     ) -> Self {
-        let (read, offsets) = decode_references(&raw[range.clone()], range.start, references);
-        Self::new(range, offsets, kind, read)
+        let read = decode_references(&raw[range.clone()], range.start, references);
+        let read = match kind {
+            SpanKind::Attribute => decode_percent(read),
+            SpanKind::Text | SpanKind::Verbatim => read,
+        };
+        Self::new(range, read.offsets, kind, read.text)
     }
 
     /// The span of the verbatim text at `range` of `raw`.

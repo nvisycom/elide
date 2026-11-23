@@ -75,6 +75,26 @@ impl CharacterReferences {
     }
 }
 
+/// A text read from its escaped spelling, and the map back to the source
+/// bytes it was read from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedText {
+    /// The text as read.
+    pub text: String,
+    /// The map from [`text`](Self::text) back to the source bytes.
+    pub offsets: OffsetMap,
+}
+
+/// A stretch of escaped text read as other text: a character reference, or a
+/// percent-encoded character.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Token {
+    /// The range of the escaped text it spans.
+    pub(crate) range: Range<usize>,
+    /// The text it reads as.
+    pub(crate) text: String,
+}
+
 /// Decode the escaped text `raw`, with the map back to its source bytes.
 ///
 /// `raw`'s first byte sits at `base` in its source; the map translates decoded
@@ -83,31 +103,39 @@ impl CharacterReferences {
 /// Character references decode by `rules`. A reference that does not decode
 /// (an unknown name, a code that is no character, a `&` that starts no
 /// reference) stays as written, as text.
-pub fn decode_references(
+pub fn decode_references(raw: &str, base: usize, rules: CharacterReferences) -> DecodedText {
+    decode_tokens(raw, base, references(raw, rules))
+}
+
+/// `raw` with each of its `tokens`, in order, read as its text, with the map
+/// back to its source bytes, each token an atomic run.
+///
+/// `raw`'s first byte sits at `base` in its source.
+pub(crate) fn decode_tokens(
     raw: &str,
     base: usize,
-    rules: CharacterReferences,
-) -> (String, OffsetMap) {
+    tokens: impl IntoIterator<Item = Token>,
+) -> DecodedText {
     let mut decoded = String::with_capacity(raw.len());
     let mut runs = Vec::new();
-    // `copied` is the raw offset past the last reference.
+    // `copied` is the raw offset past the last token.
     let mut copied = 0;
-    for (reference, text) in references(raw, rules) {
-        if copied < reference.start {
+    for Token { range: token, text } in tokens {
+        if copied < token.start {
             let start = decoded.len();
-            decoded.push_str(&raw[copied..reference.start]);
+            decoded.push_str(&raw[copied..token.start]);
             runs.push(OffsetRun::identity(
                 start..decoded.len(),
-                base + copied..base + reference.start,
+                base + copied..base + token.start,
             ));
         }
         let start = decoded.len();
         decoded.push_str(&text);
         runs.push(OffsetRun::entity(
             start..decoded.len(),
-            base + reference.start..base + reference.end,
+            base + token.start..base + token.end,
         ));
-        copied = reference.end;
+        copied = token.end;
     }
     if copied < raw.len() {
         let start = decoded.len();
@@ -117,7 +145,10 @@ pub fn decode_references(
             base + copied..base + raw.len(),
         ));
     }
-    (decoded, OffsetMap::new(runs))
+    DecodedText {
+        text: decoded,
+        offsets: OffsetMap::new(runs),
+    }
 }
 
 /// The escaped text `raw` decoded by `rules`, as [`decode_references`]
@@ -126,7 +157,11 @@ pub fn decode_references(
 pub(crate) fn decoded(raw: &str, rules: CharacterReferences) -> String {
     let mut decoded = String::with_capacity(raw.len());
     let mut copied = 0;
-    for (reference, text) in references(raw, rules) {
+    for Token {
+        range: reference,
+        text,
+    } in references(raw, rules)
+    {
         decoded.push_str(&raw[copied..reference.start]);
         decoded.push_str(&text);
         copied = reference.end;
@@ -135,19 +170,19 @@ pub(crate) fn decoded(raw: &str, rules: CharacterReferences) -> String {
     decoded
 }
 
-/// Each character reference of `raw` that decodes by `rules`, in order: the
-/// range it spans in `raw`, from its `&`, and the text it stands for.
-fn references(
-    raw: &str,
-    rules: CharacterReferences,
-) -> impl Iterator<Item = (Range<usize>, String)> + '_ {
+/// Each character reference of `raw` that decodes by `rules`, in order, its
+/// range from its `&`.
+fn references(raw: &str, rules: CharacterReferences) -> impl Iterator<Item = Token> + '_ {
     let mut at = 0;
     std::iter::from_fn(move || {
         while let Some(amp) = raw[at..].find('&').map(|i| at + i) {
             at = amp + 1;
             if let Some((text, len)) = rules.decode(&raw[at..]) {
                 at += len;
-                return Some((amp..at, text));
+                return Some(Token {
+                    range: amp..at,
+                    text,
+                });
             }
         }
         None
@@ -219,18 +254,22 @@ mod tests {
 
     #[test]
     fn a_named_reference_decodes_to_an_atomic_run_between_identity_runs() {
-        let (decoded, map) = decode_references("Alice &amp; Bob", 100, CharacterReferences::Xml);
-        assert_eq!(decoded, "Alice & Bob");
-        assert_eq!(map, alice_amp_bob());
+        assert_eq!(
+            decode_references("Alice &amp; Bob", 100, CharacterReferences::Xml),
+            DecodedText {
+                text: "Alice & Bob".into(),
+                offsets: alice_amp_bob(),
+            }
+        );
     }
 
     #[test]
     fn numeric_references_decode_in_either_dialect() {
         for rules in [CharacterReferences::Xml, CharacterReferences::Html] {
-            let (decoded, map) = decode_references("A&#46;B&#x40;C", 0, rules);
-            assert_eq!(decoded, "A.B@C");
-            assert_eq!(map.raw_ranges(1..2), vec![1..6]);
-            assert_eq!(map.raw_ranges(0..5), vec![0..14]);
+            let DecodedText { text, offsets } = decode_references("A&#46;B&#x40;C", 0, rules);
+            assert_eq!(text, "A.B@C");
+            assert_eq!(offsets.raw_ranges(1..2), vec![1..6]);
+            assert_eq!(offsets.raw_ranges(0..5), vec![0..14]);
         }
     }
 
@@ -244,17 +283,23 @@ mod tests {
             "&#0; x",
             "&#58x",
         ] {
-            let (decoded, map) = decode_references(raw, 0, CharacterReferences::Xml);
-            assert_eq!(decoded, raw);
-            assert_eq!(map, OffsetMap::identity(0, raw.len()));
+            assert_eq!(
+                decode_references(raw, 0, CharacterReferences::Xml),
+                DecodedText {
+                    text: raw.into(),
+                    offsets: OffsetMap::identity(0, raw.len()),
+                }
+            );
         }
     }
 
     #[test]
     fn a_name_longer_than_any_reference_stays_as_text() {
         let raw = format!("&{};", "a".repeat(LONGEST_NAME + 1));
-        let (decoded, _) = decode_references(&raw, 0, CharacterReferences::Xml);
-        assert_eq!(decoded, raw);
+        assert_eq!(
+            decode_references(&raw, 0, CharacterReferences::Xml).text,
+            raw
+        );
     }
 
     #[cfg(feature = "xml")]
@@ -269,7 +314,7 @@ mod tests {
             "",
         ] {
             for rules in [CharacterReferences::Xml, CharacterReferences::Html] {
-                assert_eq!(decoded(raw, rules), decode_references(raw, 0, rules).0);
+                assert_eq!(decoded(raw, rules), decode_references(raw, 0, rules).text);
             }
         }
     }
@@ -278,7 +323,7 @@ mod tests {
     #[test]
     fn html_reads_references_as_a_browser_does() {
         let rules = CharacterReferences::Html;
-        let decode = |raw| decode_references(raw, 0, rules).0;
+        let decode = |raw| decode_references(raw, 0, rules).text;
         assert_eq!(decode("javascript&colon;x"), "javascript:x");
         assert_eq!(decode("jav&Tab;ascript:x"), "jav\tascript:x");
         // A numeric reference may omit its `;`.

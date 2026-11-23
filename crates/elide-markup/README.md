@@ -11,8 +11,9 @@ HTML and XML differ in their parser and serializer but share the same
 redactable units (text runs, attribute values, comments) and the same
 bookkeeping. One engine reads both over `elide-codec`'s extract engine
 (`ExtractedItem`, `ExtractStream`, `SourceAddresser`): it splits a document into
-passages a reader takes in as one, decodes their character references so
-detection reads what a reader sees, and writes back only the stretch of each
+passages a reader takes in as one, decodes their character references (and an
+attribute value's percent-encoded characters, as in `mailto:jane%40example.com`)
+so detection reads what a reader sees, and writes back only the stretch of each
 value a redaction changed, escaped for where it lands. Everything outside a
 redaction stays byte-identical.
 
