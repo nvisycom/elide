@@ -473,6 +473,27 @@ mod tests {
         );
     }
 
+    /// A glyph straddling the gap between two regions painting its tile
+    /// shows in each, apart: a box per region, neither over the gap the
+    /// pattern does not paint.
+    #[test]
+    fn a_glyph_between_regions_shows_in_each_apart() {
+        let block = tiled_block(b"/Pattern cs /P0 scn 0 0 9 20 re f 11 0 39 20 re f");
+        let straddling: Vec<DeviceRect> = block
+            .rects
+            .iter()
+            .filter(|glyph| glyph.chars == (1..2))
+            .filter_map(GlyphRect::visible)
+            .collect();
+        assert_eq!(straddling.len(), 2, "{straddling:?}");
+        for rect in visible(&block) {
+            assert!(
+                rect.max_x <= 9.0 || rect.min_x >= 11.0,
+                "a box spans the gap: {rect:?}"
+            );
+        }
+    }
+
     /// A region painted twice places its tiles once, so painting over the
     /// same tiles again is not charged again.
     #[test]
@@ -1056,13 +1077,13 @@ mod tests {
         }
     }
 
-    /// A box moves with its text but keeps to the clip it was drawn under:
-    /// covered text a clip hid, moved into the clip by a removal before it,
-    /// gets the part of a box the clip shows, and covered text moved past the
-    /// clip's edge loses the part beyond it.
+    /// A box moves with its text but keeps to the clip it was drawn under,
+    /// and marks only text that showed: covered text moved past the clip's
+    /// edge loses the part beyond it, and covered text a clip hid draws no
+    /// box, even moved into the clip by a removal before it.
     #[test]
     fn a_moved_box_keeps_to_its_clip() {
-        let box_x = |clip: &[u8]| {
+        let drawn = |clip: &[u8]| {
             let content = [clip, b" BT /F1 20 Tf 10 50 Td (AB) Tj ET"].concat();
             let (_, out, _) = covered(
                 &content,
@@ -1071,17 +1092,16 @@ mod tests {
                     Detection::new(1, 1..2).covering(Color::BLACK),
                 ],
             );
-            let drawn = boxes(&out, 1);
-            assert_eq!(drawn.len(), 1, "{drawn:?}");
-            (drawn[0][0], drawn[0][2])
+            boxes(&out, 1)
         };
-        let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
-        // Hidden past x = 20, "B" moves to 10 and shows up to the clip.
-        let (min, max) = box_x(b"0 0 20 100 re W n");
-        assert!(near(min, 10.0) && near(max, 20.0), "{min} {max}");
         // Shown from x = 20, "B" moves to 10 but shows only from the clip.
-        let (min, max) = box_x(b"20 0 280 100 re W n");
-        assert!(near(min, 20.0) && max < 24.0, "{min} {max}");
+        let shown = drawn(b"20 0 280 100 re W n");
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        let (min, max) = (shown[0][0], shown[0][2]);
+        assert!((min - 20.0).abs() < 1e-3 && max < 24.0, "{min} {max}");
+        // Hidden past x = 20, "B" moves to 10, under the clip, unboxed.
+        let hidden = drawn(b"0 0 20 100 re W n");
+        assert!(hidden.is_empty(), "{hidden:?}");
     }
 
     /// A removal on another line moves nothing on this one: a line starts

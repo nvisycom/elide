@@ -264,10 +264,13 @@ fn check_boundaries(
             else {
                 continue;
             };
+            // The cuts are sorted and apart, so only the first ending past
+            // the glyph's start can overlap it without matching it.
             let drawn = &glyph.bytes;
-            let splits = cuts.iter().any(|cut| {
-                cut.bytes.start < drawn.end && drawn.start < cut.bytes.end && cut.bytes != *drawn
-            });
+            let first = cuts.partition_point(|cut| cut.bytes.end <= drawn.start);
+            let splits = cuts
+                .get(first)
+                .is_some_and(|cut| cut.bytes.start < drawn.end && cut.bytes != *drawn);
             if splits {
                 let address = glyph.address;
                 return Err(Error::redaction(format!(
@@ -501,7 +504,8 @@ fn draw_covers(
 /// The glyph boxes of `block`, read from `pristine`, each `covered` glyph's
 /// moved as far as the text before it on its line moves: back by each glyph
 /// `removed` and each kern `zeroed` there, as they close up, through the
-/// transform each copy of it is drawn with.
+/// transform each copy of it is drawn with. A copy its clip hid stays put,
+/// hidden: a box marks only text that showed.
 ///
 /// # Errors
 ///
@@ -538,8 +542,8 @@ fn moved_rects(
         .rects
         .iter()
         .map(|rect| match moves.get(&rect.chars.start) {
-            Some(&advance) => rect.moved(advance),
-            None => rect.clone(),
+            Some(&advance) if rect.visible().is_some() => rect.moved(advance),
+            _ => rect.clone(),
         })
         .collect())
 }
