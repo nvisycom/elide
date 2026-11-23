@@ -119,11 +119,17 @@ impl DataReader<Text> for TxtHandler {
 #[async_trait::async_trait]
 impl DataWriter<Text> for TxtHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
-        // Apply right-to-left so each edit's length delta doesn't invalidate
-        // earlier locations: sort ascending by position, then walk in reverse.
+        // Check every span against the text before any edit, so a batch that
+        // fails changes nothing. Then apply right-to-left so each edit's length
+        // delta doesn't invalidate earlier locations: sort ascending by
+        // position, then walk in reverse.
         let spans = redactions
             .iter()
-            .map(|(location, _)| span(location).cloned())
+            .map(|(location, _)| {
+                let span = span(location)?;
+                slice(&self.text, span)?;
+                Ok(span.clone())
+            })
             .collect::<Result<Vec<_>>>()?;
         spans.ensure_disjoint()?;
         redactions.sort_by_position();
@@ -327,6 +333,28 @@ mod tests {
         .await?;
         assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
         Ok(())
+    }
+
+    /// A batch with a span the text can't take changes nothing, even when
+    /// another of its edits, applied first, is valid.
+    #[tokio::test]
+    async fn a_failed_batch_leaves_the_text_as_it_was() {
+        let src = "Jané Roe and Joe";
+        let mut h = handler(src);
+        let end = src.len();
+        let err = h
+            .write_at(Redactions::from([
+                // Splits `é`.
+                (TextLocation::inline(0..4), TextReplacement::replaced("[A]")),
+                (
+                    TextLocation::inline(end - 3..end),
+                    TextReplacement::replaced("[B]"),
+                ),
+            ]))
+            .await
+            .expect_err("splits a character");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.text(), src);
     }
 
     /// After a write the blocks follow the text: each reads its paragraph as
