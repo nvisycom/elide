@@ -40,7 +40,7 @@ use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentKind;
 
 pub use self::addresser::SourceAddresser;
-pub use self::offset::{OffsetMap, OffsetRun, RunKind};
+pub use self::offset::{OffsetMap, OffsetRun, Rewrite, RunKind};
 use self::state::SpliceState;
 pub use self::stream::ExtractStream;
 

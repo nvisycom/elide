@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use elide_codec::extract::{ExtractedItem, ItemEdit, OffsetMap, Passage, SourceAddresser};
+use elide_codec::extract::{ExtractedItem, ItemEdit, OffsetMap, Passage, Rewrite, SourceAddresser};
 use elide_core::modality::text::SourceRef;
 use quick_xml::escape::{escape, partial_escape};
 
@@ -105,26 +105,7 @@ impl MarkupSpan {
     /// rewritten, widened to whole character references, so a reference the
     /// redaction did not touch keeps its spelling.
     pub(crate) fn write_back(&self, value: &str) -> Option<(Range<usize>, String)> {
-        let read = self.read.as_str();
-        if value == read {
-            return None;
-        }
-        let prefix = common_prefix(read, value);
-        let suffix = common_suffix(&read[prefix..], &value[prefix..]);
-        let mut changed = prefix..read.len() - suffix;
-        // A pure insertion covers no read text; widen it by one character so it
-        // lands on raw bytes.
-        if changed.is_empty() {
-            match read[changed.end..].chars().next() {
-                Some(next) => changed.end += next.len_utf8(),
-                None => changed.start -= read[..changed.start].chars().next_back()?.len_utf8(),
-            }
-        }
-        let raw = self.offsets.raw_ranges(changed);
-        let raw = raw.first()?.start..raw.last()?.end;
-        let decoded = self.offsets.decoded_ranges(raw.clone());
-        let decoded = decoded.first()?.start..decoded.last()?.end;
-        let text = &value[decoded.start..value.len() - (read.len() - decoded.end)];
+        let Rewrite { raw, text } = self.offsets.rewrite(&self.read, value)?;
         let text = match self.kind {
             SpanKind::Text => partial_escape(text),
             SpanKind::Attribute => escape(text),
@@ -132,26 +113,6 @@ impl MarkupSpan {
         };
         Some((raw, text.into_owned()))
     }
-}
-
-/// The byte length of the longest common prefix of `a` and `b`, on a character
-/// boundary.
-fn common_prefix(a: &str, b: &str) -> usize {
-    a.char_indices()
-        .zip(b.chars())
-        .find(|((_, x), y)| x != y)
-        .map_or(a.len().min(b.len()), |((at, _), _)| at)
-}
-
-/// The byte length of the longest common suffix of `a` and `b`, on a character
-/// boundary.
-fn common_suffix(a: &str, b: &str) -> usize {
-    a.chars()
-        .rev()
-        .zip(b.chars().rev())
-        .take_while(|(x, y)| x == y)
-        .map(|(x, _)| x.len_utf8())
-        .sum()
 }
 
 /// Maps a markup item's decoded value range to/from its raw source bytes

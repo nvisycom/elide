@@ -10,7 +10,7 @@ mod csv;
 mod json;
 #[cfg(any(feature = "txt", feature = "json", feature = "csv"))]
 mod loaded;
-#[cfg(any(feature = "txt", feature = "json", feature = "csv"))]
+#[cfg(any(feature = "txt", feature = "csv"))]
 mod slice;
 #[cfg(feature = "txt")]
 mod txt;

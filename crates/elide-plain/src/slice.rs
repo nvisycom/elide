@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-#[cfg(any(feature = "txt", feature = "json"))]
+#[cfg(feature = "txt")]
 use elide_core::modality::text::TextLocation;
 use elide_core::{Error, Result};
 
@@ -13,7 +13,7 @@ use elide_core::{Error, Result};
 /// [`MalformedInput`] for an unresolved mark, which has none.
 ///
 /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-#[cfg(any(feature = "txt", feature = "json"))]
+#[cfg(feature = "txt")]
 pub(crate) fn span(location: &TextLocation) -> Result<&Range<usize>> {
     location
         .range()
