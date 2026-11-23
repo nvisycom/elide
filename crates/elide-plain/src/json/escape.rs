@@ -28,8 +28,24 @@ pub(super) fn json_escape(s: &str) -> String {
     out
 }
 
-/// Decode the JSON string escape beginning at `bytes[0]` (which must be `\`),
-/// returning how many **source** bytes it spans and the character it denotes.
+/// One JSON string escape: how many source bytes it spans, and the character
+/// it denotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Escape {
+    /// The bytes it spans in the source, its `\` included.
+    pub(super) len: usize,
+    /// The character it denotes.
+    pub(super) character: char,
+}
+
+impl Escape {
+    /// An escape of `len` source bytes denoting `character`.
+    const fn new(len: usize, character: char) -> Self {
+        Self { len, character }
+    }
+}
+
+/// Decode the JSON string escape beginning at `bytes[0]` (which must be `\`).
 ///
 /// A simple escape (`\"`, `\\`, `\/`, `\n`, `\r`, `\t`, `\b`, `\f`) is 2 source
 /// bytes; a `\uXXXX` BMP escape is 6; a `𐀀` surrogate pair is 12.
@@ -37,16 +53,17 @@ pub(super) fn json_escape(s: &str) -> String {
 /// mismatched surrogate). The decoded `char`'s [`char::len_utf8`] is how many
 /// value bytes the escape contributes, the two lengths differ, which is why
 /// the source↔value offset mapping walks escapes through this helper.
-pub(super) fn decode_escape(bytes: &[u8]) -> Option<(usize, char)> {
+pub(super) fn decode_escape(bytes: &[u8]) -> Option<Escape> {
+    let simple = |character| Some(Escape::new(2, character));
     match bytes.get(1)? {
-        b'"' => Some((2, '"')),
-        b'\\' => Some((2, '\\')),
-        b'/' => Some((2, '/')),
-        b'n' => Some((2, '\n')),
-        b'r' => Some((2, '\r')),
-        b't' => Some((2, '\t')),
-        b'b' => Some((2, '\u{0008}')),
-        b'f' => Some((2, '\u{000c}')),
+        b'"' => simple('"'),
+        b'\\' => simple('\\'),
+        b'/' => simple('/'),
+        b'n' => simple('\n'),
+        b'r' => simple('\r'),
+        b't' => simple('\t'),
+        b'b' => simple('\u{0008}'),
+        b'f' => simple('\u{000c}'),
         b'u' => {
             let hi = hex4(bytes.get(2..6)?)?;
             // A high surrogate must be followed by `\uXXXX` low surrogate; the
@@ -60,13 +77,13 @@ pub(super) fn decode_escape(bytes: &[u8]) -> Option<(usize, char)> {
                     return None;
                 }
                 let cp = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
-                return char::from_u32(cp).map(|c| (12, c));
+                return char::from_u32(cp).map(|c| Escape::new(12, c));
             }
             // A lone low surrogate is invalid; any other value is a BMP char.
             if (0xDC00..=0xDFFF).contains(&hi) {
                 return None;
             }
-            char::from_u32(hi).map(|c| (6, c))
+            char::from_u32(hi).map(|c| Escape::new(6, c))
         }
         _ => None,
     }
@@ -90,9 +107,12 @@ mod tests {
 
     #[test]
     fn decode_escape_handles_simple_bmp_and_surrogate_pairs() {
-        assert_eq!(decode_escape(b"\\n"), Some((2, '\n')));
-        assert_eq!(decode_escape(b"\\u00e9"), Some((6, '\u{e9}')));
-        assert_eq!(decode_escape(b"\\uD83D\\uDE00"), Some((12, '\u{1F600}')));
+        assert_eq!(decode_escape(b"\\n"), Some(Escape::new(2, '\n')));
+        assert_eq!(decode_escape(b"\\u00e9"), Some(Escape::new(6, '\u{e9}')));
+        assert_eq!(
+            decode_escape(b"\\uD83D\\uDE00"),
+            Some(Escape::new(12, '\u{1F600}'))
+        );
         // Malformed: bad hex, a lone high surrogate, a lone low surrogate.
         assert_eq!(decode_escape(b"\\u00zz"), None);
         assert_eq!(decode_escape(b"\\uD83D"), None);

@@ -4,12 +4,12 @@
 
 use csv::{ReaderBuilder, StringRecord};
 use elide_codec::content::ContentData;
-use elide_codec::{Document, DocumentLoader, StrippedContent};
+use elide_codec::{Document, DocumentLoader};
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
 use super::handler::{CsvData, CsvHandler, FORMAT_ID};
-use crate::control;
+use crate::loaded::Loaded;
 
 /// Loader for delimited text. Parses with the [`csv`] crate, treating the
 /// first row as headers and auto-detecting the field delimiter unless one
@@ -32,31 +32,10 @@ impl CsvLoader {
             delimiter,
         }
     }
-}
 
-impl Default for CsvLoader {
-    fn default() -> Self {
-        Self {
-            has_headers: true,
-            delimiter: None,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DocumentLoader for CsvLoader {
-    /// Terminal control sequences are always stripped: they are undisplayed
-    /// content, which no policy chooses for.
-    async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
-        let (handler, stripped) = self.load(content)?;
-        Ok(Document::leaf(FORMAT_ID, handler).with_stripped(stripped))
-    }
-}
-
-impl CsvLoader {
     /// The handler over `content`'s rows, each cell without its terminal
-    /// control sequences, and what was stripped.
-    pub(crate) fn load(&self, content: ContentData) -> Result<(CsvHandler, StrippedContent)> {
+    /// control sequences ([`control`](crate::control)).
+    pub(crate) fn load(&self, content: ContentData) -> Result<Loaded<CsvHandler>> {
         let text = content.decode()?;
         let trailing_newline = text.ends_with('\n');
         let delimiter = self.delimiter.unwrap_or_else(|| detect_delimiter(&text));
@@ -96,8 +75,24 @@ impl CsvLoader {
             trailing_newline,
             crlf,
         };
-        let stripped = control::recorded(data.strip_controls());
-        Ok((CsvHandler::new(data), stripped))
+        let removed = data.strip_controls();
+        Ok(Loaded::new(CsvHandler::new(data), removed))
+    }
+}
+
+impl Default for CsvLoader {
+    /// A header row and an auto-detected delimiter.
+    fn default() -> Self {
+        Self::new(true, None)
+    }
+}
+
+#[async_trait::async_trait]
+impl DocumentLoader for CsvLoader {
+    /// Terminal control sequences are always stripped: they are undisplayed
+    /// content, which no policy chooses for.
+    async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
+        Ok(self.load(content)?.into_document(FORMAT_ID))
     }
 }
 

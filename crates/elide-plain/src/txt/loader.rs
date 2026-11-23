@@ -2,13 +2,14 @@
 //! sequences in it, and parses the rest into a [`TxtHandler`].
 
 use elide_codec::content::ContentData;
-use elide_codec::{Document, DocumentLoader, StrippedContent};
+use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
 use super::TxtHandler;
 use super::handler::FORMAT_ID;
-use crate::control;
+use crate::control::{self, Stripped};
+use crate::loaded::Loaded;
 
 /// Loader that validates and parses plain-text files. Produces one leaf
 /// [`Document`] per input.
@@ -17,10 +18,10 @@ pub(crate) struct TxtLoader;
 
 impl TxtLoader {
     /// The handler over `content`'s text without its terminal control
-    /// sequences ([`control`]), and what was stripped.
-    pub(crate) fn load(&self, content: ContentData) -> Result<(TxtHandler, StrippedContent)> {
-        let (text, removed) = control::strip_owned(content.decode()?);
-        Ok((TxtHandler::new(text), control::recorded(removed)))
+    /// sequences ([`control`]).
+    pub(crate) fn load(&self, content: ContentData) -> Result<Loaded<TxtHandler>> {
+        let Stripped { kept, removed } = control::strip_owned(content.decode()?);
+        Ok(Loaded::new(TxtHandler::new(kept), removed))
     }
 }
 
@@ -29,8 +30,7 @@ impl DocumentLoader for TxtLoader {
     /// Terminal control sequences are always stripped: they are undisplayed
     /// content, which no policy chooses for.
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
-        let (handler, stripped) = self.load(content)?;
-        Ok(Document::leaf(FORMAT_ID, handler).with_stripped(stripped))
+        Ok(self.load(content)?.into_document(FORMAT_ID))
     }
 }
 
@@ -45,7 +45,10 @@ mod tests {
 
     #[test]
     fn load_multiline() -> Result<()> {
-        let (doc, stripped) = TxtLoader.load(ContentData::from_text("hello\nworld\n"))?;
+        let Loaded {
+            handler: doc,
+            stripped,
+        } = TxtLoader.load(ContentData::from_text("hello\nworld\n"))?;
         assert_eq!(doc.format().as_str(), "elide.text.txt");
         // The source is held verbatim, blank lines and trailing newline included.
         assert_eq!(doc.text(), "hello\nworld\n");
@@ -55,7 +58,9 @@ mod tests {
 
     #[test]
     fn load_no_trailing_newline() -> Result<()> {
-        let (doc, _) = TxtLoader.load(ContentData::from_text("single line"))?;
+        let doc = TxtLoader
+            .load(ContentData::from_text("single line"))?
+            .handler;
         assert_eq!(doc.text(), "single line");
         Ok(())
     }
@@ -71,7 +76,10 @@ mod tests {
     /// terminal shows, and the strip is recorded.
     #[test]
     fn terminal_control_sequences_are_stripped() -> Result<()> {
-        let (doc, stripped) = TxtLoader.load(ContentData::from_text(
+        let Loaded {
+            handler: doc,
+            stripped,
+        } = TxtLoader.load(ContentData::from_text(
             "call Ja\u{1b}[mne Roe\u{1b}]0;x\u{7}\n",
         ))?;
         assert_eq!(doc.text(), "call Jane Roe\n");

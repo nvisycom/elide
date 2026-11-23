@@ -77,6 +77,17 @@ impl OffsetRun {
     }
 }
 
+/// What writing a new value over a text rewrites in its raw bytes: see
+/// [`OffsetMap::rewrite`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rewrite<'v> {
+    /// The source-absolute raw range to replace.
+    pub raw: Range<usize>,
+    /// The part of the new value written there, still decoded: the caller
+    /// escapes it for where it lands.
+    pub text: &'v str,
+}
+
 /// The decoded-to-raw byte correspondence of one text containing escapes.
 ///
 /// It is a sequence of identity stretches interleaved with atomic entity runs.
@@ -179,6 +190,34 @@ impl OffsetMap {
         self.translate(decoded, |run| &run.decoded, |run| &run.raw)
     }
 
+    /// What writing `value` over the text this map read as `read` rewrites:
+    /// `None` while `value` is as read.
+    ///
+    /// Only the stretch between the longest unchanged start and end is
+    /// rewritten, widened to whole entities, so an escape the change did not
+    /// touch keeps its spelling. A pure insertion is widened by one character
+    /// so it lands on raw bytes.
+    pub fn rewrite<'v>(&self, read: &str, value: &'v str) -> Option<Rewrite<'v>> {
+        if value == read {
+            return None;
+        }
+        let prefix = common_prefix(read, value);
+        let suffix = common_suffix(&read[prefix..], &value[prefix..]);
+        let mut changed = prefix..read.len() - suffix;
+        if changed.is_empty() {
+            match read[changed.end..].chars().next() {
+                Some(next) => changed.end += next.len_utf8(),
+                None => changed.start -= read[..changed.start].chars().next_back()?.len_utf8(),
+            }
+        }
+        let raw = self.raw_ranges(changed);
+        let raw = raw.first()?.start..raw.last()?.end;
+        let decoded = self.decoded_ranges(raw.clone());
+        let decoded = decoded.first()?.start..decoded.last()?.end;
+        let text = &value[decoded.start..value.len() - (read.len() - decoded.end)];
+        Some(Rewrite { raw, text })
+    }
+
     /// Translate a source-absolute `raw` byte range into the decoded byte
     /// range(s) it corresponds to, the inverse of
     /// [`raw_ranges`](Self::raw_ranges).
@@ -233,6 +272,26 @@ impl OffsetMap {
         }
         ranges
     }
+}
+
+/// The byte length of the longest common prefix of `a` and `b`, on a character
+/// boundary.
+fn common_prefix(a: &str, b: &str) -> usize {
+    a.char_indices()
+        .zip(b.chars())
+        .find(|((_, x), y)| x != y)
+        .map_or(a.len().min(b.len()), |((at, _), _)| at)
+}
+
+/// The byte length of the longest common suffix of `a` and `b`, on a character
+/// boundary.
+fn common_suffix(a: &str, b: &str) -> usize {
+    a.chars()
+        .rev()
+        .zip(b.chars().rev())
+        .take_while(|(x, y)| x == y)
+        .map(|(x, _)| x.len_utf8())
+        .sum()
 }
 
 #[cfg(test)]
@@ -313,6 +372,23 @@ mod tests {
             outer.compose(&inner),
             OffsetMap::new(vec![OffsetRun::entity(0..2, 0..9)])
         );
+    }
+
+    /// Only the changed stretch is rewritten, widened to whole entities.
+    #[test]
+    fn a_rewrite_covers_the_changed_stretch_widened_to_whole_entities() {
+        let map = alice_amp_bob();
+        let read = "Alice & Bob";
+        // "Bob" alone.
+        let rewrite = map.rewrite(read, "Alice & Rob").unwrap();
+        assert_eq!((rewrite.raw, rewrite.text), (112..113, "R"));
+        // A change touching the entity takes all of it.
+        let rewrite = map.rewrite(read, "Alice + Bob").unwrap();
+        assert_eq!((rewrite.raw, rewrite.text), (106..111, "+"));
+        // An insertion lands on the character after it.
+        let rewrite = map.rewrite(read, "Alice & Bobby").unwrap();
+        assert_eq!((rewrite.raw, rewrite.text), (114..115, "bby"));
+        assert_eq!(map.rewrite(read, read), None);
     }
 
     #[test]

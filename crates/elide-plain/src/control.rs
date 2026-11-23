@@ -33,14 +33,25 @@
 use std::borrow::Cow;
 
 use anstream::adapter::strip_str;
-use elide_codec::StrippedContent;
-use elide_core::redaction::HiddenContent;
 
-/// `text` without its terminal control sequences and control characters, and
-/// how many runs of them were removed; borrowed when there are none.
-pub(crate) fn strip(text: &str) -> (Cow<'_, str>, usize) {
+/// What stayed once terminal control sequences were stripped, and how many
+/// runs of them went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Stripped<T> {
+    /// What stayed: a text, or a handler over one.
+    pub(crate) kept: T,
+    /// How many runs of control sequences and characters were removed.
+    pub(crate) removed: usize,
+}
+
+/// `text` without its terminal control sequences and control characters;
+/// borrowed when there are none.
+pub(crate) fn strip(text: &str) -> Stripped<Cow<'_, str>> {
     if !text.chars().any(is_control) {
-        return (Cow::Borrowed(text), 0);
+        return Stripped {
+            kept: Cow::Borrowed(text),
+            removed: 0,
+        };
     }
     let mut out = String::with_capacity(text.len());
     let mut removed = 0;
@@ -63,25 +74,22 @@ pub(crate) fn strip(text: &str) -> (Cow<'_, str>, usize) {
         removed += usize::from(kept < body.len());
         out.push_str(&line[body.len()..]);
     }
-    (Cow::Owned(out), removed)
+    Stripped {
+        kept: Cow::Owned(out),
+        removed,
+    }
 }
 
 /// [`strip`] over an owned `text`, handed back unchanged when it holds no
 /// control.
 #[cfg(any(feature = "txt", feature = "csv"))]
-pub(crate) fn strip_owned(text: String) -> (String, usize) {
-    match strip(&text) {
-        (Cow::Owned(stripped), removed) => (stripped, removed),
-        (Cow::Borrowed(_), _) => (text, 0),
-    }
-}
-
-/// The record of `removed` runs of control sequences and characters stripped,
-/// as [`Undisplayed`](HiddenContent::Undisplayed) content.
-pub(crate) fn recorded(removed: usize) -> StrippedContent {
-    let mut stripped = StrippedContent::new();
-    stripped.record(HiddenContent::Undisplayed, None, removed);
-    stripped
+pub(crate) fn strip_owned(text: String) -> Stripped<String> {
+    let Stripped { kept, removed } = strip(&text);
+    let kept = match kept {
+        Cow::Owned(kept) => kept,
+        Cow::Borrowed(_) => text,
+    };
+    Stripped { kept, removed }
 }
 
 /// Whether `c` is a control a terminal obeys: a C0 control but tab, line
@@ -99,15 +107,16 @@ fn is_c1(c: char) -> bool {
 mod tests {
     use super::*;
 
+    /// `text` stripped, and how many runs went.
     fn stripped(text: &str) -> (String, usize) {
-        let (out, removed) = strip(text);
-        (out.into_owned(), removed)
+        let Stripped { kept, removed } = strip(text);
+        (kept.into_owned(), removed)
     }
 
     #[test]
     fn plain_text_is_borrowed() {
-        let (out, removed) = strip("Jane Roe\tjane@example.com\r\n");
-        assert!(matches!(out, Cow::Borrowed(_)));
+        let Stripped { kept, removed } = strip("Jane Roe\tjane@example.com\r\n");
+        assert!(matches!(kept, Cow::Borrowed(_)));
         assert_eq!(removed, 0);
     }
 

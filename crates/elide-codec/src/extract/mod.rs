@@ -29,6 +29,7 @@
 
 mod addresser;
 mod offset;
+mod splice;
 mod state;
 mod stream;
 
@@ -40,7 +41,8 @@ use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentKind;
 
 pub use self::addresser::SourceAddresser;
-pub use self::offset::{OffsetMap, OffsetRun, RunKind};
+pub use self::offset::{OffsetMap, OffsetRun, Rewrite, RunKind};
+pub use self::splice::{Splice, splice};
 use self::state::SpliceState;
 pub use self::stream::ExtractStream;
 

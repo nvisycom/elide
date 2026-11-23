@@ -2,7 +2,23 @@
 
 use std::ops::Range;
 
+#[cfg(feature = "txt")]
+use elide_core::modality::text::TextLocation;
 use elide_core::{Error, Result};
+
+/// The span `location` addresses in a text's decoded stream.
+///
+/// # Errors
+///
+/// [`MalformedInput`] for an unresolved mark, which has none.
+///
+/// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+#[cfg(feature = "txt")]
+pub(crate) fn span(location: &TextLocation) -> Result<&Range<usize>> {
+    location
+        .range()
+        .ok_or_else(|| Error::malformed("an unresolved mark has no span"))
+}
 
 /// The bytes of `text` at `range`.
 ///

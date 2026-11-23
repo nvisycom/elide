@@ -22,7 +22,7 @@ use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use super::loader::CsvLoader;
-use crate::control;
+use crate::control::{self, Stripped};
 use crate::slice::slice;
 
 /// Stable [`FormatId`] for the CSV codec.
@@ -75,25 +75,47 @@ pub(crate) struct CsvData {
 }
 
 impl CsvData {
-    /// Every cell, the header row's first.
-    fn cells_mut(&mut self) -> impl Iterator<Item = &mut String> {
-        self.headers
-            .iter_mut()
-            .flatten()
-            .chain(self.rows.iter_mut().flatten())
+    /// Every row, the header row first.
+    fn all_rows(&self) -> impl Iterator<Item = &Vec<String>> {
+        self.headers.iter().chain(&self.rows)
+    }
+
+    /// Every row, the header row first, mutably.
+    fn all_rows_mut(&mut self) -> impl Iterator<Item = &mut Vec<String>> {
+        self.headers.iter_mut().chain(&mut self.rows)
+    }
+
+    /// Where the row addressed `row` is held: the header row is row 0 when
+    /// there is one, and the data rows follow.
+    fn row_at(&self, row: u32) -> RowAt {
+        match (&self.headers, row) {
+            (Some(_), 0) => RowAt::Header,
+            (Some(_), row) => RowAt::Data(row as usize - 1),
+            (None, row) => RowAt::Data(row as usize),
+        }
     }
 
     /// Strip the terminal control sequences from every cell, returning how
     /// many went.
     pub(super) fn strip_controls(&mut self) -> usize {
-        self.cells_mut()
+        self.all_rows_mut()
+            .flatten()
             .map(|cell| {
-                let (stripped, removed) = control::strip_owned(mem::take(cell));
-                *cell = stripped;
+                let Stripped { kept, removed } = control::strip_owned(mem::take(cell));
+                *cell = kept;
                 removed
             })
             .sum()
     }
+}
+
+/// Where an addressed row is held in [`CsvData`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowAt {
+    /// The header row.
+    Header,
+    /// The data row at this index.
+    Data(usize),
 }
 
 /// Handler for parsed CSV content. Each cell is independently addressable
@@ -109,35 +131,19 @@ impl CsvHandler {
         Self { data }
     }
 
-    /// Total number of addressable rows, header included.
-    fn total_rows(&self) -> u32 {
-        let header = u32::from(self.data.headers.is_some());
-        header + self.data.rows.len() as u32
-    }
-
-    /// Number of cells in `row`, or `None` when the row is out of range.
-    fn row_len(&self, row: u32) -> Option<usize> {
-        self.row_cells(row).map(<[String]>::len)
-    }
-
-    /// The cells of `row` (header row 0 when present, then data rows).
+    /// The cells of `row` (see [`CsvData::row_at`]).
     fn row_cells(&self, row: u32) -> Option<&[String]> {
-        match &self.data.headers {
-            Some(headers) if row == 0 => Some(headers),
-            Some(_) => self.data.rows.get((row - 1) as usize),
-            None => self.data.rows.get(row as usize),
+        match self.data.row_at(row) {
+            RowAt::Header => self.data.headers.as_deref(),
+            RowAt::Data(index) => self.data.rows.get(index).map(Vec::as_slice),
         }
-        .map(Vec::as_slice)
     }
 
-    /// Mutable cells of `row`, with the same addressing as [`row_cells`].
-    ///
-    /// [`row_cells`]: Self::row_cells
+    /// The cells of `row`, mutably.
     fn row_cells_mut(&mut self, row: u32) -> Option<&mut Vec<String>> {
-        match &mut self.data.headers {
-            Some(headers) if row == 0 => Some(headers),
-            Some(_) => self.data.rows.get_mut((row - 1) as usize),
-            None => self.data.rows.get_mut(row as usize),
+        match self.data.row_at(row) {
+            RowAt::Header => self.data.headers.as_mut(),
+            RowAt::Data(index) => self.data.rows.get_mut(index),
         }
     }
 
@@ -256,7 +262,7 @@ impl CsvHandler {
             cells
                 .entry((location.row_index, location.column_index))
                 .or_default()
-                .push(location.span.clone().unwrap_or(0..cell.len()));
+                .push(cell_span(location, cell));
         }
         cells.values().try_for_each(|spans| spans.ensure_disjoint())
     }
@@ -273,32 +279,28 @@ impl CsvHandler {
             .row_cells_mut(location.row_index)
             .and_then(|cells| cells.get_mut(location.column_index as usize))
             .ok_or_else(|| no_cell(location))?;
-        let span = location.span.clone().unwrap_or(0..cell.len());
+        let span = cell_span(location, cell);
         cell.redact_with(replacement, span)
     }
 
-    /// Drop the row at `row_index` (the same addressing as [`row_cells`]).
-    /// Dropping the header row writes the table without one.
+    /// Drop `row` (see [`CsvData::row_at`]). Dropping the header row writes
+    /// the table without one.
     ///
     /// # Errors
     ///
     /// [`MalformedInput`] if there is no such row.
     ///
-    /// [`row_cells`]: Self::row_cells
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    fn drop_row(&mut self, row_index: u32) -> Result<()> {
-        let data_index = match &self.data.headers {
-            Some(_) if row_index == 0 => {
-                self.data.headers = None;
-                return Ok(());
+    fn drop_row(&mut self, row: u32) -> Result<()> {
+        match self.data.row_at(row) {
+            RowAt::Header => self.data.headers = None,
+            RowAt::Data(index) if index < self.data.rows.len() => {
+                self.data.rows.remove(index);
             }
-            Some(_) => (row_index - 1) as usize,
-            None => row_index as usize,
-        };
-        if data_index >= self.data.rows.len() {
-            return Err(Error::malformed(format!("no CSV row {row_index} to drop")));
+            RowAt::Data(_) => {
+                return Err(Error::malformed(format!("no CSV row {row} to drop")));
+            }
         }
-        self.data.rows.remove(data_index);
         Ok(())
     }
 
@@ -312,7 +314,7 @@ impl CsvHandler {
     fn drop_column(&mut self, col: u32) -> Result<()> {
         let index = col as usize;
         let mut dropped = false;
-        for row in self.data.headers.iter_mut().chain(&mut self.data.rows) {
+        for row in self.data.all_rows_mut() {
             if index < row.len() {
                 row.remove(index);
                 dropped = true;
@@ -332,12 +334,8 @@ impl Stream<Tabular> for CsvHandler {
 
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
         let mut chunks = Vec::new();
-        for row in 0..self.total_rows() {
-            for col in 0..self.row_len(row).unwrap_or(0) as u32 {
-                let cell = self
-                    .cell_at(row, col)
-                    .expect("bounds checked above")
-                    .to_owned();
+        for (row, cells) in (0..).zip(self.data.all_rows()) {
+            for (col, cell) in (0..).zip(cells) {
                 let mut location = TabularLocation::new(row, col);
                 let mut hints = Vec::new();
                 if let Some(name) = self.column_name(col) {
@@ -345,17 +343,13 @@ impl Stream<Tabular> for CsvHandler {
                     // A data cell's label is the header cell above it, a real
                     // tabular location the boost can point at.
                     if row > 0 {
-                        let header_location =
-                            TabularLocation::new(0, col).with_column_name(name.to_owned());
-                        hints.push(ResolvedHint::new(
-                            header_location,
-                            TextData::new(name.to_owned()),
-                        ));
+                        let header = TabularLocation::new(0, col).with_column_name(name.to_owned());
+                        hints.push(ResolvedHint::new(header, TextData::new(name.to_owned())));
                     }
                 }
                 chunks.push(Chunk {
                     location,
-                    data: TextData::new(cell),
+                    data: TextData::new(cell.clone()),
                     hints,
                 });
             }
@@ -368,7 +362,7 @@ impl Stream<Tabular> for CsvHandler {
         // placeholders); a missing span means the whole cell. Re-anchor onto
         // the chunk's real cell coordinates.
         let cell = self.cell_at(chunk.location.row_index, chunk.location.column_index)?;
-        let span = local.span.unwrap_or(0..cell.len());
+        let span = cell_span(&local, cell);
         if span.start > span.end || span.end > cell.len() {
             return None;
         }
@@ -419,6 +413,12 @@ fn unsheeted(location: &TabularLocation) -> Result<()> {
     }
 }
 
+/// The span of `cell` that `location` addresses: its intra-cell span, or the
+/// whole cell.
+fn cell_span(location: &TabularLocation, cell: &str) -> Range<usize> {
+    location.span.clone().unwrap_or(0..cell.len())
+}
+
 /// The error for a location naming a cell the table doesn't have.
 fn no_cell(location: &TabularLocation) -> Error {
     Error::malformed(format!(
@@ -435,12 +435,13 @@ mod tests {
 
     use super::super::loader::CsvLoader;
     use super::*;
+    use crate::loaded::Loaded;
 
     async fn load(text: &str) -> CsvHandler {
         CsvLoader::default()
             .load(ContentData::from_text(text))
             .unwrap()
-            .0
+            .handler
     }
 
     #[tokio::test]
@@ -593,9 +594,10 @@ mod tests {
     #[tokio::test]
     async fn options_disable_headers_so_the_first_row_is_data() {
         // With `has_headers = false`, row 0 is an ordinary data row.
-        let (mut handler, _) = CsvLoader::new(false, None)
+        let mut handler = CsvLoader::new(false, None)
             .load(ContentData::from_text("a@x.test,b\nc,d\n"))
-            .unwrap();
+            .unwrap()
+            .handler;
         let first = handler.chunks().unwrap().into_iter().next().unwrap();
         assert_eq!(first.location.row_index, 0);
         assert!(first.location.column_name.is_none());
@@ -613,9 +615,10 @@ mod tests {
     async fn options_set_the_delimiter_the_sniffer_would_miss() {
         // A single-column-looking TSV: auto-detect would read it as one comma
         // field; an explicit tab splits it into two columns.
-        let (handler, _) = CsvLoader::new(true, Some(b'\t'))
+        let handler = CsvLoader::new(true, Some(b'\t'))
             .load(ContentData::from_text("name\temail\nAlice\ta@x.test\n"))
-            .unwrap();
+            .unwrap()
+            .handler;
         assert_eq!(handler.row_cells(1).unwrap(), &["Alice", "a@x.test"]);
     }
 
@@ -624,7 +627,8 @@ mod tests {
     #[test]
     fn terminal_control_sequences_are_stripped() -> Result<()> {
         let src = "name,note\nJa\u{1b}[mne Roe,=SUM(1;2)\n";
-        let (handler, stripped) = CsvLoader::default().load(ContentData::from_text(src))?;
+        let Loaded { handler, stripped } =
+            CsvLoader::default().load(ContentData::from_text(src))?;
         assert_eq!(
             handler.encode()?.decode()?,
             "name,note\nJane Roe,=SUM(1;2)\n"
@@ -641,7 +645,9 @@ mod tests {
     #[test]
     fn a_stripped_ragged_table_encodes() -> Result<()> {
         let src = "a,b,c\nJa\u{1b}[mne\nx,y\n";
-        let (handler, _) = CsvLoader::default().load(ContentData::from_text(src))?;
+        let handler = CsvLoader::default()
+            .load(ContentData::from_text(src))?
+            .handler;
         assert_eq!(handler.encode()?.decode()?, "a,b,c\nJane\nx,y\n");
         Ok(())
     }

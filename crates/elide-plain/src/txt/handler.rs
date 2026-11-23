@@ -19,13 +19,13 @@ use std::ops::Range;
 use elide_codec::content::ContentData;
 use elide_codec::string::{ContiguousSpan, DisjointSpans, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
-use elide_core::modality::text::{Marked, Text, TextData, TextLocation, TextReplacement};
+use elide_core::modality::text::{Marked, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use super::TxtLoader;
-use crate::slice::slice;
+use crate::slice::{slice, span};
 
 /// Stable [`FormatId`] for the plain-text codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
@@ -119,17 +119,26 @@ impl DataReader<Text> for TxtHandler {
 #[async_trait::async_trait]
 impl DataWriter<Text> for TxtHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
-        // Apply right-to-left so each edit's length delta doesn't invalidate
-        // earlier locations: sort ascending by position, then walk in reverse.
+        // Check every span against the text before any edit, so a batch that
+        // fails changes nothing. Then apply right-to-left so each edit's length
+        // delta doesn't invalidate earlier locations: sort ascending by
+        // position, then walk in reverse.
         let spans = redactions
             .iter()
-            .map(|(location, _)| span(location).cloned())
+            .map(|(location, _)| {
+                let span = span(location)?;
+                slice(&self.text, span)?;
+                Ok(span.clone())
+            })
             .collect::<Result<Vec<_>>>()?;
         spans.ensure_disjoint()?;
         redactions.sort_by_position();
         for (location, replacement) in redactions.into_iter().rev() {
-            self.redact_one(&location, &replacement)?;
+            self.text
+                .redact_with(&replacement, span(&location)?.clone())?;
         }
+        // A redaction moves the text after it, and the blocks with it.
+        self.blocks = paragraph_blocks(&self.text);
         Ok(())
     }
 }
@@ -146,25 +155,6 @@ impl TxtHandler {
     pub(crate) fn text(&self) -> &str {
         &self.text
     }
-
-    /// Splice `replacement` over `location`. A location outside the text is
-    /// an error: skipping it would leave the content unredacted.
-    fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        self.text.redact_with(replacement, span(location)?.clone())
-    }
-}
-
-/// The span a location addresses.
-///
-/// # Errors
-///
-/// [`MalformedInput`] for an unresolved mark, which has none.
-///
-/// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-fn span(location: &TextLocation) -> Result<&Range<usize>> {
-    location
-        .range()
-        .ok_or_else(|| Error::malformed("an unresolved mark has no span"))
 }
 
 /// Byte ranges of the paragraph blocks in `text`: each is a maximal run of
@@ -208,7 +198,7 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use elide_core::modality::text::SourceRef;
+    use elide_core::modality::text::{SourceRef, TextReplacement};
     use elide_core::primitive::Color;
     use elide_core::redaction::HiddenContentPolicy;
 
@@ -342,6 +332,47 @@ mod tests {
         ]))
         .await?;
         assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
+        Ok(())
+    }
+
+    /// A batch with a span the text can't take changes nothing, even when
+    /// another of its edits, applied first, is valid.
+    #[tokio::test]
+    async fn a_failed_batch_leaves_the_text_as_it_was() {
+        let src = "Jané Roe and Joe";
+        let mut h = handler(src);
+        let end = src.len();
+        let err = h
+            .write_at(Redactions::from([
+                // Splits `é`.
+                (TextLocation::inline(0..4), TextReplacement::replaced("[A]")),
+                (
+                    TextLocation::inline(end - 3..end),
+                    TextReplacement::replaced("[B]"),
+                ),
+            ]))
+            .await
+            .expect_err("splits a character");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(h.text(), src);
+    }
+
+    /// After a write the blocks follow the text: each reads its paragraph as
+    /// it now stands.
+    #[tokio::test]
+    async fn blocks_follow_a_write() -> Result<()> {
+        let mut h = handler("Jane Roe\n\nnext block\n");
+        h.write_at(Redactions::from([(
+            TextLocation::inline(0..8),
+            TextReplacement::replaced("[NAME]"),
+        )]))
+        .await?;
+        let blocks: Vec<_> = h
+            .chunks()?
+            .into_iter()
+            .map(|chunk| chunk.data.as_str().to_owned())
+            .collect();
+        assert_eq!(blocks, ["[NAME]", "next block"]);
         Ok(())
     }
 

@@ -12,6 +12,7 @@ mod escape;
 mod handler;
 mod loader;
 mod parser;
+mod span;
 
 pub(crate) use self::handler::JsonHandler;
 pub use self::handler::format;
