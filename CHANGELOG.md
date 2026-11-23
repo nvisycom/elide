@@ -26,7 +26,8 @@ and this project adheres to
   found by a model is attributed to the model that answered its request,
   through language routing and failover alike
 - WebAssembly bindings (`elide-wasm`) that run the detect-and-redact pipeline
-  in a browser
+  in a browser, over every format but MP3; a blob with no format hint is
+  recognized by its leading bytes, and a PDF's text is located on its page
 
 #### Formats
 

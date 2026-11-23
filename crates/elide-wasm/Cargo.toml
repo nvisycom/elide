@@ -35,10 +35,15 @@ elide = { path = "../elide", version = "0.1.0", default-features = false, featur
     "operator-fake",
     "codec-text",
     "codec-csv",
+    "codec-xlsx",
+    "codec-docx",
+    "codec-pptx",
+    "codec-pdf",
     "codec-png",
     "codec-jpeg",
     "codec-tiff",
     "codec-wav",
+    "codec-sniff",
 ] }
 
 # Derive macros & error handling
@@ -55,6 +60,13 @@ console_error_panic_hook = { workspace = true, features = [] }
 # `Send + Sync` `NerBackend` the recognizer requires. Safe on wasm's single
 # thread; no `unsafe` in this crate.
 send_wrapper = { workspace = true, features = ["futures"] }
+
+[dev-dependencies]
+# (De)serialization
+serde_json = { workspace = true, features = [] }
+
+# WebAssembly / browser bindings
+wasm-bindgen-test = { workspace = true, features = [] }
 
 [package.metadata.cargo-machete]
 # `wasm-bindgen-futures` is pulled in by the `#[wasm_bindgen]` codegen for the

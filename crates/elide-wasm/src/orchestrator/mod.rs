@@ -10,7 +10,7 @@ use elide::{Orchestrator as CoreOrchestrator, Report as CoreReport};
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
-pub use self::report::{Entity, Location, Modality, Report, Stripped};
+pub use self::report::{Entity, Location, Modality, Rect, Rendered, Report, Stripped};
 use crate::analyzer::{Analyzer, StageModality};
 use crate::anonymizer::Anonymizer;
 use crate::error::{ElideError, ElideErrorKind};
@@ -119,15 +119,20 @@ impl Orchestrator {
     /// Detect and redact the personal data in `bytes`, of the format `hint`
     /// names.
     ///
-    /// The hint is a file extension like `txt`, `csv`, `png`. Returns the
-    /// redacted bytes and every finding.
+    /// The hint is a file extension like `txt`, `docx`, `pdf`. Without one,
+    /// the format is recognized by its leading bytes, which only the binary
+    /// formats carry. Returns the redacted bytes and every finding.
     ///
     /// # Errors
     ///
     /// Rejects with an [`ElideError`] if the format is unknown or the pipeline
     /// fails.
     #[wasm_bindgen]
-    pub async fn redact(&self, bytes: Vec<u8>, hint: String) -> Result<Ts<Report>, ElideError> {
+    pub async fn redact(
+        &self,
+        bytes: Vec<u8>,
+        hint: Option<String>,
+    ) -> Result<Ts<Report>, ElideError> {
         let result = run(self, bytes, hint).await?;
         Ts::from_rust(&result).map_err(|e| {
             ElideError::new(
@@ -147,11 +152,16 @@ impl Orchestrator {
 
 /// The pipeline proper, returning the crate's own [`Result`] so the boundary
 /// only deals with [`ElideError`].
-async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Report> {
+async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: Option<String>) -> Result<Report> {
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry
-        .document_with("input", &hint, bytes, HiddenContentPolicy::default())
-        .await?;
+    let policy = HiddenContentPolicy::default();
+    let mut document = match hint.as_deref().filter(|hint| !hint.is_empty()) {
+        Some(hint) => registry.document_with("input", hint, bytes, policy).await?,
+        None => {
+            let decoded = registry.decode_content(bytes.into(), policy).await?;
+            Document::new("input", decoded)
+        }
+    };
     let report = pipeline.core().anonymize(&mut document).await?;
 
     // Each modality locates its entities in its own coordinate space, so the
@@ -159,13 +169,16 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Re
     // time span, a tabular cell, a metadata key).
     let mut entities = Vec::new();
     collect::<Text>(&report, &mut entities, Modality::Text, |e| {
-        e.location
-            .range()
-            .map(|r| Location::Text {
-                start: r.start,
-                end: r.end,
-            })
-            .unwrap_or(Location::Text { start: 0, end: 0 })
+        let span = e.location.range().cloned().unwrap_or_default();
+        let rendered = e.location.page().map(|page| Rendered {
+            page,
+            rects: e.location.rects().iter().map(Rect::from).collect(),
+        });
+        Location::Text {
+            start: span.start,
+            end: span.end,
+            rendered,
+        }
     });
     collect::<Tabular>(&report, &mut entities, Modality::Tabular, |e| {
         Location::Tabular {

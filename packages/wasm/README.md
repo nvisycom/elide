@@ -7,7 +7,8 @@ In-browser PII detection and redaction, compiled to WebAssembly.
 
 The [Elide](https://github.com/nvisycom/elide) detect-and-redact pipeline runs
 entirely in the browser — no text, image, or audio ever leaves the page. It
-covers text, tabular, image, and audio, combining deterministic patterns with
+covers text, tabular, image, and audio, and the DOCX, PPTX, XLSX, and PDF
+documents that hold them, combining deterministic patterns with
 browser-supplied NER, OCR, and speech-to-text models, and rewrites the input
 with a policy-driven anonymizer.
 
@@ -45,8 +46,9 @@ entities; // -> the detected entities, each with a label and location
 
 An `Orchestrator` pairs a detect side (an `Analyzer`) with an optional redact
 side (an `Anonymizer`) per modality, then runs the pipeline over a blob with
-`redact`, dispatching by the format hint. Omit the anonymizer to use the default
-policy. The orchestrator is reusable across many `redact` calls.
+`redact`, dispatching by the format hint: a file extension, or nothing, to
+recognize a binary format by its leading bytes. Omit the anonymizer to use the
+default policy. The orchestrator is reusable across many `redact` calls.
 
 Browser-supplied models — NER, OCR, speech-to-text — are passed as async
 callbacks; language detection is built in:
@@ -64,6 +66,8 @@ const analyzer = Analyzer.image()
 
 - **Every modality in the browser** — text, tabular, image (EXIF scrub + OCR
   pixel redaction), and audio, from one API.
+- **Documents** — DOCX, PPTX, XLSX, and PDF, each decoded into the modalities
+  it holds; a PDF entity is located by its page and boxes.
 - **Compile-time type-safety** — each handle is branded with the modalities it
   applies to, so a wrong pairing (an OCR enricher on a text analyzer) is a
   TypeScript error, not a runtime surprise.

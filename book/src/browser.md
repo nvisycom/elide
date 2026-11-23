@@ -44,6 +44,12 @@ new TextDecoder().decode(redacted); // "Email me at [EMAIL]."
 Without an anonymizer, a modality uses the default policy. An orchestrator
 can redact any number of blobs.
 
+Documents work the same way: a DOCX, PPTX, XLSX, or PDF decodes into the
+modalities it holds, and each is redacted by that modality's stage. The hint
+names the format by its extension; leave it out and a binary format is
+recognized by its leading bytes. A PDF entity's location carries the page and
+the boxes it is drawn in.
+
 ## Models in the browser
 
 Language detection is built in. NER, OCR, and speech-to-text models are
@@ -70,9 +76,11 @@ on a text analyzer is a type error.
 
 ## What the browser build leaves out
 
-Text, tables, images, and audio all work in the browser. Left out are the
-parts that need a native library or a network client: MP3 decoding, PDF
-page rendering, and `RigBackend`.
+Text, tables, images, audio, and the documents that hold them all work in
+the browser. Left out are the parts that need a native library or a network
+client: MP3, PDF page rendering, and `RigBackend`. Without page rendering, a
+PDF page whose text can't be placed (in a font whose widths can't be known,
+or written vertically) is refused.
 
 To build the package and the demo from the repository:
 
