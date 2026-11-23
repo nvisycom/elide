@@ -4,7 +4,9 @@
 
 use std::ops::Range;
 
-use elide_codec::extract::{ExtractedItem, ItemEdit, OffsetMap, Passage, Rewrite, SourceAddresser};
+use elide_codec::extract::{
+    ExtractedItem, ItemEdit, OffsetMap, Passage, Rewrite, SourceAddresser, Splice,
+};
 use elide_core::modality::text::SourceRef;
 use quick_xml::escape::{escape, partial_escape};
 
@@ -98,20 +100,20 @@ impl MarkupSpan {
         }
     }
 
-    /// The raw range to replace, and its new raw text, that write `value` back
-    /// over this span; `None` while `value` is as read.
+    /// The [`Splice`] that writes `value` back over this span; `None` while
+    /// `value` is as read.
     ///
     /// Only the stretch between the longest unchanged start and end is
     /// rewritten, widened to whole character references, so a reference the
     /// redaction did not touch keeps its spelling.
-    pub(crate) fn write_back(&self, value: &str) -> Option<(Range<usize>, String)> {
+    pub(crate) fn write_back(&self, value: &str) -> Option<Splice> {
         let Rewrite { raw, text } = self.offsets.rewrite(&self.read, value)?;
         let text = match self.kind {
             SpanKind::Text => partial_escape(text),
             SpanKind::Attribute => escape(text),
             SpanKind::Verbatim => text.into(),
         };
-        Some((raw, text.into_owned()))
+        Some(Splice::new(raw, text))
     }
 }
 
@@ -167,11 +169,11 @@ mod tests {
         let raw = "a&amp;b&amp;c";
         let span = MarkupSpan::escaped(raw, 0..raw.len(), SpanKind::Text, CharacterReferences::Xml);
         // "a&b&c" → "a&X&c": the middle `b` alone.
-        assert_eq!(span.write_back("a&X&c"), Some((6..7, "X".to_owned())));
+        assert_eq!(span.write_back("a&X&c"), Some(Splice::new(6..7, "X")));
         // "a&b&c" → "a?b&c": the first reference, whole.
-        assert_eq!(span.write_back("a?b&c"), Some((1..6, "?".to_owned())));
+        assert_eq!(span.write_back("a?b&c"), Some(Splice::new(1..6, "?")));
         // An insertion lands on the character after it.
-        assert_eq!(span.write_back("a&b&cd"), Some((12..13, "cd".to_owned())));
+        assert_eq!(span.write_back("a&b&cd"), Some(Splice::new(12..13, "cd")));
         assert_eq!(span.write_back("a&b&c"), None);
     }
 }

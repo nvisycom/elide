@@ -5,26 +5,27 @@
 //! (what a recognizer sees) and a [`JsonSpan`] mapping it back onto the source
 //! bytes. The extract stream does the rest, as it does for markup: it streams
 //! each item as its own chunk, reads and redacts by decoded offset, and lifts
-//! a finding to its source bytes. [`Encode::encode`] writes back only what a
-//! redaction changed, so formatting (indentation, key order, whitespace) and
-//! every byte outside a redacted stretch, escapes included, stay as written.
+//! a finding to its source bytes. Each write is spliced into the source at
+//! once, rewriting only what a redaction changed, so formatting (indentation,
+//! key order, whitespace) and every byte outside a redacted stretch, escapes
+//! included, stay as written, and the source references of what follows a
+//! write address the source as it now stands.
 
 use std::borrow::Cow;
-use std::cmp::Reverse;
 use std::fmt;
 
 use elide_codec::content::ContentData;
-use elide_codec::extract::ExtractStream;
+use elide_codec::extract::{ExtractStream, Splice, splice};
 use elide_codec::{Encode, Format, FormatId, Stream};
+use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
 
 use super::JsonLoader;
 use super::escape::json_escape;
 use super::parser::parse_items;
-use super::span::{JsonAddresser, JsonSpan, Splice};
+use super::span::{JsonAddresser, JsonSpan};
 use crate::control::{self, Stripped};
 
 /// Stable [`FormatId`] for the JSON codec.
@@ -41,7 +42,8 @@ pub fn format() -> Format {
 pub(crate) struct JsonHandler {
     /// The keys, string values, and scalars.
     body: ExtractStream<JsonSpan>,
-    /// The source the items were read from, which encode splices them into.
+    /// The source the items were read from: as it now stands, every write
+    /// spliced in.
     source: String,
 }
 
@@ -94,26 +96,6 @@ impl JsonHandler {
     }
 }
 
-/// `source` with each of `splices` written over its raw range.
-///
-/// The ranges come from disjoint items of this same source, so they never
-/// overlap; applied right to left, an edit's length change never moves one
-/// still to come.
-fn splice(source: &str, mut splices: Vec<Splice>) -> Result<String> {
-    splices.sort_by_key(|splice| Reverse(splice.raw.start));
-    let mut out = source.to_owned();
-    for Splice { raw, text } in splices {
-        if out.get(raw.clone()).is_none() {
-            return Err(Error::processing(format!(
-                "JSON splice {}..{} is outside the source or splits a character",
-                raw.start, raw.end
-            )));
-        }
-        out.replace_range(raw, &text);
-    }
-    Ok(out)
-}
-
 impl Stream<Text> for JsonHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID
@@ -134,13 +116,7 @@ impl Stream<Text> for JsonHandler {
 
 impl Encode for JsonHandler {
     fn encode(&self) -> Result<ContentData> {
-        let splices = self
-            .body
-            .items()
-            .iter()
-            .filter_map(|item| item.address.write_back(&item.value))
-            .collect();
-        Ok(ContentData::from_text(splice(&self.source, splices)?))
+        Ok(ContentData::from_text(self.source.clone()))
     }
 }
 
@@ -153,8 +129,18 @@ impl DataReader<Text> for JsonHandler {
 
 #[async_trait::async_trait]
 impl DataWriter<Text> for JsonHandler {
+    /// The batch is spliced into the source, which is read again, so each
+    /// item's map back onto the source describes its value as it now reads.
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
-        self.body.write_at(redactions).await
+        self.body.write_at(redactions).await?;
+        let splices = self
+            .body
+            .items()
+            .iter()
+            .filter_map(|item| item.address.write_back(&item.value))
+            .collect();
+        *self = Self::parse(&splice(&self.source, splices)?)?;
+        Ok(())
     }
 }
 
@@ -1018,6 +1004,31 @@ mod tests {
             lifted.source_refs(),
             &[SourceRef::new(raw..raw + "bar".len())][..]
         );
+        Ok(())
+    }
+
+    /// After a write, a finding lifts to the source bytes it reads as now,
+    /// and a source reference to them redacts it.
+    #[tokio::test]
+    async fn source_references_follow_a_write() -> Result<()> {
+        let mut h = handler(r#"{"a":"long secret"}"#);
+        let chunk = find_chunk(&h, "long secret");
+        let start = chunk.location.range().unwrap().start;
+        h.write_at(Redactions::from([(
+            TextLocation::inline(start..start + 4),
+            TextReplacement::replaced("X"),
+        )]))
+        .await?;
+        let src = encoded(&h);
+        assert_eq!(src, r#"{"a":"X secret"}"#);
+        let chunk = find_chunk(&h, "X secret");
+        let lifted = h.lift(&chunk, TextLocation::inline(2..8)).unwrap();
+        let raw = src.find("secret").unwrap();
+        assert_eq!(lifted.source_refs(), [SourceRef::new(raw..raw + 6)]);
+        let mark = TextLocation::marked_source(SourceRef::new(raw..raw + 6));
+        h.write_at(Redactions::from([(mark, TextReplacement::replaced("Y"))]))
+            .await?;
+        assert_eq!(encoded(&h), r#"{"a":"X Y"}"#);
         Ok(())
     }
 

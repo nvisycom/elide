@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use elide_codec::extract::{ExtractedItem, ItemEdit, OffsetMap, Rewrite, SourceAddresser};
+use elide_codec::extract::{ExtractedItem, ItemEdit, OffsetMap, Rewrite, SourceAddresser, Splice};
 use elide_core::modality::text::SourceRef;
 
 use super::escape::json_escape;
@@ -70,15 +70,6 @@ impl JsonSpan {
             text: json_escape(text),
         })
     }
-}
-
-/// A rewrite of the JSON source: the raw range replaced, and its new text.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Splice {
-    /// The raw range replaced.
-    pub(super) raw: Range<usize>,
-    /// The raw text written there.
-    pub(super) text: String,
 }
 
 /// Maps a JSON item's decoded value range to and from its raw source bytes

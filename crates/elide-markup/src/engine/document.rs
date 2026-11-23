@@ -8,15 +8,12 @@
 //! stretches byte-identical. Splices apply right-to-left so an earlier edit's
 //! length delta never shifts a later span.
 
-use std::cmp::Reverse;
-use std::ops::Range;
-
 use elide_codec::content::ContentData;
-use elide_codec::extract::{ExtractStream, Passage};
+use elide_codec::extract::{self, ExtractStream, Passage};
 use elide_codec::{Blob, Document, FormatId, LocalId, Native, StreamMut};
+use elide_core::Result;
 use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
-use elide_core::{Error, Result};
 
 use super::address::{MarkupAddresser, MarkupItem, MarkupSpan};
 use super::config::MarkupConfig;
@@ -82,33 +79,15 @@ pub(crate) fn decode(
 /// where it lands.
 ///
 /// Item spans come from disjoint quick-xml events over this same `raw`, so
-/// they never overlap. Applying them right-to-left means each splice's
-/// length delta can't shift the spans of items earlier in the document. A
-/// separator stands for its markup and is never written back.
+/// they never overlap. A separator stands for its markup and is never written
+/// back.
 fn splice(raw: &str, items: &[MarkupItem]) -> Result<String> {
-    let mut edits: Vec<(Range<usize>, String)> = items
+    let splices = items
         .iter()
         .filter(|item| item.passage != Passage::Separator)
         .filter_map(|item| item.address.write_back(&item.value))
         .collect();
-    edits.sort_by_key(|(range, _)| Reverse(range.start));
-
-    let mut out = raw.to_owned();
-    for (Range { start, end }, text) in edits {
-        // Spans index into `out`, which starts as `raw` and only ever
-        // grows/shrinks to the right of the current splice, so they stay
-        // in-bounds and on char boundaries by construction. The guard is
-        // defensive: a malformed loader would surface here rather than
-        // panic in `replace_range`.
-        if out.get(start..end).is_none() {
-            return Err(Error::processing(format!(
-                "markup splice span {start}..{end} is out of bounds or mid-character (len {})",
-                out.len()
-            )));
-        }
-        out.replace_range(start..end, &text);
-    }
-    Ok(out)
+    extract::splice(raw, splices)
 }
 
 #[cfg(test)]
