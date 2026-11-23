@@ -5,11 +5,9 @@
 //! (what a recognizer sees) and a [`JsonSpan`] mapping it back onto the source
 //! bytes. The extract stream does the rest, as it does for markup: it streams
 //! each item as its own chunk, reads and redacts by decoded offset, and lifts
-//! a finding to its source bytes. Each write is spliced into the source at
-//! once, rewriting only what a redaction changed, so formatting (indentation,
-//! key order, whitespace) and every byte outside a redacted stretch, escapes
-//! included, stay as written, and the source references of what follows a
-//! write address the source as it now stands.
+//! a finding to its source bytes. [`Encode::encode`] writes back only what a
+//! redaction changed, so formatting (indentation, key order, whitespace) and
+//! every byte outside a redacted stretch, escapes included, stay as written.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -42,8 +40,8 @@ pub fn format() -> Format {
 pub(crate) struct JsonHandler {
     /// The keys, string values, and scalars.
     body: ExtractStream<JsonSpan>,
-    /// The source the items were read from: as it now stands, every write
-    /// spliced in.
+    /// The source the items were read from, which encode splices them into
+    /// and every source reference addresses.
     source: String,
 }
 
@@ -116,7 +114,13 @@ impl Stream<Text> for JsonHandler {
 
 impl Encode for JsonHandler {
     fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::from_text(self.source.clone()))
+        let splices = self
+            .body
+            .items()
+            .iter()
+            .filter_map(|item| item.address.write_back(&item.value))
+            .collect();
+        Ok(ContentData::from_text(splice(&self.source, splices)?))
     }
 }
 
@@ -129,18 +133,8 @@ impl DataReader<Text> for JsonHandler {
 
 #[async_trait::async_trait]
 impl DataWriter<Text> for JsonHandler {
-    /// The batch is spliced into the source, which is read again, so each
-    /// item's map back onto the source describes its value as it now reads.
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
-        self.body.write_at(redactions).await?;
-        let splices = self
-            .body
-            .items()
-            .iter()
-            .filter_map(|item| item.address.write_back(&item.value))
-            .collect();
-        *self = Self::parse(&splice(&self.source, splices)?)?;
-        Ok(())
+        self.body.write_at(redactions).await
     }
 }
 
@@ -1007,11 +1001,12 @@ mod tests {
         Ok(())
     }
 
-    /// After a write, a finding lifts to the source bytes it reads as now,
-    /// and a source reference to them redacts it.
+    /// After a write, source references still address the source as read: a
+    /// finding lifts to its bytes there, and a reference to them redacts it.
     #[tokio::test]
-    async fn source_references_follow_a_write() -> Result<()> {
-        let mut h = handler(r#"{"a":"long secret"}"#);
+    async fn source_references_address_the_source_as_read_after_a_write() -> Result<()> {
+        let src = r#"{"a":"long secret"}"#;
+        let mut h = handler(src);
         let chunk = find_chunk(&h, "long secret");
         let start = chunk.location.range().unwrap().start;
         h.write_at(Redactions::from([(
@@ -1019,8 +1014,7 @@ mod tests {
             TextReplacement::replaced("X"),
         )]))
         .await?;
-        let src = encoded(&h);
-        assert_eq!(src, r#"{"a":"X secret"}"#);
+        assert_eq!(encoded(&h), r#"{"a":"X secret"}"#);
         let chunk = find_chunk(&h, "X secret");
         let lifted = h.lift(&chunk, TextLocation::inline(2..8)).unwrap();
         let raw = src.find("secret").unwrap();

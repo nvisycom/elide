@@ -190,6 +190,27 @@ impl OffsetMap {
         self.translate(decoded, |run| &run.decoded, |run| &run.raw)
     }
 
+    /// This map once the stretch `replaced` of its decoded text, `len` bytes
+    /// long, is rewritten with `written` bytes: what was written maps
+    /// atomically onto all `replaced` mapped onto, the rest as before.
+    ///
+    /// A map that starts as the identity over a text and takes each edit so
+    /// maps the edited text back onto the text as it was.
+    #[must_use]
+    pub fn edited(&self, replaced: Range<usize>, written: usize, len: usize) -> OffsetMap {
+        let end = replaced.start + written;
+        let after = len - replaced.len() + written;
+        let mut runs = Vec::with_capacity(3);
+        if replaced.start > 0 {
+            runs.push(OffsetRun::identity(0..replaced.start, 0..replaced.start));
+        }
+        runs.push(OffsetRun::entity(replaced.start..end, replaced.clone()));
+        if end < after {
+            runs.push(OffsetRun::identity(end..after, replaced.end..len));
+        }
+        self.compose(&OffsetMap::new(runs))
+    }
+
     /// What writing `value` over the text this map read as `read` rewrites:
     /// `None` while `value` is as read.
     ///
@@ -372,6 +393,24 @@ mod tests {
             outer.compose(&inner),
             OffsetMap::new(vec![OffsetRun::entity(0..2, 0..9)])
         );
+    }
+
+    /// Each edit maps what it wrote onto all it replaced, through the edits
+    /// before it.
+    #[test]
+    fn an_edited_map_maps_back_to_the_text_as_it_was() {
+        // "long secret" → "X secret" → "X Y".
+        let map = OffsetMap::identity(0, 11)
+            .edited(0..4, 1, 11)
+            .edited(2..8, 1, 8);
+        assert_eq!(map.raw_ranges(0..1), vec![0..4]);
+        assert_eq!(map.raw_ranges(1..2), vec![4..5]);
+        assert_eq!(map.raw_ranges(2..3), vec![5..11]);
+        assert_eq!(map.decoded_ranges(6..8), vec![2..3]);
+        // A removal leaves an empty run where the text was.
+        let map = OffsetMap::identity(0, 11).edited(4..11, 0, 11);
+        assert_eq!(map.decoded_ranges(5..8), vec![4..4]);
+        assert_eq!(map.raw_ranges(0..4), vec![0..4]);
     }
 
     /// Only the changed stretch is rewritten, widened to whole entities.
