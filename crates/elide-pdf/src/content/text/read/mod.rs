@@ -28,9 +28,11 @@ use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
 use self::stream::{Frame, Graphics, ScopeFont};
-use super::{FontEntry, GlyphSite, OffsetMap, OffsetRun, PenStep, StreamTarget, TextBlock};
+use super::{FontEntry, OffsetMap, OffsetRun, PenStep, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
-use crate::pdf::reader::{DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Scope, page_frame};
+use crate::pdf::reader::{
+    DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Point, Scope, page_frame,
+};
 
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
@@ -89,7 +91,6 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut runs: Vec<OffsetRun> = Vec::new();
     let mut next_char = 0usize;
     let mut rects: Vec<GlyphRect> = Vec::new();
-    let mut advances = BTreeMap::new();
     let mut steps: Vec<PenStep> = Vec::new();
     let mut lines = 0u64;
     let mut fonts: Vec<FontEntry> = Vec::new();
@@ -98,7 +99,6 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         runs: &mut runs,
         next_char: &mut next_char,
         rects: &mut rects,
-        advances: &mut advances,
         steps: &mut steps,
         lines: &mut lines,
         fonts: &mut fonts,
@@ -130,7 +130,6 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         text,
         offsets: OffsetMap::new(runs),
         rects,
-        advances,
         steps,
         frame,
         fonts,
@@ -145,7 +144,6 @@ struct TextAccum<'a> {
     runs: &'a mut Vec<OffsetRun>,
     next_char: &'a mut usize,
     rects: &'a mut Vec<GlyphRect>,
-    advances: &'a mut BTreeMap<GlyphSite, Option<f64>>,
     steps: &'a mut Vec<PenStep>,
     /// The lines numbered so far, across the page and every form it draws.
     lines: &'a mut u64,
@@ -172,7 +170,7 @@ struct Walk<'a, 'd> {
     accum: TextAccum<'a>,
     /// Where the last shown glyph left the pen, in device space, shared across
     /// every stream of the page (`None` before the first glyph).
-    pen: Option<(f64, f64)>,
+    pen: Option<Point>,
     active: BTreeSet<ObjectId>,
     /// The tiling patterns already selected on this page: a pattern's walk
     /// does not depend on where it is selected, so each is walked once.

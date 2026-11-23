@@ -32,7 +32,7 @@ fn covered_text_stays_where_pdfium_drew_it() {
     let text = &blocks[0].text;
     let span = |value: &str| {
         let start = text[..text.find(value).unwrap()].chars().count();
-        Detection::new(1, start, start + value.chars().count()).covering(Color::BLACK)
+        Detection::new(1, start..start + value.chars().count()).covering(Color::BLACK)
     };
     let mut edit = source.edit();
     edit.redact(TextRedaction {

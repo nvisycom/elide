@@ -227,9 +227,14 @@ fn upright(rect: [f64; 4], rotate: u32) -> Matrix {
 /// transformed by the matrix, then scaled and moved onto the rectangle.
 /// `None` when the transformed box has no area.
 fn placement(bbox: [f64; 4], matrix: Matrix, rect: [f64; 4]) -> Option<Matrix> {
-    let [x0, y0, x1, y1] = bbox;
-    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| matrix.apply(x, y));
-    let placed = DeviceRect::of_corners(corners);
+    let [min_x, min_y, max_x, max_y] = bbox;
+    let placed = DeviceRect {
+        min_x,
+        min_y,
+        max_x,
+        max_y,
+    }
+    .mapped(matrix);
     let (width, height) = (placed.max_x - placed.min_x, placed.max_y - placed.min_y);
     if width <= f64::EPSILON || height <= f64::EPSILON {
         return None;
@@ -249,7 +254,7 @@ fn placement(bbox: [f64; 4], matrix: Matrix, rect: [f64; 4]) -> Option<Matrix> {
 #[cfg(test)]
 mod tests {
     use super::{placement, upright};
-    use crate::pdf::reader::Matrix;
+    use crate::pdf::reader::{Matrix, Point};
 
     #[test]
     fn an_appearance_is_placed_on_its_rectangle() {
@@ -286,7 +291,7 @@ mod tests {
     fn an_upright_annotation_turns_back_about_its_corner() {
         let m = upright([10.0, 20.0, 50.0, 30.0], 90);
         let at = |x: f64, y: f64| {
-            let (x, y) = m.apply(x, y);
+            let Point { x, y } = m.apply(Point::new(x, y));
             ((x * 1e9).round() / 1e9, (y * 1e9).round() / 1e9)
         };
         assert_eq!(at(10.0, 30.0), (10.0, 30.0));

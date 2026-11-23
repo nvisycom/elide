@@ -129,7 +129,7 @@ impl PdfState {
             // character offsets.
             let start = before.chars().count();
             let end = start + text[range].chars().count();
-            let detection = Detection::new(number, start, end);
+            let detection = Detection::new(number, start..end);
             detections.push(match cover {
                 Some(color) => detection.covering(color),
                 None => detection,

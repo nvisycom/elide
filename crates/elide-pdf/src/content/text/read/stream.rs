@@ -406,7 +406,6 @@ impl<'d> Walk<'_, 'd> {
             runs: self.accum.runs,
             next_char: self.accum.next_char,
             rects: self.accum.rects,
-            advances: self.accum.advances,
             steps: self.accum.steps,
             cursor,
             pen: &mut self.pen,

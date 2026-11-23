@@ -14,7 +14,6 @@
 mod read;
 mod redact;
 
-use std::collections::BTreeMap;
 use std::ops::Range;
 
 use elide_core::Result;
@@ -100,12 +99,6 @@ pub(crate) struct TextBlock {
     /// The page's visible rectangle and rotation, for normalizing a device box
     /// to page fractions.
     pub(crate) frame: PageFrame,
-    /// Each glyph's advance as a `TJ` number moves the pen, by its site: the
-    /// number that, put in the
-    /// glyph's place, leaves the text after it where it was. `None` for a
-    /// glyph no number moves the pen as it does (one at font size 0), or one
-    /// drawn with different spacings (a form drawn twice).
-    pub(crate) advances: BTreeMap<GlyphSite, Option<f64>>,
     /// Every move of the pen as the page draws its text, in draw order: how
     /// far each glyph and `TJ` kern moved it, so a deletion can tell how far
     /// the text after it moves.
@@ -167,26 +160,23 @@ pub(crate) struct FontEntry {
 /// [`OffsetMap`](crate::content::text::OffsetMap), and the raster path resolves the
 /// same range to glyph pixel boxes. A caller never picks a coordinate unit per
 /// path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Detection {
     /// 1-based page number the span is on.
     pub(crate) page: u32,
-    /// Start character offset into the page text (inclusive).
-    pub(crate) start: usize,
-    /// End character offset into the page text (exclusive).
-    pub(crate) end: usize,
+    /// The character offsets into the page text the span covers.
+    pub(crate) chars: Range<usize>,
     /// The color of the box the span is covered with in place, its glyphs'
     /// extent kept; `None` when it is removed.
     pub(crate) cover: Option<Color>,
 }
 
 impl Detection {
-    /// A detection of `[start, end)` (character offsets) on `page`, removed.
-    pub(crate) fn new(page: u32, start: usize, end: usize) -> Self {
+    /// A detection of the characters `chars` on `page`, removed.
+    pub(crate) fn new(page: u32, chars: Range<usize>) -> Self {
         Self {
             page,
-            start,
-            end,
+            chars,
             cover: None,
         }
     }
@@ -278,27 +268,33 @@ pub(crate) struct GlyphSite {
 }
 
 /// One move of the pen as a page draws its text: a glyph's advance or a `TJ`
-/// kern, on its line, and how far it moved the pen in device space.
+/// kern, on its line, and how far it moved the pen along the line in text
+/// space.
 ///
 /// A line is a run of glyphs placed from one setting of the line matrix
 /// (`BT`, `Td`, `TD`, `T*`, `Tm`, `'`, `"`), numbered uniquely across the
 /// page and the forms it draws: a glyph deleted from a line moves only what
-/// the same line shows after it.
+/// the same line shows after it, by its advance in text space, whatever
+/// transform each later glyph is drawn under.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PenStep {
     pub(crate) line: u64,
     pub(crate) mover: Mover,
-    pub(crate) delta: (f64, f64),
+    pub(crate) advance: f64,
 }
 
 /// What moved the pen in a [`PenStep`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Mover {
     /// The glyph whose code is at `site`, drawing the page's characters
-    /// `chars` (none for a glyph that reads as nothing).
+    /// `chars` (none for a glyph that reads as nothing), and the `TJ` number
+    /// that moves the pen as this drawing of it does, the number that, put in
+    /// its place, leaves the text after it where it was: `None` at font size
+    /// 0, where no number does.
     Glyph {
         site: GlyphSite,
         chars: Range<usize>,
+        number: Option<f64>,
     },
     /// The `TJ` kern at this address.
     Kern(Address),
@@ -364,7 +360,7 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{DocBuilder, Page, to_unicode_cmap, type1};
-    use crate::pdf::reader::GlyphRect;
+    use crate::pdf::reader::{GlyphRect, Point};
     use crate::sanitize::{Check, Rebuild};
 
     /// Every stream of the PDF `bytes`, decoded, as text.
@@ -651,30 +647,33 @@ mod tests {
 
     /// Every glyph `blocks`' first page draws that `chars` doesn't, by its
     /// origin.
-    fn origins_outside(blocks: &[TextBlock], chars: Range<usize>) -> Vec<(f64, f64)> {
+    fn origins_outside(blocks: &[TextBlock], chars: Range<usize>) -> Vec<Point> {
         blocks[0]
             .rects
             .iter()
             .filter(|glyph| glyph.chars.end <= chars.start || glyph.chars.start >= chars.end)
-            .map(|glyph| glyph.origin)
+            .map(GlyphRect::origin)
             .collect()
     }
 
     /// Whether the origins `a` and `b` are the same, each within 0.001 pt.
-    fn same_origins(a: &[(f64, f64)], b: &[(f64, f64)]) -> bool {
+    fn same_origins(a: &[Point], b: &[Point]) -> bool {
         a.len() == b.len()
-            && a.iter()
-                .zip(b)
-                .all(|(a, b)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3)
+            && a.iter().zip(b).all(|(&a, &b)| {
+                let apart = a - b;
+                apart.x.abs() < 1e-3 && apart.y.abs() < 1e-3
+            })
     }
 
-    /// The `re` rectangles the page `number` of `pdf` draws, as corners.
+    /// The cover boxes the page `number` of `pdf` draws, as corners: the
+    /// `re` rectangles after the first `rg`, which only the covers set.
     fn boxes(pdf: &Pdf, number: u32) -> Vec<[f64; 4]> {
         let id = pdf.doc().get_pages()[&number];
         let content = Content::decode(&pdf.doc().get_page_content(id)).unwrap();
         content
             .operations
             .iter()
+            .skip_while(|op| op.operator != "rg")
             .filter(|op| op.operator == "re")
             .map(|op| {
                 let [x, y, w, h] = [0, 1, 2, 3].map(|i| op.operands[i].as_float().unwrap() as f64);
@@ -728,7 +727,7 @@ mod tests {
     fn covered_text_keeps_its_place_under_a_box() {
         let (before, out, after) = covered(
             b"BT /F1 12 Tf 1.5 Tc 4 Tw 110 Tz 10 50 Td (Call Jane Roe now) Tj ET",
-            &[Detection::new(1, 5, 13).covering(Color::BLACK)],
+            &[Detection::new(1, 5..13).covering(Color::BLACK)],
         );
         assert!(!streams_of(&out.bytes()).contains("Jane"));
         let (kept, now) = (
@@ -759,8 +758,8 @@ mod tests {
         let (_, out, _) = covered(
             b"BT /F1 12 Tf 10 50 Td [(Call Jane) -300 (Roe now)] TJ ET",
             &[
-                Detection::new(1, 5, 9).covering(red),
-                Detection::new(1, 10, 13).covering(Color::BLACK),
+                Detection::new(1, 5..9).covering(red),
+                Detection::new(1, 10..13).covering(Color::BLACK),
             ],
         );
         assert_eq!(boxes(&out, 1).len(), 2);
@@ -775,15 +774,15 @@ mod tests {
         let (before, _, after) = covered(
             b"BT /F1 12 Tf 14 TL 10 60 Td [(Jane) -300 (Roe) 120 (x)] TJ (Ann Lee) ' ET",
             &[
-                Detection::new(1, 5, 8).covering(Color::BLACK),
-                Detection::new(1, 10, 13).covering(Color::BLACK),
+                Detection::new(1, 5..8).covering(Color::BLACK),
+                Detection::new(1, 10..13).covering(Color::BLACK),
             ],
         );
         let mut kept = before[0].rects.clone();
         kept.retain(|glyph| {
             !(5..8).contains(&glyph.chars.start) && !(10..13).contains(&glyph.chars.start)
         });
-        let kept: Vec<(f64, f64)> = kept.iter().map(|glyph| glyph.origin).collect();
+        let kept: Vec<Point> = kept.iter().map(GlyphRect::origin).collect();
         let now = origins_outside(&after, 0..0);
         assert!(same_origins(&kept, &now), "{kept:?} against {now:?}");
     }
@@ -796,15 +795,15 @@ mod tests {
         let (before, out, after) = covered(
             b"BT /F1 12 Tf 10 50 Td (Jane Roe at Acme) Tj ET",
             &[
-                Detection::new(1, 0, 5),
-                Detection::new(1, 12, 16).covering(Color::BLACK),
+                Detection::new(1, 0..5),
+                Detection::new(1, 12..16).covering(Color::BLACK),
             ],
         );
         assert!(!streams_of(&out.bytes()).contains("Jane"));
         assert!(!streams_of(&out.bytes()).contains("Acme"));
         assert_eq!(after[0].text.trim(), "Roe at");
         // "Roe at " moved left by "Jane "'s width; nothing follows the cover.
-        let shift = before[0].rects[5].origin.0 - after[0].rects[0].origin.0;
+        let shift = before[0].rects[5].origin().x - after[0].rects[0].origin().x;
         assert!(shift > 0.0);
         assert_eq!(boxes(&out, 1).len(), 1);
     }
@@ -819,7 +818,7 @@ mod tests {
             .iter()
             .find(|g| g.chars.start == at)
             .unwrap();
-        glyph.origin.0
+        glyph.origin().x
     }
 
     /// The one box drawn on `out`'s first page, checked to sit exactly over
@@ -859,8 +858,8 @@ mod tests {
         let (before, out, after) = covered(
             b"BT /F1 24 Tf 20 60 Td (Call Jane Roe at Acme Ltd now) Tj ET",
             &[
-                Detection::new(1, 5, 10),
-                Detection::new(1, 17, 21).covering(Color::BLACK),
+                Detection::new(1, 5..10),
+                Detection::new(1, 17..21).covering(Color::BLACK),
             ],
         );
         assert!(!streams_of(&out.bytes()).contains("Acme"));
@@ -876,13 +875,116 @@ mod tests {
         let (before, out, after) = covered(
             b"BT /F1 24 Tf 20 60 Td [(Call Jane) -400 (Roe at Acme Ltd)] TJ ET",
             &[
-                Detection::new(1, 5, 9),
-                Detection::new(1, 17, 21).covering(Color::BLACK),
+                Detection::new(1, 5..9),
+                Detection::new(1, 17..21).covering(Color::BLACK),
             ],
         );
         let moved = origin_of(&before, "Roe") - origin_of(&after, "Roe");
         assert!(moved > 0.0);
         box_over_gap(&before, &out, &after, 17..21, moved);
+    }
+
+    /// A `cm` between a removal and a cover on one line scales what the
+    /// removal moves after it: the box moves as the text does, by the removed
+    /// advance under the covered glyph's transform.
+    #[test]
+    fn a_box_moves_under_a_cm_between_removal_and_cover() {
+        let content =
+            b"BT /F1 24 Tf 20 60 Td (Call Jane ) Tj 1.5 0 0 1.5 0 0 cm (Roe at Acme Ltd) Tj ET";
+        let text = |blocks: &[TextBlock], word: &str| {
+            let start = blocks[0].text.find(word).unwrap();
+            start..start + word.len()
+        };
+        let mut pdf = DocBuilder::with_version("1.5");
+        let font = pdf.add(type1("Helvetica"));
+        pdf.page(
+            Page::new()
+                .font("F1", font)
+                .content(content.to_vec())
+                .size(600, 200),
+        );
+        let source = Pdf::open(&pdf.bytes()).unwrap().read(Rebuild).unwrap().pdf;
+        let before = source.read(Text).unwrap();
+        let (jane, acme) = (text(&before, "Jane "), text(&before, "Acme"));
+        let (_, out, after) = covered(
+            content,
+            &[
+                Detection::new(1, jane),
+                Detection::new(1, acme.clone()).covering(Color::BLACK),
+            ],
+        );
+        let moved = origin_of(&before, "Roe") - origin_of(&after, "Roe");
+        assert!(moved > 0.0);
+        box_over_gap(&before, &out, &after, acme, moved);
+    }
+
+    /// A pattern's covered text after a removal is boxed on every tile, each
+    /// box moved through its own tile's placement: the pattern drawn at twice
+    /// its size moves each box twice as far.
+    #[test]
+    fn a_tiled_cover_moves_on_every_tile() {
+        let bytes = tiling_document(
+            Object::Integer(1),
+            b"/Pattern cs /P0 scn 0 0 100 80 re f".to_vec(),
+        );
+        let mut doc = Document::load_mem(&bytes).unwrap();
+        let text_pattern = doc
+            .objects
+            .values_mut()
+            .filter_map(|object| object.as_stream_mut().ok())
+            .find(|stream| {
+                stream
+                    .dict
+                    .get(b"Resources")
+                    .and_then(Object::as_dict)
+                    .is_ok_and(|resources| resources.has(b"Font"))
+                    && stream.dict.has(b"PatternType")
+            })
+            .unwrap();
+        text_pattern.dict.set(
+            "Matrix",
+            vec![2.into(), 0.into(), 0.into(), 2.into(), 0.into(), 0.into()],
+        );
+        let mut scaled = Vec::new();
+        doc.save_to(&mut scaled).unwrap();
+        let pdf = Pdf::open(&scaled).unwrap().read(Rebuild).unwrap().pdf;
+        let before = pdf.read(Text).unwrap();
+        assert_eq!(before[0].text.trim_end(), "Jane Roe");
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &before,
+            detections: &[
+                Detection::new(1, 0..5),
+                Detection::new(1, 5..8).covering(Color::BLACK),
+            ],
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        out.read(Check).unwrap();
+        // Each tile's "Roe" closes up to where its "Jane " began, on its own
+        // tile's line.
+        let corner = |g: &GlyphRect| Point::new(g.rect.min_x, g.rect.min_y);
+        let mut expected: Vec<Point> = before[0]
+            .rects
+            .iter()
+            .filter(|g| g.chars.start == 0)
+            .map(corner)
+            .collect();
+        let roe = before[0].rects.iter().filter(|g| g.chars.start == 5);
+        assert!(roe.clone().all(|g| g.rect.min_x > 1.0), "nothing to move");
+        let mut drawn: Vec<Point> = boxes(&out, 1)
+            .iter()
+            .map(|b| Point::new(b[0], b[1]))
+            .collect();
+        expected.sort_by(|a, b| a.y.total_cmp(&b.y));
+        drawn.sort_by(|a, b| a.y.total_cmp(&b.y));
+        assert_eq!(drawn.len(), 2, "{drawn:?}");
+        assert_eq!(expected.len(), 2, "{expected:?}");
+        assert!(
+            same_origins(&drawn, &expected),
+            "{drawn:?} against {expected:?}"
+        );
     }
 
     /// A removal on another line moves nothing on this one: a line starts
@@ -892,8 +994,8 @@ mod tests {
         let (before, out, after) = covered(
             b"BT /F1 24 Tf 30 TL 20 80 Td (Call Jane Roe) Tj T* (at Acme Ltd) Tj ET",
             &[
-                Detection::new(1, 5, 10),
-                Detection::new(1, 17, 21).covering(Color::BLACK),
+                Detection::new(1, 5..10),
+                Detection::new(1, 17..21).covering(Color::BLACK),
             ],
         );
         assert_eq!(&before[0].text[17..21], "Acme");
@@ -927,7 +1029,7 @@ mod tests {
         edit.redact(TextRedaction {
             source: &pdf,
             blocks: &blocks,
-            detections: &[Detection::new(1, 0, 4).covering(Color::BLACK)],
+            detections: &[Detection::new(1, 0..4).covering(Color::BLACK)],
         })
         .unwrap();
         let out = edit.finish().unwrap();
@@ -965,7 +1067,7 @@ mod tests {
             .redact(TextRedaction {
                 source: &pdf,
                 blocks: &blocks,
-                detections: &[Detection::new(1, 0, 4).covering(Color::BLACK)],
+                detections: &[Detection::new(1, 0..4).covering(Color::BLACK)],
             })
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Redaction);
@@ -978,8 +1080,8 @@ mod tests {
         let (_, out, after) = covered(
             b"BT /F1 12 Tf 10 50 Td (Jane Roe) Tj ET",
             &[
-                Detection::new(1, 0, 4),
-                Detection::new(1, 0, 4).covering(Color::BLACK),
+                Detection::new(1, 0..4),
+                Detection::new(1, 0..4).covering(Color::BLACK),
             ],
         );
         assert!(!streams_of(&out.bytes()).contains("Jane"));
@@ -1006,7 +1108,7 @@ mod tests {
             .redact(TextRedaction {
                 source: &pdf,
                 blocks: &blocks,
-                detections: &[Detection::new(1, 0, 4).covering(Color::BLACK)],
+                detections: &[Detection::new(1, 0..4).covering(Color::BLACK)],
             })
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Redaction);
@@ -1026,7 +1128,7 @@ mod tests {
         edit.redact(TextRedaction {
             source: &pdf,
             blocks: &blocks,
-            detections: &[Detection::new(1, 0, 8)],
+            detections: &[Detection::new(1, 0..8)],
         })
         .unwrap();
         let out = edit.finish().unwrap();
@@ -1065,7 +1167,7 @@ mod tests {
         edit.redact(TextRedaction {
             source: &pdf,
             blocks: &blocks,
-            detections: &[Detection::new(1, 0, 8)],
+            detections: &[Detection::new(1, 0..8)],
         })
         .unwrap();
         let out = edit.finish().unwrap();
@@ -1259,7 +1361,7 @@ mod tests {
         edit.redact(TextRedaction {
             source: &pdf,
             blocks: &blocks,
-            detections: &[Detection::new(1, 0, 1)],
+            detections: &[Detection::new(1, 0..1)],
         })
         .unwrap();
         let out = edit.finish().unwrap();
@@ -1306,7 +1408,7 @@ mod tests {
             .redact(TextRedaction {
                 source: &pdf,
                 blocks: &blocks,
-                detections: &[Detection::new(1, 0, 4)],
+                detections: &[Detection::new(1, 0..4)],
             })
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Redaction);

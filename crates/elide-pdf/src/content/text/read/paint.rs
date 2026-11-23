@@ -8,7 +8,7 @@ use lopdf::content::Operation;
 use lopdf::{Dictionary, Document, ObjectId};
 
 use super::stream::operand_f64;
-use crate::pdf::reader::{DeviceRect, DictionaryExt, Matrix};
+use crate::pdf::reader::{DeviceRect, DictionaryExt, Matrix, Point, Vector};
 
 /// The tiling pattern a fill or stroke paints with, and the space of the
 /// stream that selected it, which its `/Matrix` lays its tiles out in.
@@ -117,20 +117,17 @@ impl Painting {
     /// is none of these, else each region a fill or stroke with a pattern
     /// paints, within the clip.
     pub(super) fn path(&mut self, operation: &Operation, ctm: Matrix) -> Option<Vec<Painted>> {
-        let at = |index: usize| {
-            (
-                operand_f64(&operation.operands, index),
-                operand_f64(&operation.operands, index + 1),
-            )
-        };
+        let operand = |index: usize| operand_f64(&operation.operands, index);
+        let at = |index: usize| Point::new(operand(index), operand(index + 1));
         match operation.operator.as_str() {
             "m" | "l" => self.extend(ctm, &[at(0)]),
             "c" => self.extend(ctm, &[at(0), at(2), at(4)]),
             "v" | "y" => self.extend(ctm, &[at(0), at(2)]),
             "re" => {
-                let (x, y) = at(0);
-                let (w, h) = at(2);
-                self.extend(ctm, &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)])
+                let corner = at(0);
+                let (w, h) = (operand(2), operand(3));
+                let across = |x, y| corner + Vector::new(x, y);
+                self.extend(ctm, &[corner, across(w, 0.0), across(w, h), across(0.0, h)])
             }
             "h" => Some(Vec::new()),
             "W" | "W*" => {
@@ -319,9 +316,9 @@ impl Painting {
     }
 
     /// Widen the path's extent to the user-space `points` mapped by `ctm`.
-    fn extend(&mut self, ctm: Matrix, points: &[(f64, f64)]) -> Option<Vec<Painted>> {
-        for &(x, y) in points {
-            let (x, y) = ctm.apply(x, y);
+    fn extend(&mut self, ctm: Matrix, points: &[Point]) -> Option<Vec<Painted>> {
+        for &point in points {
+            let Point { x, y } = ctm.apply(point);
             let point = DeviceRect {
                 min_x: x,
                 min_y: y,

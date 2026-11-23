@@ -31,25 +31,22 @@ use pdfium_render::prelude::PdfiumError;
 use super::pdfium::with_document;
 use crate::content::text::TextBlock;
 use crate::pdf::Pdf;
-use crate::pdf::reader::DictionaryExt;
 use crate::pdf::reader::font::font_file;
+use crate::pdf::reader::{DictionaryExt, Point, Vector};
 use crate::sanitize::Rebuild;
 
 /// How far apart two positions may be, in points: PDFium sums a line's
 /// advances as `f32`s. A thousandth of an em at 12 points is 0.012.
 const TOLERANCE: f64 = 3e-3;
 
-/// A point on the page.
-type Point = (f64, f64);
-
 /// Whether `a` and `b` are the same point, within [`TOLERANCE`].
 fn same(a: Point, b: Point) -> bool {
-    (a.0 - b.0).abs() <= TOLERANCE && (a.1 - b.1).abs() <= TOLERANCE
+    negligible(a - b)
 }
 
-/// The move from `from` to `to`.
-fn step(from: Point, to: Point) -> Point {
-    (to.0 - from.0, to.1 - from.1)
+/// Whether `by` moves nowhere, within [`TOLERANCE`] each way.
+fn negligible(by: Vector) -> bool {
+    by.x.abs() <= TOLERANCE && by.y.abs() <= TOLERANCE
 }
 
 /// A glyph the reader places, or a character PDFium reads: what it reads
@@ -129,7 +126,7 @@ fn placed(block: &TextBlock) -> Result<Vec<Placed<String>>, String> {
                 .ok_or("a glyph's characters are past the page's text")?;
             Ok(Placed {
                 text: text.iter().collect(),
-                origin: glyph.origin,
+                origin: glyph.origin(),
             })
         })
         .collect()
@@ -192,7 +189,7 @@ fn theirs(pdf: &Pdf) -> Result<Vec<Vec<Placed<char>>>, String> {
                 };
                 theirs.push(Placed {
                     text,
-                    origin: (f64::from(x.value), f64::from(y.value)),
+                    origin: Point::new(f64::from(x.value), f64::from(y.value)),
                 });
             }
             pages.push(theirs);
@@ -286,7 +283,7 @@ fn compare_rebuilt(
     readings: &mut Vec<String>,
     mut hidden: HashMap<char, usize>,
 ) {
-    let cell = |(x, y): Point| ((x / CELL).floor() as i64, (y / CELL).floor() as i64);
+    let cell = |Point { x, y }: Point| ((x / CELL).floor() as i64, (y / CELL).floor() as i64);
     let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
     for (i, c) in theirs.iter().enumerate() {
         grid.entry(cell(c.origin)).or_default().push(i);
@@ -406,7 +403,7 @@ impl Near {
     }
 
     /// The cell `point` is in.
-    fn cell((x, y): Point) -> (i64, i64) {
+    fn cell(Point { x, y }: Point) -> (i64, i64) {
         ((x / COPY).floor() as i64, (y / COPY).floor() as i64)
     }
 
@@ -424,7 +421,7 @@ impl Near {
 
 /// How far apart `a` and `b` are.
 fn distance(a: Point, b: Point) -> f64 {
-    (a.0 - b.0).hypot(a.1 - b.1)
+    (a - b).length()
 }
 
 /// Compare the reader's glyphs on a page of a rebuilt document with
@@ -448,9 +445,9 @@ fn compare_source(
             continue;
         }
         steps += 1;
-        let ours = step(glyph.origin, next.origin);
-        let theirs = step(c.origin, next_c.origin);
-        if !same(ours, theirs) {
+        let ours = next.origin - glyph.origin;
+        let theirs = next_c.origin - c.origin;
+        if !negligible(ours - theirs) {
             errors.push(format!(
                 "{:?} moves the pen {ours:?}, PDFium's {theirs:?}",
                 glyph.text

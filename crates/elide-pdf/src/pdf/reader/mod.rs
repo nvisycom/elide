@@ -7,6 +7,7 @@ mod matrix;
 pub(crate) mod name_tree;
 mod object;
 mod page;
+mod point;
 mod scope;
 
 pub(crate) use self::matrix::Matrix;
@@ -18,4 +19,5 @@ pub(crate) use self::page::{
     DeviceRect, GlyphRect, PRINT_BOXES, PageBoxes, PageFrame, PageGeometry, normalize_rect,
     page_boxes, page_frame,
 };
+pub(crate) use self::point::{Point, Vector};
 pub(crate) use self::scope::Scope;
