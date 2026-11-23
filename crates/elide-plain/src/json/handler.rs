@@ -16,6 +16,7 @@
 //! offset translation is a single per-leaf walk of its escape table.
 
 use std::borrow::Cow;
+use std::cmp::Reverse;
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
@@ -29,8 +30,8 @@ use elide_core::{Error, Result};
 use super::JsonLoader;
 use super::escape::{decode_escape, json_escape};
 use super::parser::parse_slots;
-use crate::control;
-use crate::slice::slice;
+use crate::control::{self, Stripped};
+use crate::slice::{slice, span};
 
 /// Stable [`FormatId`] for the JSON codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
@@ -50,6 +51,15 @@ struct LeafEdit {
     slot: usize,
     /// The byte range to replace within that leaf's decoded value.
     value: Range<usize>,
+}
+
+/// A [`LeafEdit`] planned in a write, and the text written over it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlannedEdit {
+    /// Where the text is written.
+    edit: LeafEdit,
+    /// The text, unescaped.
+    text: String,
 }
 
 /// The interior of a quoted leaf: the source byte range between its two `"`
@@ -100,10 +110,10 @@ pub(super) enum Slot {
 /// An addressable position in the document.
 #[derive(Debug, Clone)]
 pub(super) struct Leaf {
-    pub kind: LeafKind,
+    pub(super) kind: LeafKind,
     /// Current unescaped UTF-8 value: what the recognizer sees in
     /// [`Chunk::data`] and what redactions edit.
-    pub value: String,
+    pub(super) value: String,
     /// Current source bytes: what `encode` emits and what a raw
     /// [`SourceRef`] addresses. For [`LeafKind::Key`] and
     /// [`LeafKind::StringValue`] this is the quoted form `"…"` with `\\` /
@@ -111,12 +121,12 @@ pub(super) struct Leaf {
     ///
     /// [`TextLocation`] offsets address the *decoded* stream ([`value`](Self::value)),
     /// not these bytes, the two differ wherever an escape collapses.
-    pub serialized: String,
+    pub(super) serialized: String,
     /// Out-of-band located context (currently the enclosing object key)
     /// surfaced to recognizers as hints; empty for keys and for value
     /// leaves outside any object (e.g. a top-level scalar). Each hint
     /// carries the key's source span so a boost can point back at the key.
-    pub hints: Vec<ResolvedHint<Text>>,
+    pub(super) hints: Vec<ResolvedHint<Text>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,21 +193,13 @@ impl Leaf {
             }
             return Some(slot_start + value_offset);
         }
-        let bounds = self.escaped_bounds(slot_start);
-        let bytes = self.serialized.as_bytes();
-        let mut src = bounds.start;
-        let mut val = 0usize;
-        while val < value_offset {
-            if src >= bounds.end {
-                return None;
-            }
-            let width = self.token_width(bytes, src - slot_start)?;
-            src += width.source;
-            val += width.value;
-        }
-        // `val` overshoots when `value_offset` fell inside a multi-byte decoded
-        // char; only an exact boundary has a well-defined source offset.
-        (val == value_offset).then_some(src)
+        // The first boundary at or past the offset overshoots it when the
+        // offset falls inside a multi-byte decoded char; only an exact boundary
+        // has a well-defined source offset.
+        self.boundaries(slot_start)
+            .find(|at| at.value >= value_offset)
+            .filter(|at| at.value == value_offset)
+            .map(|at| at.source)
     }
 
     /// Inverse of [`value_to_source`](Self::value_to_source): map a source byte
@@ -230,16 +232,33 @@ impl Leaf {
         if source_offset < bounds.start || source_offset > bounds.end {
             return None;
         }
-        let bytes = self.serialized.as_bytes();
-        let mut src = bounds.start;
-        let mut val = 0usize;
-        while src < source_offset {
-            let width = self.token_width(bytes, src - slot_start)?;
-            src += width.source;
-            val += width.value;
-        }
-        // Landed inside an escape rather than on a boundary.
-        (src == source_offset).then_some(val)
+        // Past an offset inside an escape, the first boundary overshoots it.
+        self.boundaries(slot_start)
+            .find(|at| at.source >= source_offset)
+            .filter(|at| at.source == source_offset)
+            .map(|at| at.value)
+    }
+
+    /// Each token boundary of this quoted leaf's interior, in order, from its
+    /// start to its end: where it sits in the document's source and in the
+    /// value. The walk stops early at a malformed escape.
+    fn boundaries(&self, slot_start: usize) -> impl Iterator<Item = Boundary> + '_ {
+        let bounds = self.escaped_bounds(slot_start);
+        let mut next = Some(Boundary {
+            source: bounds.start,
+            value: 0,
+        });
+        std::iter::from_fn(move || {
+            let at = next?;
+            next = (at.source < bounds.end)
+                .then(|| self.token_width(at.source - slot_start))
+                .flatten()
+                .map(|width| Boundary {
+                    source: at.source + width.source,
+                    value: at.value + width.value,
+                });
+            Some(at)
+        })
     }
 
     /// The [`EscapedBounds`] of this quoted leaf: the source byte range of its
@@ -257,12 +276,13 @@ impl Leaf {
     /// character its UTF-8 width (equal in both dimensions, so a multi-byte
     /// literal like `é` is stepped over whole and an offset can never land inside
     /// it). `None` for a malformed escape or a non-boundary `local`.
-    fn token_width(&self, bytes: &[u8], local: usize) -> Option<TokenWidth> {
+    fn token_width(&self, local: usize) -> Option<TokenWidth> {
+        let bytes = self.serialized.as_bytes();
         if bytes.get(local) == Some(&b'\\') {
-            let (source_len, decoded) = decode_escape(&bytes[local..])?;
+            let escape = decode_escape(&bytes[local..])?;
             Some(TokenWidth {
-                source: source_len,
-                value: decoded.len_utf8(),
+                source: escape.len,
+                value: escape.character.len_utf8(),
             })
         } else {
             // A literal character occupies the same bytes in source and value.
@@ -273,6 +293,16 @@ impl Leaf {
             })
         }
     }
+}
+
+/// A token boundary in a quoted leaf: where it sits in the document's source
+/// and in the leaf's value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Boundary {
+    /// The source byte offset, in the document.
+    source: usize,
+    /// The value byte offset.
+    value: usize,
 }
 
 /// How wide one serialized token is in each of the leaf's two coordinate spaces:
@@ -390,9 +420,7 @@ impl Stream<Text> for JsonHandler {
             .iter()
             .zip(&self.offsets)
             .filter_map(|(slot, offset)| {
-                let Slot::Leaf(leaf) = slot else {
-                    return None;
-                };
+                let leaf = slot.leaf()?;
                 let start = offset.decoded;
                 Some(Chunk {
                     location: TextLocation::inline(start..start + leaf.value.len()),
@@ -462,9 +490,7 @@ impl Encode for JsonHandler {
 #[async_trait::async_trait]
 impl DataReader<Text> for JsonHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<TextData> {
-        let range = location
-            .range()
-            .ok_or_else(|| Error::malformed("an unresolved mark has no span"))?;
+        let range = span(location)?;
         let found = self.find_leaf(range).ok_or_else(|| {
             Error::malformed(format!(
                 "range {}..{} is not within one JSON value",
@@ -483,37 +509,36 @@ impl DataWriter<Text> for JsonHandler {
         // **pre-mutation** slots first: mutating a leaf shifts later slots'
         // offsets, but a per-leaf value range stays valid regardless. Any
         // location that resolves to no value is an error.
-        let mut plan: Vec<(LeafEdit, String)> = Vec::new();
-        for (loc, replacement) in redactions.into_iter() {
-            let edit = self.edit_for(&loc)?;
-            let original = match &self.slots[edit.slot] {
-                Slot::Leaf(leaf) => leaf.value.get(edit.value.clone()).unwrap_or_default(),
-                Slot::Passthrough(_) => "",
-            };
-            let value = replacement.written(original).into_owned();
-            plan.push((edit, value));
+        let mut plan = Vec::new();
+        for (location, replacement) in redactions.into_iter() {
+            let edit = self.edit_for(&location)?;
+            let original = self.slots[edit.slot]
+                .leaf()
+                .and_then(|leaf| leaf.value.get(edit.value.clone()))
+                .unwrap_or_default();
+            let text = replacement.written(original).into_owned();
+            plan.push(PlannedEdit { edit, text });
         }
         // Apply per-leaf edits right-to-left within each leaf so earlier
         // edits in the same leaf don't shift later ones.
-        plan.sort_by(|(a, _), (b, _)| a.slot.cmp(&b.slot).then(b.value.start.cmp(&a.value.start)));
+        plan.sort_by_key(|planned| (planned.edit.slot, Reverse(planned.edit.value.start)));
         let spans: Vec<Range<usize>> = plan
             .iter()
-            .map(|(edit, _)| {
+            .map(|PlannedEdit { edit, .. }| {
                 let start = self.offsets[edit.slot].decoded;
                 start + edit.value.start..start + edit.value.end
             })
             .collect();
         spans.ensure_disjoint()?;
-        let edited = !plan.is_empty();
-        for (edit, value) in plan {
-            let Slot::Leaf(leaf) = &mut self.slots[edit.slot] else {
-                continue;
-            };
-            leaf.splice(edit.value, &value)?;
+        if plan.is_empty() {
+            return Ok(());
         }
-        if edited {
-            self.offsets = offsets(&self.slots);
+        for PlannedEdit { edit, text } in plan {
+            if let Some(leaf) = self.slots[edit.slot].leaf_mut() {
+                leaf.splice(edit.value, &text)?;
+            }
         }
+        self.offsets = offsets(&self.slots);
         Ok(())
     }
 }
@@ -546,10 +571,9 @@ impl JsonHandler {
     }
 
     /// This handler with the terminal control sequences each key and string
-    /// value decodes to stripped ([`control`]), and how many went. A changed
-    /// string is written again, escaped; the rest of the source stays as
-    /// written.
-    pub(super) fn strip_controls(self) -> Result<(Self, usize)> {
+    /// value decodes to stripped ([`control`]). A changed string is written
+    /// again, escaped; the rest of the source stays as written.
+    pub(super) fn strip_controls(self) -> Result<Stripped<Self>> {
         let mut removed = 0;
         let mut source = String::new();
         for slot in &self.slots {
@@ -563,20 +587,23 @@ impl JsonHandler {
                     continue;
                 }
             };
-            match control::strip(&leaf.value) {
-                (Cow::Owned(value), count) => {
-                    removed += count;
+            let stripped = control::strip(&leaf.value);
+            removed += stripped.removed;
+            match stripped.kept {
+                Cow::Owned(value) => {
                     source.push('"');
                     source.push_str(&json_escape(&value));
                     source.push('"');
                 }
-                (Cow::Borrowed(_), _) => source.push_str(&leaf.serialized),
+                Cow::Borrowed(_) => source.push_str(&leaf.serialized),
             }
         }
-        if removed == 0 {
-            return Ok((self, 0));
-        }
-        Ok((Self::parse(&source)?, removed))
+        let kept = if removed == 0 {
+            self
+        } else {
+            Self::parse(&source)?
+        };
+        Ok(Stripped { kept, removed })
     }
 
     /// The slots that can hold offset `at` in one coordinate space, in order:
@@ -593,9 +620,7 @@ impl JsonHandler {
     /// and its decoded-stream start offset.
     fn find_leaf(&self, range: &Range<usize>) -> Option<LeafAt<'_>> {
         self.slots_at(range.start, |o| o.decoded).find_map(|index| {
-            let Slot::Leaf(leaf) = &self.slots[index] else {
-                return None;
-            };
+            let leaf = self.slots[index].leaf()?;
             (range.start <= range.end && range.end <= self.offsets[index + 1].decoded).then(|| {
                 LeafAt {
                     index,
@@ -653,9 +678,9 @@ impl JsonHandler {
             }
             pieces.push(next.value);
         }
-        let Slot::Leaf(leaf) = &self.slots[edit.slot] else {
-            unreachable!("a source reference resolves to a leaf");
-        };
+        let leaf = self.slots[edit.slot]
+            .leaf()
+            .expect("a source reference resolves to a leaf");
         Ok(LeafEdit {
             slot: edit.slot,
             value: leaf.value.contiguous_span(pieces)?,
@@ -689,7 +714,7 @@ impl JsonHandler {
             )));
         }
         for idx in self.slots_at(raw.start, |o| o.source) {
-            let Slot::Leaf(leaf) = &self.slots[idx] else {
+            let Some(leaf) = self.slots[idx].leaf() else {
                 continue;
             };
             if raw.end > self.offsets[idx + 1].source {
@@ -739,9 +764,7 @@ impl JsonHandler {
     ///
     /// [`range`]: TextLocation::range
     fn resolve_range(&self, location: &TextLocation) -> Result<LeafEdit> {
-        let range = location
-            .range()
-            .ok_or_else(|| Error::malformed("a JSON redaction needs a byte range"))?;
+        let range = span(location)?;
         if range.start > range.end {
             return Err(Error::malformed(format!(
                 "redaction range {}..{} is reversed",
@@ -757,7 +780,7 @@ impl JsonHandler {
                 range.start, range.end
             )));
         };
-        let Slot::Leaf(leaf) = slot else {
+        let Some(leaf) = slot.leaf() else {
             return Err(Error::malformed(format!(
                 "redaction range {}..{} does not start in a JSON value",
                 range.start, range.end
@@ -777,6 +800,22 @@ impl JsonHandler {
 }
 
 impl Slot {
+    /// The leaf this slot holds, if it is one.
+    fn leaf(&self) -> Option<&Leaf> {
+        match self {
+            Slot::Leaf(leaf) => Some(leaf),
+            Slot::Passthrough(_) => None,
+        }
+    }
+
+    /// The leaf this slot holds, mutably, if it is one.
+    fn leaf_mut(&mut self) -> Option<&mut Leaf> {
+        match self {
+            Slot::Leaf(leaf) => Some(leaf),
+            Slot::Passthrough(_) => None,
+        }
+    }
+
     /// This slot's length in the decoded stream, the decoded value for a leaf,
     /// the verbatim bytes for passthrough.
     fn decoded_len(&self) -> usize {

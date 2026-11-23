@@ -86,13 +86,9 @@ impl<'a> SlotParser<'a> {
     }
 
     fn consume_whitespace(&mut self) {
-        while let Some(b) = self.peek() {
-            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                self.pending.push(b as char);
-                self.pos += 1;
-            } else {
-                break;
-            }
+        while let Some(b @ (b' ' | b'\t' | b'\n' | b'\r')) = self.peek() {
+            self.pending.push(char::from(b));
+            self.pos += 1;
         }
     }
 
@@ -106,6 +102,21 @@ impl<'a> SlotParser<'a> {
         self.pending.push(c as char);
         self.pos += 1;
         Ok(())
+    }
+
+    /// After a member of an object or array: consume the `,` before the next
+    /// one, returning `true`, or the `close` that ends it, returning `false`.
+    fn separator(&mut self, close: u8) -> Result<bool> {
+        self.consume_whitespace();
+        match self.peek() {
+            Some(b',') => self.consume_punct(b',').map(|()| true),
+            Some(b) if b == close => self.consume_punct(close).map(|()| false),
+            _ => Err(Error::malformed(format!(
+                "expected ',' or {:?} at offset {}",
+                char::from(close),
+                self.pos
+            ))),
+        }
     }
 
     /// Run `parse` (an object/array body) one level deeper, restoring the
@@ -126,19 +137,13 @@ impl<'a> SlotParser<'a> {
             ))),
             Some(b'{') => self.nested(Self::parse_object),
             Some(b'[') => self.nested(|p| p.parse_array(key_context)),
-            Some(b'"') => {
-                let mut leaf = self.parse_string_leaf(LeafKind::StringValue)?;
-                if let Some(k) = key_context {
-                    leaf.hints.push(k.clone());
-                }
-                self.push_leaf(leaf);
-                Ok(())
-            }
-            Some(b't') | Some(b'f') | Some(b'n') | Some(b'-') | Some(b'0'..=b'9') => {
-                let mut leaf = self.parse_scalar()?;
-                if let Some(k) = key_context {
-                    leaf.hints.push(k.clone());
-                }
+            Some(b'"' | b't' | b'f' | b'n' | b'-' | b'0'..=b'9') => {
+                let mut leaf = if self.peek() == Some(b'"') {
+                    self.parse_string_leaf(LeafKind::StringValue)?
+                } else {
+                    self.parse_scalar()?
+                };
+                leaf.hints.extend(key_context.cloned());
                 self.push_leaf(leaf);
                 Ok(())
             }
@@ -178,21 +183,8 @@ impl<'a> SlotParser<'a> {
             self.consume_whitespace();
             self.consume_punct(b':')?;
             self.parse_value(Some(&key_hint))?;
-            self.consume_whitespace();
-            match self.peek() {
-                Some(b',') => {
-                    self.consume_punct(b',')?;
-                }
-                Some(b'}') => {
-                    self.consume_punct(b'}')?;
-                    return Ok(());
-                }
-                _ => {
-                    return Err(Error::malformed(format!(
-                        "expected ',' or '}}' at offset {}",
-                        self.pos
-                    )));
-                }
+            if !self.separator(b'}')? {
+                return Ok(());
             }
         }
     }
@@ -209,21 +201,8 @@ impl<'a> SlotParser<'a> {
             // hint: `{"cards": ["4111…", "5555…"]}` should treat both
             // PANs as living under `cards`.
             self.parse_value(key_context)?;
-            self.consume_whitespace();
-            match self.peek() {
-                Some(b',') => {
-                    self.consume_punct(b',')?;
-                }
-                Some(b']') => {
-                    self.consume_punct(b']')?;
-                    return Ok(());
-                }
-                _ => {
-                    return Err(Error::malformed(format!(
-                        "expected ',' or ']' at offset {}",
-                        self.pos
-                    )));
-                }
+            if !self.separator(b']')? {
+                return Ok(());
             }
         }
     }
@@ -251,12 +230,11 @@ impl<'a> SlotParser<'a> {
                     });
                 }
                 Some(b'\\') => {
-                    let (source_len, decoded) =
-                        decode_escape(&self.bytes[self.pos..]).ok_or_else(|| {
-                            Error::malformed(format!("invalid escape at offset {}", self.pos))
-                        })?;
-                    value.push(decoded);
-                    self.pos += source_len;
+                    let escape = decode_escape(&self.bytes[self.pos..]).ok_or_else(|| {
+                        Error::malformed(format!("invalid escape at offset {}", self.pos))
+                    })?;
+                    value.push(escape.character);
+                    self.pos += escape.len;
                 }
                 Some(b) if b < 0x20 => {
                     return Err(Error::malformed(format!(

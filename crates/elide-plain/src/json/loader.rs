@@ -3,13 +3,14 @@
 //! formatting (indentation, key order, whitespace) verbatim.
 
 use elide_codec::content::ContentData;
-use elide_codec::{Document, DocumentLoader, StrippedContent};
+use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
 use super::JsonHandler;
 use super::handler::FORMAT_ID;
-use crate::control;
+use crate::control::Stripped;
+use crate::loaded::Loaded;
 
 /// Loader for JSON files. Produces one leaf [`Document`] per input.
 #[derive(Debug)]
@@ -17,11 +18,11 @@ pub(crate) struct JsonLoader;
 
 impl JsonLoader {
     /// The handler over `content`, each key and string value without the
-    /// terminal control sequences it decodes to ([`control`]),
-    /// and what was stripped.
-    pub(crate) fn load(&self, content: ContentData) -> Result<(JsonHandler, StrippedContent)> {
-        let (handler, removed) = JsonHandler::parse(&content.decode()?)?.strip_controls()?;
-        Ok((handler, control::recorded(removed)))
+    /// terminal control sequences it decodes to ([`control`](crate::control)).
+    pub(crate) fn load(&self, content: ContentData) -> Result<Loaded<JsonHandler>> {
+        let Stripped { kept, removed } =
+            JsonHandler::parse(&content.decode()?)?.strip_controls()?;
+        Ok(Loaded::new(kept, removed))
     }
 }
 
@@ -30,8 +31,7 @@ impl DocumentLoader for JsonLoader {
     /// Terminal control sequences are always stripped: they are undisplayed
     /// content, which no policy chooses for.
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
-        let (handler, stripped) = self.load(content)?;
-        Ok(Document::leaf(FORMAT_ID, handler).with_stripped(stripped))
+        Ok(self.load(content)?.into_document(FORMAT_ID))
     }
 }
 
@@ -45,7 +45,10 @@ mod tests {
 
     #[test]
     fn load_valid_json() -> Result<()> {
-        let (doc, stripped) = JsonLoader.load(ContentData::from_text(r#"{"a":1}"#))?;
+        let Loaded {
+            handler: doc,
+            stripped,
+        } = JsonLoader.load(ContentData::from_text(r#"{"a":1}"#))?;
         assert_eq!(doc.format().as_str(), "elide.text.json");
         assert!(stripped.is_empty());
         Ok(())
@@ -65,7 +68,10 @@ mod tests {
     fn terminal_control_sequences_are_stripped() -> Result<()> {
         let src =
             "{\n  \"na\\u001b[mme\": \"Ja\\u001b[mne \\u00e9\",\n  \"n\": 1, \"t\": \"x\u{7f}\"\n}";
-        let (doc, stripped) = JsonLoader.load(ContentData::from_text(src))?;
+        let Loaded {
+            handler: doc,
+            stripped,
+        } = JsonLoader.load(ContentData::from_text(src))?;
         assert_eq!(
             doc.encode()?.decode()?,
             "{\n  \"name\": \"Jane \u{e9}\",\n  \"n\": 1, \"t\": \"x\"\n}"
