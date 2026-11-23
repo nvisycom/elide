@@ -33,14 +33,17 @@ install-tools: ## Installs CLI tools required for development.
 		$(call log,cargo-watch already installed.); \
 	fi
 
-.PHONY: wasm-pkg
-wasm-pkg: ## Builds @nvisy/elide into packages/wasm/dist via wasm-pack.
+.PHONY: wasm-tools
+wasm-tools: ## Installs the wasm32 target and wasm-pack.
 	@$(call log,Adding wasm32 target...)
 	@rustup target add wasm32-unknown-unknown
 	@$(call log,Ensuring wasm-pack is installed...)
 	@command -v wasm-pack >/dev/null 2>&1 || \
 		cargo binstall wasm-pack --no-confirm || \
 		cargo install wasm-pack --locked
+
+.PHONY: wasm-pkg
+wasm-pkg: wasm-tools ## Builds @nvisy/elide into packages/wasm/dist via wasm-pack.
 	@$(call log,Building @nvisy/elide (release)...)
 	@# wasm-pack reads the wasm-bindgen version from Cargo.lock and fetches a
 	@# matching CLI itself; --no-pack skips its package.json so the hand-authored
@@ -68,6 +71,11 @@ wasm-demo: wasm-pkg ## Builds the full browser demo (Vite app + wasm package).
 	@npm ci && npm run build -w @nvisy/elide-demo
 	@$(call log,Demo built to packages/demo/dist.)
 	@$(call log,Preview it with: npm run preview -w @nvisy/elide-demo)
+
+.PHONY: wasm-test
+wasm-test: wasm-tools ## Runs the elide-wasm tests under Node via wasm-pack.
+	@$(call log,Running elide-wasm tests...)
+	@wasm-pack test --node crates/elide-wasm
 
 .PHONY: wasm-dev
 wasm-dev: wasm-pkg ## Runs the demo dev server with hot reload.

@@ -278,3 +278,8 @@ jobs:
       # rather than only surfacing post-merge in the Pages deploy.
       - name: Build demo
         run: make wasm-demo
+
+      # Each document format the browser build decodes, redacted end to end
+      # through the bindings under Node.
+      - name: Test elide-wasm (wasm32)
+        run: make wasm-test

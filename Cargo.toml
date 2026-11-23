@@ -78,6 +78,7 @@ csv = { version = "1.0", features = [] }
 # WebAssembly / browser bindings
 wasm-bindgen = { version = "0.2", features = [] }
 wasm-bindgen-futures = { version = "0.4", features = [] }
+wasm-bindgen-test = { version = "0.3", features = [] }
 js-sys = { version = "0.3", features = [] }
 send_wrapper = { version = "0.6", features = [] }
 serde-wasm-bindgen = { version = "0.6", features = [] }

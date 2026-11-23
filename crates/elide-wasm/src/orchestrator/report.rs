@@ -2,6 +2,7 @@
 //! JavaScript: the redacted blob and the entities it found, in `Tsify`-generated
 //! TypeScript shapes.
 
+use elide::primitive::UnitBoundingBox;
 use elide::redaction::{HiddenContent, HiddenContentKind};
 use serde::Serialize;
 use tsify::Tsify;
@@ -65,6 +66,10 @@ pub enum Location {
         start: usize,
         /// End byte offset (exclusive).
         end: usize,
+        /// Where the span is drawn, for text read off a rendered page (a
+        /// PDF's); absent for text that is its own source.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rendered: Option<Rendered>,
     },
     /// A cell in a spreadsheet or CSV.
     Tabular {
@@ -103,6 +108,42 @@ pub enum Location {
         /// The field's key.
         key: String,
     },
+}
+
+/// Where a text span is drawn on a rendered page.
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct Rendered {
+    /// The 1-based page number.
+    pub page: u32,
+    /// The regions the span covers, one per line it wraps across.
+    pub rects: Vec<Rect>,
+}
+
+/// A region of a page, as fractions of its width and height from its
+/// top-left corner.
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct Rect {
+    /// Left edge, as a fraction of the page width.
+    pub x: f64,
+    /// Top edge, as a fraction of the page height.
+    pub y: f64,
+    /// Width, as a fraction of the page width.
+    pub width: f64,
+    /// Height, as a fraction of the page height.
+    pub height: f64,
+}
+
+impl From<&UnitBoundingBox> for Rect {
+    fn from(rect: &UnitBoundingBox) -> Self {
+        Self {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
 }
 
 /// One item of hidden content the run stripped: where, what, and how many.

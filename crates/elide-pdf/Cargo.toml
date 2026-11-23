@@ -76,6 +76,12 @@ image = { workspace = true, features = [] }
 # Rendering
 pdfium-render = { workspace = true, features = [], optional = true }
 
+# On wasm the RNG `lopdf` pulls through `rand` needs its browser entropy
+# backend enabled (paired with the `getrandom_backend` cfg in
+# `.cargo/config.toml`). Native builds are unaffected.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }

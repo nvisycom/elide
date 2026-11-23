@@ -38,12 +38,13 @@ export class Orchestrator {
   ): Orchestrator;
   /**
    * Detect and redact the personal data in `bytes`, whose format the `hint`
-   * names (a file extension like `txt`, `csv`, `png`), returning the redacted
-   * bytes and every entity.
+   * names (a file extension like `txt`, `docx`, `pdf`), returning the redacted
+   * bytes and every entity. Without a hint the format is recognized by its
+   * leading bytes, which only the binary formats carry.
    *
    * Rejects with an `ElideError` if the format is unknown or the pipeline fails.
    */
-  redact(bytes: Uint8Array, hint: string): Promise<Report>;
+  redact(bytes: Uint8Array, hint?: string): Promise<Report>;
   free(): void;
   [Symbol.dispose](): void;
 }

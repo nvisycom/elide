@@ -20,18 +20,23 @@ Every modality the browser can hand over as bytes is covered: text and tabular
 (pattern and NER recognizers scan the decoded text or cells), image (its EXIF
 metadata is scrubbed, and with an OCR enricher its rendered text is read and
 matched regions blacked out), and audio (with an STT enricher its transcript is
-scanned and matched spans silenced). The models the browser supplies — NER, OCR,
-STT — arrive as async JavaScript callbacks; language detection is a built-in
-pure-Rust enricher.
+scanned and matched spans silenced). Documents decode into those modalities:
+DOCX, PPTX and XLSX into their text, cells, images and properties, and PDF into
+its page text and images. A blob with no format hint is recognized by its
+leading bytes. The models the browser supplies — NER, OCR, STT — arrive as
+async JavaScript callbacks; language detection is a built-in pure-Rust
+enricher.
 
 The pipeline is asynchronous, and in the browser its work is driven by the
 page's own event loop rather than a Rust async runtime, so nothing here spawns
 threads, opens sockets, or touches a filesystem. Only the parts of the toolkit
 that compile to WebAssembly are pulled in — detection and redaction, the
-plain-text, image, and WAV codecs, and the pure-Rust enrichers; the native
-codecs and engines (MP3, PDF, office formats, in-process OCR/STT/LLM models) are
-deliberately left out of the browser build, their models delegated to JavaScript
-instead.
+plain-text, office, PDF, image, and WAV codecs, and the pure-Rust enrichers; the
+native codecs and engines (MP3 encoding, PDF rasterizing, in-process
+OCR/STT/LLM models) are left out of the browser build, their models delegated
+to JavaScript instead. Without rasterizing, a PDF page whose text can't be
+placed (in a font whose widths can't be known, or written vertically) is
+refused, and a scanned page is redacted through its images, like any image.
 
 The rich Rust objects stay in wasm memory behind the handles, and only the
 config and the redaction result cross the boundary as data, typed through
