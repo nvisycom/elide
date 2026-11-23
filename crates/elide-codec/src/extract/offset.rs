@@ -87,6 +87,55 @@ impl OffsetMap {
         Self::new(vec![OffsetRun::identity(0..len, base..base + len)])
     }
 
+    /// The map of a text decoded again from this map's decoded text, `inner`
+    /// mapping it onto this one's decoded offsets: straight onto the raw
+    /// bytes.
+    ///
+    /// An entity of either map stays atomic: where `inner` splits one of this
+    /// map's entities between runs, the runs merge into one entity over both.
+    pub fn compose(&self, inner: &OffsetMap) -> OffsetMap {
+        let mut runs: Vec<OffsetRun> = Vec::with_capacity(self.runs.len() + inner.runs.len());
+        let mut push = |run: OffsetRun| match runs.last_mut() {
+            Some(prev) if run.raw.start < prev.raw.end => {
+                *prev = OffsetRun::entity(
+                    prev.decoded.start..run.decoded.end,
+                    prev.raw.start..prev.raw.end.max(run.raw.end),
+                );
+            }
+            _ => runs.push(run),
+        };
+        for run in &inner.runs {
+            if run.kind == RunKind::Entity {
+                let raw = self.raw_ranges(run.raw.clone());
+                if let (Some(first), Some(last)) = (raw.first(), raw.last()) {
+                    push(OffsetRun::entity(
+                        run.decoded.clone(),
+                        first.start..last.end,
+                    ));
+                }
+                continue;
+            }
+            // An identity run reads this map's runs under it as they are.
+            for outer in &self.runs {
+                let start = run.raw.start.max(outer.decoded.start);
+                let end = run.raw.end.min(outer.decoded.end);
+                if start >= end {
+                    continue;
+                }
+                let at = run.decoded.start + start - run.raw.start;
+                let decoded = at..at + end - start;
+                push(match outer.kind {
+                    RunKind::Identity => {
+                        let raw = outer.raw.start + start - outer.decoded.start;
+                        OffsetRun::identity(decoded, raw..raw + end - start)
+                    }
+                    RunKind::Entity => OffsetRun::entity(decoded, outer.raw.clone()),
+                });
+            }
+        }
+        OffsetMap::new(runs)
+    }
+
     /// Translate a `decoded` byte range into the raw byte ranges it came from.
     ///
     /// The raw ranges are source-absolute.
@@ -171,6 +220,43 @@ mod tests {
             OffsetRun::entity(6..7, 106..111),
             OffsetRun::identity(7..11, 111..115),
         ])
+    }
+
+    /// A map composed over `alice_amp_bob` reads through both.
+    #[test]
+    fn a_composed_map_reads_through_both() {
+        // Decoded again, "Alic" stays, "e & " reads as one character, "Bob"
+        // stays: "Alic_Bob".
+        let inner = OffsetMap::new(vec![
+            OffsetRun::identity(0..4, 0..4),
+            OffsetRun::entity(4..5, 4..8),
+            OffsetRun::identity(5..8, 8..11),
+        ]);
+        let map = alice_amp_bob().compose(&inner);
+        assert_eq!(map.raw_ranges(0..4), vec![100..104]);
+        // The one character covers "e &amp; ", the reference whole.
+        assert_eq!(map.raw_ranges(4..5), vec![104..112]);
+        assert_eq!(map.decoded_ranges(107..108), vec![4..5]);
+        assert_eq!(map.raw_ranges(5..8), vec![112..115]);
+    }
+
+    /// Where the inner map splits an entity between runs, the runs merge.
+    #[test]
+    fn a_composed_map_keeps_a_split_entity_whole() {
+        // "%4" then `&fjlig;` (raw 2..9), which reads "fj"; decoded again,
+        // "%4f" is one character and "j" follows it, inside the reference.
+        let outer = OffsetMap::new(vec![
+            OffsetRun::identity(0..2, 0..2),
+            OffsetRun::entity(2..4, 2..9),
+        ]);
+        let inner = OffsetMap::new(vec![
+            OffsetRun::entity(0..1, 0..3),
+            OffsetRun::identity(1..2, 3..4),
+        ]);
+        assert_eq!(
+            outer.compose(&inner),
+            OffsetMap::new(vec![OffsetRun::entity(0..2, 0..9)])
+        );
     }
 
     #[test]

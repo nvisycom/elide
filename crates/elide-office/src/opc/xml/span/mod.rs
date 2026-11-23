@@ -115,9 +115,8 @@ impl Span {
             // decode whole before it is mapped reference by reference.
             BlockKind::Text => {
                 unescape(slice).map_err(|_| Unreadable)?;
-                let (text, offsets) =
-                    decode_references(slice, self.range.start, CharacterReferences::Xml);
-                Ok((Cow::Owned(text), offsets))
+                let read = decode_references(slice, self.range.start, CharacterReferences::Xml);
+                Ok((Cow::Owned(read.text), read.offsets))
             }
             BlockKind::Attribute => {
                 attribute_value(slice).map_err(|_| Unreadable)?;
@@ -200,8 +199,8 @@ fn decode_attribute(raw: &str, base: usize) -> (String, OffsetMap) {
         literal(&mut text, &mut runs, copied, at);
         let start = text.len();
         if bytes[at] == b'&' {
-            let (decoded, _) = decode_references(&raw[at..end], 0, CharacterReferences::Xml);
-            text.push_str(&decoded);
+            let read = decode_references(&raw[at..end], 0, CharacterReferences::Xml);
+            text.push_str(&read.text);
         } else {
             text.push(' ');
         }
