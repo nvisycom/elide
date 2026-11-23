@@ -48,6 +48,24 @@ impl OffsetRun {
         }
     }
 
+    /// The part of `decoded` this run covers, and the raw bytes it maps
+    /// onto: the matching stretch of an identity run, all of an entity's.
+    fn under(&self, decoded: &Range<usize>) -> Option<(Range<usize>, Range<usize>)> {
+        let start = decoded.start.max(self.decoded.start);
+        let end = decoded.end.min(self.decoded.end);
+        if start >= end {
+            return None;
+        }
+        let raw = match self.kind {
+            RunKind::Identity => {
+                let raw = self.raw.start + start - self.decoded.start;
+                raw..raw + end - start
+            }
+            RunKind::Entity => self.raw.clone(),
+        };
+        Some((start..end, raw))
+    }
+
     /// An entity run mapping the decoded entity character(s) `decoded` onto the
     /// whole raw reference `raw`.
     pub fn entity(decoded: Range<usize>, raw: Range<usize>) -> Self {
@@ -104,33 +122,43 @@ impl OffsetMap {
             }
             _ => runs.push(run),
         };
+        // Inner runs advance through this map's decoded text in order, so the
+        // runs under each are found from a cursor that only moves forward.
+        let mut next = 0;
         for run in &inner.runs {
-            if run.kind == RunKind::Entity {
-                let raw = self.raw_ranges(run.raw.clone());
-                if let (Some(first), Some(last)) = (raw.first(), raw.last()) {
-                    push(OffsetRun::entity(
-                        run.decoded.clone(),
-                        first.start..last.end,
-                    ));
-                }
-                continue;
+            let mid = &run.raw;
+            while self
+                .runs
+                .get(next)
+                .is_some_and(|outer| outer.decoded.end <= mid.start)
+            {
+                next += 1;
             }
-            // An identity run reads this map's runs under it as they are.
-            for outer in &self.runs {
-                let start = run.raw.start.max(outer.decoded.start);
-                let end = run.raw.end.min(outer.decoded.end);
-                if start >= end {
-                    continue;
-                }
-                let at = run.decoded.start + start - run.raw.start;
-                let decoded = at..at + end - start;
-                push(match outer.kind {
-                    RunKind::Identity => {
-                        let raw = outer.raw.start + start - outer.decoded.start;
-                        OffsetRun::identity(decoded, raw..raw + end - start)
+            let under = self.runs[next..]
+                .iter()
+                .take_while(|outer| outer.decoded.start < mid.end)
+                .filter_map(|outer| Some((outer.kind, outer.under(mid)?)));
+            match run.kind {
+                // An entity maps onto all the raw bytes under it.
+                RunKind::Entity => {
+                    let raw = under.fold(None, |hull: Option<Range<usize>>, (_, (_, raw))| {
+                        Some(hull.map_or(raw.clone(), |hull| hull.start..raw.end))
+                    });
+                    if let Some(raw) = raw {
+                        push(OffsetRun::entity(run.decoded.clone(), raw));
                     }
-                    RunKind::Entity => OffsetRun::entity(decoded, outer.raw.clone()),
-                });
+                }
+                // An identity run reads the runs under it as they are.
+                RunKind::Identity => {
+                    for (kind, (part, raw)) in under {
+                        let at = run.decoded.start + part.start - mid.start;
+                        push(OffsetRun {
+                            kind,
+                            decoded: at..at + part.len(),
+                            raw,
+                        });
+                    }
+                }
             }
         }
         OffsetMap::new(runs)
@@ -238,6 +266,34 @@ mod tests {
         assert_eq!(map.raw_ranges(4..5), vec![104..112]);
         assert_eq!(map.decoded_ranges(107..108), vec![4..5]);
         assert_eq!(map.raw_ranges(5..8), vec![112..115]);
+    }
+
+    /// Composing walks both maps once, so a long value of references each
+    /// decoded again composes run for run.
+    #[test]
+    fn a_long_composed_map_maps_each_run() {
+        // `&#37;41` 100 000 times: each reference reads `%`, and each `%41` an
+        // `A` over its whole reference and digits.
+        let count = 100_000;
+        let outer = OffsetMap::new(
+            (0..count)
+                .flat_map(|i| {
+                    [
+                        OffsetRun::entity(3 * i..3 * i + 1, 7 * i..7 * i + 5),
+                        OffsetRun::identity(3 * i + 1..3 * i + 3, 7 * i + 5..7 * i + 7),
+                    ]
+                })
+                .collect(),
+        );
+        let inner = OffsetMap::new(
+            (0..count)
+                .map(|i| OffsetRun::entity(i..i + 1, 3 * i..3 * i + 3))
+                .collect(),
+        );
+        let want = (0..count)
+            .map(|i| OffsetRun::entity(i..i + 1, 7 * i..7 * i + 7))
+            .collect();
+        assert_eq!(outer.compose(&inner), OffsetMap::new(want));
     }
 
     /// Where the inner map splits an entity between runs, the runs merge.
