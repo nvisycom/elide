@@ -1077,6 +1077,36 @@ mod tests {
         }
     }
 
+    /// A word covered across two regions painting its tile, with a gap the
+    /// pattern does not paint between them, is boxed in each region, its
+    /// glyphs there joined, and never over the gap.
+    #[test]
+    fn a_cover_across_regions_leaves_the_gap() {
+        let bytes = tiling_document(
+            Object::Integer(1),
+            b"/Pattern cs /P0 scn 0 0 4 20 re f 20 0 30 20 re f".to_vec(),
+        );
+        let pdf = Pdf::open(&bytes).unwrap().read(Rebuild).unwrap().pdf;
+        let before = pdf.read(Text).unwrap();
+        assert_eq!(&before[0].text[..8], "Jane Roe");
+        let mut edit = pdf.edit();
+        edit.redact(TextRedaction {
+            source: &pdf,
+            blocks: &before,
+            detections: &[Detection::new(1, 0..8).covering(Color::BLACK)],
+        })
+        .unwrap();
+        let out = edit.finish().unwrap();
+        let drawn = boxes(&out, 1);
+        assert_eq!(drawn.len(), 2, "{drawn:?}");
+        for b in &drawn {
+            assert!(
+                b[2] <= 4.0 + 1e-6 || b[0] >= 20.0 - 1e-6,
+                "a box spans the gap: {drawn:?}"
+            );
+        }
+    }
+
     /// A box moves with its text but keeps to the clip it was drawn under,
     /// and marks only text that showed: covered text moved past the clip's
     /// edge loses the part beyond it, and covered text a clip hid draws no

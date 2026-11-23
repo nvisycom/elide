@@ -409,15 +409,19 @@ impl<'a> PageGeometry<'a> {
     /// per line of each drawing of it, in the order of `spans`:
     /// [`lines_for`](Self::lines_for) for many spans at once, in one pass over
     /// the glyphs. `spans` are sorted and disjoint; a glyph in two of them
-    /// boxes the first. A drawing places its glyphs in character order, so a
-    /// glyph no later than the one before starts another drawing, as each
-    /// tile of a pattern is: its box never joins the last one's.
+    /// boxes the first. A drawing places its glyphs in character order under
+    /// one clip, so a glyph no later than the one before, or under another
+    /// clip, starts another drawing, as each tile of a pattern and each
+    /// region painting it is: its box never joins the last one's. A clip is
+    /// a box, so the bounds of glyphs within one stay within it; bounds
+    /// joined across two clips could cover what each hides, such as the gap
+    /// between two regions a pattern paints.
     pub(crate) fn lines_for_each<T: Copy>(
         &self,
         spans: &[(T, Range<usize>)],
     ) -> Vec<(T, DeviceRect)> {
         let mut lines: Vec<Vec<DeviceRect>> = vec![Vec::new(); spans.len()];
-        let mut last: Vec<Option<usize>> = vec![None; spans.len()];
+        let mut last: Vec<Option<(usize, Clip)>> = vec![None; spans.len()];
         for glyph in self.rects {
             let Some(rect) = glyph.visible() else {
                 continue;
@@ -429,8 +433,9 @@ impl<'a> PageGeometry<'a> {
             if chars.start >= glyph.chars.end {
                 continue;
             }
-            let same_drawing = last[i].is_some_and(|start| start < glyph.chars.start);
-            last[i] = Some(glyph.chars.start);
+            let same_drawing = last[i]
+                .is_some_and(|(start, clip)| start < glyph.chars.start && clip == glyph.clip);
+            last[i] = Some((glyph.chars.start, glyph.clip));
             match lines[i].last_mut() {
                 Some(line) if same_drawing && same_line(line, &rect) => {
                     *line = line.union(rect);
