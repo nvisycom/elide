@@ -17,7 +17,7 @@
 //! *not* part of that state (they reset at `BT` and are set by the text-
 //! positioning operators), so [`Cursor`] holds them separately.
 
-use crate::pdf::reader::Matrix;
+use crate::pdf::reader::{Matrix, Point, Vector};
 
 /// The parametric text state (9.3) the `q`/`Q` stack saves and
 /// restores. The text matrix and line matrix are deliberately absent: the spec
@@ -59,33 +59,45 @@ impl Default for TextState {
 
 /// The text matrix `Tm` and text line matrix `Tlm` (9.4.2). Both
 /// reset to the identity at `BT`; the positioning operators move them, and each
-/// shown glyph advances `Tm`.
+/// shown glyph advances `Tm`. Each setting of the line matrix starts a line,
+/// numbered by the caller.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Cursor {
     tm: Matrix,
     tlm: Matrix,
+    line: u64,
 }
 
 impl Cursor {
-    /// A cursor at the text-object origin, as `BT` establishes.
-    pub(super) fn new() -> Self {
+    /// A cursor at the text-object origin, as `BT` establishes, starting line
+    /// `line`.
+    pub(super) fn new(line: u64) -> Self {
         Self {
             tm: Matrix::IDENTITY,
             tlm: Matrix::IDENTITY,
+            line,
         }
     }
 
-    /// `Tm a b c d e f`: set both the text and line matrix absolutely.
-    pub(super) fn set_matrix(&mut self, m: Matrix) {
+    /// The line the cursor places glyphs on.
+    pub(super) fn line(&self) -> u64 {
+        self.line
+    }
+
+    /// `Tm a b c d e f`: set both the text and line matrix absolutely,
+    /// starting line `line`.
+    pub(super) fn set_matrix(&mut self, m: Matrix, line: u64) {
         self.tm = m;
         self.tlm = m;
+        self.line = line;
     }
 
     /// `Td tx ty`: move to the start of the next line, offset by `(tx, ty)` from
-    /// the current line's start.
-    pub(super) fn next_line_offset(&mut self, tx: f64, ty: f64) {
+    /// the current line's start, starting line `line`.
+    pub(super) fn next_line_offset(&mut self, tx: f64, ty: f64, line: u64) {
         self.tlm = Matrix::translation(tx, ty).then(self.tlm);
         self.tm = self.tlm;
+        self.line = line;
     }
 
     /// Advance the text matrix by a horizontal displacement `tx` (text-space
@@ -94,19 +106,11 @@ impl Cursor {
         self.tm = Matrix::translation(tx, 0.0).then(self.tm);
     }
 
-    /// The glyph origin in device space: the text matrix combined with the CTM,
-    /// origin extracted. This is where the next glyph would be drawn — its x locates
-    /// a horizontal gap, its y a line change.
-    pub(super) fn device_origin(&self, ctm: Matrix) -> (f64, f64) {
-        self.tm.then(ctm).origin()
-    }
-
-    /// Map a point given in *text space* (relative to the current text origin)
-    /// through the text matrix and CTM to device space. Used to project a
-    /// glyph's box corners (advance × ascent/descent) onto the page.
-    pub(super) fn device_point(&self, ctm: Matrix, tx: f64, ty: f64) -> (f64, f64) {
-        let m = self.tm.then(ctm);
-        (m.a * tx + m.c * ty + m.e, m.b * tx + m.d * ty + m.f)
+    /// The text-to-device transform at the pen: the text matrix, then `ctm`.
+    /// Its origin is where the next glyph would be drawn: its x locates a
+    /// horizontal gap, its y a line change.
+    pub(super) fn transform(&self, ctm: Matrix) -> Matrix {
+        self.tm.then(ctm)
     }
 
     /// The writing-direction unit vector in device space and its scale: the
@@ -116,13 +120,13 @@ impl Cursor {
     /// deltas along it handles rotated/sheared text, not just upright. A
     /// degenerate basis falls back to the x-axis so a caller never divides by
     /// zero.
-    pub(super) fn writing_axis(&self, ctm: Matrix) -> ((f64, f64), f64) {
-        let m = self.tm.then(ctm);
-        let len = m.a.hypot(m.b);
+    pub(super) fn writing_axis(&self, ctm: Matrix) -> (Vector, f64) {
+        let along = self.tm.then(ctm).vector(Vector::new(1.0, 0.0));
+        let len = along.length();
         if len <= f64::MIN_POSITIVE {
-            ((1.0, 0.0), 0.0)
+            (Vector::new(1.0, 0.0), 0.0)
         } else {
-            ((m.a / len, m.b / len), len)
+            (Vector::new(along.x / len, along.y / len), len)
         }
     }
 }
@@ -155,17 +159,11 @@ impl SpaceRule {
     /// (a word boundary); otherwise a forward advance of at least that threshold
     /// is a word space. Projecting onto the axis — rather than comparing raw x/y
     /// — makes this correct for rotated and vertical text, not just upright.
-    pub(super) fn needs_space(
-        pen: (f64, f64),
-        next: (f64, f64),
-        axis: (f64, f64),
-        em: f64,
-    ) -> bool {
-        let dx = next.0 - pen.0;
-        let dy = next.1 - pen.1;
+    pub(super) fn needs_space(pen: Point, next: Point, axis: Vector, em: f64) -> bool {
+        let moved = next - pen;
         // Component along the writing direction, and perpendicular to it.
-        let along = dx * axis.0 + dy * axis.1;
-        let perp = dx * -axis.1 + dy * axis.0;
+        let along = moved.dot(axis);
+        let perp = moved.dot(Vector::new(-axis.y, axis.x));
         let threshold = em * Self::GAP_EM;
         if perp.abs() > threshold {
             return true;

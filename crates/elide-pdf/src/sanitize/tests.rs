@@ -1472,7 +1472,7 @@ fn a_simple_font_reads_through_its_to_unicode() {
     let blocks = pdf.read(Text).unwrap();
     assert_eq!(blocks[0].text.trim(), "Jane");
 
-    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 0, 4)]);
+    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 0..4)]);
     assert!(!redacted.read(Text).unwrap()[0].text.contains("Jane"));
 }
 
@@ -1502,7 +1502,7 @@ fn a_partly_detected_ligature_is_scrubbed() {
     let blocks = pdf.read(Text).unwrap();
     assert_eq!(blocks[0].text.trim(), "fix");
 
-    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 1, 2)]);
+    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 1..2)]);
     let to_unicode: String = redacted
         .doc()
         .objects
@@ -1549,7 +1549,7 @@ fn a_glyph_deleted_from_a_shared_form_is_scrubbed() {
     let blocks = pdf.read(Text).unwrap();
     assert_eq!(blocks[1].text.trim(), "fix");
 
-    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 0, 2)]);
+    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, 0..2)]);
     let to_unicode: String = redacted
         .doc()
         .objects
@@ -2498,7 +2498,7 @@ fn form_fields_are_flattened_into_the_page() {
     assert!(!text.contains("Hidden") && !text.contains("Off"), "{text}");
 
     let start = text[..text.find("Jane Roe").unwrap()].chars().count();
-    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, start, start + 8)]);
+    let redacted = deleted(&pdf, &blocks, &[Detection::new(1, start..start + 8)]);
     let redacted = redacted.doc();
     assert!(!text_of(redacted).contains("Jane Roe"));
 }

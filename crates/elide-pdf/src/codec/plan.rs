@@ -13,7 +13,7 @@ use crate::pdf::{Edit, Pdf};
 /// Everything an encode writes into a document.
 #[derive(Debug, Default)]
 pub(super) struct Plan {
-    /// The detected text spans whose glyphs are deleted.
+    /// The detected text spans whose glyphs are deleted, removed or covered.
     pub(super) text: Vec<Detection>,
     /// Embedded images replaced with their redacted bytes.
     pub(super) images: Vec<ImageReplacement>,

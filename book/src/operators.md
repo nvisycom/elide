@@ -12,7 +12,7 @@ For `dana.reed@example.com`:
 |---|---|
 | `Keep` | Left as it is: nothing is written; the selection is audited |
 | `Remove` | Removed: nothing marks where it was |
-| `Cover::default()` | `█████████████████████`, one `█` per character |
+| `Cover::default()` | `█████████████████████`, one `█` per character; in a PDF, a box over the text, which keeps its place |
 | `Replace::new("[EMAIL]")` | `[EMAIL]` |
 | `Mask::stars()` | `*********************` |
 | `Mask::stars().with_keep_suffix(11)` | `**********example.com` |

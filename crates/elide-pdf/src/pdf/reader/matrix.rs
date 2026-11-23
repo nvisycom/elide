@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use lopdf::{Dictionary, Document};
 
-use super::DictionaryExt;
+use super::{DictionaryExt, Point, Vector};
 
 /// A 2×3 affine transform `[a b c d e f]`, mapping a point `(x, y)` to
 /// `(a·x + c·y + e, b·x + d·y + f)`. Row-vector convention, as PDF uses.
@@ -61,17 +61,23 @@ impl Matrix {
         }
     }
 
-    /// The device-space origin `(e, f)` — where this matrix places `(0, 0)`.
-    pub(crate) fn origin(self) -> (f64, f64) {
-        (self.e, self.f)
+    /// Where this matrix places the origin: `(e, f)`.
+    pub(crate) fn origin(self) -> Point {
+        Point::new(self.e, self.f)
     }
 
-    /// Where this matrix places the point `(x, y)`.
-    pub(crate) fn apply(self, x: f64, y: f64) -> (f64, f64) {
-        (
-            self.a * x + self.c * y + self.e,
-            self.b * x + self.d * y + self.f,
+    /// Where this matrix places `point`.
+    pub(crate) fn apply(self, point: Point) -> Point {
+        Point::new(
+            self.a * point.x + self.c * point.y + self.e,
+            self.b * point.x + self.d * point.y + self.f,
         )
+    }
+
+    /// The move this matrix turns `by` into: its linear part, without the
+    /// translation.
+    pub(crate) fn vector(self, by: Vector) -> Vector {
+        Vector::new(self.a * by.x + self.c * by.y, self.b * by.x + self.d * by.y)
     }
 
     /// The matrix undoing this one, or `None` when it flattens the plane
@@ -119,11 +125,8 @@ mod tests {
     #[test]
     fn an_inverse_undoes_its_matrix() {
         let m = Matrix::from([2.0, 1.0, -1.0, 3.0, 5.0, -7.0]);
-        let (x, y) = m
-            .inverse()
-            .unwrap()
-            .apply(m.apply(4.0, 6.0).0, m.apply(4.0, 6.0).1);
-        assert!((x - 4.0).abs() < 1e-9 && (y - 6.0).abs() < 1e-9);
+        let back = m.inverse().unwrap().apply(m.apply(Point::new(4.0, 6.0)));
+        assert!((back.x - 4.0).abs() < 1e-9 && (back.y - 6.0).abs() < 1e-9);
         assert!(
             Matrix::from([1.0, 2.0, 2.0, 4.0, 0.0, 0.0])
                 .inverse()
@@ -136,9 +139,8 @@ mod tests {
     #[test]
     fn a_tiny_scale_inverts() {
         let m = Matrix::from([1e-9, 0.0, 0.0, 1e-9, 3.0, 4.0]);
-        let (x, y) = m.apply(5e9, 7e9);
-        let (x, y) = m.inverse().unwrap().apply(x, y);
-        assert!((x - 5e9).abs() < 1.0 && (y - 7e9).abs() < 1.0);
+        let back = m.inverse().unwrap().apply(m.apply(Point::new(5e9, 7e9)));
+        assert!((back.x - 5e9).abs() < 1.0 && (back.y - 7e9).abs() < 1.0);
         assert!(Matrix::from([0.0; 6]).inverse().is_none());
     }
 }

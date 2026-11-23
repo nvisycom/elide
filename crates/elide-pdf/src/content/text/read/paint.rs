@@ -8,7 +8,7 @@ use lopdf::content::Operation;
 use lopdf::{Dictionary, Document, ObjectId};
 
 use super::stream::operand_f64;
-use crate::pdf::reader::{DeviceRect, DictionaryExt, Matrix};
+use crate::pdf::reader::{Clip, DeviceRect, DictionaryExt, Matrix, Point, Vector};
 
 /// The tiling pattern a fill or stroke paints with, and the space of the
 /// stream that selected it, which its `/Matrix` lays its tiles out in.
@@ -64,16 +64,6 @@ impl Line {
     }
 }
 
-/// What the clip leaves to paint: everything, the device-space bounds of the
-/// clip, or nothing.
-#[derive(Debug, Clone, Copy, Default)]
-enum Clip {
-    #[default]
-    Whole,
-    Within(DeviceRect),
-    Nothing,
-}
-
 /// The patterns a stream fills and strokes with, its clip and line style,
 /// all graphics state (saved by `q`, restored by `Q`), and the path it is
 /// building.
@@ -117,20 +107,17 @@ impl Painting {
     /// is none of these, else each region a fill or stroke with a pattern
     /// paints, within the clip.
     pub(super) fn path(&mut self, operation: &Operation, ctm: Matrix) -> Option<Vec<Painted>> {
-        let at = |index: usize| {
-            (
-                operand_f64(&operation.operands, index),
-                operand_f64(&operation.operands, index + 1),
-            )
-        };
+        let operand = |index: usize| operand_f64(&operation.operands, index);
+        let at = |index: usize| Point::new(operand(index), operand(index + 1));
         match operation.operator.as_str() {
             "m" | "l" => self.extend(ctm, &[at(0)]),
             "c" => self.extend(ctm, &[at(0), at(2), at(4)]),
             "v" | "y" => self.extend(ctm, &[at(0), at(2)]),
             "re" => {
-                let (x, y) = at(0);
-                let (w, h) = at(2);
-                self.extend(ctm, &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)])
+                let corner = at(0);
+                let (w, h) = (operand(2), operand(3));
+                let across = |x, y| corner + Vector::new(x, y);
+                self.extend(ctm, &[corner, across(w, 0.0), across(w, h), across(0.0, h)])
             }
             "h" => Some(Vec::new()),
             "W" | "W*" => {
@@ -223,6 +210,12 @@ impl Painting {
             .collect()
     }
 
+    /// Whether text shown now adds its outlines to the clip its text object
+    /// sets at `ET`: a clipping rendering mode, 4 to 7.
+    pub(super) fn clips_text(&self) -> bool {
+        self.render >= 4
+    }
+
     /// Open a text object: no text has been shown in it to clip with.
     pub(super) fn begin_text(&mut self) {
         self.text_clip = None;
@@ -236,14 +229,9 @@ impl Painting {
         }
     }
 
-    /// The part of the glyph box `rect` the clip shows, or `None` when it
-    /// hides all of it.
-    pub(super) fn visible(&self, rect: DeviceRect) -> Option<DeviceRect> {
-        match self.clip {
-            Clip::Whole => Some(rect),
-            Clip::Within(clip) => rect.within(clip),
-            Clip::Nothing => None,
-        }
+    /// What the clip leaves of what is drawn now.
+    pub(super) fn clip(&self) -> Clip {
+        self.clip
     }
 
     /// Whether a fill paints with a pattern, and is not fully transparent.
@@ -319,9 +307,9 @@ impl Painting {
     }
 
     /// Widen the path's extent to the user-space `points` mapped by `ctm`.
-    fn extend(&mut self, ctm: Matrix, points: &[(f64, f64)]) -> Option<Vec<Painted>> {
-        for &(x, y) in points {
-            let (x, y) = ctm.apply(x, y);
+    fn extend(&mut self, ctm: Matrix, points: &[Point]) -> Option<Vec<Painted>> {
+        for &point in points {
+            let Point { x, y } = ctm.apply(point);
             let point = DeviceRect {
                 min_x: x,
                 min_y: y,

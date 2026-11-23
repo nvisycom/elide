@@ -158,10 +158,10 @@ Audio        time interval      beep | silence | remove
 ```
 
 **Text.** A location is a half-open byte range. The replacement is a
-removal, a cover (one `█` per character), or a
-replacement string. A replacement's length may differ from the
-original, which is why text redaction batches require coordinate care (Section
-6).
+removal, a cover (one `█` per character; in a PDF, the glyphs are deleted and
+their space kept under a box of the cover's color), or a replacement string. A
+replacement's length may differ from the original, which is why text redaction
+batches require coordinate care (Section 6).
 
 **Tabular.** A location is a cell coordinate (row and column, with optional
 character offsets and column or sheet names). Tabular reuses the text data and

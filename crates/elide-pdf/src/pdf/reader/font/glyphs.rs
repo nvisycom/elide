@@ -10,6 +10,7 @@
 //! its encoding's character (9.10.2).
 
 use std::borrow::Cow;
+use std::ops::Range;
 use std::{array, iter};
 
 use elide_core::{Error, ErrorKind, Result};
@@ -25,10 +26,8 @@ use crate::pdf::reader::{DictionaryExt, StreamExt};
 
 /// One decoded glyph within an operand's bytes.
 pub(crate) struct Glyph {
-    /// Start of the glyph's code within the operand string.
-    pub(crate) byte_start: usize,
-    /// End of the glyph's code (exclusive).
-    pub(crate) byte_end: usize,
+    /// Where the glyph's code is within the operand string.
+    pub(crate) bytes: Range<usize>,
     /// The glyph's raw character code (the bytes consumed, big-endian), which
     /// keys its `/ToUnicode` entry.
     pub(crate) code: u32,
@@ -502,8 +501,7 @@ impl Composite {
                 }
             };
             glyphs.push(Glyph {
-                byte_start: i,
-                byte_end: i + len,
+                bytes: i..i + len,
                 code,
                 width_key: cid,
                 text: mapped_text(&units, self.symbol)?,
@@ -544,8 +542,7 @@ impl Simple {
                         })?,
                 };
                 Ok(Glyph {
-                    byte_start: i,
-                    byte_end: i + 1,
+                    bytes: i..i + 1,
                     code: u32::from(b),
                     width_key: u32::from(b),
                     text,

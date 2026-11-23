@@ -7,7 +7,7 @@ use std::ops::Range;
 use elide_core::primitive::UnitBoundingBox;
 use lopdf::{Document, ObjectId};
 
-use super::{DictionaryExt, DocumentExt, Matrix};
+use super::{DictionaryExt, DocumentExt, Matrix, Point, Vector};
 
 /// One glyph's box and the decoded character range it drew, so a detected
 /// character span can be resolved back to the page rectangles it covers.
@@ -15,11 +15,60 @@ use super::{DictionaryExt, DocumentExt, Matrix};
 pub(crate) struct GlyphRect {
     /// The page-local decoded character range this glyph produced.
     pub(crate) chars: Range<usize>,
-    /// The glyph's box in default user space, bottom-left origin.
-    pub(crate) rect: DeviceRect,
-    /// Where the glyph is drawn from in default user space: the pen, raised
-    /// by the text rise (9.4.4).
-    pub(crate) origin: (f64, f64),
+    /// The glyph's box in default user space, bottom-left origin, as drawn,
+    /// before any clip.
+    pub(crate) extent: DeviceRect,
+    /// What the clip in effect where the glyph is drawn leaves of what is
+    /// drawn there: it stays on the page however the glyph moves.
+    pub(crate) clip: Clip,
+    /// The glyph's own space where it is drawn, to default user space: text
+    /// space raised by the text rise (9.4.4), then the text matrix and CTM,
+    /// and, for a tiled copy, the tile's placement. The glyph is drawn from
+    /// its origin.
+    pub(crate) transform: Matrix,
+}
+
+impl GlyphRect {
+    /// The part of the glyph's box its clip shows, or `None` when it hides
+    /// all of it.
+    pub(crate) fn visible(&self) -> Option<DeviceRect> {
+        self.clip.shows(self.extent)
+    }
+
+    /// The glyph moved `advance` along its line in text space: its box moved
+    /// by where its transform takes that move, and its transform with it,
+    /// under the same clip.
+    pub(crate) fn moved(&self, advance: f64) -> Self {
+        Self {
+            chars: self.chars.clone(),
+            extent: self
+                .extent
+                .moved(self.transform.vector(Vector::new(advance, 0.0))),
+            clip: self.clip,
+            transform: Matrix::translation(advance, 0.0).then(self.transform),
+        }
+    }
+}
+
+/// What a clip leaves of what is drawn under it: everything, what falls in
+/// a box (the clip's device-space bounds), or nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) enum Clip {
+    #[default]
+    Whole,
+    Within(DeviceRect),
+    Nothing,
+}
+
+impl Clip {
+    /// The part of `rect` the clip shows, or `None` when it hides all of it.
+    pub(crate) fn shows(self, rect: DeviceRect) -> Option<DeviceRect> {
+        match self {
+            Self::Whole => Some(rect),
+            Self::Within(clip) => rect.within(clip),
+            Self::Nothing => None,
+        }
+    }
 }
 
 /// An axis-aligned box in device (page) space, as the glyph quad projects to.
@@ -32,11 +81,21 @@ pub(crate) struct DeviceRect {
 }
 
 impl DeviceRect {
+    /// The box moved `by`.
+    pub(crate) fn moved(self, by: Vector) -> Self {
+        Self {
+            min_x: self.min_x + by.x,
+            min_y: self.min_y + by.y,
+            max_x: self.max_x + by.x,
+            max_y: self.max_y + by.y,
+        }
+    }
+
     /// The axis-aligned bounds of four device-space corners (a glyph quad mapped
     /// through a possibly-rotated matrix is not axis-aligned; take its extent).
-    pub(crate) fn of_corners(corners: [(f64, f64); 4]) -> Self {
-        let xs = corners.map(|(x, _)| x);
-        let ys = corners.map(|(_, y)| y);
+    pub(crate) fn of_corners(corners: [Point; 4]) -> Self {
+        let xs = corners.map(|corner| corner.x);
+        let ys = corners.map(|corner| corner.y);
         Self {
             min_x: xs.iter().copied().fold(f64::INFINITY, f64::min),
             min_y: ys.iter().copied().fold(f64::INFINITY, f64::min),
@@ -100,12 +159,12 @@ impl DeviceRect {
     pub(crate) fn mapped(self, matrix: Matrix) -> Self {
         Self::of_corners(
             [
-                (self.min_x, self.min_y),
-                (self.max_x, self.min_y),
-                (self.max_x, self.max_y),
-                (self.min_x, self.max_y),
+                Point::new(self.min_x, self.min_y),
+                Point::new(self.max_x, self.min_y),
+                Point::new(self.max_x, self.max_y),
+                Point::new(self.min_x, self.max_y),
             ]
-            .map(|(x, y)| matrix.apply(x, y)),
+            .map(|corner| matrix.apply(corner)),
         )
     }
 
@@ -167,12 +226,12 @@ impl PageFrame {
         // Step 3+4: rotate the two corners into the displayed frame, then flip Y
         // to a top-left origin. Rotation maps the unrotated unit square to the
         // displayed one; we rotate both corners and re-derive the min/extent.
-        let p0 = rotate_unit_point(fx0, fy0, self.rotate);
-        let p1 = rotate_unit_point(fx1, fy1, self.rotate);
-        let (min_x, max_x) = (p0.0.min(p1.0), p0.0.max(p1.0));
+        let p0 = rotate_unit_point(Point::new(fx0, fy0), self.rotate);
+        let p1 = rotate_unit_point(Point::new(fx1, fy1), self.rotate);
+        let (min_x, max_x) = (p0.x.min(p1.x), p0.x.max(p1.x));
         // Bottom-left-origin y in the rotated frame → top-left by `1 - y`.
-        let top0 = 1.0 - p0.1;
-        let top1 = 1.0 - p1.1;
+        let top0 = 1.0 - p0.y;
+        let top1 = 1.0 - p1.y;
         let (min_y, max_y) = (top0.min(top1), top0.max(top1));
 
         UnitBoundingBox::new(min_x, min_y, max_x - min_x, max_y - min_y)
@@ -181,12 +240,13 @@ impl PageFrame {
 
 /// Rotate a point in the unrotated unit square (bottom-left origin) into the
 /// displayed frame for a page `/Rotate` of 0/90/180/270 degrees clockwise.
-fn rotate_unit_point(x: f64, y: f64, rotate: u32) -> (f64, f64) {
+fn rotate_unit_point(point: Point, rotate: u32) -> Point {
+    let Point { x, y } = point;
     match rotate {
-        90 => (y, 1.0 - x),
-        180 => (1.0 - x, 1.0 - y),
-        270 => (1.0 - y, x),
-        _ => (x, y),
+        90 => Point::new(y, 1.0 - x),
+        180 => Point::new(1.0 - x, 1.0 - y),
+        270 => Point::new(1.0 - y, x),
+        _ => point,
     }
 }
 
@@ -330,18 +390,64 @@ impl<'a> PageGeometry<'a> {
     /// per line: the boxes of the glyphs that drew them, merged along each
     /// line.
     pub(crate) fn rects_for(&self, chars: Range<usize>) -> Vec<UnitBoundingBox> {
-        let mut lines: Vec<DeviceRect> = Vec::new();
-        let covering = self
-            .rects
-            .iter()
-            .filter(|g| g.chars.start < chars.end && g.chars.end > chars.start);
-        for glyph in covering {
-            match lines.last_mut() {
-                Some(line) if same_line(line, &glyph.rect) => *line = line.union(glyph.rect),
-                _ => lines.push(glyph.rect),
+        self.lines_for(chars)
+            .into_iter()
+            .map(|r| self.frame.normalize(r))
+            .collect()
+    }
+
+    /// The device-space rectangles covering the characters `chars`, one per
+    /// line, as [`rects_for`](Self::rects_for) gives them normalized.
+    pub(crate) fn lines_for(&self, chars: Range<usize>) -> Vec<DeviceRect> {
+        self.lines_for_each(&[((), chars)])
+            .into_iter()
+            .map(|((), rect)| rect)
+            .collect()
+    }
+
+    /// The device-space rectangles covering each of `spans`, with its tag, one
+    /// per line of each drawing of it, in the order of `spans`:
+    /// [`lines_for`](Self::lines_for) for many spans at once, in one pass over
+    /// the glyphs. `spans` are sorted and disjoint; a glyph in two of them
+    /// boxes the first. A drawing places its glyphs in character order under
+    /// one clip, so a glyph no later than the one before, or under another
+    /// clip, starts another drawing, as each tile of a pattern and each
+    /// region painting it is: its box never joins the last one's. A clip is
+    /// a box, so the bounds of glyphs within one stay within it; bounds
+    /// joined across two clips could cover what each hides, such as the gap
+    /// between two regions a pattern paints.
+    pub(crate) fn lines_for_each<T: Copy>(
+        &self,
+        spans: &[(T, Range<usize>)],
+    ) -> Vec<(T, DeviceRect)> {
+        let mut lines: Vec<Vec<DeviceRect>> = vec![Vec::new(); spans.len()];
+        let mut last: Vec<Option<(usize, Clip)>> = vec![None; spans.len()];
+        for glyph in self.rects {
+            let Some(rect) = glyph.visible() else {
+                continue;
+            };
+            let i = spans.partition_point(|(_, chars)| chars.end <= glyph.chars.start);
+            let Some((_, chars)) = spans.get(i) else {
+                continue;
+            };
+            if chars.start >= glyph.chars.end {
+                continue;
+            }
+            let same_drawing = last[i]
+                .is_some_and(|(start, clip)| start < glyph.chars.start && clip == glyph.clip);
+            last[i] = Some((glyph.chars.start, glyph.clip));
+            match lines[i].last_mut() {
+                Some(line) if same_drawing && same_line(line, &rect) => {
+                    *line = line.union(rect);
+                }
+                _ => lines[i].push(rect),
             }
         }
-        lines.into_iter().map(|r| self.frame.normalize(r)).collect()
+        spans
+            .iter()
+            .zip(lines)
+            .flat_map(|((tag, _), lines)| lines.into_iter().map(move |rect| (*tag, rect)))
+            .collect()
     }
 
     /// The page-local character range of each glyph whose center falls in any
@@ -354,7 +460,10 @@ impl<'a> PageGeometry<'a> {
         self.rects
             .iter()
             .filter(move |glyph| {
-                let rect = frame.normalize(glyph.rect);
+                let Some(visible) = glyph.visible() else {
+                    return false;
+                };
+                let rect = frame.normalize(visible);
                 let x = rect.x + rect.width / 2.0;
                 let y = rect.y + rect.height / 2.0;
                 regions.iter().any(|region| {

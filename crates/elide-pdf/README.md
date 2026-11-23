@@ -24,7 +24,8 @@ detection never reads. Embedded font programs are copied as stored. Metadata
 stripped and recorded, whatever the `HiddenContentPolicy` asks.
 
 Encoding deletes the detected glyphs from the content streams, keeping a
-selectable text layer, writes the redacted images and files back, and replaces
+selectable text layer: a removed span closes up, and a covered one keeps its
+place under a box of its color, writes the redacted images and files back, and replaces
 a scanned page by its render as the document then draws it, with each region
 redacted on it painted over. A scanned page is an image part like any other:
 an orchestrator analyzes it only when an image pipeline is registered, and

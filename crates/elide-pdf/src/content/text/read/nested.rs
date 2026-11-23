@@ -16,7 +16,7 @@ use super::{Graphics, MAX_WALKED_BYTES, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Wa
 use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
 use crate::pdf::reader::{
-    DeviceRect, DictionaryExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt, normalize_rect,
+    Clip, DeviceRect, DictionaryExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt, normalize_rect,
 };
 
 /// A soft mask group queued to be walked once the page's own text is: the
@@ -417,27 +417,41 @@ impl<'d> Walk<'_, 'd> {
                 continue;
             };
             let tiles = placed.done.get(&id).map(Vec::as_slice).unwrap_or_default();
-            boxes = boxes.saturating_add(tiles.len().saturating_mul(cell.glyphs.len()));
             let regions: usize = tiles.iter().map(|tile| tile.coverage.len()).sum();
             checks = checks.saturating_add(regions.saturating_mul(cell.glyphs.len()));
-            if boxes > MAX_TILED_GLYPHS || checks > MAX_COVERAGE_CHECKS {
-                return Err(Error::resource_limit(format!(
-                    "page {} tiles its patterns' text into more glyph boxes than are placed",
-                    self.page
-                )));
+            if checks > MAX_COVERAGE_CHECKS {
+                return Err(self.over_placed());
             }
-            // A glyph shows on a tile only where the regions painting it
-            // cover it.
+            // A glyph shows on a tile only within each region painting it
+            // there, apart, and its cell's clip: a copy of it per region it
+            // touches, clipped to both.
             for tile in tiles {
-                self.accum
-                    .rects
-                    .extend(cell.glyphs.iter().filter_map(|glyph| {
-                        Some(GlyphRect {
+                for &region in &tile.coverage {
+                    for glyph in &cell.glyphs {
+                        let extent = glyph.extent.mapped(tile.transform);
+                        if extent.within(region).is_none() {
+                            continue;
+                        }
+                        boxes += 1;
+                        if boxes > MAX_TILED_GLYPHS {
+                            return Err(self.over_placed());
+                        }
+                        let clip = match glyph.clip {
+                            Clip::Whole => Clip::Within(region),
+                            Clip::Within(cell) => cell
+                                .mapped(tile.transform)
+                                .intersection(region)
+                                .map_or(Clip::Nothing, Clip::Within),
+                            Clip::Nothing => Clip::Nothing,
+                        };
+                        self.accum.rects.push(GlyphRect {
                             chars: glyph.chars.clone(),
-                            rect: covered(glyph.rect.mapped(tile.transform), &tile.coverage)?,
-                            origin: tile.transform.apply(glyph.origin.0, glyph.origin.1),
-                        })
-                    }));
+                            extent,
+                            clip,
+                            transform: glyph.transform.then(tile.transform),
+                        });
+                    }
+                }
             }
         }
         Ok(())
@@ -537,6 +551,15 @@ impl<'d> Walk<'_, 'd> {
         Ok(by_space.into_values().collect())
     }
 
+    /// The error for a page whose patterns place more glyph boxes, or
+    /// compare them with more regions, than are counted.
+    fn over_placed(&self) -> Error {
+        Error::resource_limit(format!(
+            "page {} tiles its patterns' text into more glyph boxes than are placed",
+            self.page
+        ))
+    }
+
     /// The error for a page that tiles a pattern `what`.
     fn over_tiled(&self, what: &str) -> Error {
         Error::resource_limit(format!(
@@ -632,38 +655,5 @@ fn drawn_in(doc: &Document, stream: &Stream, graphics: &mut Graphics<'_>) {
     if let Some(bbox) = stream.dict.resolved_numbers::<4>(doc, b"BBox") {
         let area = DeviceRect::of_array(normalize_rect(bbox));
         graphics.painting.clip_to(area.mapped(graphics.state.ctm));
-    }
-}
-
-/// The part of the glyph box `rect` the regions `coverage` paint, each apart,
-/// or `None` when none of them does: a glyph between two regions is not
-/// painted by either.
-fn covered(rect: DeviceRect, coverage: &[DeviceRect]) -> Option<DeviceRect> {
-    coverage
-        .iter()
-        .filter_map(|region| rect.within(*region))
-        .reduce(DeviceRect::union)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rect(min_x: f64, max_x: f64) -> DeviceRect {
-        DeviceRect {
-            min_x,
-            min_y: 0.0,
-            max_x,
-            max_y: 10.0,
-        }
-    }
-
-    /// A glyph between two regions painting a tile is painted by neither;
-    /// one inside a region is painted there.
-    #[test]
-    fn a_glyph_between_regions_is_not_covered() {
-        let coverage = [rect(0.0, 5.0), rect(40.0, 45.0)];
-        assert!(covered(rect(20.0, 25.0), &coverage).is_none());
-        assert!(covered(rect(41.0, 43.0), &coverage).is_some());
     }
 }

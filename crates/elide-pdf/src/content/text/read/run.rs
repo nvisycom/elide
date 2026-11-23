@@ -7,9 +7,9 @@ use elide_core::Result;
 use lopdf::Object;
 
 use super::geometry::{Cursor, SpaceRule, TextState};
-use crate::content::text::{Address, GlyphBytes, OffsetRun, StreamTarget};
+use crate::content::text::{Address, GlyphBytes, Mover, OffsetRun, PenStep, StreamTarget};
 use crate::pdf::reader::font::{FontText, Glyph, GlyphMetrics, WidthSource, decode_glyphs};
-use crate::pdf::reader::{DeviceRect, GlyphRect, ObjectExt};
+use crate::pdf::reader::{Clip, DeviceRect, GlyphRect, Matrix, ObjectExt, Point};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (9.3.3).
@@ -52,10 +52,12 @@ pub(super) struct TextRun<'a> {
     /// before any glyph: the reference the next glyph's position is compared
     /// against to decide a word space. Carried across show-ops so a gap between
     /// two separate `Tj`s is seen.
-    pub(super) pen: &'a mut Option<(f64, f64)>,
+    pub(super) pen: &'a mut Option<Point>,
     /// Per-glyph device-space boxes (char range → box), parallel to `runs`, for
     /// building each entity's rendered geometry. A synthetic gap records none.
     pub(super) rects: &'a mut Vec<GlyphRect>,
+    /// Every move of the pen, in draw order.
+    pub(super) steps: &'a mut Vec<PenStep>,
     /// The current parametric text state (font size, spacings, scaling, CTM).
     pub(super) state: TextState,
     /// The selected font's width table, for the per-glyph advance.
@@ -83,14 +85,19 @@ impl TextRun<'_> {
         *self.next_char += count;
         self.runs.push(OffsetRun {
             chars: start..*self.next_char,
-            source: Some(GlyphBytes {
-                address,
-                byte_start: glyph.byte_start,
-                byte_end: glyph.byte_end,
-                code: glyph.code,
-                font: self.font,
-            }),
+            source: Some(self.glyph_bytes(address, glyph)),
         });
+    }
+
+    /// Where `glyph`, at `address`, is: its bytes there, its code, and the
+    /// font that draws it.
+    fn glyph_bytes(&self, address: Address, glyph: &Glyph) -> GlyphBytes {
+        GlyphBytes {
+            address,
+            bytes: glyph.bytes.clone(),
+            code: glyph.code,
+            font: self.font,
+        }
     }
 
     /// Append a synthetic space that no glyph drew: one char of gap with no glyph
@@ -142,6 +149,7 @@ impl TextRun<'_> {
                                 // Displacement is −kern/1000 × font size × hscale.
                                 let tx = -kern / 1000.0 * self.state.font_size * self.state.h_scale;
                                 self.cursor.advance(tx);
+                                self.step(Mover::Kern(address(Some(item_idx))), tx);
                             }
                             _ => {}
                         }
@@ -173,6 +181,7 @@ impl TextRun<'_> {
             let start = *self.next_char;
             self.push_glyph(address, &glyph);
             let chars = start..*self.next_char;
+            let drawn = chars.clone();
             // The glyph's advance: its visible width only, no `Tc`/`Tw`. An
             // unknown width gives a zero-width advance; its box still has its
             // height.
@@ -181,9 +190,46 @@ impl TextRun<'_> {
                 let rect = self.glyph_rect(chars, advance);
                 self.rects.push(rect);
             }
-            self.advance(&glyph, advance);
+            let word = self.word_spacing(&glyph);
+            let number = self.number(w0, word);
+            let tx = self.advance(advance, word);
+            let mover = Mover::Glyph {
+                glyph: self.glyph_bytes(address, &glyph),
+                chars: drawn,
+                number,
+            };
+            self.step(mover, tx);
         }
         Ok(())
+    }
+
+    /// Record that `mover` moved the pen `advance` along the line in text
+    /// space.
+    fn step(&mut self, mover: Mover, advance: f64) {
+        self.steps.push(PenStep {
+            line: self.cursor.line(),
+            mover,
+            advance,
+        });
+    }
+
+    /// The word spacing `glyph` moves the pen by: `Tw`, for a one-byte code
+    /// 32 only.
+    fn word_spacing(&self, glyph: &Glyph) -> f64 {
+        if glyph.code == SPACE_CODE && glyph.bytes.len() == 1 {
+            self.state.word_spacing
+        } else {
+            0.0
+        }
+    }
+
+    /// The `TJ` number that moves the pen as a glyph `w0` em wide and spaced
+    /// `word` beyond `Tc` does: `-(w0 × 1000 + 1000 × (Tc + word) / Tfs)`, a
+    /// number's displacement being `-n / 1000 × Tfs × Th` and the glyph's
+    /// `(w0 × Tfs + Tc + word) × Th`. No number does at font size 0.
+    fn number(&self, w0: f64, word: f64) -> Option<f64> {
+        let size = self.state.font_size;
+        (size != 0.0).then(|| -(w0 * 1000.0 + 1000.0 * (self.state.char_spacing + word) / size))
     }
 
     /// Push a word space before a glyph `w0` em wide when it lands past the
@@ -199,11 +245,11 @@ impl TextRun<'_> {
         let Some(pen) = *self.pen else {
             return;
         };
-        let origin = self.cursor.device_origin(self.state.ctm);
+        let origin = self.cursor.transform(self.state.ctm).origin();
         let (mut axis, scale) = self.cursor.writing_axis(self.state.ctm);
         let signed = self.state.font_size * self.state.h_scale;
         if signed * w0.signum() < 0.0 {
-            axis = (-axis.0, -axis.1);
+            axis = -axis;
         }
         let em = (signed.abs() * scale).max(f64::MIN_POSITIVE);
         if SpaceRule::needs_space(pen, origin, axis, em) {
@@ -211,39 +257,36 @@ impl TextRun<'_> {
         }
     }
 
-    /// The device-space box of the glyph drawing `chars`, `advance` wide: in
-    /// text space from the pen to its advance, and from its descent to its
-    /// ascent raised by the text rise (9.4.4), its four corners projected
-    /// through the text matrix and CTM and their extent taken, so rotation
-    /// and shear are handled. Its origin is the pen, raised by the rise.
+    /// The device-space box of the glyph drawing `chars`, `advance` wide, in
+    /// its own space: text space raised by the text rise (9.4.4), so the glyph
+    /// is drawn from that space's origin. The box spans from the origin to the
+    /// advance and from the descent to the ascent there, its four corners
+    /// projected through the text matrix and CTM and their extent taken, so
+    /// rotation and shear are handled.
     fn glyph_rect(&self, chars: Range<usize>, advance: f64) -> GlyphRect {
-        let ctm = self.state.ctm;
-        let top = self.metrics.top * self.state.font_size + self.state.rise;
-        let bottom = self.metrics.bottom * self.state.font_size + self.state.rise;
-        let corners = [
-            self.cursor.device_point(ctm, 0.0, bottom),
-            self.cursor.device_point(ctm, advance, bottom),
-            self.cursor.device_point(ctm, advance, top),
-            self.cursor.device_point(ctm, 0.0, top),
-        ];
+        let transform =
+            Matrix::translation(0.0, self.state.rise).then(self.cursor.transform(self.state.ctm));
+        let extent = DeviceRect {
+            min_x: 0.0,
+            min_y: self.metrics.bottom * self.state.font_size,
+            max_x: advance,
+            max_y: self.metrics.top * self.state.font_size,
+        };
         GlyphRect {
             chars,
-            rect: DeviceRect::of_corners(corners),
-            origin: self.cursor.device_point(ctm, 0.0, self.state.rise),
+            extent: extent.mapped(transform),
+            clip: Clip::Whole,
+            transform,
         }
     }
 
-    /// Move the pen past `glyph`, `advance` wide: `(advance + Tc + Tw) × Th`,
-    /// the word spacing only for a one-byte code 32. `Tc` and `Tw` space the
-    /// pen beyond the glyph's own width, so they leave its box alone.
-    fn advance(&mut self, glyph: &Glyph, advance: f64) {
-        let word = if glyph.code == SPACE_CODE && glyph.byte_end - glyph.byte_start == 1 {
-            self.state.word_spacing
-        } else {
-            0.0
-        };
+    /// Move the pen past a glyph `advance` wide and spaced `word` beyond
+    /// `Tc`: `advance + (Tc + word) × Th`. `Tc` and `Tw` space the pen beyond
+    /// the glyph's own width, so they leave its box alone.
+    fn advance(&mut self, advance: f64, word: f64) -> f64 {
         let tx = advance + (self.state.char_spacing + word) * self.state.h_scale;
         self.cursor.advance(tx);
-        *self.pen = Some(self.cursor.device_origin(self.state.ctm));
+        *self.pen = Some(self.cursor.transform(self.state.ctm).origin());
+        tx
     }
 }

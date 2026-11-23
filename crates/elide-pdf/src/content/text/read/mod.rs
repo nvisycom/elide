@@ -28,9 +28,11 @@ use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
 use self::stream::{Frame, Graphics, ScopeFont};
-use super::{FontEntry, OffsetMap, OffsetRun, StreamTarget, TextBlock};
+use super::{ClippingText, FontEntry, OffsetMap, OffsetRun, PenStep, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
-use crate::pdf::reader::{DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Scope, page_frame};
+use crate::pdf::reader::{
+    DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Point, Scope, page_frame,
+};
 
 /// Deepest Form-XObject nesting the walker follows, a guard against pathological
 /// or cyclic documents (the cycle guard already stops re-entry; this bounds
@@ -89,12 +91,18 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut runs: Vec<OffsetRun> = Vec::new();
     let mut next_char = 0usize;
     let mut rects: Vec<GlyphRect> = Vec::new();
+    let mut steps: Vec<PenStep> = Vec::new();
+    let mut clipping: Vec<ClippingText> = Vec::new();
+    let mut lines = 0u64;
     let mut fonts: Vec<FontEntry> = Vec::new();
     let accum = TextAccum {
         text: &mut text,
         runs: &mut runs,
         next_char: &mut next_char,
         rects: &mut rects,
+        steps: &mut steps,
+        clipping: &mut clipping,
+        lines: &mut lines,
         fonts: &mut fonts,
     };
     let mut walk = Walk::new(doc, page, accum);
@@ -124,6 +132,8 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         text,
         offsets: OffsetMap::new(runs),
         rects,
+        steps,
+        clipping,
         frame,
         fonts,
         unplaced,
@@ -137,7 +147,19 @@ struct TextAccum<'a> {
     runs: &'a mut Vec<OffsetRun>,
     next_char: &'a mut usize,
     rects: &'a mut Vec<GlyphRect>,
+    steps: &'a mut Vec<PenStep>,
+    clipping: &'a mut Vec<ClippingText>,
+    /// The lines numbered so far, across the page and every form it draws.
+    lines: &'a mut u64,
     fonts: &'a mut Vec<FontEntry>,
+}
+
+impl TextAccum<'_> {
+    /// The number of a new line, unique across the page.
+    fn new_line(&mut self) -> u64 {
+        *self.lines += 1;
+        *self.lines
+    }
 }
 
 /// The state threaded through a page's content walk, unchanged as it recurses
@@ -152,7 +174,7 @@ struct Walk<'a, 'd> {
     accum: TextAccum<'a>,
     /// Where the last shown glyph left the pen, in device space, shared across
     /// every stream of the page (`None` before the first glyph).
-    pen: Option<(f64, f64)>,
+    pen: Option<Point>,
     active: BTreeSet<ObjectId>,
     /// The tiling patterns already selected on this page: a pattern's walk
     /// does not depend on where it is selected, so each is walked once.
