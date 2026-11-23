@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::{array, slice};
+use std::{array, mem, slice};
 
 use elide_core::{Error, Result};
 use lopdf::Object;
@@ -13,11 +13,9 @@ use lopdf::content::{Content, Operation};
 use super::geometry::{Cursor, TextState};
 use super::paint::{Paint, Painting};
 use super::{TextRun, Walk};
-use crate::content::text::{FontEntry, StreamTarget};
+use crate::content::text::{ClippingText, FontEntry, GlyphBytes, Mover, StreamTarget};
 use crate::pdf::reader::font::{FontText, GlyphMetrics, WidthSource};
-use crate::pdf::reader::{
-    DeviceRect, DictionaryExt, DocumentExt, GlyphRect, Matrix, ObjectExt, Scope,
-};
+use crate::pdf::reader::{DeviceRect, DictionaryExt, DocumentExt, Matrix, ObjectExt, Scope};
 
 /// The numeric operand at `index` as `f64`, or `0.0` when absent or non-numeric
 /// (a malformed operator reads as its zero, never a hard error — positioning is
@@ -221,6 +219,8 @@ impl<'d> Walk<'_, 'd> {
         // off, is shared across this stream and every form it draws, so a word
         // gap is judged consistently across a `Do` boundary.
         let mut cursor = Cursor::new(self.accum.new_line());
+        // The glyphs the open text object shows in a clipping rendering mode.
+        let mut clipping: Vec<GlyphBytes> = Vec::new();
         // The space a pattern this stream selects is laid out in (8.7.3.1).
         let pattern_space = graphics.state.ctm;
 
@@ -256,8 +256,18 @@ impl<'d> Walk<'_, 'd> {
                 "BT" => {
                     cursor = Cursor::new(self.accum.new_line());
                     graphics.painting.begin_text();
+                    clipping.clear();
                 }
-                "ET" => graphics.painting.end_text(),
+                "ET" => {
+                    graphics.painting.end_text();
+                    if !clipping.is_empty() {
+                        self.accum.clipping.push(ClippingText {
+                            stream,
+                            end: op_idx,
+                            glyphs: mem::take(&mut clipping),
+                        });
+                    }
+                }
 
                 // Text state parameters.
                 "Tc" => graphics.state.char_spacing = operand_f64(&op.operands, 0),
@@ -301,7 +311,18 @@ impl<'d> Walk<'_, 'd> {
                 // additionally sets word and character spacing from its first
                 // two operands, then shows its third.
                 "Tj" | "TJ" | "'" | "\"" => {
+                    let from = self.accum.steps.len();
                     self.show_text(op, op_idx, &mut graphics, &mut cursor, stream)?;
+                    if graphics.painting.clips_text()
+                        && graphics.font.is_some_and(|font| font.outlines)
+                    {
+                        clipping.extend(self.accum.steps[from..].iter().filter_map(|step| {
+                            match &step.mover {
+                                Mover::Glyph { glyph, .. } => Some(glyph.clone()),
+                                Mover::Kern(_) => None,
+                            }
+                        }));
+                    }
                 }
 
                 // A `Do` may draw a Form XObject, whose content draws text in
@@ -423,29 +444,21 @@ impl<'d> Walk<'_, 'd> {
         Ok(())
     }
 
-    /// Clip the glyphs placed from the `from`th on to what `graphics`' clip
-    /// shows, a form's or a pattern cell's `/BBox` included: one it hides
-    /// has no box, though its text is still read. Text drawn with a pattern
+    /// Give the glyphs placed from the `from`th on `graphics`' clip, a form's
+    /// or a pattern cell's `/BBox` included: one it hides shows no box,
+    /// though its text is still read. Text drawn with a pattern
     /// paints it where the glyphs are, its stroke reaching past those the
     /// clip hides, so their extent is painted first; `outlines` says whether
     /// a clipping rendering mode clips to them.
     fn clip_shown(&mut self, from: usize, graphics: &mut Graphics<'_>, outlines: bool) {
         let extent = self.accum.rects[from..]
             .iter()
-            .map(|glyph| glyph.rect)
+            .map(|glyph| glyph.extent)
             .reduce(DeviceRect::union);
-        let shown: Vec<GlyphRect> = self
-            .accum
-            .rects
-            .drain(from..)
-            .filter_map(|glyph| {
-                Some(GlyphRect {
-                    rect: graphics.painting.visible(glyph.rect)?,
-                    ..glyph
-                })
-            })
-            .collect();
-        self.accum.rects.extend(shown);
+        let clip = graphics.painting.clip();
+        for glyph in &mut self.accum.rects[from..] {
+            glyph.clip = clip;
+        }
         if let Some(extent) = extent {
             let painted = graphics.painting.text(extent, graphics.state.ctm, outlines);
             self.paint(painted);

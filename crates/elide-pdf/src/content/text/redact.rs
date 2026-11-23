@@ -24,7 +24,7 @@ use std::ops::Range;
 use elide_core::primitive::Color;
 use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Document, Object, ObjectId, StringFormat};
+use lopdf::{Dictionary, Document, Object, ObjectId, StringFormat, dictionary};
 
 #[cfg(doc)]
 use super::OffsetMap;
@@ -36,11 +36,12 @@ use crate::pdf::writer::{encoded, scrub};
 use crate::pdf::{Edit, Pdf};
 
 /// One glyph to delete: its byte range within its string, and how it is
-/// covered in place, if it is.
+/// covered in place, if it is: the [`Covering`] it is written with, or, as a
+/// detection asks for it, the cover's color alone.
 #[derive(Debug, Clone, PartialEq)]
-struct Cut {
+struct Cut<C = Covering> {
     bytes: Range<usize>,
-    cover: Option<Covering>,
+    cover: Option<C>,
 }
 
 /// How a glyph is covered in place: the `TJ` number that keeps the text after
@@ -106,6 +107,10 @@ enum RunKind {
 /// drawn, as [`numbers`] gives them.
 type Numbers = BTreeMap<Located, Option<f64>>;
 
+/// The `ET` of each text object a deletion leaves with no clipping glyph, by
+/// the content stream it is in, as [`emptied_clips`] gives them.
+type Emptied = BTreeMap<ObjectId, BTreeSet<usize>>;
+
 /// The `TJ` kerns a deletion zeroed, each by the content stream it is in and
 /// its address there.
 type Zeroed = BTreeSet<(ObjectId, Address)>;
@@ -145,7 +150,8 @@ pub(super) fn delete(
     let to_delete = deletions(pristine, blocks, detections)?;
     let (deleted, surviving) = codes(pristine, blocks, &to_delete)?;
     let doc = edit.doc_mut();
-    let zeroed = rewrite(pristine, doc, &to_delete)?;
+    let emptied = emptied_clips(pristine, blocks, &to_delete)?;
+    let zeroed = rewrite(pristine, doc, &to_delete, &emptied)?;
     draw_covers(pristine, doc, blocks, &to_delete, &zeroed)?;
     // The deleted codes are scrubbed from each font's `/ToUnicode` CMap,
     // sparing any code surviving text still draws, so the removed text can't
@@ -168,48 +174,111 @@ fn deletions(
     blocks: &[TextBlock],
     detections: &[Detection],
 ) -> Result<Deletions> {
+    // Each glyph a detection asks to delete, with the color of the cover it
+    // asks for, resolved per string before any cover needs its number: a
+    // glyph both removed and covered is removed, and needs none.
+    let mut requested: BTreeMap<ObjectId, BTreeMap<Address, Vec<Cut<Color>>>> = BTreeMap::new();
+    for block in blocks {
+        let mut stream = Streams::new(pristine, block.page_id);
+        for detection in detections.iter().filter(|d| d.page == block.page) {
+            for glyph in block.offsets.glyph_bytes(detection.chars.clone()) {
+                requested
+                    .entry(stream.of(&glyph)?)
+                    .or_default()
+                    .entry(glyph.address)
+                    .or_default()
+                    .push(Cut {
+                        bytes: glyph.bytes,
+                        cover: detection.cover,
+                    });
+            }
+        }
+    }
     let numbers = if detections.iter().any(|d| d.cover.is_some()) {
         numbers(pristine, blocks)?
     } else {
         Numbers::new()
     };
     let mut to_delete = Deletions::new();
-    for block in blocks {
-        let mut stream = Streams::new(pristine, block.page_id);
-        for detection in detections.iter().filter(|d| d.page == block.page) {
-            for glyph in block.offsets.glyph_bytes(detection.chars.clone()) {
-                let located = stream.locate(&glyph)?;
-                let cover = match detection.cover {
-                    Some(color) => Some(Covering {
-                        number: cover_number(&numbers, located, block.page)?,
-                        color,
-                    }),
-                    None => None,
-                };
-                to_delete
-                    .entry(located.stream)
-                    .or_default()
-                    .entry(glyph.address)
-                    .or_default()
-                    .push(Cut {
-                        bytes: glyph.byte_start..glyph.byte_end,
-                        cover,
-                    });
-            }
-        }
-    }
-    for sites in to_delete.values_mut() {
-        for (address, cuts) in sites.iter_mut() {
-            *cuts = resolved(cuts).ok_or_else(|| {
+    for (stream, sites) in requested {
+        for (address, cuts) in sites {
+            let cuts = resolved(&cuts).ok_or_else(|| {
                 Error::redaction(format!(
                     "the glyphs at operation {} operand {} of {:?} decode differently on the \
                      pages drawing them, so they cannot be deleted",
                     address.op, address.operand, address.stream
                 ))
             })?;
+            let cuts = cuts
+                .into_iter()
+                .map(|cut| {
+                    let cover = match cut.cover {
+                        Some(color) => {
+                            let site = GlyphSite {
+                                address,
+                                byte_start: cut.bytes.start,
+                            };
+                            let number = cover_number(&numbers, Located { stream, site })?;
+                            Some(Covering { number, color })
+                        }
+                        None => None,
+                    };
+                    Ok(Cut {
+                        bytes: cut.bytes,
+                        cover,
+                    })
+                })
+                .collect::<Result<_>>()?;
+            to_delete.entry(stream).or_default().insert(address, cuts);
         }
     }
+    check_boundaries(pristine, blocks, &to_delete)?;
     Ok(to_delete)
+}
+
+/// Check that every drawing of a string `to_delete` cuts, on every page of
+/// `blocks`, read from `pristine`, decodes its glyphs where the cuts do: a
+/// form a page draws in a font of its own decodes the same bytes as other
+/// glyphs, and cutting one page's glyph would split another's.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a cut a
+/// glyph drawn elsewhere overlaps without matching it, and as
+/// [`Streams::of`].
+fn check_boundaries(
+    pristine: &Document,
+    blocks: &[TextBlock],
+    to_delete: &Deletions,
+) -> Result<()> {
+    for block in blocks {
+        let mut stream = Streams::new(pristine, block.page_id);
+        for step in &block.steps {
+            let Mover::Glyph { glyph, .. } = &step.mover else {
+                continue;
+            };
+            let id = stream.of(glyph)?;
+            let Some(cuts) = to_delete
+                .get(&id)
+                .and_then(|sites| sites.get(&glyph.address))
+            else {
+                continue;
+            };
+            let drawn = &glyph.bytes;
+            let splits = cuts.iter().any(|cut| {
+                cut.bytes.start < drawn.end && drawn.start < cut.bytes.end && cut.bytes != *drawn
+            });
+            if splits {
+                let address = glyph.address;
+                return Err(Error::redaction(format!(
+                    "page {} decodes the glyphs at operation {} operand {} of {:?} unlike \
+                     another drawing of them, so they cannot be deleted",
+                    block.page, address.op, address.operand, address.stream
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The `TJ` number that moves the pen as each glyph of `blocks`, read from
@@ -226,13 +295,10 @@ fn numbers(pristine: &Document, blocks: &[TextBlock]) -> Result<Numbers> {
     for block in blocks {
         let mut stream = Streams::new(pristine, block.page_id);
         for step in &block.steps {
-            let Mover::Glyph { site, number, .. } = step.mover else {
+            let Mover::Glyph { glyph, number, .. } = &step.mover else {
                 continue;
             };
-            let glyph = Located {
-                stream: stream.target(site.address.stream)?,
-                site,
-            };
+            let (glyph, number) = (stream.locate(glyph)?, *number);
             numbers
                 .entry(glyph)
                 .and_modify(|drawn| {
@@ -246,19 +312,22 @@ fn numbers(pristine: &Document, blocks: &[TextBlock]) -> Result<Numbers> {
     Ok(numbers)
 }
 
-/// The `TJ` number that takes the place of `glyph`, covered on `page`: its
-/// advance, as `numbers` gives it.
+/// The `TJ` number that takes the place of the covered `glyph`: its advance,
+/// as `numbers` gives it.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for a glyph no
 /// number spaces as it is drawn: at font size 0, or drawn more than once
 /// with different spacings. It can't be covered in place.
-fn cover_number(numbers: &Numbers, glyph: Located, page: u32) -> Result<f64> {
+fn cover_number(numbers: &Numbers, glyph: Located) -> Result<f64> {
     numbers.get(&glyph).copied().flatten().ok_or_else(|| {
+        let address = glyph.site.address;
         Error::redaction(format!(
-            "page {page} covers text no `TJ` number spaces as it is drawn (at font size 0, or \
-             drawn more than once with different spacings); it can't be covered in place"
+            "the covered glyph at operation {} operand {} of {:?} is spaced by no `TJ` number \
+             as it is drawn (at font size 0, or drawn more than once with different \
+             spacings); it can't be covered in place",
+            address.op, address.operand, address.stream
         ))
     })
 }
@@ -286,20 +355,62 @@ fn codes(
     let mut surviving_codes = Codes::new();
     for block in blocks {
         let mut stream = Streams::new(pristine, block.page_id);
-        for glyph in block.offsets.runs().iter().filter_map(|run| run.source) {
-            let codes = if deleted.contains(&stream.locate(&glyph)?) {
+        for glyph in block
+            .offsets
+            .runs()
+            .iter()
+            .filter_map(|run| run.source.as_ref())
+        {
+            let codes = if deleted.contains(&stream.locate(glyph)?) {
                 &mut deleted_codes
             } else {
                 &mut surviving_codes
             };
-            record_code(block, &glyph, codes)?;
+            record_code(block, glyph, codes)?;
         }
     }
     Ok((deleted_codes, surviving_codes))
 }
 
+/// The `ET` of each text object of `blocks`, read from `pristine`, whose
+/// every glyph shown in a clipping render mode `to_delete` deletes, by the
+/// stream it is in: its clip, once the union of those glyphs' outlines, is
+/// left with none, which a viewer may read as no clip at all.
+///
+/// # Errors
+///
+/// As [`Streams::of`].
+fn emptied_clips(
+    pristine: &Document,
+    blocks: &[TextBlock],
+    to_delete: &Deletions,
+) -> Result<Emptied> {
+    let deleted = located_set(to_delete, |_| true);
+    let mut emptied = Emptied::new();
+    for block in blocks {
+        let mut stream = Streams::new(pristine, block.page_id);
+        for text in &block.clipping {
+            let mut all = true;
+            for glyph in &text.glyphs {
+                if !deleted.contains(&stream.locate(glyph)?) {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                emptied
+                    .entry(stream.target(text.stream)?)
+                    .or_default()
+                    .insert(text.end);
+            }
+        }
+    }
+    Ok(emptied)
+}
+
 /// Write each stream of `to_delete` in `doc` once, from its `pristine`
-/// bytes, with every deletion in it, and return the kerns zeroed.
+/// bytes, with every deletion in it and an empty clip after each `ET`
+/// `emptied` names, and return the kerns zeroed.
 ///
 /// # Errors
 ///
@@ -307,8 +418,14 @@ fn codes(
 /// changed since it was read; as [`apply_deletions`]; and
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
 /// one can't be decoded or encoded.
-fn rewrite(pristine: &Document, doc: &mut Document, to_delete: &Deletions) -> Result<Zeroed> {
+fn rewrite(
+    pristine: &Document,
+    doc: &mut Document,
+    to_delete: &Deletions,
+    emptied: &Emptied,
+) -> Result<Zeroed> {
     let mut zeroed = Zeroed::new();
+    let none = BTreeSet::new();
     for (id, sites) in to_delete {
         let bytes = stream_content(pristine, *id)?;
         if stream_content(doc, *id)? != bytes {
@@ -318,7 +435,8 @@ fn rewrite(pristine: &Document, doc: &mut Document, to_delete: &Deletions) -> Re
             )));
         }
         let mut content = parse_content(&bytes)?;
-        let kerns = apply_deletions(&mut content, sites)?;
+        let ends = emptied.get(id).unwrap_or(&none);
+        let kerns = apply_deletions(&mut content, sites, ends)?;
         zeroed.extend(kerns.into_iter().map(|address| (*id, address)));
         let new_content = encoded(&content)?;
         doc.set_stream_content(*id, new_content)?;
@@ -364,13 +482,14 @@ fn draw_covers(
         }
         // The page's content is wrapped in `q … Q`, so the boxes after it are
         // drawn at its initial graphics state.
+        let space = name_cover_space(doc, block.page_id)?;
         let id = content_stream(doc, block.page_id)?;
         let content = [
             b"q\n".as_slice(),
             &stream_content(doc, id)?,
             b"\nQ\n",
             &encoded(&Content {
-                operations: filled(&boxes),
+                operations: filled(&space, &boxes),
             })?,
         ]
         .concat();
@@ -402,11 +521,8 @@ fn moved_rects(
     for step in &block.steps {
         let line = closed.entry(step.line).or_default();
         let gone = match &step.mover {
-            Mover::Glyph { site, chars, .. } => {
-                let glyph = Located {
-                    stream: stream.target(site.address.stream)?,
-                    site: *site,
-                };
+            Mover::Glyph { glyph, chars, .. } => {
+                let glyph = stream.locate(glyph)?;
                 if covered.contains_key(&glyph) && *line != 0.0 && !chars.is_empty() {
                     moves.insert(chars.start, -*line);
                 }
@@ -443,9 +559,9 @@ fn box_runs(
     let mut stream = Streams::new(pristine, block.page_id);
     let mut runs = Vec::new();
     for run in block.offsets.runs() {
-        let kind = match run.source {
+        let kind = match &run.source {
             None => RunKind::Gap,
-            Some(glyph) => match covered.get(&stream.locate(&glyph)?) {
+            Some(glyph) => match covered.get(&stream.locate(glyph)?) {
                 Some(&color) => RunKind::Covered(color),
                 None => RunKind::Uncovered,
             },
@@ -458,14 +574,74 @@ fn box_runs(
     Ok(runs)
 }
 
-/// The operations filling each of `boxes` in its color, in a graphics state
-/// of their own: one fill per run of boxes of one color.
-fn filled(boxes: &[(Color, DeviceRect)]) -> Vec<Operation> {
-    let mut operations = vec![Operation::new("q", Vec::new())];
+/// The calibrated RGB colour space covers are drawn in (8.6.5.3): sRGB's
+/// white point, primaries and, close to its curve, a gamma of 2.2. Unlike
+/// `DeviceRGB`, a page's `DefaultRGB` (8.6.5.6) doesn't remap it, and a
+/// document whose output intent isn't RGB can still use it.
+fn cover_space() -> Object {
+    let reals = |values: &[f32]| Object::Array(values.iter().copied().map(Object::Real).collect());
+    Object::Array(vec![
+        Object::Name(b"CalRGB".to_vec()),
+        Object::Dictionary(dictionary! {
+            "WhitePoint" => reals(&[0.9505, 1.0, 1.089]),
+            "Gamma" => reals(&[2.2, 2.2, 2.2]),
+            "Matrix" => reals(&[
+                0.4124, 0.2126, 0.0193, 0.3576, 0.7152, 0.1192, 0.1805, 0.0722, 0.9505,
+            ]),
+        }),
+    ])
+}
+
+/// Name [`cover_space`] among the colour spaces of the page `page` of
+/// `doc`, under a name the page doesn't use, and return the name. The page's
+/// resources, and their colour spaces, are copied onto it before the name is
+/// added, so a dictionary other pages share is left as it was.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+/// page, its resources, or their colour spaces can't be read.
+fn name_cover_space(doc: &mut Document, page: ObjectId) -> Result<Vec<u8>> {
+    let malformed = |e: lopdf::Error| Error::malformed(format!("page {page:?}'s resources: {e}"));
+    let dictionary = |doc: &Document, object: Option<&Object>| -> Result<Dictionary> {
+        let Some(object) = object else {
+            return Ok(Dictionary::new());
+        };
+        let (_, object) = doc.dereference(object).map_err(malformed)?;
+        Ok(object.as_dict().map_err(malformed)?.clone())
+    };
+    let mut resources = dictionary(
+        doc,
+        doc.get_dictionary(page)
+            .map_err(malformed)?
+            .get(b"Resources")
+            .ok(),
+    )?;
+    let mut spaces = dictionary(doc, resources.get(b"ColorSpace").ok())?;
+    let name = (0..)
+        .map(|n| format!("Cover{n}").into_bytes())
+        .find(|name| !spaces.has(name))
+        .unwrap_or_default();
+    spaces.set(name.clone(), cover_space());
+    resources.set("ColorSpace", spaces);
+    doc.get_dictionary_mut(page)
+        .map_err(malformed)?
+        .set("Resources", resources);
+    Ok(name)
+}
+
+/// The operations filling each of `boxes` in its color, in the colour space
+/// named `space`, in a graphics state of their own: one fill per run of boxes
+/// of one color.
+fn filled(space: &[u8], boxes: &[(Color, DeviceRect)]) -> Vec<Operation> {
+    let mut operations = vec![
+        Operation::new("q", Vec::new()),
+        Operation::new("cs", vec![Object::Name(space.to_vec())]),
+    ];
     for run in boxes.chunk_by(|(a, _), (b, _)| a == b) {
         let (color, _) = run[0];
         let rgb = [color.r, color.g, color.b].map(|c| Object::Real(f32::from(c) / 255.0));
-        operations.push(Operation::new("rg", rgb.to_vec()));
+        operations.push(Operation::new("sc", rgb.to_vec()));
         for (_, rect) in run {
             let corners = [
                 rect.min_x,
@@ -634,7 +810,7 @@ fn record_code(block: &TextBlock, glyph: &GlyphBytes, codes: &mut Codes) -> Resu
         return Ok(());
     };
     let code = glyph.code.to_be_bytes();
-    let len = glyph.byte_end - glyph.byte_start;
+    let len = glyph.bytes.len();
     let bytes = code
         .get(code.len().wrapping_sub(len)..)
         .filter(|bytes| !bytes.is_empty())
@@ -671,6 +847,7 @@ fn missing_glyph(address: &Address) -> Error {
 fn apply_deletions(
     content: &mut Content,
     sites: &BTreeMap<Address, Vec<Cut>>,
+    emptied: &BTreeSet<usize>,
 ) -> Result<BTreeSet<Address>> {
     // Each `TJ` array's strings that lose their first or last glyph, by
     // index, for each array: its kerns are zeroed once every string is
@@ -709,7 +886,7 @@ fn apply_deletions(
             }));
         }
     }
-    put_covers(content, covers)?;
+    put_covers(content, covers, emptied)?;
     Ok(zeroed)
 }
 
@@ -724,7 +901,11 @@ fn apply_deletions(
 ///
 /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) for an address
 /// that no longer names a string.
-fn put_covers(content: &mut Content, mut strings: Vec<StringCovers>) -> Result<()> {
+fn put_covers(
+    content: &mut Content,
+    mut strings: Vec<StringCovers>,
+    emptied: &BTreeSet<usize>,
+) -> Result<()> {
     strings.sort_by_key(|string| Reverse(string.address));
     // Each `TJ` array's covered elements, by index, split once every string
     // is known, so the array is rebuilt in one pass.
@@ -767,6 +948,10 @@ fn put_covers(content: &mut Content, mut strings: Vec<StringCovers>) -> Result<(
             *items = rebuilt;
         }
     }
+    // Each operation replaced: a shown string by its `TJ`, an emptied clip's
+    // `ET` by itself and a clip to nothing; all of them last first, so the
+    // earlier indices stay valid.
+    let mut splices: BTreeMap<usize, Vec<Operation>> = BTreeMap::new();
     for ShownString { op, pieces } in shown {
         let operation = &content.operations[op];
         let tj = Operation::new("TJ", vec![Object::Array(pieces)]);
@@ -784,6 +969,26 @@ fn put_covers(content: &mut Content, mut strings: Vec<StringCovers>) -> Result<(
             }
             _ => vec![tj],
         };
+        splices.insert(op, ops);
+    }
+    for &end in emptied {
+        let Some(et) = content.operations.get(end).filter(|op| op.operator == "ET") else {
+            return Err(Error::redaction(format!(
+                "operation {end} is not the `ET` its text object was read to end with"
+            )));
+        };
+        let nothing = vec![Object::Integer(0); 4];
+        splices.insert(
+            end,
+            vec![
+                et.clone(),
+                Operation::new("re", nothing),
+                Operation::new("W", Vec::new()),
+                Operation::new("n", Vec::new()),
+            ],
+        );
+    }
+    for (op, ops) in splices.into_iter().rev() {
         content.operations.splice(op..=op, ops);
     }
     Ok(())
@@ -839,10 +1044,10 @@ struct Drained {
 /// consume later, still-valid bytes. A glyph both removed and covered is
 /// removed. `None` when two cuts partly overlap: the pages drawing the string
 /// decode its glyphs differently.
-fn resolved(cuts: &[Cut]) -> Option<Vec<Cut>> {
+fn resolved<C: Clone>(cuts: &[Cut<C>]) -> Option<Vec<Cut<C>>> {
     let mut sorted = cuts.to_vec();
     sorted.sort_by_key(|cut| (cut.bytes.start, cut.bytes.end));
-    let mut merged: Vec<Cut> = Vec::with_capacity(sorted.len());
+    let mut merged: Vec<Cut<C>> = Vec::with_capacity(sorted.len());
     for cut in sorted {
         match merged.last_mut() {
             Some(last) if last.bytes == cut.bytes => {
@@ -858,9 +1063,9 @@ fn resolved(cuts: &[Cut]) -> Option<Vec<Cut>> {
 }
 
 /// Drain the glyph `cuts` from `bytes`, [`resolved`] as [`deletions`] leaves
-/// them, high to low so earlier offsets stay valid; `None` when one is past
-/// its end. Each run of covered glyphs leaves one number, the sum of their
-/// advances, at the offset they leave in the drained string.
+/// them, in one pass that moves each kept run of bytes down once; `None` when
+/// one is past its end. Each run of covered glyphs leaves one number, the sum
+/// of their advances, at the offset they leave in the drained string.
 fn drain(bytes: &mut Vec<u8>, cuts: &[Cut]) -> Option<Drained> {
     let len = bytes.len();
     if cuts
@@ -892,9 +1097,19 @@ fn drain(bytes: &mut Vec<u8>, cuts: &[Cut]) -> Option<Drained> {
         }
         drained += cut.bytes.len();
     }
-    for cut in cuts.iter().rev() {
-        bytes.drain(cut.bytes.clone());
+    // The kept bytes between the cuts, moved down once each.
+    let mut kept = 0;
+    let mut from = 0;
+    for (start, end) in cuts
+        .iter()
+        .map(|cut| (cut.bytes.start, cut.bytes.end))
+        .chain([(len, len)])
+    {
+        bytes.copy_within(from..start, kept);
+        kept += start - from;
+        from = end;
     }
+    bytes.truncate(kept);
     Some(Drained { lost, covers })
 }
 
@@ -1025,7 +1240,7 @@ mod tests {
             Object::string_literal(" Agent"),
         ]);
         let to_delete = deletions([(2, vec![(0, 3)])]);
-        apply_deletions(&mut content, &to_delete).unwrap();
+        apply_deletions(&mut content, &to_delete, &BTreeSet::new()).unwrap();
 
         let arr = tj_array(&content);
         // "ret" is now empty; both adjacent kerns (-40 before, -55 after) zeroed.
@@ -1040,12 +1255,41 @@ mod tests {
     /// its glyphs differently: they don't resolve, so nothing is drained.
     #[test]
     fn partly_overlapping_cuts_are_refused() {
-        let cut = |start, end| Cut {
+        let cut = |start, end| Cut::<Covering> {
             bytes: start..end,
             cover: None,
         };
         assert_eq!(resolved(&[cut(0, 1), cut(0, 2)]), None);
         assert_eq!(resolved(&[cut(0, 2), cut(0, 2)]), Some(vec![cut(0, 2)]));
+    }
+
+    /// Draining moves the bytes between the cuts down once, and a covered
+    /// run's number goes where its glyphs began in what is left.
+    #[test]
+    fn draining_keeps_the_bytes_between_cuts() {
+        let mut bytes = b"abcdef".to_vec();
+        let cuts = [
+            Cut {
+                bytes: 1..2,
+                cover: None,
+            },
+            Cut {
+                bytes: 3..5,
+                cover: Some(Covering {
+                    number: -500.0,
+                    color: Color::BLACK,
+                }),
+            },
+        ];
+        let drained = drain(&mut bytes, &cuts).unwrap();
+        assert_eq!(bytes, b"acf");
+        assert_eq!(
+            drained.covers,
+            [Cover {
+                offset: 2,
+                number: -500.0
+            }]
+        );
     }
 
     /// Covers in several strings of one `TJ` array each leave their number in
@@ -1074,7 +1318,7 @@ mod tests {
             (address(0), vec![cover(1, 2, -500.0)]),
             (address(2), vec![cover(0, 1, -700.0)]),
         ]);
-        apply_deletions(&mut content, &sites).unwrap();
+        apply_deletions(&mut content, &sites, &BTreeSet::new()).unwrap();
         assert_eq!(
             tj_array(&content),
             [
@@ -1099,7 +1343,7 @@ mod tests {
             Object::string_literal("Agent"),
         ]);
         let to_delete = deletions([(0, vec![(0, 3)])]);
-        apply_deletions(&mut content, &to_delete).unwrap();
+        apply_deletions(&mut content, &to_delete, &BTreeSet::new()).unwrap();
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("ret"), "survivors mangled");
@@ -1118,7 +1362,7 @@ mod tests {
             Object::string_literal("ne Roe"),
         ]);
         let to_delete = deletions([(0, vec![(4, 6)]), (2, vec![(0, 2)])]);
-        apply_deletions(&mut content, &to_delete).unwrap();
+        apply_deletions(&mut content, &to_delete, &BTreeSet::new()).unwrap();
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("Mr. "));
@@ -1137,7 +1381,12 @@ mod tests {
             (-12).into(),
             Object::string_literal(" Doe"),
         ]);
-        apply_deletions(&mut content, &deletions([(0, vec![(4, 8)])])).unwrap();
+        apply_deletions(
+            &mut content,
+            &deletions([(0, vec![(4, 8)])]),
+            &BTreeSet::new(),
+        )
+        .unwrap();
         let arr = tj_array(&content);
         assert_eq!(
             arr[2],
@@ -1159,7 +1408,7 @@ mod tests {
         }
         let mut content = tj(elements);
         let to_delete = deletions((0..count).map(|item| (2 * item, vec![(0, 1)])));
-        apply_deletions(&mut content, &to_delete).unwrap();
+        apply_deletions(&mut content, &to_delete, &BTreeSet::new()).unwrap();
         assert!(
             tj_array(&content)
                 .iter()
@@ -1182,7 +1431,7 @@ mod tests {
             Object::string_literal("c"),
         ]);
         let to_delete = deletions([(2, vec![(0, 2)])]);
-        apply_deletions(&mut content, &to_delete).unwrap();
+        apply_deletions(&mut content, &to_delete, &BTreeSet::new()).unwrap();
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("a"));

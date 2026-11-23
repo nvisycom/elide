@@ -120,6 +120,7 @@ fn placed(block: &TextBlock) -> Result<Vec<Placed<String>>, String> {
     block
         .rects
         .iter()
+        .filter(|glyph| glyph.visible().is_some())
         .map(|glyph| {
             let text = chars
                 .get(glyph.chars.clone())
@@ -136,7 +137,7 @@ fn placed(block: &TextBlock) -> Result<Vec<Placed<String>>, String> {
 /// nowhere, as a clip hides them, but spaces, each with how many.
 fn hidden(block: &TextBlock) -> HashMap<char, usize> {
     let mut shown = vec![false; block.text.chars().count()];
-    for glyph in &block.rects {
+    for glyph in block.rects.iter().filter(|glyph| glyph.visible().is_some()) {
         if let Some(shown) = shown.get_mut(glyph.chars.clone()) {
             shown.fill(true);
         }

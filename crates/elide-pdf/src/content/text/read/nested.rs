@@ -16,7 +16,7 @@ use super::{Graphics, MAX_WALKED_BYTES, MAX_XOBJECT_DEPTH, MAX_XOBJECT_WALKS, Wa
 use crate::content::image::stencil_extent;
 use crate::content::text::StreamTarget;
 use crate::pdf::reader::{
-    DeviceRect, DictionaryExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt, normalize_rect,
+    Clip, DeviceRect, DictionaryExt, GlyphRect, Matrix, ObjectExt, Scope, StreamExt, normalize_rect,
 };
 
 /// A soft mask group queued to be walked once the page's own text is: the
@@ -426,18 +426,27 @@ impl<'d> Walk<'_, 'd> {
                     self.page
                 )));
             }
-            // A glyph shows on a tile only where the regions painting it
-            // cover it.
+            // A glyph shows on a tile only within the regions painting it
+            // there and its cell's clip: the bounds of both, as the clip of
+            // its copy.
             for tile in tiles {
-                self.accum
-                    .rects
-                    .extend(cell.glyphs.iter().filter_map(|glyph| {
-                        Some(GlyphRect {
-                            chars: glyph.chars.clone(),
-                            rect: covered(glyph.rect.mapped(tile.transform), &tile.coverage)?,
-                            transform: glyph.transform.then(tile.transform),
-                        })
-                    }));
+                self.accum.rects.extend(cell.glyphs.iter().map(|glyph| {
+                    let extent = glyph.extent.mapped(tile.transform);
+                    let clip = match (glyph.clip, covering(extent, &tile.coverage)) {
+                        (Clip::Whole, Some(coverage)) => Clip::Within(coverage),
+                        (Clip::Within(cell), Some(coverage)) => cell
+                            .mapped(tile.transform)
+                            .intersection(coverage)
+                            .map_or(Clip::Nothing, Clip::Within),
+                        _ => Clip::Nothing,
+                    };
+                    GlyphRect {
+                        chars: glyph.chars.clone(),
+                        extent,
+                        clip,
+                        transform: glyph.transform.then(tile.transform),
+                    }
+                }));
             }
         }
         Ok(())
@@ -635,13 +644,14 @@ fn drawn_in(doc: &Document, stream: &Stream, graphics: &mut Graphics<'_>) {
     }
 }
 
-/// The part of the glyph box `rect` the regions `coverage` paint, each apart,
-/// or `None` when none of them does: a glyph between two regions is not
-/// painted by either.
-fn covered(rect: DeviceRect, coverage: &[DeviceRect]) -> Option<DeviceRect> {
+/// The bounds of the regions `coverage` that paint some of the glyph box
+/// `extent`, or `None` when none does: a glyph between two regions is
+/// painted by neither, and their bounds would show it.
+fn covering(extent: DeviceRect, coverage: &[DeviceRect]) -> Option<DeviceRect> {
     coverage
         .iter()
-        .filter_map(|region| rect.within(*region))
+        .copied()
+        .filter(|region| extent.within(*region).is_some())
         .reduce(DeviceRect::union)
 }
 
@@ -663,7 +673,7 @@ mod tests {
     #[test]
     fn a_glyph_between_regions_is_not_covered() {
         let coverage = [rect(0.0, 5.0), rect(40.0, 45.0)];
-        assert!(covered(rect(20.0, 25.0), &coverage).is_none());
-        assert!(covered(rect(41.0, 43.0), &coverage).is_some());
+        assert!(covering(rect(20.0, 25.0), &coverage).is_none());
+        assert_eq!(covering(rect(41.0, 43.0), &coverage), Some(coverage[1]));
     }
 }

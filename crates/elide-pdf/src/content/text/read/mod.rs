@@ -28,7 +28,7 @@ use self::nested::{Cell, Mask, Selected};
 use self::paint::Painted;
 use self::run::TextRun;
 use self::stream::{Frame, Graphics, ScopeFont};
-use super::{FontEntry, OffsetMap, OffsetRun, PenStep, StreamTarget, TextBlock};
+use super::{ClippingText, FontEntry, OffsetMap, OffsetRun, PenStep, StreamTarget, TextBlock};
 use crate::pdf::Pdf;
 use crate::pdf::reader::{
     DocumentExt, GlyphRect, MAX_CONTENT_BYTES, PageFrame, Point, Scope, page_frame,
@@ -92,6 +92,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
     let mut next_char = 0usize;
     let mut rects: Vec<GlyphRect> = Vec::new();
     let mut steps: Vec<PenStep> = Vec::new();
+    let mut clipping: Vec<ClippingText> = Vec::new();
     let mut lines = 0u64;
     let mut fonts: Vec<FontEntry> = Vec::new();
     let accum = TextAccum {
@@ -100,6 +101,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         next_char: &mut next_char,
         rects: &mut rects,
         steps: &mut steps,
+        clipping: &mut clipping,
         lines: &mut lines,
         fonts: &mut fonts,
     };
@@ -131,6 +133,7 @@ fn text_block_for_page(doc: &Document, page: u32, page_id: ObjectId) -> Result<T
         offsets: OffsetMap::new(runs),
         rects,
         steps,
+        clipping,
         frame,
         fonts,
         unplaced,
@@ -145,6 +148,7 @@ struct TextAccum<'a> {
     next_char: &'a mut usize,
     rects: &'a mut Vec<GlyphRect>,
     steps: &'a mut Vec<PenStep>,
+    clipping: &'a mut Vec<ClippingText>,
     /// The lines numbered so far, across the page and every form it draws.
     lines: &'a mut u64,
     fonts: &'a mut Vec<FontEntry>,

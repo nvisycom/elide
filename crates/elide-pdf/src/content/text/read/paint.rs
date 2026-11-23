@@ -8,7 +8,7 @@ use lopdf::content::Operation;
 use lopdf::{Dictionary, Document, ObjectId};
 
 use super::stream::operand_f64;
-use crate::pdf::reader::{DeviceRect, DictionaryExt, Matrix, Point, Vector};
+use crate::pdf::reader::{Clip, DeviceRect, DictionaryExt, Matrix, Point, Vector};
 
 /// The tiling pattern a fill or stroke paints with, and the space of the
 /// stream that selected it, which its `/Matrix` lays its tiles out in.
@@ -62,16 +62,6 @@ impl Line {
         }
         self.width.max(1.0) / 2.0 * factor
     }
-}
-
-/// What the clip leaves to paint: everything, the device-space bounds of the
-/// clip, or nothing.
-#[derive(Debug, Clone, Copy, Default)]
-enum Clip {
-    #[default]
-    Whole,
-    Within(DeviceRect),
-    Nothing,
 }
 
 /// The patterns a stream fills and strokes with, its clip and line style,
@@ -220,6 +210,12 @@ impl Painting {
             .collect()
     }
 
+    /// Whether text shown now adds its outlines to the clip its text object
+    /// sets at `ET`: a clipping rendering mode, 4 to 7.
+    pub(super) fn clips_text(&self) -> bool {
+        self.render >= 4
+    }
+
     /// Open a text object: no text has been shown in it to clip with.
     pub(super) fn begin_text(&mut self) {
         self.text_clip = None;
@@ -233,14 +229,9 @@ impl Painting {
         }
     }
 
-    /// The part of the glyph box `rect` the clip shows, or `None` when it
-    /// hides all of it.
-    pub(super) fn visible(&self, rect: DeviceRect) -> Option<DeviceRect> {
-        match self.clip {
-            Clip::Whole => Some(rect),
-            Clip::Within(clip) => rect.within(clip),
-            Clip::Nothing => None,
-        }
+    /// What the clip leaves of what is drawn now.
+    pub(super) fn clip(&self) -> Clip {
+        self.clip
     }
 
     /// Whether a fill paints with a pattern, and is not fully transparent.

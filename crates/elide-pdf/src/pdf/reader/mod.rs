@@ -16,7 +16,7 @@ pub(crate) use self::object::{
     DictionaryExt, DocumentExt, MAX_CONTENT_BYTES, ObjectExt, StreamExt, parse_content,
 };
 pub(crate) use self::page::{
-    DeviceRect, GlyphRect, PRINT_BOXES, PageBoxes, PageFrame, PageGeometry, normalize_rect,
+    Clip, DeviceRect, GlyphRect, PRINT_BOXES, PageBoxes, PageFrame, PageGeometry, normalize_rect,
     page_boxes, page_frame,
 };
 pub(crate) use self::point::{Point, Vector};

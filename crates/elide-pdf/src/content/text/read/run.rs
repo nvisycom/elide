@@ -7,11 +7,9 @@ use elide_core::Result;
 use lopdf::Object;
 
 use super::geometry::{Cursor, SpaceRule, TextState};
-use crate::content::text::{
-    Address, GlyphBytes, GlyphSite, Mover, OffsetRun, PenStep, StreamTarget,
-};
+use crate::content::text::{Address, GlyphBytes, Mover, OffsetRun, PenStep, StreamTarget};
 use crate::pdf::reader::font::{FontText, Glyph, GlyphMetrics, WidthSource, decode_glyphs};
-use crate::pdf::reader::{DeviceRect, GlyphRect, Matrix, ObjectExt, Point};
+use crate::pdf::reader::{Clip, DeviceRect, GlyphRect, Matrix, ObjectExt, Point};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (9.3.3).
@@ -87,14 +85,19 @@ impl TextRun<'_> {
         *self.next_char += count;
         self.runs.push(OffsetRun {
             chars: start..*self.next_char,
-            source: Some(GlyphBytes {
-                address,
-                byte_start: glyph.bytes.start,
-                byte_end: glyph.bytes.end,
-                code: glyph.code,
-                font: self.font,
-            }),
+            source: Some(self.glyph_bytes(address, glyph)),
         });
+    }
+
+    /// Where `glyph`, at `address`, is: its bytes there, its code, and the
+    /// font that draws it.
+    fn glyph_bytes(&self, address: Address, glyph: &Glyph) -> GlyphBytes {
+        GlyphBytes {
+            address,
+            bytes: glyph.bytes.clone(),
+            code: glyph.code,
+            font: self.font,
+        }
     }
 
     /// Append a synthetic space that no glyph drew: one char of gap with no glyph
@@ -190,12 +193,8 @@ impl TextRun<'_> {
             let word = self.word_spacing(&glyph);
             let number = self.number(w0, word);
             let tx = self.advance(advance, word);
-            let site = GlyphSite {
-                address,
-                byte_start: glyph.bytes.start,
-            };
             let mover = Mover::Glyph {
-                site,
+                glyph: self.glyph_bytes(address, &glyph),
                 chars: drawn,
                 number,
             };
@@ -275,7 +274,8 @@ impl TextRun<'_> {
         };
         GlyphRect {
             chars,
-            rect: extent.mapped(transform),
+            extent: extent.mapped(transform),
+            clip: Clip::Whole,
             transform,
         }
     }

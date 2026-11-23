@@ -15,8 +15,12 @@ use super::{DictionaryExt, DocumentExt, Matrix, Point, Vector};
 pub(crate) struct GlyphRect {
     /// The page-local decoded character range this glyph produced.
     pub(crate) chars: Range<usize>,
-    /// The glyph's box in default user space, bottom-left origin.
-    pub(crate) rect: DeviceRect,
+    /// The glyph's box in default user space, bottom-left origin, as drawn,
+    /// before any clip.
+    pub(crate) extent: DeviceRect,
+    /// What the clip in effect where the glyph is drawn leaves of what is
+    /// drawn there: it stays on the page however the glyph moves.
+    pub(crate) clip: Clip,
     /// The glyph's own space where it is drawn, to default user space: text
     /// space raised by the text rise (9.4.4), then the text matrix and CTM,
     /// and, for a tiled copy, the tile's placement. The glyph is drawn from
@@ -25,15 +29,44 @@ pub(crate) struct GlyphRect {
 }
 
 impl GlyphRect {
+    /// The part of the glyph's box its clip shows, or `None` when it hides
+    /// all of it.
+    pub(crate) fn visible(&self) -> Option<DeviceRect> {
+        self.clip.shows(self.extent)
+    }
+
     /// The glyph moved `advance` along its line in text space: its box moved
-    /// by where its transform takes that move, and its transform with it.
+    /// by where its transform takes that move, and its transform with it,
+    /// under the same clip.
     pub(crate) fn moved(&self, advance: f64) -> Self {
         Self {
             chars: self.chars.clone(),
-            rect: self
-                .rect
+            extent: self
+                .extent
                 .moved(self.transform.vector(Vector::new(advance, 0.0))),
+            clip: self.clip,
             transform: Matrix::translation(advance, 0.0).then(self.transform),
+        }
+    }
+}
+
+/// What a clip leaves of what is drawn under it: everything, what falls in
+/// a box (the clip's device-space bounds), or nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) enum Clip {
+    #[default]
+    Whole,
+    Within(DeviceRect),
+    Nothing,
+}
+
+impl Clip {
+    /// The part of `rect` the clip shows, or `None` when it hides all of it.
+    pub(crate) fn shows(self, rect: DeviceRect) -> Option<DeviceRect> {
+        match self {
+            Self::Whole => Some(rect),
+            Self::Within(clip) => rect.within(clip),
+            Self::Nothing => None,
         }
     }
 }
@@ -373,15 +406,22 @@ impl<'a> PageGeometry<'a> {
     }
 
     /// The device-space rectangles covering each of `spans`, with its tag, one
-    /// per line of each, in the order of `spans`: [`lines_for`](Self::lines_for)
-    /// for many spans at once, in one pass over the glyphs. `spans` are sorted
-    /// and disjoint; a glyph in two of them boxes the first.
+    /// per line of each drawing of it, in the order of `spans`:
+    /// [`lines_for`](Self::lines_for) for many spans at once, in one pass over
+    /// the glyphs. `spans` are sorted and disjoint; a glyph in two of them
+    /// boxes the first. A drawing places its glyphs in character order, so a
+    /// glyph no later than the one before starts another drawing, as each
+    /// tile of a pattern is: its box never joins the last one's.
     pub(crate) fn lines_for_each<T: Copy>(
         &self,
         spans: &[(T, Range<usize>)],
     ) -> Vec<(T, DeviceRect)> {
         let mut lines: Vec<Vec<DeviceRect>> = vec![Vec::new(); spans.len()];
+        let mut last: Vec<Option<usize>> = vec![None; spans.len()];
         for glyph in self.rects {
+            let Some(rect) = glyph.visible() else {
+                continue;
+            };
             let i = spans.partition_point(|(_, chars)| chars.end <= glyph.chars.start);
             let Some((_, chars)) = spans.get(i) else {
                 continue;
@@ -389,9 +429,13 @@ impl<'a> PageGeometry<'a> {
             if chars.start >= glyph.chars.end {
                 continue;
             }
+            let same_drawing = last[i].is_some_and(|start| start < glyph.chars.start);
+            last[i] = Some(glyph.chars.start);
             match lines[i].last_mut() {
-                Some(line) if same_line(line, &glyph.rect) => *line = line.union(glyph.rect),
-                _ => lines[i].push(glyph.rect),
+                Some(line) if same_drawing && same_line(line, &rect) => {
+                    *line = line.union(rect);
+                }
+                _ => lines[i].push(rect),
             }
         }
         spans
@@ -411,7 +455,10 @@ impl<'a> PageGeometry<'a> {
         self.rects
             .iter()
             .filter(move |glyph| {
-                let rect = frame.normalize(glyph.rect);
+                let Some(visible) = glyph.visible() else {
+                    return false;
+                };
+                let rect = frame.normalize(visible);
                 let x = rect.x + rect.width / 2.0;
                 let y = rect.y + rect.height / 2.0;
                 regions.iter().any(|region| {
