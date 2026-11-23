@@ -1,17 +1,19 @@
-//! CSV loader: decode bytes to text, auto-detect the delimiter, and
-//! parse rows into a [`CsvHandler`].
+//! CSV loader: decode bytes to text, auto-detect the delimiter, parse rows
+//! into a [`CsvHandler`], and strip the terminal control sequences in each
+//! cell ([`control`]).
 
 use csv::{ReaderBuilder, StringRecord};
-use elide_codec::Loader;
 use elide_codec::content::ContentData;
-use elide_core::modality::tabular::Tabular;
+use elide_codec::{Document, DocumentLoader, StrippedContent};
+use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
-use super::handler::{CsvData, CsvHandler};
+use super::handler::{CsvData, CsvHandler, FORMAT_ID};
+use crate::control;
 
 /// Loader for delimited text. Parses with the [`csv`] crate, treating the
 /// first row as headers and auto-detecting the field delimiter unless one
-/// is set.
+/// is set. Produces one leaf [`Document`] per input.
 #[derive(Debug)]
 pub(crate) struct CsvLoader {
     /// Whether the first row is a header row. Defaults to `true`.
@@ -42,11 +44,19 @@ impl Default for CsvLoader {
 }
 
 #[async_trait::async_trait]
-impl Loader for CsvLoader {
-    type Modality = Tabular;
-    type Stream = CsvHandler;
+impl DocumentLoader for CsvLoader {
+    /// Terminal control sequences are always stripped: they are undisplayed
+    /// content, which no policy chooses for.
+    async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
+        let (handler, stripped) = self.load(content)?;
+        Ok(Document::leaf(FORMAT_ID, handler).with_stripped(stripped))
+    }
+}
 
-    async fn decode(&self, content: ContentData) -> Result<CsvHandler> {
+impl CsvLoader {
+    /// The handler over `content`'s rows, each cell without its terminal
+    /// control sequences, and what was stripped.
+    pub(crate) fn load(&self, content: ContentData) -> Result<(CsvHandler, StrippedContent)> {
         let text = content.decode()?;
         let trailing_newline = text.ends_with('\n');
         let delimiter = self.delimiter.unwrap_or_else(|| detect_delimiter(&text));
@@ -79,13 +89,15 @@ impl Loader for CsvLoader {
         let headers = self.has_headers.then(|| records.next().unwrap_or_default());
         let rows = records.collect();
 
-        Ok(CsvHandler::new(CsvData {
+        let mut data = CsvData {
             headers,
             rows,
             delimiter,
             trailing_newline,
             crlf,
-        }))
+        };
+        let stripped = control::recorded(data.strip_controls());
+        Ok((CsvHandler::new(data), stripped))
     }
 }
 

@@ -254,9 +254,10 @@ Re-encoding has a two-clause contract.
 First, untouched units serialize byte-for-byte where the format permits. For
 formats whose handles preserve a verbatim view of the source, plain text, JSON,
 HTML, and CSV among them, the encoder copies untouched bytes directly. The
-output of a document with no mutations is byte-identical to the input. A CSV
-handle, for instance, retains its delimiter and trailing-newline convention so
-that re-serialization reproduces the source exactly.
+output of a document with no mutations, and nothing stripped at decode, is
+byte-identical to the input. A CSV handle, for instance, retains its delimiter
+and trailing-newline convention so that re-serialization reproduces the source
+exactly.
 
 Second, touched units serialize their mutated value through format-aware
 write-back. A text replacement is escaped according to the format's rules. A

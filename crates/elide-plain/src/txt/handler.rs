@@ -32,7 +32,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
 /// The plain-text [`Format`], resolved by `.txt`/`.log` and `text/plain`.
 pub fn format() -> Format {
-    Format::new(FORMAT_ID, TxtLoader)
+    Format::with_document_loader(FORMAT_ID, TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }
