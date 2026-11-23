@@ -652,7 +652,7 @@ mod tests {
             .rects
             .iter()
             .filter(|glyph| glyph.chars.end <= chars.start || glyph.chars.start >= chars.end)
-            .map(GlyphRect::origin)
+            .map(|glyph| glyph.transform.origin())
             .collect()
     }
 
@@ -782,7 +782,7 @@ mod tests {
         kept.retain(|glyph| {
             !(5..8).contains(&glyph.chars.start) && !(10..13).contains(&glyph.chars.start)
         });
-        let kept: Vec<Point> = kept.iter().map(GlyphRect::origin).collect();
+        let kept: Vec<Point> = kept.iter().map(|glyph| glyph.transform.origin()).collect();
         let now = origins_outside(&after, 0..0);
         assert!(same_origins(&kept, &now), "{kept:?} against {now:?}");
     }
@@ -803,7 +803,8 @@ mod tests {
         assert!(!streams_of(&out.bytes()).contains("Acme"));
         assert_eq!(after[0].text.trim(), "Roe at");
         // "Roe at " moved left by "Jane "'s width; nothing follows the cover.
-        let shift = before[0].rects[5].origin().x - after[0].rects[0].origin().x;
+        let shift =
+            before[0].rects[5].transform.origin().x - after[0].rects[0].transform.origin().x;
         assert!(shift > 0.0);
         assert_eq!(boxes(&out, 1).len(), 1);
     }
@@ -818,7 +819,7 @@ mod tests {
             .iter()
             .find(|g| g.chars.start == at)
             .unwrap();
-        glyph.origin().x
+        glyph.transform.origin().x
     }
 
     /// The one box drawn on `out`'s first page, checked to sit exactly over

@@ -25,12 +25,6 @@ pub(crate) struct GlyphRect {
 }
 
 impl GlyphRect {
-    /// Where the glyph is drawn from in default user space: the pen, raised
-    /// by the text rise.
-    pub(crate) fn origin(&self) -> Point {
-        self.transform.origin()
-    }
-
     /// The glyph moved `advance` along its line in text space: its box moved
     /// by where its transform takes that move, and its transform with it.
     pub(crate) fn moved(&self, advance: f64) -> Self {

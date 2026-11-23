@@ -126,7 +126,7 @@ fn placed(block: &TextBlock) -> Result<Vec<Placed<String>>, String> {
                 .ok_or("a glyph's characters are past the page's text")?;
             Ok(Placed {
                 text: text.iter().collect(),
-                origin: glyph.origin(),
+                origin: glyph.transform.origin(),
             })
         })
         .collect()
