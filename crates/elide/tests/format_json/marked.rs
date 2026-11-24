@@ -85,7 +85,7 @@ async fn a_suppressed_mark_is_not_resolved() -> Result<()> {
     let mut entity = flagged(builtins::PHONE_NUMBER.to_ref(), mark.clone());
     entity.record_manual(Manual::new(ManualIntent::Suppress, mark), Some("reviewer"));
     let report = Report::new().insert_part::<Text>(PartId::from(NAME), vec![entity]);
-    orchestrator(&registry)?
+    let _applied = orchestrator(&registry)?
         .anonymize_with(&mut document, report)
         .await?;
     assert_eq!(document.document.encode()?.decode()?, SOURCE);

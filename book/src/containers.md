@@ -38,16 +38,20 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .with(Rule::fallback(Cover::default())),
         );
 
-    orchestrator.anonymize(&mut document).await?;
+    let applied = orchestrator.anonymize(&mut document).await?;
 
     std::fs::write("contract.redacted.docx", document.document.encode()?.as_bytes())?;
+    // The applied report is the record of what was redacted, and where.
+    println!("report digest: {}", applied.digest());
     Ok(())
 }
 ```
 
 `registry.document` decodes a named file into an orchestrator `Document`.
 `anonymize` analyzes every part, redacts it, and writes the parts back into
-the container; `encode` then produces a complete replacement file.
+the container; `encode` then produces a complete replacement file. It returns
+the applied report: every entity found, each with the record of how it was
+hidden. Keep it as the audit of the run; dropping it is a compiler warning.
 
 Parts in a modality with no pipeline are left untouched. The document
 properties and comments are removed at decode by default (see

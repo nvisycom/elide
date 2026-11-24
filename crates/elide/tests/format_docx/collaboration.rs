@@ -54,7 +54,7 @@ async fn encoded(collaboration: Disposition, anonymizer: Anonymizer<Text>) -> Ve
         .await
         .expect("decode docx");
     let mut documents = [Document::new("review.docx", handle)];
-    orchestrator
+    let _applied = orchestrator
         .anonymize(&mut documents)
         .await
         .expect("anonymize");
@@ -143,7 +143,7 @@ async fn a_plain_orchestrator_still_erases_what_is_flagged() {
         .await
         .expect("decode docx");
     let mut documents = [Document::new("review.docx", handle)];
-    orchestrator
+    let _applied = orchestrator
         .anonymize(&mut documents)
         .await
         .expect("anonymize");

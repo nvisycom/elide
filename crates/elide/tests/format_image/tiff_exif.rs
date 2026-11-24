@@ -40,7 +40,7 @@ async fn tiff_gps_is_stripped_through_the_facade() {
     let mut documents = [Document::new("photo.tiff", handle)];
 
     let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await
         .expect("anonymize");

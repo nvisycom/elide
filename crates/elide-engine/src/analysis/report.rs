@@ -70,6 +70,7 @@ use crate::PartId;
 /// [`new`]: Report::new
 /// [`insert_part`]: Report::insert_part
 #[derive(Default)]
+#[must_use = "a report is the record of what was found and, once applied, of what was redacted"]
 pub struct Report {
     /// Every part's entities (a `Vec<Entity<M>>` of the part's modality), keyed
     /// by its [`PartId`] path. A named document's own content is its depth-1
@@ -233,7 +234,6 @@ impl Report {
     /// the `P` pipeline.
     ///
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
-    #[must_use]
     pub fn insert_part<P: Modality>(mut self, id: PartId, entities: Vec<Entity<P>>) -> Self
     where
         Vec<Entity<P>>: serde::Serialize,

@@ -39,7 +39,7 @@ async fn redact_sparing(
             .expect("the page is text")
             .suppress_within(&TextLocation::inline(region));
     }
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, report)
         .await
         .expect("anonymize");

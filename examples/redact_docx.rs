@@ -71,10 +71,12 @@ async fn main() -> Result<()> {
     // 4. Apply the (here unedited) report: redact the body, redact each
     //    part, write the parts back, and re-encode the package. The enrichment
     //    (`analyzed.artifacts`) is not needed to redact; it is what a re-run
-    //    would reuse.
-    orchestrator
+    //    would reuse. The applied report is the record of what was redacted:
+    //    keep it, or anchor its digest where whoever carries it cannot write.
+    let applied = orchestrator
         .anonymize_with(&mut document, analyzed.report)
         .await?;
+    println!("\napplied report digest: {}", applied.digest());
     let encoded = document.document.encode()?;
 
     // 5. Write the redacted `.docx` out. That is the whole deliverable: a

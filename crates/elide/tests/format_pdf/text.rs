@@ -138,7 +138,7 @@ async fn kept_text_stays_in_the_pdf() -> Result<()> {
     let mut document = registry
         .document("doc.pdf", FIXTURE.source, HiddenContentPolicy::default())
         .await?;
-    orchestrator.anonymize(&mut document).await?;
+    let _applied = orchestrator.anonymize(&mut document).await?;
 
     let redacted = extracted_text(document.document.encode()?.as_bytes()).await?;
     assert!(

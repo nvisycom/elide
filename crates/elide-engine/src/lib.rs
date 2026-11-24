@@ -449,8 +449,9 @@ impl Orchestrator {
     /// Overlapping entities resolve to one operator, as they will at apply. A
     /// part of a modality with no pipeline is skipped, as [`anonymize_with`]
     /// passes it through. Picking again after a review edit records only what
-    /// changed: an entity whose latest pick already names the same operator
-    /// gains nothing.
+    /// changed, as [`Anonymizer::pick`] does: an entity whose latest pick is
+    /// already this decision gains nothing, while a new operator, rule, or
+    /// rationale is recorded anew, even under the same operator.
     ///
     /// # Errors
     ///
@@ -460,6 +461,7 @@ impl Orchestrator {
     ///
     /// [`anonymize_with`]: Self::anonymize_with
     /// [`with_scope`]: Self::with_scope
+    /// [`Anonymizer::pick`]: elide_redaction::Anonymizer::pick
     pub fn pick(&self, report: &mut Report) -> Result<()> {
         for entities in report.parts.values_mut() {
             if let Some(pipeline) = self.pipelines.get(&entities.modality()) {

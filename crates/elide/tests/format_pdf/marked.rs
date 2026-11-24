@@ -58,7 +58,7 @@ async fn a_marked_region_is_redacted() -> Result<()> {
     let mut document = registry
         .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
         .await?;
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut document, marked(number, rect))
         .await?;
 
@@ -86,7 +86,7 @@ async fn a_marked_number_leaves_the_rest_of_its_line() -> Result<()> {
     let mut document = registry
         .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
         .await?;
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut document, marked(number, rect))
         .await?;
 

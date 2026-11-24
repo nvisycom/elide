@@ -80,7 +80,7 @@ async fn redacted_always(orchestrator: &Orchestrator) -> Result<Bytes> {
         .document("doc.pdf", FIXTURE.source, HiddenContentPolicy::default())
         .await?;
     let report = orchestrator.analyze(&mut document).await?.report;
-    orchestrator.anonymize_with(&mut document, report).await?;
+    let _applied = orchestrator.anonymize_with(&mut document, report).await?;
     Ok(Bytes::copy_from_slice(
         document.document.encode()?.as_bytes(),
     ))

@@ -54,7 +54,7 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
     let mut documents = [Document::new("shared_string_cells.xlsx", handle)];
 
     let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await
         .expect("anonymize");

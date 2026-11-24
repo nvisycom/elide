@@ -147,7 +147,7 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
         );
     }
 
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await?;
     // Each output re-encodes AND its body no longer carries the email: decode
@@ -208,7 +208,7 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
         "every nesting level's body is analyzed; got depths {depths:?}",
     );
 
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut document, analyzed.report)
         .await?;
 

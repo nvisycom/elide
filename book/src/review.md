@@ -43,7 +43,9 @@ report
     .by("reviewer-7")
     .suppress_within(&TextLocation::inline(0..120));
 
-orchestrator.anonymize_with(&mut document, report).await?;
+// The applied report carries each entity's redaction record: keep it.
+let applied = orchestrator.anonymize_with(&mut document, report).await?;
+println!("report digest: {}", applied.digest());
 # Ok(())
 # }
 ```

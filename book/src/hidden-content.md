@@ -19,31 +19,32 @@ Only two kinds of hidden content are a choice, made per document with a
 | Category | Covers | Default |
 |---|---|---|
 | Metadata | Document properties, custom XML, EXIF and XMP, audio tags, HTML `<meta>` | `KeepOnlyEssential` |
-| Collaboration | Comments, tracked revisions | `KeepOnlyEssential` |
+| Collaboration | Comments, tracked revisions, annotations | `KeepOnlyEssential` |
 
 A PDF's metadata (`/Info` and XMP) and its annotations are always stripped,
-whatever the policy (see [#345](https://github.com/nvisycom/elide/issues/345)).
+whatever the policy (see [#410](https://github.com/nvisycom/elide/issues/410)).
 
 `KeepOnlyEssential` removes the content without inspecting it, keeping only
 what a reader of the file sees. On metadata it keeps only what a viewer needs
 to render the file, such as an image's orientation. On collaboration it
 produces the final visible document: insertions accepted, deletions applied,
-comments dropped. `ScanAsContent` keeps the content and handles it like
-visible content: it is detected with the request's label catalog and what the
-catalog covers is redacted (see [Metadata](metadata.md)); a format that
-cannot surface it to detection strips it instead. `FlagEverything` keeps the
-content as `ScanAsContent` does and also makes every item its format labels an
-entity, whatever the catalog declares: each metadata field (an HTML `<meta>`
-field included, labelled by its name), and each comment, author, and tracked
-deletion, which is then erased whole; a legacy Excel note's own text is
-removed at decode and its shape kept. A flagged item is erased even when the
-anonymizer has no rule for its label; a rule that matches it decides instead,
-so a text rule for `communications_content` (what a comment says) or
-`person_name` (who wrote it), or `Keep` to leave it, treats it otherwise. A kept
-item is still scanned, and what a recognizer finds inside it takes the whole
-item; `ScanAsContent` is what redacts a finding and keeps the rest. A
-reviewer's `suppress_within` spares a flagged item only when the region
-contains the whole item (see [Reviewing](review.md)).
+comments and annotations dropped. `ScanAsContent` keeps the content and
+handles it like visible content: it is detected with the request's label
+catalog and what the catalog covers is redacted (see [Metadata](metadata.md));
+a format that cannot surface it to detection strips it instead.
+`FlagEverything` keeps the content as `ScanAsContent` does and also makes
+every item its format labels an entity, whatever the catalog declares: each
+metadata field (an HTML `<meta>` field included, labelled by its name), and
+each comment, author, and tracked deletion, which is then erased whole; a
+legacy Excel note's own text is removed at decode and its shape kept. A
+flagged item is erased even when the anonymizer has no rule for its label; a
+rule that matches it decides instead, so a text rule for
+`communications_content` (what a comment says) or `person_name` (who wrote
+it), or `Keep` to leave it, treats it otherwise. A kept item is still scanned,
+and what a recognizer finds inside it takes the whole item; `ScanAsContent` is
+what redacts a finding and keeps the rest. A reviewer's `suppress_within`
+spares a flagged item only when the region contains the whole item (see
+[Reviewing](review.md)).
 
 A redacted office comment or change keeps its author's name and account,
 which are detected and redacted, but not its date: a date the format lets go
