@@ -3,10 +3,10 @@
 //! report entry in place, fold changed blob children back, remove unreadable
 //! ones).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use elide_codec::StreamMut;
-use elide_core::modality::NoArtifact;
+use elide_core::modality::{DataReader, Modality, NoArtifact};
 use elide_core::recognition::Scope;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
@@ -154,5 +154,94 @@ impl PartVisitor for Redact<'_> {
 
     fn stripped(&mut self) -> &mut StrippedRecord {
         &mut self.stripped
+    }
+}
+
+/// The read visitor: the data at each of a set of locations, each in the part
+/// its [`PartId`] names, leaving the documents as they are.
+pub(crate) struct Read<'r, M: Modality> {
+    /// The locations to read, each with the part it is in.
+    locations: &'r [(PartId, M::Location)],
+    /// The index in `locations` of each location to read, by its part.
+    by_part: HashMap<&'r PartId, Vec<usize>>,
+    /// The read at each location, by its index in `locations`.
+    data: Vec<Option<Result<M::Data>>>,
+    /// The hidden content the walk sees stripped, which a read does not report.
+    stripped: StrippedRecord,
+}
+
+impl<'r, M: Modality> Read<'r, M> {
+    /// A read of each of `locations`.
+    pub(crate) fn new(locations: &'r [(PartId, M::Location)]) -> Self {
+        let mut by_part: HashMap<&'r PartId, Vec<usize>> = HashMap::new();
+        for (i, (part_id, _)) in locations.iter().enumerate() {
+            by_part.entry(part_id).or_default().push(i);
+        }
+        Self {
+            locations,
+            by_part,
+            data: locations.iter().map(|_| None).collect(),
+            stripped: StrippedRecord::default(),
+        }
+    }
+
+    /// The read at each location, in the order they were given: its data, or
+    /// [`NotFound`](elide_core::ErrorKind::NotFound) when its part is in none
+    /// of the documents walked.
+    pub(crate) fn finish(self) -> Vec<Result<M::Data>> {
+        self.data
+            .into_iter()
+            .zip(self.locations)
+            .map(|(read, (part_id, _))| {
+                read.unwrap_or_else(|| {
+                    Err(Error::not_found(format!(
+                        "no {} part `{part_id}` in the documents",
+                        M::NAME
+                    )))
+                })
+            })
+            .collect()
+    }
+}
+
+impl<M: Modality> PartVisitor for Read<'_, M> {
+    fn visit_streams<'a>(
+        &'a mut self,
+        _orchestrator: &'a Orchestrator,
+        streams: Vec<(PartId, StreamMut<'a>)>,
+        _policy: HiddenContentPolicy,
+    ) -> BoxFuture<'a, Result<bool>> {
+        Box::pin(async move {
+            for (part_id, handle) in streams {
+                let Some(wanted) = self.by_part.get(&part_id) else {
+                    continue;
+                };
+                let Some(stream) = handle.downcast::<M>() else {
+                    for &i in wanted {
+                        self.data[i] = Some(Err(Error::malformed(format!(
+                            "part `{part_id}` is not of the {} modality",
+                            M::NAME
+                        ))));
+                    }
+                    continue;
+                };
+                for &i in wanted {
+                    self.data[i] = Some(stream.read_at(&self.locations[i].1).await);
+                }
+            }
+            Ok(false)
+        })
+    }
+
+    fn fold_child(&mut self, _child: Child<'_>) -> Result<Fold> {
+        Ok(Fold::Keep)
+    }
+
+    fn stripped(&mut self) -> &mut StrippedRecord {
+        &mut self.stripped
+    }
+
+    fn enters(&self, part: &PartId) -> bool {
+        self.by_part.keys().any(|wanted| part.contains(wanted))
     }
 }

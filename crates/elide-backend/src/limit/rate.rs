@@ -4,8 +4,33 @@ use std::time::Duration;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::future::TimeoutFuture;
+#[cfg(target_arch = "wasm32")]
+use send_wrapper::SendWrapper;
 use tokio::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::{Instant, sleep};
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
+/// Wait for `duration`, or for `setTimeout`'s longest delay if that is
+/// shorter, on the browser's `setTimeout`.
+///
+/// `setTimeout` takes a signed 32-bit delay and fires at once on a larger one,
+/// so a longer wait is cut to that bound; the caller rechecks its tokens on
+/// waking and waits again for what remains. The timer future holds a JS closure, so it is not `Send`; [`SendWrapper`]
+/// lets it be awaited inside the `Send` futures a [`Backend`] returns. That is
+/// sound on wasm32, which runs this on one thread.
+#[cfg(target_arch = "wasm32")]
+async fn sleep(duration: Duration) {
+    // `setTimeout` takes whole milliseconds; round up so a wait never ends
+    // before the bucket has refilled.
+    let longest = i32::MAX.unsigned_abs();
+    let millis = u32::try_from(duration.as_micros().div_ceil(1000))
+        .map_or(longest, |millis| millis.min(longest));
+    SendWrapper::new(TimeoutFuture::new(millis)).await;
+}
 
 /// A token bucket: `capacity` tokens that refill at a steady rate.
 ///

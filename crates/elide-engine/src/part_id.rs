@@ -79,6 +79,13 @@ impl PartId {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Whether `part` is this part or lies inside it: this path is a prefix of
+    /// `part`'s.
+    #[must_use]
+    pub fn contains(&self, part: &PartId) -> bool {
+        part.0.starts_with(&self.0)
+    }
 }
 
 impl fmt::Display for PartId {

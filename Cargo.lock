@@ -1207,7 +1207,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "elide-core",
+ "gloo-timers",
+ "send_wrapper",
  "tokio",
+ "web-time",
 ]
 
 [[package]]
@@ -1499,6 +1502,7 @@ dependencies = [
  "elide-core",
  "elide-fake",
  "elide-image",
+ "getrandom 0.4.3",
  "hex",
  "hipstr",
  "hmac",
@@ -1521,6 +1525,7 @@ dependencies = [
  "console_error_panic_hook",
  "elide",
  "js-sys",
+ "schemars",
  "send_wrapper",
  "serde",
  "serde-wasm-bindgen",

@@ -19,7 +19,7 @@ use serde::Deserialize;
 use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
-use crate::error::{ElideError, ElideErrorKind};
+use crate::error::{ElideError, from_js};
 
 /// The scoring a same-label merge combines the pair's confidences with.
 #[derive(Deserialize, Tsify)]
@@ -107,10 +107,7 @@ impl Layer {
     #[wasm_bindgen(js_name = filter)]
     pub fn filter(threshold: f32) -> Result<Layer, ElideError> {
         let threshold = ConfidenceThreshold::new(threshold).ok_or_else(|| {
-            ElideError::new(
-                ElideErrorKind::Configuration,
-                format!("filter threshold {threshold} is outside [0, 1]"),
-            )
+            ElideError::configuration(format!("filter threshold {threshold} is outside [0, 1]"))
         })?;
         Ok(Self(LayerKind::Filter(threshold)))
     }
@@ -124,12 +121,7 @@ impl Layer {
     /// Throws an [`ElideError`] if `scoring` is not a known scoring.
     #[wasm_bindgen(js_name = reconcileSameLabel)]
     pub fn reconcile_same_label(scoring: Ts<SameLabelScoring>) -> Result<Layer, ElideError> {
-        let scoring = scoring.to_rust().map_err(|e| {
-            ElideError::new(
-                ElideErrorKind::Configuration,
-                format!("invalid same-label scoring: {e}"),
-            )
-        })?;
+        let scoring = from_js(&scoring, "same-label scoring")?;
         let kind = match scoring {
             SameLabelScoring::Max => SameLabelKind::Max,
             SameLabelScoring::NoisyOr => SameLabelKind::NoisyOr,
@@ -146,12 +138,7 @@ impl Layer {
     /// Throws an [`ElideError`] if `config` is not a known configuration.
     #[wasm_bindgen(js_name = reconcileCrossLabel)]
     pub fn reconcile_cross_label(config: Ts<CrossLabelConfig>) -> Result<Layer, ElideError> {
-        let config = config.to_rust().map_err(|e| {
-            ElideError::new(
-                ElideErrorKind::Configuration,
-                format!("invalid cross-label config: {e}"),
-            )
-        })?;
+        let config = from_js(&config, "cross-label config")?;
         let kind = match config {
             CrossLabelConfig::Structural { iou } => CrossLabelKind::Structural { iou },
             CrossLabelConfig::Exclusive { tiebreaker } => CrossLabelKind::Exclusive(tiebreaker),

@@ -3,27 +3,31 @@
 //!
 //! `elide-ner` ships no model; the backend is caller-provided. On wasm the
 //! natural backend is the browser itself — a remote inference endpoint, a
-//! transformers.js model, a WebGPU pipeline. [`Recognizer::ner`](super::Recognizer::ner) takes an
-//! async JS callback `(text, labels) => Promise<NerSpan[]>` and wraps it in a
-//! `JsCallbackBackend`, so Rust runs the NER recognizer (scoring, alignment,
-//! label filtering) around whatever inference the app supplies.
+//! transformers.js model, a WebGPU pipeline. [`Recognizer::ner`](super::Recognizer::ner) takes a
+//! [`Backend`] whose callback is `(text, labels) => Promise<NerSpan[]>`, so Rust
+//! runs the NER recognizer (scoring, alignment, label filtering) around whatever
+//! inference the app supplies.
 
-use elide::backend::Backend;
+use elide::backend::Backend as BackendTrait;
 use elide::entity::audit::ModelId;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::ner::backend::{NerRequest, NerResponse, NerSpan};
 use elide::{Error, Result};
-use js_sys::{Array, Function, Promise};
-use send_wrapper::SendWrapper;
+use js_sys::Array;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+
+use crate::backend::{Backend, Composed, JsCallback};
+
+/// The component's name, and the model every response of the callback
+/// names.
+const NAME: &str = "js-callback-ner";
 
 /// One span the JS callback returns, deserialized from a plain object.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsSpan {
-    /// The canonical label id (e.g. `person`, `organization`).
+    /// The canonical label id (e.g. `person_name`, `organization_name`).
     label: String,
     /// Start byte offset of the span in the request text.
     start: usize,
@@ -34,38 +38,10 @@ struct JsSpan {
 }
 
 /// A NER backend that defers inference to a JavaScript callback.
-///
-/// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
-/// `Send + Sync` bound the recognizer requires. That is sound on wasm, which is
-/// single-threaded — the wrapper only panics if accessed from another thread,
-/// which never happens here.
-pub(super) struct JsCallbackBackend {
-    callback: SendWrapper<Function>,
-}
-
-impl JsCallbackBackend {
-    fn new(callback: Function) -> Self {
-        Self {
-            callback: SendWrapper::new(callback),
-        }
-    }
-
-    /// Invoke the JS callback with `(text, labels)` and await its promise. The
-    /// `!Send` work stays inside a [`SendWrapper`] future so it never has to be
-    /// `Send` across the await.
-    async fn call_js(&self, text: String, labels: Array) -> std::result::Result<JsValue, JsValue> {
-        SendWrapper::new(async move {
-            let ret = self
-                .callback
-                .call2(&JsValue::NULL, &JsValue::from_str(&text), &labels)?;
-            JsFuture::from(Promise::resolve(&ret)).await
-        })
-        .await
-    }
-}
+pub(crate) struct JsNerBackend(JsCallback);
 
 #[async_trait::async_trait]
-impl Backend for JsCallbackBackend {
+impl BackendTrait for JsNerBackend {
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
@@ -73,25 +49,23 @@ impl Backend for JsCallbackBackend {
         // The callback gets an empty label list for `None` (its own label
         // set) too, so a request for no labels is answered here.
         if request.wants_nothing() {
-            return Ok(NerResponse::new(model(), Vec::new()));
+            return Ok(NerResponse::new(ModelId::new(NAME), Vec::new()));
         }
-        let labels = Array::new();
-        if let Some(requested) = request.labels {
-            for label in requested {
-                labels.push(&JsValue::from_str(label.id()));
-            }
-        }
-        let value = self
-            .call_js(request.text.to_owned(), labels)
-            .await
-            .map_err(js_to_error)?;
-        let spans: Vec<JsSpan> = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            Error::malformed(format!("NER callback returned an unreadable value: {e}"))
-        })?;
+        let (text, labels) = (request.text, request.labels);
+        let spans: Vec<JsSpan> = self
+            .0
+            .call("NER", move || {
+                let labels: Array = labels
+                    .into_iter()
+                    .flatten()
+                    .map(|label| JsValue::from_str(label.id()))
+                    .collect();
+                Ok(Array::of2(&JsValue::from_str(text), &labels))
+            })
+            .await?;
         // The callback's byte offsets are untrusted: a reversed range, an end
         // past the text, or an offset mid-character would produce a nonsensical
         // or panicking span downstream. Reject them fail-closed.
-        let text = request.text;
         let spans = spans
             .into_iter()
             .map(|s| {
@@ -110,27 +84,11 @@ impl Backend for JsCallbackBackend {
                 Ok(NerSpan::new(s.label, s.score, s.start..s.end))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(NerResponse::new(model(), spans))
+        Ok(NerResponse::new(ModelId::new(NAME), spans))
     }
 }
 
-/// Turn a `JsValue` thrown or rejected by the callback into the crate error.
-fn js_to_error(value: JsValue) -> Error {
-    let message = value.as_string().unwrap_or_else(|| {
-        js_sys::Reflect::get(&value, &JsValue::from_str("message"))
-            .ok()
-            .and_then(|m| m.as_string())
-            .unwrap_or_else(|| "NER callback rejected".to_owned())
-    });
-    Error::processing(message)
-}
-
-/// Build a NER recognizer whose inference is the JavaScript `callback`.
-pub(super) fn build_ner(callback: Function) -> NerRecognizer<JsCallbackBackend> {
-    NerRecognizer::new(JsCallbackBackend::new(callback)).with_name("js-callback-ner")
-}
-
-/// The model every response of the JavaScript callback names.
-fn model() -> ModelId {
-    ModelId::new("js-callback-ner")
+/// Build a NER recognizer whose inference is `backend`'s JavaScript callback.
+pub(super) fn build_ner(backend: Backend) -> NerRecognizer<Composed<JsNerBackend>> {
+    NerRecognizer::new(backend.build(&JsNerBackend)).with_name(NAME)
 }

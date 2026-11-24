@@ -3,17 +3,22 @@
 //! The fluent [`Orchestrator`] folds per-modality stages and drives them over a
 //! blob with [`redact`](Orchestrator::redact).
 
+mod entities;
 mod report;
 
+use elide::Orchestrator as CoreOrchestrator;
 use elide::prelude::*;
-use elide::{Orchestrator as CoreOrchestrator, Report as CoreReport};
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
-pub use self::report::{Entity, Location, Modality, Rect, Rendered, Report, Stripped};
+use self::entities::{read_matched, to_entities};
+pub use self::report::{
+    Entity, HiddenContent, HiddenContentKind, LeakProfile, Location, Modality, Rect, Redaction,
+    Rendered, Report, Source, Span, Stripped,
+};
 use crate::analyzer::{Analyzer, StageModality};
 use crate::anonymizer::Anonymizer;
-use crate::error::{ElideError, ElideErrorKind};
+use crate::error::{ElideError, ElideErrorKind, language_tags};
 
 /// The detect-and-redact pipeline: modality stages, codecs, and labels.
 ///
@@ -24,6 +29,11 @@ use crate::error::{ElideError, ElideErrorKind};
 /// Add a modality's stage with [`with`](Self::with) — an [`Analyzer`] paired with
 /// the modality's redaction policy — then run it over a blob with
 /// [`redact`](Self::redact). Reusable across calls.
+///
+/// [`with`](Self::with) and [`withLanguages`](Self::with_languages) consume the
+/// orchestrator and return the configured one, to be used in its place. One
+/// that throws consumes it too, so after an error the pipeline is built again
+/// from a new orchestrator.
 #[wasm_bindgen]
 pub struct Orchestrator {
     orchestrator: CoreOrchestrator,
@@ -34,7 +44,7 @@ impl Default for Orchestrator {
         Self {
             orchestrator: CoreOrchestrator::new()
                 .with_registry(FormatRegistry::with_builtin())
-                .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins())),
+                .with_scope(scope()),
         }
     }
 }
@@ -72,8 +82,7 @@ impl Orchestrator {
         let modality = analyzer.modality();
         let anonymizer = match anonymizer {
             Some(anonymizer) if anonymizer.modality() as u8 != modality as u8 => {
-                return Err(ElideError::new(
-                    ElideErrorKind::Configuration,
+                return Err(ElideError::configuration(
                     "the anonymizer's modality does not match the analyzer's",
                 ));
             }
@@ -116,6 +125,27 @@ impl Orchestrator {
         Ok(self)
     }
 
+    /// Assert the languages (BCP-47 tags such as `de`) every blob this
+    /// orchestrator redacts is written in, mirroring the toolkit's
+    /// `Scope::with_languages`.
+    ///
+    /// An asserted language outranks a detected one: recognizers scoped to a
+    /// language run by it, and a backend's language routes follow it. Replaces
+    /// any languages asserted before; an empty list asserts none, leaving the
+    /// language to detection.
+    ///
+    /// # Errors
+    ///
+    /// Throws an [`ElideError`] if a tag is not valid BCP-47.
+    #[wasm_bindgen(js_name = withLanguages)]
+    pub fn with_languages(mut self, languages: Vec<String>) -> Result<Orchestrator, ElideError> {
+        let languages = language_tags(&languages)?;
+        self.orchestrator = self
+            .orchestrator
+            .with_scope(scope().with_languages(languages));
+        Ok(self)
+    }
+
     /// Detect and redact the personal data in `bytes`, of the format `hint`
     /// names.
     ///
@@ -150,6 +180,12 @@ impl Orchestrator {
     }
 }
 
+/// The scope every run starts from: the built-in label catalog, and no asserted
+/// language.
+fn scope() -> Scope {
+    Scope::new().with_catalog(LabelCatalog::with_builtins())
+}
+
 /// The pipeline proper, returning the crate's own [`Result`] so the boundary
 /// only deals with [`ElideError`].
 async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: Option<String>) -> Result<Report> {
@@ -162,59 +198,20 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: Option<String>) -> R
             Document::new("input", decoded)
         }
     };
-    let report = pipeline.core().anonymize(&mut document).await?;
-
-    // Each modality locates its entities in its own coordinate space, so the
-    // `Location` is built per modality (a text byte span, an image box, an audio
-    // time span, a tabular cell, a metadata key).
-    let mut entities = Vec::new();
-    collect::<Text>(&report, &mut entities, Modality::Text, |e| {
-        let span = e.location.range().cloned().unwrap_or_default();
-        let rendered = e.location.page().map(|page| Rendered {
-            page,
-            rects: e.location.rects().iter().map(Rect::from).collect(),
-        });
-        Location::Text {
-            start: span.start,
-            end: span.end,
-            rendered,
-        }
-    });
-    collect::<Tabular>(&report, &mut entities, Modality::Tabular, |e| {
-        Location::Tabular {
-            sheet: e.location.sheet_name.as_ref().map(|s| s.to_string()),
-            row: e.location.row_index,
-            column: e.location.column_index,
-        }
-    });
-    collect::<Image>(&report, &mut entities, Modality::Image, |e| {
-        let bbox = &e.location.bounding_box;
-        Location::Image {
-            x: bbox.min.x,
-            y: bbox.min.y,
-            width: bbox.width(),
-            height: bbox.height(),
-        }
-    });
-    collect::<Audio>(&report, &mut entities, Modality::Audio, |e| {
-        Location::Audio {
-            start_ms: e.location.span.start_millis(),
-            end_ms: e.location.span.end_millis(),
-            speaker: e.location.speaker_id.as_ref().map(|s| s.to_string()),
-        }
-    });
-    collect::<Metadata>(&report, &mut entities, Modality::Metadata, |e| {
-        Location::Metadata {
-            key: e.location.key.to_string(),
-        }
-    });
+    // Detect, read what each entity matched while the document still holds
+    // it, then redact.
+    let core = pipeline.core();
+    let analyzed = core.analyze(&mut document).await?;
+    let values = read_matched(core, &mut document, &analyzed).await;
+    let report = core.anonymize_with(&mut document, analyzed.report).await?;
+    let entities = to_entities(&report, values);
 
     let stripped = report
         .stripped()
         .map(|item| Stripped {
             part: item.part.segments().map(str::to_owned).collect(),
-            kind: item.content.kind(),
-            item: item.content,
+            kind: item.content.kind().into(),
+            item: item.content.into(),
             count: item.count,
         })
         .collect();
@@ -225,38 +222,4 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: Option<String>) -> R
         entities,
         stripped,
     })
-}
-
-/// Append modality `M`'s entities from every part of that modality, in part
-/// order, mapping each one's location to a [`Location`] with `locate`.
-fn collect<M: elide::modality::Modality>(
-    report: &CoreReport,
-    out: &mut Vec<Entity>,
-    modality: Modality,
-    locate: impl Fn(&elide::entity::Entity<M>) -> Location,
-) {
-    let mut ids: Vec<_> = report
-        .part_ids()
-        .filter(|(_, name)| *name == M::NAME)
-        .map(|(id, _)| id)
-        .collect();
-    ids.sort_unstable();
-    for id in ids {
-        let Ok(part) = report.part::<M>(id) else {
-            continue;
-        };
-        let path: Vec<String> = id.segments().map(str::to_owned).collect();
-        for entity in part.entities() {
-            out.push(Entity {
-                id: entity.id.to_string(),
-                part: path.clone(),
-                modality,
-                label: entity.label.as_str().to_owned(),
-                location: locate(entity),
-                confidence: f32::from(entity.confidence),
-                language: entity.language.as_ref().map(|l| l.to_string()),
-                coref: entity.coref.as_ref().map(|c| c.as_str().to_owned()),
-            });
-        }
-    }
 }

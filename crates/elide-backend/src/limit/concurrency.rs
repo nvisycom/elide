@@ -31,6 +31,10 @@ pub struct ConcurrencyLimited<B> {
 impl<B> ConcurrencyLimited<B> {
     /// Admit at most `max_concurrent` of `inner`'s calls at once.
     ///
+    /// A limit above what a semaphore can count ([`Semaphore::MAX_PERMITS`],
+    /// `usize::MAX >> 3`) is cut to that count, which no number of concurrent
+    /// calls reaches.
+    ///
     /// # Panics
     ///
     /// Panics if `max_concurrent` is zero — a zero-permit limiter would block
@@ -40,7 +44,7 @@ impl<B> ConcurrencyLimited<B> {
         assert!(max_concurrent > 0, "max_concurrent must be non-zero");
         Self {
             inner,
-            permits: Semaphore::new(max_concurrent),
+            permits: Semaphore::new(max_concurrent.min(Semaphore::MAX_PERMITS)),
         }
     }
 

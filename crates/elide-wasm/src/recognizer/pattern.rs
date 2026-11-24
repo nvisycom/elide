@@ -4,7 +4,7 @@ use elide::recognition::pattern::PatternRecognizer;
 use serde::Deserialize;
 use tsify::{Ts, Tsify};
 
-use crate::error::{ElideError, ElideErrorKind};
+use crate::error::{ElideError, from_js};
 
 /// Which built-in recognizer sources a pattern recognizer draws on.
 ///
@@ -27,12 +27,7 @@ pub struct PatternRecognizerConfig {
 pub(super) fn build_pattern(
     config: Ts<PatternRecognizerConfig>,
 ) -> Result<PatternRecognizer, ElideError> {
-    let config = config.to_rust().map_err(|e| {
-        ElideError::new(
-            ElideErrorKind::Configuration,
-            format!("invalid pattern recognizer config: {e}"),
-        )
-    })?;
+    let config = from_js(&config, "pattern recognizer config")?;
     let mut builder = PatternRecognizer::builder();
     if config.builtin_patterns {
         builder = builder.with_builtin_patterns();

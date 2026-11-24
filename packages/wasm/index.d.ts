@@ -7,6 +7,7 @@
 import type { StageModality } from "./_shared.js";
 import type { Report } from "./_shared.js";
 import type { Analyzer } from "./analyzer.js";
+import type { Anonymizer } from "./anonymizer.js";
 
 export { ElideError, ElideErrorKind } from "./dist/elide_wasm.js";
 export type {
@@ -19,7 +20,16 @@ export type {
   StageModality,
   Entity,
   Location,
+  Span,
+  Rendered,
+  Rect,
+  Source,
+  Redaction,
+  LeakProfile,
   Report,
+  Stripped,
+  HiddenContent,
+  HiddenContentKind,
 } from "./_shared.js";
 
 /**
@@ -29,6 +39,10 @@ export type {
  * add a modality's stage with {@link with} (the {@link Analyzer}'s modality
  * selects the codec path and redaction policy), then run it over a blob with
  * {@link redact}. Reusable across calls.
+ *
+ * {@link with} and {@link withLanguages} consume the orchestrator and return
+ * the configured one, to be used in its place. One that throws consumes it
+ * too, so after an error the pipeline is built again from a new orchestrator.
  */
 export class Orchestrator {
   constructor();
@@ -36,6 +50,14 @@ export class Orchestrator {
     analyzer: Analyzer<M>,
     anonymizer?: Anonymizer<M>,
   ): Orchestrator;
+  /**
+   * Assert the languages (BCP-47 tags such as `de`) every blob is written in.
+   * An asserted language outranks a detected one: language-scoped recognizers
+   * run by it, and a backend's language routes follow it. Replaces any
+   * languages asserted before; an empty list leaves the language to
+   * detection. Throws on an invalid tag.
+   */
+  withLanguages(languages: string[]): Orchestrator;
   /**
    * Detect and redact the personal data in `bytes`, whose format the `hint`
    * names (a file extension like `txt`, `docx`, `pdf`), returning the redacted

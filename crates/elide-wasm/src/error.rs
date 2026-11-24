@@ -4,6 +4,9 @@
 //! elide pipeline failure from any other with `e instanceof ElideError` and
 //! branch on its [`kind`](ElideError::kind).
 
+use elide::primitive::LanguageTag;
+use serde::de::DeserializeOwned;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
 /// The category of an [`ElideError`], mirroring the toolkit's own error kinds.
@@ -96,6 +99,32 @@ impl ElideError {
             message: message.into(),
         }
     }
+
+    /// A [`Configuration`](ElideErrorKind::Configuration) error with `message`.
+    pub(crate) fn configuration(message: impl Into<String>) -> Self {
+        Self::new(ElideErrorKind::Configuration, message)
+    }
+}
+
+/// The Rust value of the JS config `value`, or a configuration error naming
+/// `what` it configures.
+pub(crate) fn from_js<T>(value: &Ts<T>, what: &str) -> Result<T, ElideError>
+where
+    T: Tsify + DeserializeOwned,
+    T::JsType: Clone,
+{
+    value
+        .to_rust()
+        .map_err(|e| ElideError::configuration(format!("invalid {what}: {e}")))
+}
+
+/// The Rust value of an optional JS config `value`, its default when absent.
+pub(crate) fn from_js_or_default<T>(value: Option<&Ts<T>>, what: &str) -> Result<T, ElideError>
+where
+    T: Tsify + DeserializeOwned + Default,
+    T::JsType: Clone,
+{
+    value.map_or_else(|| Ok(T::default()), |value| from_js(value, what))
 }
 
 impl From<elide::Error> for ElideError {
@@ -105,4 +134,15 @@ impl From<elide::Error> for ElideError {
             message: error.to_string(),
         }
     }
+}
+
+/// The BCP-47 `tag`, or a configuration error naming it.
+pub(crate) fn language_tag(tag: &str) -> Result<LanguageTag, ElideError> {
+    tag.parse()
+        .map_err(|e| ElideError::configuration(format!("invalid language tag `{tag}`: {e}")))
+}
+
+/// The BCP-47 `tags`, or a configuration error naming the first invalid one.
+pub(crate) fn language_tags(tags: &[String]) -> Result<Vec<LanguageTag>, ElideError> {
+    tags.iter().map(|tag| language_tag(tag)).collect()
 }

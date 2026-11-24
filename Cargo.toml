@@ -81,6 +81,8 @@ wasm-bindgen-futures = { version = "0.4", features = [] }
 wasm-bindgen-test = { version = "0.3", features = [] }
 js-sys = { version = "0.3", features = [] }
 send_wrapper = { version = "0.6", features = [] }
+gloo-timers = { version = "0.4", features = [] }
+web-time = { version = "1.1", features = [] }
 serde-wasm-bindgen = { version = "0.6", features = [] }
 console_error_panic_hook = { version = "0.1", features = [] }
 tsify = { version = "0.5", default-features = false, features = ["js"] }

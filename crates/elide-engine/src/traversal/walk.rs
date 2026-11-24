@@ -106,6 +106,9 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             // and applied after the recursion releases the borrow.
             let mut folds: Vec<(LocalId, Fold)> = Vec::new();
             for (id, part_id, bytes, hint) in blobs {
+                if !self.visitor.enters(&part_id) {
+                    continue;
+                }
                 if depth + 1 > MAX_CONTAINER_DEPTH {
                     return Err(Error::malformed(format!(
                         "container nesting exceeds the depth limit of {MAX_CONTAINER_DEPTH} \

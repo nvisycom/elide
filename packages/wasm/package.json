@@ -20,7 +20,8 @@
     "anonymizer.d.ts",
     "label.js",
     "label.d.ts",
-    "_shared.d.ts"
+    "_shared.d.ts",
+    "_callbacks.d.ts"
   ],
   "module": "./index.js",
   "types": "./index.d.ts",

@@ -5,47 +5,43 @@
 //! An image has no text to scan until OCR reads it; an audio clip has none until
 //! STT transcribes it; a language-aware recognizer needs the language detected
 //! first. `elide` ships each pass's contract but no model — the browser supplies
-//! that through a JS callback ([`Enricher::ocr`], [`Enricher::stt`]) or, for
-//! language detection, a built-in pure-Rust pass ([`Enricher::language`]). Each
-//! returns an [`Enricher`] handed to [`Analyzer::enrich`](crate::analyzer::Analyzer::enrich).
+//! that through a JS-callback [`Backend`] ([`Enricher::language`],
+//! [`Enricher::ocr`], [`Enricher::stt`]). Each returns an [`Enricher`] handed to
+//! [`Analyzer::enrich`](crate::analyzer::Analyzer::enrich).
 //!
 //! A handle is one opaque class regardless of which enricher it wraps, so a
-//! caller can pass a mixed list — a language enricher beside an OCR enricher — to
-//! one stage. Which enrichers a stage accepts is a modality question: language
-//! detection applies to every text-shaped modality, OCR only to image, STT only
-//! to audio. An enricher offered to a stage it does not support fails the stage's
+//! caller can pass a mixed list — a language enricher beside an OCR enricher —
+//! to one stage. Which enrichers a stage accepts is a modality question:
+//! language detection applies to every stage, OCR only to image, STT only to
+//! audio. An enricher offered to a stage it does not support fails the stage's
 //! build with a [`Configuration`](crate::error::ElideErrorKind::Configuration)
 //! error. The published TypeScript brands each handle with its supported
 //! modalities so this mismatch is also a compile-time error.
 
-mod lingua;
+mod language;
 mod ocr;
 mod stt;
 
 use elide::detection::Analyzer;
-use elide::enrichment::lingua::LinguaEnricher;
 use elide::enrichment::ocr::OcrEnricher;
 use elide::enrichment::stt::SttEnricher;
 use elide::modality::audio::Audio;
 use elide::modality::image::Image;
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
-use js_sys::Function;
-use tsify::Ts;
-use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::*;
 
-pub use self::lingua::{LanguagePreset, LanguageSet};
-use crate::error::{ElideError, ElideErrorKind};
+use crate::backend::{Backend, Composed};
+use crate::error::ElideError;
 
 /// The enrichers a handle may carry, one variant per shipped pass.
 enum Kind {
-    /// Language detection (built-in), applicable to every text-shaped modality.
-    Language(LinguaEnricher),
+    /// Language detection (JS callback), applicable to every stage.
+    Language(self::language::LanguageEnricher<Composed<self::language::JsLanguageBackend>>),
     /// Image OCR (JS callback), applicable only to the image modality.
-    Ocr(OcrEnricher<self::ocr::JsCallbackBackend>),
+    Ocr(OcrEnricher<Composed<self::ocr::JsOcrBackend>>),
     /// Audio STT (JS callback), applicable only to the audio modality.
-    Stt(SttEnricher<self::stt::JsCallbackBackend>),
+    Stt(SttEnricher<Composed<self::stt::JsSttBackend>>),
 }
 
 impl Kind {
@@ -70,56 +66,68 @@ pub struct Enricher(Kind);
 
 #[wasm_bindgen]
 impl Enricher {
-    /// Build the built-in language-detection enricher over `languages`.
+    /// Build a language-detection enricher whose detection is `backend`'s
+    /// JavaScript callback.
     ///
-    /// A preset (`"english"`, `"common"`, `"all"`) or an explicit list of
-    /// BCP-47 tags.
-    ///
-    /// The resulting [`Enricher`] applies to any text-shaped modality (text,
-    /// tabular, image, audio). It runs in wasm; no callback is needed.
+    /// The callback is `(text: string, candidates: string[]) =>
+    /// Promise<LanguageDetection[]>`, where a `LanguageDetection` is
+    /// `{ language, confidence, start?, end? }`: a BCP-47 tag, the confidence
+    /// in `[0, 1]`, and the byte span it covers when not the whole text.
+    /// `candidates` are the languages asserted with
+    /// [`Orchestrator::with_languages`](crate::orchestrator::Orchestrator::with_languages)
+    /// to choose among, empty for any; with one asserted language the callback
+    /// is not called. The resulting [`Enricher`] applies to every stage.
     ///
     /// # Errors
     ///
-    /// Rejects if `languages` is neither a known preset nor a list of valid
-    /// BCP-47 tags.
+    /// Rejects a `languageRouted` backend: a detection request has no
+    /// language to route by, since finding it is the request's job.
     #[wasm_bindgen(js_name = language)]
-    pub fn language(languages: Ts<LanguageSet>) -> Result<Enricher, ElideError> {
-        Ok(Self(Kind::Language(self::lingua::build_language(
-            languages,
-        )?)))
+    pub fn language(backend: Backend) -> Result<Enricher, ElideError> {
+        if backend.routes_by_language() {
+            return Err(ElideError::configuration(
+                "a language-detection backend cannot be routed by language",
+            ));
+        }
+        Ok(Self(Kind::Language(self::language::build_language(
+            backend,
+        ))))
     }
 
-    /// Build an OCR enricher whose recognition is a JavaScript `callback`.
+    /// Build an OCR enricher whose recognition is `backend`'s JavaScript
+    /// callback.
     ///
-    /// The callback is `(image: Uint8Array) => Promise<OcrRegion[]>`, where an
-    /// `OcrRegion` is `{ text, x, y, width, height, confidence? }` in image-pixel
-    /// coordinates.
+    /// The callback is `(image: Uint8Array, language?: string) =>
+    /// Promise<OcrRegion[]>`, where `language` is the call's BCP-47 tag when
+    /// known, and an `OcrRegion` is `{ text, x, y, width, height, confidence? }`
+    /// in image-pixel coordinates.
     /// It runs on the browser event loop; the enricher awaits it. The resulting
     /// [`Enricher`] applies only to the image modality.
     #[wasm_bindgen(js_name = ocr)]
-    pub fn ocr(callback: Function) -> Enricher {
-        Self(Kind::Ocr(self::ocr::build_ocr(callback)))
+    pub fn ocr(backend: Backend) -> Enricher {
+        Self(Kind::Ocr(self::ocr::build_ocr(backend)))
     }
 
-    /// Build an STT enricher whose transcription is a JavaScript `callback`.
+    /// Build an STT enricher whose transcription is `backend`'s JavaScript
+    /// callback.
     ///
-    /// The callback is `(audio: Uint8Array) => Promise<Segment[]>`, where a
-    /// `Segment` is `{ text, startMs, endMs }`. It runs on the browser event
-    /// loop; the enricher awaits it. The resulting [`Enricher`] applies only to
+    /// The callback is `(audio: Uint8Array, language?: string) =>
+    /// Promise<Segment[]>`, where `language` is the call's BCP-47 tag when
+    /// known, and a `Segment` is `{ text, startMs, endMs }`. It runs on the
+    /// browser event loop; the enricher awaits it. The resulting [`Enricher`] applies only to
     /// the audio modality.
     #[wasm_bindgen(js_name = stt)]
-    pub fn stt(callback: Function) -> Enricher {
-        Self(Kind::Stt(self::stt::build_stt(callback)))
+    pub fn stt(backend: Backend) -> Enricher {
+        Self(Kind::Stt(self::stt::build_stt(backend)))
     }
 }
 
 impl Enricher {
     /// The error for an enricher offered to a stage that cannot run it.
     fn mismatch(label: &str, modality: &str) -> ElideError {
-        ElideError::new(
-            ElideErrorKind::Configuration,
-            format!("{label} enricher does not apply to the {modality} modality"),
-        )
+        ElideError::configuration(format!(
+            "{label} enricher does not apply to the {modality} modality"
+        ))
     }
 
     /// Fold this enricher into a [`Text`] analyzer; only language detection
@@ -168,16 +176,4 @@ impl Enricher {
             other => Err(Self::mismatch(other.label(), "audio")),
         }
     }
-}
-
-/// Turn a `JsValue` thrown or rejected by a callback into the crate error,
-/// shared by the OCR and STT backends.
-pub(super) fn js_to_error(value: JsValue) -> elide::Error {
-    let message = value.as_string().unwrap_or_else(|| {
-        js_sys::Reflect::get(&value, &JsValue::from_str("message"))
-            .ok()
-            .and_then(|m| m.as_string())
-            .unwrap_or_else(|| "enricher callback rejected".to_owned())
-    });
-    elide::Error::processing(message)
 }

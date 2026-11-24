@@ -4,34 +4,22 @@
 
 #![cfg(target_arch = "wasm32")]
 
+mod common;
+
 use elide_wasm::analyzer::Analyzer;
 use elide_wasm::anonymizer::Anonymizer;
-use elide_wasm::error::ElideError;
 use elide_wasm::operator::Operator;
 use elide_wasm::orchestrator::Orchestrator;
-use elide_wasm::recognizer::Recognizer;
 use elide_wasm::rule::Rule;
-use js_sys::{JSON, Reflect, Uint8Array};
 use serde_json::Value;
-use tsify::Ts;
-use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
+
+use self::common::{ok, patterns, run};
 
 const DOCX: &[u8] = include_bytes!("../../elide/tests/testdata/docx/body_header_hyperlink.docx");
 const PPTX: &[u8] = include_bytes!("../../elide/tests/testdata/pptx/slide_text.pptx");
 const XLSX: &[u8] = include_bytes!("../../elide/tests/testdata/xlsx/shared_string_cells.xlsx");
 const PDF: &[u8] = include_bytes!("../../elide/tests/testdata/pdf/born_digital_text.pdf");
-
-/// The value of `result`, or a panic with its error's message.
-fn ok<T>(result: Result<T, ElideError>) -> T {
-    result.unwrap_or_else(|error| panic!("{:?}: {}", error.kind(), error.message()))
-}
-
-/// A recognizer of the built-in patterns.
-fn patterns() -> Recognizer {
-    let config = JSON::parse(r#"{"builtinPatterns":true,"builtinDictionaries":false}"#).unwrap();
-    ok(Recognizer::pattern(Ts::new_unchecked(config)))
-}
 
 /// An anonymizer removing everything found.
 fn removing(anonymizer: Anonymizer) -> Anonymizer {
@@ -51,19 +39,6 @@ fn pipeline() -> Orchestrator {
     ))
 }
 
-/// The redacted bytes and the entities of a run over `bytes`, of the format
-/// `hint` names.
-async fn redact(bytes: &[u8], hint: Option<&str>) -> (Vec<u8>, Vec<Value>) {
-    let report: JsValue = ok(pipeline()
-        .redact(bytes.to_vec(), hint.map(str::to_owned))
-        .await)
-    .into();
-    let redacted = Uint8Array::new(&Reflect::get(&report, &"redacted".into()).unwrap()).to_vec();
-    let entities =
-        serde_wasm_bindgen::from_value(Reflect::get(&report, &"entities".into()).unwrap()).unwrap();
-    (redacted, entities)
-}
-
 /// The entities of `entities` labelled an email address.
 fn emails(entities: &[Value]) -> Vec<&Value> {
     entities
@@ -75,12 +50,19 @@ fn emails(entities: &[Value]) -> Vec<&Value> {
 /// `bytes` has an email found and removed: decoding the redacted document
 /// again finds none.
 async fn removes_emails(bytes: &[u8], hint: Option<&str>) -> Vec<Value> {
-    let (redacted, entities) = redact(bytes, hint).await;
+    let (redacted, entities) = run(&pipeline(), bytes, hint).await;
     assert!(
         !emails(&entities).is_empty(),
         "no email found: {entities:?}"
     );
-    let (_, again) = redact(&redacted, hint).await;
+    for email in emails(&entities) {
+        let value = email["value"].as_str().unwrap_or_default();
+        assert!(
+            value.contains('@'),
+            "an email's value is what it matched: {email}"
+        );
+    }
+    let (_, again) = run(&pipeline(), &redacted, hint).await;
     assert!(emails(&again).is_empty(), "an email is left: {again:?}");
     entities
 }
