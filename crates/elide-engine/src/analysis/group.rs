@@ -13,6 +13,7 @@
 use std::any::{Any, TypeId};
 
 use elide_core::entity::Entity;
+use elide_core::entity::audit::AuditHash;
 use elide_core::modality::{Modality, ModalityArtifact};
 
 /// A type-erased, downcastable group of entities, a `Vec<Entity<M>>` behind
@@ -37,6 +38,8 @@ pub(crate) trait EntityGroup: Send + Sync + erased_serde::Serialize {
     ///
     /// [`Modality::NAME`]: elide_core::modality::Modality::NAME
     fn modality_name(&self) -> &'static str;
+    /// Each entity's [`digest`](Entity::digest), in order.
+    fn digests(&self) -> Vec<AuditHash>;
 }
 
 impl<M: Modality> EntityGroup for Vec<Entity<M>>
@@ -61,6 +64,10 @@ where
 
     fn modality_name(&self) -> &'static str {
         M::NAME
+    }
+
+    fn digests(&self) -> Vec<AuditHash> {
+        self.iter().map(Entity::digest).collect()
     }
 }
 

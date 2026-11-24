@@ -64,7 +64,8 @@ fn entity_audit_trail_is_reachable_and_verifies() {
 }
 
 /// Tamper-evidence over the *stored* form: serialize the trail, edit the JSON,
-/// deserialize, and re-verify. The recomputed hash no longer matches.
+/// and read it back. The recomputed hash no longer matches, so the trail does
+/// not deserialize.
 #[cfg(feature = "serde")]
 #[test]
 fn tampering_with_the_serialized_trail_breaks_verification() {
@@ -74,14 +75,12 @@ fn tampering_with_the_serialized_trail_breaks_verification() {
     // Rewrite the detected label's confidence in the stored trail, leaving its
     // stored hash intact.
     value[0]["confidence"] = serde_json::json!(0.1);
-    let tampered: AuditLog<Text> = serde_json::from_value(value).unwrap();
-
-    assert!(tampered.verify().is_err());
+    assert!(serde_json::from_value::<AuditLog<Text>>(value).is_err());
 }
 
-/// Appending a validly-chained event past the trail's end is caught: the trail
-/// must have a single tip, and a second self-consistent tail node leaves two
-/// sinks.
+/// Appending a validly-chained event past the trail's end is caught on read:
+/// the trail must have a single tip, and a second self-consistent tail node
+/// leaves two sinks.
 #[cfg(feature = "serde")]
 #[test]
 fn appending_a_valid_tail_event_breaks_verification() {
@@ -94,13 +93,11 @@ fn appending_a_valid_tail_event_breaks_verification() {
     // two events are sinks.
     let mut forged = events.clone();
     forged.push(events.last().unwrap().clone());
-    let tampered: AuditLog<Text> = serde_json::from_value(serde_json::json!(forged)).unwrap();
-
-    assert!(tampered.verify().is_err());
+    assert!(serde_json::from_value::<AuditLog<Text>>(serde_json::json!(forged)).is_err());
 }
 
 /// Splicing a self-consistent birth (parentless) event from *another* trail
-/// into the middle is caught: its hash is referenced by nothing here, so it is
+/// into the middle is caught on read: its hash is referenced by nothing here, so it is
 /// an extra sink.
 #[cfg(feature = "serde")]
 #[test]
@@ -113,7 +110,5 @@ fn inserting_an_orphan_event_breaks_verification() {
 
     let mut forged = victim.as_array().unwrap().clone();
     forged.insert(1, foreign_birth);
-    let tampered: AuditLog<Text> = serde_json::from_value(serde_json::json!(forged)).unwrap();
-
-    assert!(tampered.verify().is_err());
+    assert!(serde_json::from_value::<AuditLog<Text>>(serde_json::json!(forged)).is_err());
 }

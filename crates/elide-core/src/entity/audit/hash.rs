@@ -37,6 +37,19 @@ impl AuditHash {
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0.0
     }
+
+    /// The digest of `fields` in order, each length-prefixed so no two lists
+    /// of fields share one (`["ab", "c"]` differs from `["a", "bc"]`).
+    pub fn of_fields<F: AsRef<[u8]>>(fields: impl IntoIterator<Item = F>) -> Self {
+        let mut hasher = AuditHasher::new();
+        let mut count = 0u64;
+        for field in fields {
+            hasher.bytes(field.as_ref());
+            count += 1;
+        }
+        hasher.raw(&count.to_le_bytes());
+        hasher.finish()
+    }
 }
 
 /// Streaming builder for an [`AuditHash`]: audit payloads fold their fields in

@@ -18,12 +18,12 @@ use uuid::Uuid;
 
 #[cfg(feature = "fixtures")]
 use self::audit::PatternRule;
-use self::audit::{AuditEvent, AuditLog, Manual, ManualIntent};
+use self::audit::{AuditEvent, AuditHash, AuditHasher, AuditLog, Manual, ManualIntent};
 pub use self::coref::EntityCoRef;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
-use crate::modality::Modality;
 #[cfg(feature = "fixtures")]
 use crate::modality::text::{Text, TextLocation};
+use crate::modality::{Modality, ModalityLocation};
 use crate::primitive::{Confidence, LanguageTag};
 
 /// Detected piece of sensitive information within some medium.
@@ -127,6 +127,33 @@ impl<M: Modality> Entity<M> {
             recognized_range: None,
             audit: AuditLog::default(),
         }
+    }
+
+    /// A digest of everything the entity says: its id, label, location,
+    /// confidence, coreference, language, and recognized range, and its audit
+    /// trail through the trail's [`tip`](AuditLog::tip).
+    ///
+    /// A trail [verifies](AuditLog::verify) on its own, but the fields beside
+    /// it are free to change: a label or location edited without an event
+    /// leaves the trail intact. The digest covers both, so comparing it
+    /// against one recorded earlier catches either.
+    pub fn digest(&self) -> AuditHash {
+        let mut hasher = AuditHasher::new();
+        hasher
+            .raw(self.id.as_bytes())
+            .bytes(self.label.as_str().as_bytes())
+            .bytes(&self.location.hash())
+            .raw(&self.confidence.get().to_le_bytes())
+            .opt(self.coref.as_ref().map(|coref| coref.as_str().as_bytes()))
+            .opt(self.language.as_ref().map(|tag| tag.as_str().as_bytes()));
+        match &self.recognized_range {
+            Some(range) => hasher
+                .byte(1)
+                .raw(&(range.start as u64).to_le_bytes())
+                .raw(&(range.end as u64).to_le_bytes()),
+            None => hasher.byte(0),
+        };
+        hasher.raw(self.audit.tip().as_bytes()).finish()
     }
 
     /// Record `event` on the audit trail, taking its confidence as the
