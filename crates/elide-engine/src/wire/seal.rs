@@ -54,6 +54,11 @@ impl fmt::Debug for SealKey {
 ///   compute, so it can be stored beside what it covers, as long as the carrier
 ///   does not hold the key.
 ///
+/// Which of the two a reader accepts is the reader's to choose, never the
+/// seal's: a [`Restorer`](crate::Restorer) with a key accepts only a `Mac`,
+/// and one without only a `Digest`, so a carrier cannot swap a `Mac` for a
+/// `Digest` it computed itself.
+///
 /// Read a value back against its seal with [`Restorer::restore`](crate::Restorer::restore).
 ///
 /// [`Report`]: crate::Report
@@ -72,28 +77,40 @@ pub enum Seal {
 impl Seal {
     /// The unkeyed seal of `value`.
     #[must_use]
-    pub fn of(value: &impl Sealable) -> Self {
-        Self::Digest(AuditHash::of_fields(value.seal_fields()))
+    pub fn of<T: Sealable>(value: &T) -> Self {
+        Self::Digest(AuditHash::of_fields(fields(value)))
     }
 
     /// The seal of `value` keyed with `key`.
     #[must_use]
-    pub fn keyed(value: &impl Sealable, key: &SealKey) -> Self {
-        Self::Mac(AuditHash::of_fields_keyed(&key.0, value.seal_fields()))
+    pub fn keyed<T: Sealable>(value: &T, key: &SealKey) -> Self {
+        Self::Mac(AuditHash::of_fields_keyed(&key.0, fields(value)))
     }
 
-    /// Check `value` against the seal, with `key` for a keyed one.
+    /// Check `value` against the seal, under the scheme the reading side
+    /// chose: with `key`, only a keyed seal is accepted, and without one only
+    /// an unkeyed one.
+    ///
+    /// The scheme is never the seal's own to choose. A keyed seal is stored
+    /// beside what it covers, so its carrier could swap it for an unkeyed
+    /// digest of a value it changed; a reader holding a key refuses one.
     pub(crate) fn check<T: Sealable>(&self, value: &T, key: Option<&SealKey>) -> Result<()> {
-        let matches = match self {
-            Self::Digest(digest) => AuditHash::of_fields(value.seal_fields()).matches(digest),
-            Self::Mac(mac) => {
-                let key = key.ok_or_else(|| {
-                    Error::configuration(format!(
-                        "the {} has a keyed seal, and no seal key is set to check it",
-                        T::NAME
-                    ))
-                })?;
-                AuditHash::of_fields_keyed(&key.0, value.seal_fields()).matches(mac)
+        let matches = match (self, key) {
+            (Self::Mac(mac), Some(key)) => {
+                AuditHash::of_fields_keyed(&key.0, fields(value)).matches(mac)
+            }
+            (Self::Digest(digest), None) => AuditHash::of_fields(fields(value)).matches(digest),
+            (Self::Digest(_), Some(_)) => {
+                return Err(Error::integrity(format!(
+                    "the {} has an unkeyed seal, and a keyed one is required",
+                    T::NAME
+                )));
+            }
+            (Self::Mac(_), None) => {
+                return Err(Error::configuration(format!(
+                    "the {} has a keyed seal, and no seal key is set to check it",
+                    T::NAME
+                )));
             }
         };
         if matches {
@@ -105,6 +122,14 @@ impl Seal {
             )))
         }
     }
+}
+
+/// The fields a seal of `value` covers: its type's name, so no two kinds of
+/// value seal alike, then the value's own.
+pub(crate) fn fields<T: Sealable>(value: &T) -> Vec<Vec<u8>> {
+    let mut fields = vec![T::NAME.as_bytes().to_vec()];
+    fields.extend(value.seal_fields());
+    fields
 }
 
 /// The seal fields of `parts`, each a part's path, its modality, and what the

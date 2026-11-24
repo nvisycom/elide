@@ -106,13 +106,15 @@ impl JsonSchema for Report {
         // `parts` is an array of part entries, each a discriminated group;
         // `stripped` (output only, ignored on input) lists the hidden content
         // stripped from each part.
+        // `id` is the report's identity, a UUID the seal covers.
         json_schema!({
             "type": "object",
             "properties": {
+                "id": { "type": "string", "format": "uuid" },
                 "parts": { "type": "array", "items": group },
                 "stripped": { "type": "array", "items": stripped },
             },
-            "required": ["parts"],
+            "required": ["id", "parts"],
         })
     }
 }

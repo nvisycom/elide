@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::{Error, Result};
-use serde::de::{DeserializeSeed, Deserializer};
+use serde::Serialize;
+use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer};
 
 use super::seal::private::Sealed;
 use super::seal::{Seal, SealKey, Sealable};
@@ -87,7 +88,10 @@ impl Restorer {
         Self::default()
     }
 
-    /// Check keyed seals with `key`, the [`SealKey`] they were made with.
+    /// Check seals with `key`, the [`SealKey`] they were made with: with a key
+    /// set, only a keyed seal is accepted, so a carrier cannot replace one
+    /// with an unkeyed digest of a value it changed. Without a key, only an
+    /// unkeyed seal is accepted.
     #[must_use]
     pub fn with_seal_key(mut self, key: SealKey) -> Self {
         self.key = Some(key);
@@ -105,8 +109,8 @@ impl Restorer {
     pub fn with_modality<M>(mut self) -> Self
     where
         M: Modality,
-        M::Location: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: Serialize + DeserializeOwned,
+        M::Artifact: Serialize + DeserializeOwned,
     {
         self.register::<M>();
         self
@@ -116,8 +120,8 @@ impl Restorer {
     pub(crate) fn register<M>(&mut self)
     where
         M: Modality,
-        M::Location: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: Serialize + DeserializeOwned,
+        M::Artifact: Serialize + DeserializeOwned,
     {
         self.entries.insert(
             M::NAME,
@@ -150,9 +154,9 @@ impl Restorer {
     /// Read a [`Report`], [`Review`], or [`ArtifactSet`] back and check it
     /// against `seal`, routing each part to its registered modality.
     ///
-    /// For a report, every entity's audit trail must verify as well. A keyed
-    /// seal needs the key it was made with, set with
-    /// [`with_seal_key`](Self::with_seal_key).
+    /// For a report, every entity's audit trail must verify as well. With a
+    /// key set by [`with_seal_key`](Self::with_seal_key), only a keyed seal
+    /// is accepted; without one, only an unkeyed seal.
     ///
     /// A part naming an unregistered modality is handled by what dropping it
     /// would cost. An empty one is skipped, since nothing is lost (as
@@ -165,8 +169,9 @@ impl Restorer {
     ///
     /// [`MalformedInput`] if the payload is malformed, or if a part carries
     /// entities or edits under an unregistered modality; [`Integrity`] if a
-    /// trail does not verify or the value does not match `seal`;
-    /// [`Configuration`] for a keyed seal with no key set.
+    /// trail does not verify, the value does not match `seal`, or `seal` is
+    /// unkeyed where a key is set; [`Configuration`] for a keyed seal with no
+    /// key set.
     ///
     /// [`analyze`]: crate::Orchestrator::analyze
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput

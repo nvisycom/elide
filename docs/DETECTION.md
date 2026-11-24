@@ -253,10 +253,10 @@ set, and a suppressed entity stays in the report rather than vanishing, so the
 record of what was found and what a person chose to keep is never lost.
 
 A correction that can leave content unredacted (a suppression, a relabel, a
-relocation off any of the old span) narrows the redaction, and a caller's
-review policy decides who may make one: it can protect labels no correction
-may narrow, and require a reason. An inclusion only adds to what is hidden,
-so any reviewer may make one. The policy reads the names a review carries;
+relocation) narrows the redaction, and a caller's review policy decides who
+may make one: it can protect labels no correction may narrow, and require a
+reason. An inclusion only adds to what is hidden, though the policy still
+sees it, and can require it be attributed. The policy reads the names a review carries;
 authenticating the reviewer who sent it is the caller's.
 
 ## 8. Reconciliation and Conflict Resolution

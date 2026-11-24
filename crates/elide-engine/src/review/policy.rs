@@ -78,9 +78,8 @@ pub struct ProposedEdit<'a> {
     /// a relabel's.
     pub decision: &'a ManualIntent,
     /// The entities whose redaction the edit narrows: what it could leave
-    /// unredacted that would have been hidden. Empty for an edit that only
-    /// adds to what is hidden: an include, or a relocation to a region
-    /// containing the old one.
+    /// unredacted that would have been hidden, leaving out any already
+    /// suppressed. Empty for an include, which only adds to what is hidden.
     pub narrowed: &'a [Narrowed],
     /// Who the review says made the edit.
     pub by: Option<&'a str>,
@@ -90,8 +89,8 @@ pub struct ProposedEdit<'a> {
 
 impl ProposedEdit<'_> {
     /// Whether the edit could leave content unredacted that would have been
-    /// hidden: a suppression, a relabel, or a relocation off any of the old
-    /// location.
+    /// hidden: a suppression, a relabel, or a relocation of an entity not
+    /// already suppressed.
     #[must_use]
     pub fn narrows(&self) -> bool {
         !self.narrowed.is_empty()
@@ -108,8 +107,8 @@ pub struct Narrowed {
 }
 
 /// Refuses every edit that narrows the redaction of an entity of a protected
-/// label: no suppression, relabel, or relocation that could leave any of it
-/// unredacted. A region suppression containing one is refused too.
+/// label: no suppression, relabel, or relocation of one. A region suppression
+/// containing one is refused too.
 #[derive(Debug, Clone, Default)]
 pub struct Protect(HashSet<LabelRef>);
 
@@ -139,15 +138,15 @@ impl ReviewPolicy for Protect {
     }
 }
 
-/// Refuses every edit that does not name who made it.
+/// Refuses every edit that does not name who made it, a blank name included.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RequireActor;
 
 impl ReviewPolicy for RequireActor {
     fn check(&self, edit: &ProposedEdit<'_>) -> Result<()> {
         match edit.by {
-            Some(_) => Ok(()),
-            None => Err(Error::refused(format!(
+            Some(actor) if !actor.trim().is_empty() => Ok(()),
+            _ => Err(Error::refused(format!(
                 "an edit of part `{}` names no actor",
                 edit.part
             ))),

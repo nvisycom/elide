@@ -42,6 +42,7 @@ use serde::de::{
 };
 use serde::ser::{Serialize, Serializer};
 use serde_value::Value;
+use uuid::Uuid;
 
 use super::restorer::{ModalityEntry, Parser, Restorer};
 use crate::PartId;
@@ -103,6 +104,7 @@ struct StrippedEntry<'a> {
 #[derive(serde::Serialize)]
 #[serde(rename = "Report")]
 struct ReportWire<'a> {
+    id: Uuid,
     parts: Vec<PartEntry<'a>>,
     stripped: Vec<StrippedEntry<'a>>,
 }
@@ -140,7 +142,12 @@ impl Serialize for Report {
                 count,
             })
             .collect();
-        ReportWire { parts, stripped }.serialize(serializer)
+        ReportWire {
+            id: self.id,
+            parts,
+            stripped,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -226,6 +233,9 @@ pub(super) trait Leaf {
     const GROUP_NAME: &'static str;
     /// The whole-set struct name: `"Report"` / `"ArtifactSet"`.
     const SET_NAME: &'static str;
+    /// The whole set's fields on the wire, for a format that reads a struct
+    /// by its field list.
+    const SET_FIELDS: &'static [&'static str];
     /// What `expecting` writes for one part entry.
     const GROUP_EXPECTING: &'static str;
     /// What `expecting` writes for the whole set.
@@ -243,6 +253,13 @@ pub(super) trait Leaf {
 
     /// Store a reconstructed part group, keyed by `id`, into the set.
     fn set_part(set: &mut Self::Set, id: PartId, parsed: Self::Parsed);
+
+    /// Store the set's own `id` read from the wire. A set that carries one
+    /// requires it; one that does not ignores an `id` field.
+    fn set_id(_set: &mut Self::Set, _id: Uuid) {}
+
+    /// Whether the set carries an `id` of its own, which must then be present.
+    const HAS_ID: bool = false;
 }
 
 /// The report leaf: a group's `entities` reconstruct as a boxed
@@ -257,7 +274,9 @@ impl Leaf for EntityLeaf {
     const FIELD: &'static str = "entities";
     const GROUP_EXPECTING: &'static str = "a { id, modality, entities } part entry";
     const GROUP_NAME: &'static str = "PartEntry";
+    const HAS_ID: bool = true;
     const SET_EXPECTING: &'static str = "a { parts: [..] } report";
+    const SET_FIELDS: &'static [&'static str] = &["id", "parts", "stripped"];
     const SET_NAME: &'static str = "Report";
 
     fn parse<E: DeError>(
@@ -275,6 +294,10 @@ impl Leaf for EntityLeaf {
 
     fn set_part(report: &mut Report, id: PartId, entities: Box<dyn EntityGroup>) {
         report.parts.insert(id, entities);
+    }
+
+    fn set_id(report: &mut Report, id: Uuid) {
+        report.id = id;
     }
 }
 
@@ -329,6 +352,7 @@ impl Leaf for ArtifactLeaf {
     const GROUP_EXPECTING: &'static str = "a { id, modality, artifact } part entry";
     const GROUP_NAME: &'static str = "ArtifactEntry";
     const SET_EXPECTING: &'static str = "a { parts: [..] } artifact set";
+    const SET_FIELDS: &'static [&'static str] = &["parts"];
     const SET_NAME: &'static str = "ArtifactSet";
 
     fn parse<E: DeError>(
@@ -377,6 +401,7 @@ impl Leaf for EditLeaf {
     const GROUP_EXPECTING: &'static str = "a { id, modality, edits } part entry";
     const GROUP_NAME: &'static str = "EditEntry";
     const SET_EXPECTING: &'static str = "a { against, parts: [..] } review";
+    const SET_FIELDS: &'static [&'static str] = &["against", "parts"];
     const SET_NAME: &'static str = "Review";
 
     fn parse<E: DeError>(
@@ -557,7 +582,7 @@ impl<'de, L: Leaf> DeserializeSeed<'de> for SetSeed<'_, L> {
     type Value = L::Set;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<L::Set, D::Error> {
-        deserializer.deserialize_struct(L::SET_NAME, &["parts"], self)
+        deserializer.deserialize_struct(L::SET_NAME, L::SET_FIELDS, self)
     }
 }
 
@@ -570,6 +595,7 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<L::Set, A::Error> {
         let mut set: Option<L::Set> = None;
+        let mut id: Option<Uuid> = None;
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
                 "parts" => {
@@ -577,6 +603,12 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
                         return Err(DeError::duplicate_field("parts"));
                     }
                     set = Some(map.next_value_seed(PartsSeed::<L>::new(self.registry))?);
+                }
+                "id" if L::HAS_ID => {
+                    if id.is_some() {
+                        return Err(DeError::duplicate_field("id"));
+                    }
+                    id = Some(map.next_value()?);
                 }
                 // Any field other than `parts` is ignored, so a wire form
                 // carrying derived output (a report's `stripped` section) still
@@ -587,7 +619,11 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
                 }
             }
         }
-        Ok(set.unwrap_or_default())
+        let mut set = set.unwrap_or_default();
+        if L::HAS_ID {
+            L::set_id(&mut set, id.ok_or_else(|| DeError::missing_field("id"))?);
+        }
+        Ok(set)
     }
 }
 
@@ -607,7 +643,7 @@ impl<'de> DeserializeSeed<'de> for ReviewSeed<'_> {
     type Value = Review;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Review, D::Error> {
-        deserializer.deserialize_struct(EditLeaf::SET_NAME, &["against", "parts"], self)
+        deserializer.deserialize_struct(EditLeaf::SET_NAME, EditLeaf::SET_FIELDS, self)
     }
 }
 
@@ -974,7 +1010,7 @@ mod tests {
     fn unregistered_empty_group_is_skipped() {
         // Two empty audio parts against a text-only registry: the report
         // reconstructs with no parts.
-        let json = r#"{"parts":[{"id":["a"],"modality":"audio","entities":[]},{"id":["a","b.wav"],"modality":"audio","entities":[]}]}"#;
+        let json = r#"{"id":"01960000-0000-7000-8000-000000000000","parts":[{"id":["a"],"modality":"audio","entities":[]},{"id":["a","b.wav"],"modality":"audio","entities":[]}]}"#;
         let mut de = serde_json::Deserializer::from_str(json);
         let back = match ReportSeed::new(&text_registry()).deserialize(&mut de) {
             Ok(report) => report,
@@ -992,7 +1028,7 @@ mod tests {
         // the reverse of what we emit.
         let entities = serde_json::to_string(&vec![text_entity("EMAIL_ADDRESS")]).unwrap();
         let json = format!(
-            r#"{{"parts":[{{"entities":{entities},"modality":"text","id":["document"]}}]}}"#
+            r#"{{"parts":[{{"entities":{entities},"modality":"text","id":["document"]}}],"id":"01960000-0000-7000-8000-000000000000"}}"#
         );
         let mut de = serde_json::Deserializer::from_str(&json);
         let report = match ReportSeed::new(&text_registry()).deserialize(&mut de) {
@@ -1008,11 +1044,24 @@ mod tests {
         assert!(entities[0].audit().verify().is_ok(), "audit data survived");
     }
 
+    /// A report's id is required: without it, nothing ties the report to the
+    /// version a review or a seal names.
+    #[test]
+    fn a_report_without_an_id_is_rejected() {
+        let json = r#"{"parts":[]}"#;
+        let mut de = serde_json::Deserializer::from_str(json);
+        assert!(
+            ReportSeed::new(&text_registry())
+                .deserialize(&mut de)
+                .is_err()
+        );
+    }
+
     /// An unknown entry field (a later format version) is ignored, matching the
     /// set-level policy, the wire format can grow additively.
     #[test]
     fn unknown_entry_fields_are_ignored() {
-        let json = r#"{"parts":[{"id":["document"],"modality":"text","entities":[],"future":42}]}"#;
+        let json = r#"{"id":"01960000-0000-7000-8000-000000000000","parts":[{"id":["document"],"modality":"text","entities":[],"future":42}]}"#;
         let mut de = serde_json::Deserializer::from_str(json);
         assert!(
             ReportSeed::new(&text_registry())

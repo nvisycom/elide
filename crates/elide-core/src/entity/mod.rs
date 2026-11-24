@@ -10,6 +10,7 @@ pub mod audit;
 mod coref;
 mod label;
 
+use std::collections::HashSet;
 use std::mem;
 use std::ops::Range;
 
@@ -276,7 +277,8 @@ impl<M: Modality> Entity<M> {
     ///
     /// Every absorbed trail moves into this one, leaving each absorbed entity
     /// with an empty trail, and a fusion event recording `location` joins the
-    /// trails' tips. A trail with no events contributes no tip.
+    /// trails' tips. An event the trails share is kept once, a tip they share
+    /// is joined once, and a trail with no events contributes no tip.
     pub fn fuse(
         &mut self,
         absorbed: &mut [Entity<M>],
@@ -284,16 +286,21 @@ impl<M: Modality> Entity<M> {
         confidence: Confidence,
         location: M::Location,
     ) {
+        // Trails that share events (two findings of one recognition) merge
+        // each shared event once, and join each shared tip once.
+        let mut seen: HashSet<AuditHash> =
+            self.audit.events().iter().map(AuditEvent::hash).collect();
         let mut heads = Vec::with_capacity(absorbed.len() + 1);
         if !self.audit.is_empty() {
             heads.push(self.audit.tip());
         }
         for other in absorbed {
-            if !other.audit.is_empty() {
+            if !other.audit.is_empty() && !heads.contains(&other.audit.tip()) {
                 heads.push(other.audit.tip());
             }
             let events = mem::take(&mut other.audit).into_events();
-            self.audit.absorb(events);
+            self.audit
+                .absorb(events.into_iter().filter(|event| seen.insert(event.hash())));
         }
         self.location = location.clone();
         self.confidence = confidence;
@@ -619,6 +626,20 @@ mod tests {
             "re-suppressing does not grow the trail",
         );
         assert!(entity.audit.verify().is_ok());
+    }
+
+    /// Fusing findings whose trails share an event keeps it once, and the
+    /// fused trail still verifies.
+    #[test]
+    fn fusing_shared_trails_keeps_each_event_once() {
+        let mut base = text_entity();
+        let mut absorbed = [base.clone(), base.clone()];
+        let conf = base.confidence;
+        let location = base.location.clone();
+        base.fuse(&mut absorbed, "max", conf, location);
+
+        assert_eq!(base.audit.events().len(), 2, "one birth, one fusion");
+        assert!(base.audit.verify().is_ok());
     }
 
     /// A decision recorded through [`Entity::record`] still takes effect: no

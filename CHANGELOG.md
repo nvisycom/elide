@@ -86,12 +86,15 @@ and this project adheres to
   `relocate`, `suppress`, and `suppress_within`, each attributed to its `by`
   and `because` and recorded as a `Manual` audit event naming what it set.
   The review applies whole or not at all, only to the report version it was
-  made against, so it cannot be applied twice or replace a newer one
+  made against, so it cannot be applied twice or replace a newer one; a
+  review that would change nothing is refused. A region suppression spares
+  what the region covers, by span, by raw bytes, or by rendered boxes, so a
+  reviewer's mark can clear what it encloses
 - A `ReviewPolicy` decides which edits a review may make, shown each as a
   `ProposedEdit`: the decision it records, the entities whose redaction it
   narrows, and its actor and reason. The standard policies each check one
-  thing, `Protect` (labels no edit may narrow: suppress, relabel, or relocate
-  off any of the old location), `RequireActor`, and `RequireReason` (to
+  thing, `Protect` (labels no edit may suppress, relabel, or relocate),
+  `RequireActor`, and `RequireReason` (to
   narrow), and combine with `and`; a closure is a policy too. A refused review
   fails with `ErrorKind::Refused`
 - `Orchestrator::read` reads the data at locations in any part of a document,
@@ -116,12 +119,16 @@ and this project adheres to
 - A report, review, or artifact set reads back only against a `Seal`, plain
   data made when it is written: `Seal::of`, an unkeyed digest kept where the
   carrier cannot write, or `Seal::keyed`, a MAC under a `SealKey` the carrier
-  does not hold, checked with the key set by `with_seal_key`. A report's seal
-  covers every entity's fields and audit trail, by part and entity id; a
-  review's the report version it was made against and every edit; an artifact
-  set's every artifact as serialized. `Restorer::restore` checks it,
-  and `restore_unsealed` skips the check by name. Reports and reviews written
-  before this release do not read back
+  does not hold. The reader chooses the scheme: a `Restorer` with a key set by
+  `with_seal_key` accepts only a MAC, one without only a digest. A seal names
+  the kind of value it covers; a report's covers its id and every entity's
+  fields and audit trail, by part and entity id; a review's the report version
+  it was made against and every edit; an artifact set's every artifact as
+  serialized. `Restorer::restore` checks it, and `restore_unsealed` skips the
+  check by name
+- Every `Report` has an id, a UUIDv7 minted when it is created and kept across
+  reviews and round trips, so two reports with the same findings never share
+  a digest
 - Applying a report fails closed: a part with entities that no registered
   pipeline can apply, or that names no part of the documents, a mark the
   document cannot place, and a location a stream cannot read or write are

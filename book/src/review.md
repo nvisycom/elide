@@ -101,11 +101,11 @@ content unredacted.
 
 ## What a review may do
 
-An include only adds to what is redacted, and so does a relocation to a
-region containing the old one. Every other edit can leave content unredacted
-that would have been hidden: a suppression, a relabel (another label may get
-a weaker operator), a relocation that gives up any of the old location. The
-orchestrator's `ReviewPolicy` governs those. It is shown each edit as a
+An include only adds to what is redacted. Every other edit can leave content
+unredacted that would have been hidden: a suppression, a relabel (another
+label may get a weaker operator), a relocation (a rule may choose its
+operator by where an entity sits). The orchestrator's `ReviewPolicy` sees
+every edit, and decides on those. It is shown each edit as a
 `ProposedEdit`: the decision it records, the entities whose redaction it
 narrows, and who made it and why. Each standard policy checks one thing:
 `Protect` keeps labels from being narrowed, `RequireActor` wants every edit
@@ -125,7 +125,8 @@ A review is bound to the report it was made against: `Review::new` records
 the report's digest, and `review` refuses a review made against another
 report, or an earlier version of this one. Applying a review changes the
 digest, so the same review cannot be applied twice, and an older one cannot
-replace a newer.
+replace a newer. A review that would change nothing is refused for the same
+reason, so check `is_empty` before sending one.
 
 ## Showing the reviewer
 
@@ -138,12 +139,15 @@ cannot read costs only its own result, but an embedded file that fails to
 decode on the way fails the whole read.
 
 To show the reviewer what redaction will do, not only what was found, call
-`orchestrator.pick(&mut report)`. Each entity records the operator it will get,
-how much that operator's output leaks, the rule that chose it, and the policy's
-rationale, as a `Selection` event, picked by the same anonymizers and scope
-`anonymize_with` applies. When no review intervenes, the plan shown is the plan
-that runs; after one, pick again to update it. An unchanged pick is not
-recorded twice.
+`orchestrator.pick(&mut report)` before starting the review. Each entity
+records the operator it will get, how much that operator's output leaks, the
+rule that chose it, and the policy's rationale, as a `Selection` event, picked
+by the same anonymizers and scope `anonymize_with` applies; show the entities
+`unsuppressed` lists, as a suppressed one keeps its last pick but is not
+redacted. A pick changes the report, so make the `Review` after it: a review
+made before applies to no later version. When no review intervenes, the plan
+shown is the plan that runs; after one, pick again to update it. An unchanged
+pick is not recorded twice.
 
 Applying records a `Redaction` event naming, by its hash, the `Selection` it
 applied, and the location the operator wrote. If an edit changed the decision
@@ -173,13 +177,18 @@ A `Seal` is plain data, made with one of:
   beside what it covers.
 
 `Report::restorer()` (or `orchestrator.restorer()`) reads either back
-with `restore(&seal, ..)`, and refuses it if it does not match; a keyed seal
-needs the key, set with `with_seal_key` on the restorer or the
-orchestrator. A report's seal covers every entity's fields and trail, by part
-and entity id, so the order a report was built or serialized in does not
-matter. A review's covers the report it was made against and every edit, who
-made it, and why. `restore_unsealed` skips the check, for a value only shown, or
-one that never left the side that reads it.
+with `restore(&seal, ..)`, and refuses it if it does not match. The reader,
+not the seal, chooses the scheme: with a key set by `with_seal_key` on the
+restorer or the orchestrator, only a keyed seal is accepted, so a carrier
+cannot swap one for a digest of a value it changed; without a key, only an
+unkeyed seal is.
+
+A report's seal covers its id, minted when the report is created, and every
+entity's fields and trail, by part and entity id, so the order a report was
+built or serialized in does not matter, and two reports with the same
+findings never seal alike. A review's covers the report it was made against
+and every edit, who made it, and why. `restore_unsealed` skips the check, for
+a value only shown, or one that never left the side that reads it.
 
 The analysis also returns `artifacts`: the OCR layouts and transcripts it
 produced. Pass them to `re_analyze` to detect again, under a new scope or

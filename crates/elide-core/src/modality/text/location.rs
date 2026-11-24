@@ -347,6 +347,40 @@ impl ModalityLocation for TextLocation {
         span_overlap(a, b)
     }
 
+    /// A decoded span covers what its range contains. A location anchored by
+    /// raw bytes covers another whose every reference sits inside one of its
+    /// own, in the same part; one anchored by rendered boxes covers another on
+    /// the same page whose every box sits inside one of its own. So a
+    /// reviewer's mark, which has no decoded span, can cover the detections it
+    /// encloses.
+    fn covers(&self, other: &Self) -> bool {
+        if self.overlap(other) == Overlap::Contains || self.hash() == other.hash() {
+            return true;
+        }
+        let (refs, inner) = (self.source_refs(), other.source_refs());
+        if !refs.is_empty() && !inner.is_empty() {
+            return inner.iter().all(|inner| {
+                refs.iter().any(|outer| {
+                    outer.part == inner.part
+                        && outer.range.start <= inner.range.start
+                        && inner.range.end <= outer.range.end
+                })
+            });
+        }
+        let (rects, inner) = (self.rects(), other.rects());
+        if !rects.is_empty() && !inner.is_empty() && self.page() == other.page() {
+            return inner.iter().all(|inner| {
+                rects.iter().any(|outer| {
+                    outer.x <= inner.x
+                        && outer.y <= inner.y
+                        && inner.x + inner.width <= outer.x + outer.width
+                        && inner.y + inner.height <= outer.y + outer.height
+                })
+            });
+        }
+        false
+    }
+
     fn union(&self, other: &Self) -> Option<Self> {
         // A single span can't straddle two pages; require page agreement (both
         // unpaged, or both on the same rendered page).
@@ -544,6 +578,25 @@ mod tests {
         let late_page = TextLocation::rendered(0..5, 2, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
         // Page 1 sorts before page 2 even with a larger offset.
         assert_eq!(early_page.position_cmp(&late_page), Ordering::Less);
+    }
+
+    /// A mark covers the detections its raw bytes or rendered boxes enclose,
+    /// though it overlaps nothing by span.
+    #[test]
+    fn a_mark_covers_what_it_encloses() {
+        let detected = TextLocation::inline(4..8)
+            .with_source([SourceRef::in_part(10..14, "word/document.xml")]);
+        let mark = TextLocation::marked_source(SourceRef::in_part(0..20, "word/document.xml"));
+        let elsewhere = TextLocation::marked_source(SourceRef::in_part(0..20, "word/footer1.xml"));
+        assert!(mark.covers(&detected));
+        assert!(!elsewhere.covers(&detected));
+        assert!(!detected.covers(&mark));
+
+        let boxed = TextLocation::rendered(0..5, 2, [UnitBoundingBox::new(0.2, 0.2, 0.1, 0.05)]);
+        let region = TextLocation::marked_rendered(2, UnitBoundingBox::new(0.1, 0.1, 0.5, 0.5));
+        let other_page = TextLocation::marked_rendered(3, UnitBoundingBox::new(0.1, 0.1, 0.5, 0.5));
+        assert!(region.covers(&boxed));
+        assert!(!other_page.covers(&boxed));
     }
 
     #[test]

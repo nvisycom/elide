@@ -228,8 +228,10 @@ impl<M: Modality> Anonymizer<M> {
         let mut resolved = Vec::new();
         for members in cluster_overlaps(entities, &live) {
             // Pick the safest operator among the members, the one that leaks
-            // least; ties go to the wider span, then the earlier position.
-            // `None` means no member had an operator.
+            // least; ties go to the wider span, then the earlier position,
+            // then the lower entity id, so the pick never depends on the order
+            // the entities are held in. `None` means no member had an
+            // operator.
             let Some((winner, operator, selection)) = members
                 .iter()
                 .copied()
@@ -244,6 +246,7 @@ impl<M: Modality> Anonymizer<M> {
                                 .location()
                                 .position_cmp(entities[*i].location())
                         })
+                        .then_with(|| entities[*j].id().cmp(&entities[*i].id()))
                 })
                 .map(|(i, r)| {
                     let mut selection =

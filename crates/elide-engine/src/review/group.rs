@@ -3,8 +3,10 @@
 
 use elide_core::entity::Entity;
 use elide_core::entity::audit::Manual;
-use elide_core::modality::{Modality, ModalityLocation, Overlap};
+use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::{Error, Result};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use super::edit::{Change, Edit};
@@ -23,14 +25,15 @@ pub(crate) trait EditGroup: ErasedGroup {
     /// hold yet, which an include creates.
     fn empty_entities(&self) -> Box<dyn EntityGroup>;
     /// The part's `entities` with every edit applied in order, each checked
-    /// against `policy` as the edits before it left them. `entities` is left
-    /// as it is, so a refused edit changes nothing.
+    /// against `policy` as the edits before it left them, and whether any edit
+    /// changed an entity. `entities` is left as it is, so a refused edit
+    /// changes nothing.
     fn apply(
         &self,
         part: &PartId,
         entities: &dyn EntityGroup,
         policy: &dyn ReviewPolicy,
-    ) -> Result<Box<dyn EntityGroup>>;
+    ) -> Result<(Box<dyn EntityGroup>, bool)>;
 }
 
 impl<M: Modality> GroupItem for Edit<M> {
@@ -39,7 +42,7 @@ impl<M: Modality> GroupItem for Edit<M> {
 
 impl<M: Modality> EditGroup for Vec<Edit<M>>
 where
-    M::Location: serde::Serialize + serde::de::DeserializeOwned,
+    M::Location: Serialize + DeserializeOwned,
 {
     fn fields(&self, out: &mut Vec<Vec<u8>>) {
         for edit in self {
@@ -65,7 +68,7 @@ where
         part: &PartId,
         entities: &dyn EntityGroup,
         policy: &dyn ReviewPolicy,
-    ) -> Result<Box<dyn EntityGroup>> {
+    ) -> Result<(Box<dyn EntityGroup>, bool)> {
         let mut entities = entities
             .as_any()
             .downcast_ref::<Vec<Entity<M>>>()
@@ -76,40 +79,36 @@ where
                 ))
             })?
             .clone();
+        let mut changed = false;
         for edit in self {
-            step(part, &mut entities, edit, policy)?;
+            changed |= step(part, &mut entities, edit, policy)?;
         }
-        Ok(Box::new(entities))
+        Ok((Box::new(entities), changed))
     }
 }
 
-/// Check one `edit` of `part` against `policy`, and apply it to the part's
-/// `entities` once accepted.
+/// Check one `edit` of `part` against `policy`, apply it to the part's
+/// `entities` once accepted, and return whether it changed an entity.
 fn step<M: Modality>(
     part: &PartId,
     entities: &mut Vec<Entity<M>>,
     edit: &Edit<M>,
     policy: &dyn ReviewPolicy,
-) -> Result<()> {
+) -> Result<bool> {
     let targets = targets(part, entities, &edit.change)?;
-    let widens = match &edit.change {
-        Change::Include { .. } => true,
-        Change::Relocate { location, .. } => targets
-            .iter()
-            .all(|&i| covers(location, entities[i].location())),
-        _ => false,
-    };
-    let narrowed: Vec<Narrowed> = if widens {
-        Vec::new()
-    } else {
-        targets
-            .iter()
-            .map(|&i| Narrowed {
-                id: entities[i].id(),
-                label: entities[i].label().clone(),
-            })
-            .collect()
-    };
+    // Only an include adds to what is hidden. A relocation can narrow even
+    // into a region containing the old one, as a rule may choose its operator
+    // by where an entity sits; and an entity already suppressed is not
+    // redacted, so no edit narrows it.
+    let narrowed: Vec<Narrowed> = targets
+        .iter()
+        .map(|&i| &entities[i])
+        .filter(|entity| !entity.is_suppressed())
+        .map(|entity| Narrowed {
+            id: entity.id(),
+            label: entity.label().clone(),
+        })
+        .collect();
     let decision = edit.change.intent();
     policy.check(&ProposedEdit {
         part,
@@ -138,19 +137,21 @@ fn step<M: Modality>(
                 edit.because.clone(),
                 by,
             ));
+            Ok(true)
         }
         change => {
+            let mut changed = false;
             for i in targets {
                 let at = match change {
                     Change::SuppressWithin { region } => region.clone(),
                     Change::Relocate { location, .. } => location.clone(),
                     _ => entities[i].location().clone(),
                 };
-                entities[i].record_manual(manual(at), by);
+                changed |= entities[i].record_manual(manual(at), by);
             }
+            Ok(changed)
         }
     }
-    Ok(())
 }
 
 /// The indices of the entities of `part` that `change` touches: none for an
@@ -169,7 +170,7 @@ fn targets<M: Modality>(
     match change {
         Change::Include { .. } => Ok(Vec::new()),
         Change::SuppressWithin { region } => Ok((0..entities.len())
-            .filter(|&i| covers(region, entities[i].location()))
+            .filter(|&i| region.covers(entities[i].location()))
             .collect()),
         Change::Suppress { entity: id }
         | Change::Relabel { entity: id, .. }
@@ -177,10 +178,4 @@ fn targets<M: Modality>(
             .map(|i| vec![i])
             .ok_or_else(|| Error::not_found(format!("part `{part}` holds no entity `{id}`"))),
     }
-}
-
-/// Whether `outer` covers all of `inner`: it contains it, or is the same
-/// location.
-fn covers<L: ModalityLocation>(outer: &L, inner: &L) -> bool {
-    outer.overlap(inner) == Overlap::Contains || outer.hash() == inner.hash()
 }

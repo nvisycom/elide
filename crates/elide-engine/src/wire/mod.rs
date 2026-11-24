@@ -20,6 +20,6 @@ mod seal;
 mod serde;
 
 pub use self::restorer::Restorer;
-pub(crate) use self::seal::part_fields;
 pub use self::seal::{Seal, SealKey, Sealable};
+pub(crate) use self::seal::{fields, part_fields};
 pub(crate) use self::serde::Erased;

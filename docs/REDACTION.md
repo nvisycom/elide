@@ -325,9 +325,11 @@ adjacent concerns to the engine that embeds it.
   or by data-release target is the embedding engine's job.
 - **Audit persistence.** Every pick and every applied redaction is recorded
   on its entity's hash-linked audit trail, and the report that carries them
-  serializes, and reads back only against a seal: its digest, stored where the
-  report's carrier cannot write, or a digest keyed with a secret the carrier
-  does not hold. The toolkit does not persist that record or hold the key; a
+  serializes. Read back normally, it is checked against a seal: its digest,
+  stored where the report's carrier cannot write, or a digest keyed with a
+  secret the carrier does not hold. An unsealed read, named as such, skips
+  that check, for a report that never left the side reading it. The toolkit
+  does not persist that record or hold the key; a
   deployment that needs a durable compliance log keeps the report and its
   seal. The seal covers the report's entities and their trails, not its record
   of stripped hidden content.

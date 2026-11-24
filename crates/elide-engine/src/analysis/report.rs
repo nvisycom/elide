@@ -33,12 +33,14 @@ use elide_core::entity::audit::AuditHash;
 use elide_core::modality::Modality;
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use super::group::EntityGroup;
 use super::part::Part;
 use crate::PartId;
-use crate::wire::{Restorer, part_fields};
+use crate::wire::{Restorer, fields, part_fields};
 
 /// The detected entities of a document set, reviewed before apply.
 ///
@@ -71,9 +73,13 @@ use crate::wire::{Restorer, part_fields};
 /// [`entity_anywhere`]: Report::entity_anywhere
 /// [`new`]: Report::new
 /// [`insert_part`]: Report::insert_part
-#[derive(Default)]
 #[must_use = "a report is the record of what was found and, once applied, of what was redacted"]
 pub struct Report {
+    /// The report's identity, minted when it is created and kept across
+    /// reviews and round trips, so two reports with the same findings (or
+    /// none) never share a digest, and a review of one never applies to the
+    /// other.
+    pub(crate) id: Uuid,
     /// Every part's entities (a `Vec<Entity<M>>` of the part's modality), keyed
     /// by its [`PartId`] path. A named document's own content is its depth-1
     /// part; container parts nest below.
@@ -119,8 +125,19 @@ pub struct StrippedItem {
     pub count: usize,
 }
 
+impl Default for Report {
+    fn default() -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            parts: HashMap::new(),
+            stripped: StrippedRecord::default(),
+        }
+    }
+}
+
 impl Report {
-    /// An empty report with no parts, to fill in by hand or by analysis.
+    /// An empty report with no parts and a fresh identity, to fill in by hand
+    /// or by analysis.
     ///
     /// Fill it with [`insert_part`], or let [`analyze`] produce one.
     ///
@@ -218,13 +235,21 @@ impl Report {
     /// [`Seal`]: crate::Seal
     #[must_use]
     pub fn digest(&self) -> AuditHash {
-        AuditHash::of_fields(self.seal_fields())
+        AuditHash::of_fields(fields(self))
     }
 
-    /// The fields the report's digest covers: each part with entities, by
-    /// path, with its modality and its entities' digests by id.
+    /// The report's identity, a time-ordered UUIDv7 minted when it was
+    /// created: what tells two reports with the same findings apart.
+    #[must_use]
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    /// The fields the report's digest covers: its id, then each part with
+    /// entities, by path, with its modality and its entities' digests by id.
     pub(crate) fn seal_fields(&self) -> Vec<Vec<u8>> {
-        part_fields(
+        let mut fields = vec![self.id.as_bytes().to_vec()];
+        fields.extend(part_fields(
             self.parts
                 .iter()
                 .filter(|(_, entities)| !entities.is_empty())
@@ -233,7 +258,8 @@ impl Report {
                     let body = digests.iter().map(|d| d.as_bytes().to_vec()).collect();
                     (id, entities.modality_name(), body)
                 }),
-        )
+        ));
+        fields
     }
 
     /// Set the entities of the part `id` as modality `P`, replacing any.
@@ -245,7 +271,7 @@ impl Report {
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     pub fn insert_part<P: Modality>(mut self, id: PartId, entities: Vec<Entity<P>>) -> Self
     where
-        P::Location: serde::Serialize + serde::de::DeserializeOwned,
+        P::Location: Serialize + DeserializeOwned,
     {
         self.parts.insert(id, Box::new(entities));
         self
@@ -319,10 +345,13 @@ mod tests {
     fn the_digest_covers_every_entity_and_field() {
         let kept = at("EMAIL_ADDRESS", 0..5);
         let other = at("PERSON_NAME", 6..9);
+        let id = Uuid::now_v7();
         let report = |entities: Vec<Entity<Text>>| {
-            Report::new()
+            let mut report = Report::new()
                 .insert_part::<Text>(doc(), entities)
-                .insert_part::<Text>(doc().child("empty"), Vec::new())
+                .insert_part::<Text>(doc().child("empty"), Vec::new());
+            report.id = id;
+            report
         };
         let written = report(vec![kept.clone(), other.clone()]);
         let digest = written.digest();
@@ -349,8 +378,19 @@ mod tests {
 
         assert_ne!(report(vec![kept.clone()]).digest(), digest);
 
-        let without_empty = Report::new().insert_part::<Text>(doc(), vec![kept, other]);
+        let mut without_empty = Report::new().insert_part::<Text>(doc(), vec![kept, other]);
+        without_empty.id = id;
         assert_eq!(without_empty.digest(), digest);
+
+        // Another report with the same findings has another identity.
+        assert_ne!(
+            Report::new()
+                .insert_part::<Text>(doc(), vec![at("EMAIL_ADDRESS", 0..5)])
+                .digest(),
+            Report::new()
+                .insert_part::<Text>(doc(), vec![at("EMAIL_ADDRESS", 0..5)])
+                .digest(),
+        );
     }
 
     #[test]

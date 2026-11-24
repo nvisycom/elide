@@ -21,6 +21,8 @@ use elide_core::{Error, Result};
 use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use self::analysis::StrippedRecord;
 pub use self::analysis::{AnalyzedDocument, ArtifactSet, Part, Report, StrippedItem};
@@ -185,8 +187,8 @@ impl Orchestrator {
     pub fn with_modality<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
-        M::Location: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: Serialize + DeserializeOwned,
+        M::Artifact: Serialize + DeserializeOwned,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => {
@@ -214,8 +216,8 @@ impl Orchestrator {
     pub fn with_analyzer<M>(mut self, analyzer: Analyzer<M>) -> Self
     where
         M: Modality,
-        M::Location: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: Serialize + DeserializeOwned,
+        M::Artifact: Serialize + DeserializeOwned,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.analyzer = analyzer,
@@ -237,8 +239,8 @@ impl Orchestrator {
     pub fn with_anonymizer<M>(mut self, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
-        M::Location: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: Serialize + DeserializeOwned,
+        M::Artifact: Serialize + DeserializeOwned,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.set_anonymizer(anonymizer),
@@ -264,8 +266,8 @@ impl Orchestrator {
     fn insert_pipeline<M>(&mut self, pipeline: ModalityPipeline<M>)
     where
         M: Modality,
-        M::Location: serde::Serialize + serde::de::DeserializeOwned,
-        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: Serialize + DeserializeOwned,
+        M::Artifact: Serialize + DeserializeOwned,
     {
         self.pipelines.insert(TypeId::of::<M>(), Box::new(pipeline));
         self.restorer.register::<M>();
@@ -490,8 +492,10 @@ impl Orchestrator {
     /// against another report, or an earlier version of this one;
     /// [`NotFound`](elide_core::ErrorKind::NotFound) when an edit names an
     /// entity its part does not hold, or a part the report holds as another
-    /// modality; [`Refused`](elide_core::ErrorKind::Refused) when the policy
-    /// refuses an edit.
+    /// modality; [`MalformedInput`](elide_core::ErrorKind::MalformedInput) when
+    /// an include reuses an entity id or the review changes nothing;
+    /// [`Refused`](elide_core::ErrorKind::Refused) when the policy refuses an
+    /// edit.
     pub fn review(&self, report: &mut Report, review: &Review) -> Result<()> {
         review.apply(report, self.review_policy.as_ref())
     }

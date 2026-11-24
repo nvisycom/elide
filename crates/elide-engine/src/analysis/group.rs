@@ -18,6 +18,8 @@ use std::any::{Any, TypeId};
 use elide_core::entity::Entity;
 use elide_core::entity::audit::AuditHash;
 use elide_core::modality::{Modality, ModalityArtifact};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 /// One item of a group: something that belongs to a single modality, such as
@@ -53,7 +55,7 @@ pub(crate) trait ErasedGroup: Send + Sync + erased_serde::Serialize {
 
 impl<T: GroupItem> ErasedGroup for Vec<T>
 where
-    Vec<T>: serde::Serialize,
+    Vec<T>: Serialize,
 {
     fn as_any(&self) -> &dyn Any {
         self
@@ -86,7 +88,7 @@ pub(crate) trait EntityGroup: ErasedGroup {
 
 impl<M: Modality> EntityGroup for Vec<Entity<M>>
 where
-    M::Location: serde::Serialize + serde::de::DeserializeOwned,
+    M::Location: Serialize + DeserializeOwned,
 {
     fn digests(&self) -> Vec<AuditHash> {
         let mut entities: Vec<&Entity<M>> = self.iter().collect();

@@ -37,12 +37,13 @@ pub struct Edit<M: Modality> {
 
 /// What an [`Edit`] changes.
 ///
-/// An [`Include`](Self::Include) only ever adds what redaction hides, so any
-/// reviewer can make one. The rest can leave content unredacted that would
-/// have been hidden, so the [`ReviewPolicy`](super::ReviewPolicy) decides who
-/// may make them: a suppression, a relabel (another label may get a weaker
-/// operator), and a relocation to anything but a region containing the old
-/// one.
+/// An [`Include`](Self::Include) only adds to what redaction hides: it narrows
+/// nothing. The rest can leave content unredacted that would have been hidden:
+/// a suppression, a relabel (another label may get a weaker operator), and a
+/// relocation (a rule may choose its operator by where an entity sits). The
+/// [`ReviewPolicy`](super::ReviewPolicy) sees every edit, an include too, and
+/// can refuse any of them: one that wants every edit attributed refuses an
+/// unattributed include.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "op",
@@ -63,7 +64,8 @@ pub enum Change<M: Modality> {
     /// Add an entity of `label` at `location`, one detection missed, with
     /// the id `entity`, so later edits can address it.
     Include {
-        /// The new entity's id, unique in its part.
+        /// The new entity's id: one no entity of the report holds, in any
+        /// part, and no other include of the review gives.
         entity: Uuid,
         /// The label of the entity.
         label: LabelRef,
