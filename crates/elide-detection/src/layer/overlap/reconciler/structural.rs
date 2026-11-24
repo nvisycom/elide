@@ -24,15 +24,15 @@ pub enum OnConflict {
 ///
 /// Reads the geometric relationship between the two locations rather than
 /// treating every overlap as a contest:
-/// - **Nesting**, one location inside the other (a postal code within an
-///   address): a legitimate hierarchy → keep both, *unless* the contained
-///   entity is weaker than its container by at least `margin`
+/// - **Nesting**, one location strictly inside the other (a postal code
+///   within an address): a legitimate hierarchy → keep both, *unless* the
+///   contained entity is weaker than its container by at least `margin`
 ///   (`inner + margin <= outer`), a subsumed junk match that loses.
 /// - **Incidental overlap**, they overlap but their [intersection-over-union]
 ///   is below `threshold`: two distinct findings that merely touch → keep both.
-/// - **Near-coincident**, IoU at or above `threshold`: two recognizers
-///   claiming substantially the same span with different labels, a true
-///   conflict → resolved with the tiebreaker, or, after
+/// - **Near-coincident**, the same extent or an IoU at or above `threshold`:
+///   two recognizers claiming substantially the same span with different
+///   labels, a true conflict → resolved with the tiebreaker, or, after
 ///   [`reviewing`](Structural::reviewing), contested for human review.
 ///
 /// [intersection-over-union]: elide_core::modality::Overlap::Crossing
@@ -137,7 +137,14 @@ where
         let subsumed = |inner: &Entity<M>, outer: &Entity<M>| {
             inner.confidence.get() + self.margin <= outer.confidence.get()
         };
-        match a.location.overlap(&b.location) {
+        let overlap = a.location.overlap(&b.location);
+        // Each containing the other is the same extent, which `overlap` reports
+        // as a containment: two labels claiming exactly one span, the plainest
+        // conflict, not a nesting.
+        if overlap == Overlap::Contains && b.location.overlap(&a.location) == Overlap::Contains {
+            return self.settle(a, b);
+        }
+        match overlap {
             // `b` is inside `a`.
             Overlap::Contains if subsumed(b, a) => Disposition::Resolve {
                 winner: Winner::First,
