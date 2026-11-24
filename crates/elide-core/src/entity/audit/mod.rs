@@ -83,8 +83,11 @@ pub struct AuditLog<M: Modality> {
 }
 
 /// A trail deserializes only once it [verifies](AuditLog::verify): a loaded
-/// trail that was altered, truncated, or extended is rejected as it is read,
-/// so no caller can act on one without checking it.
+/// trail whose hashes or links do not hold (an event altered, an event cut
+/// below its tip, an event appended past it) is rejected as it is read, so no
+/// caller can act on one without checking it. A trail cut back to an earlier
+/// tip is intact in its own right and reads back; only a tip or report
+/// digest held elsewhere tells it apart.
 #[cfg(feature = "serde")]
 impl<'de, M> Deserialize<'de> for AuditLog<M>
 where

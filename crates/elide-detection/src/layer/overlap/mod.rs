@@ -255,19 +255,22 @@ mod tests {
     }
 
     /// Two labels on exactly the same span are a true conflict, not a nesting:
-    /// the more confident wins whichever comes first.
+    /// the more confident wins whichever comes first, whether the two are
+    /// further apart than the nesting margin or within it.
     #[test]
     fn structural_resolves_identical_spans_in_either_order() {
-        let person = || entity("PERSON_NAME", 0, 12, 0.5);
-        let org = || entity("ORGANIZATION", 0, 12, 0.9);
-        for entities in [vec![person(), org()], vec![org(), person()]] {
-            let out = structural().apply(entities);
-            assert_eq!(out.kept.len(), 1);
-            assert_eq!(out.kept[0].label, LabelRef::new("ORGANIZATION"));
-            assert!(has_kind(&out.kept[0], |k| matches!(
-                k,
-                AuditKind::Conflict(c) if c.competing_label == LabelRef::new("PERSON_NAME")
-            )));
+        for (weak, strong) in [(0.5, 0.9), (0.8, 0.9)] {
+            let person = || entity("PERSON_NAME", 0, 12, weak);
+            let org = || entity("ORGANIZATION", 0, 12, strong);
+            for entities in [vec![person(), org()], vec![org(), person()]] {
+                let out = structural().apply(entities);
+                assert_eq!(out.kept.len(), 1);
+                assert_eq!(out.kept[0].label, LabelRef::new("ORGANIZATION"));
+                assert!(has_kind(&out.kept[0], |k| matches!(
+                    k,
+                    AuditKind::Conflict(c) if c.competing_label == LabelRef::new("PERSON_NAME")
+                )));
+            }
         }
     }
 

@@ -130,8 +130,13 @@ impl<M: Modality> Entity<M> {
     }
 
     /// A digest of everything the entity says: its id, label, location,
-    /// confidence, coreference, language, and recognized range, and its audit
-    /// trail through the trail's [`tip`](AuditLog::tip).
+    /// confidence, coreference, language, and recognized range, and every
+    /// event of its audit trail by hash, in the order recorded.
+    ///
+    /// The order counts: a trail's readers ([`is_suppressed`](Self::is_suppressed),
+    /// its latest selection and redaction) take the last event of a kind, and a
+    /// trail with two sibling events swapped still verifies, with the same
+    /// tip.
     ///
     /// A trail [verifies](AuditLog::verify) on its own, but the fields beside
     /// it are free to change: a label or location edited without an event
@@ -153,7 +158,11 @@ impl<M: Modality> Entity<M> {
                 .raw(&(range.end as u64).to_le_bytes()),
             None => hasher.byte(0),
         };
-        hasher.raw(self.audit.tip().as_bytes()).finish()
+        hasher.raw(&(self.audit.events().len() as u64).to_le_bytes());
+        for event in self.audit.events() {
+            hasher.raw(event.hash().as_bytes());
+        }
+        hasher.finish()
     }
 
     /// Record `event` on the audit trail, taking its confidence as the
@@ -274,6 +283,37 @@ mod tests {
         let conf = Confidence::MAX;
         let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternRule::default());
         Entity::new(LabelRef::new("NAME"), loc).with_event(birth)
+    }
+
+    /// Two recognizers' findings fused: swapping the sibling births leaves a
+    /// trail that verifies, with the same tip, but not the same digest.
+    #[test]
+    fn the_digest_covers_the_order_of_sibling_events() {
+        let loc = TextLocation::inline(0..5);
+        let conf = Confidence::MAX;
+        let births = [
+            AuditEvent::pattern("a", conf, loc.clone(), PatternRule::default()),
+            AuditEvent::pattern("b", conf, loc.clone(), PatternRule::default()),
+        ]
+        .map(|birth| AuditLog::new(birth).into_events().remove(0));
+        let parents: Vec<_> = births.iter().map(AuditEvent::hash).collect();
+        let fusion = AuditEvent::fusion("max", conf);
+        // The same fusion over the same parents; only the births' order differs.
+        let fused = |births: [AuditEvent<Text>; 2]| {
+            let mut entity = Entity::<Text>::new("NAME", loc.clone());
+            entity.audit.absorb(births);
+            entity.audit.record_fusion(fusion.clone(), parents.clone());
+            entity
+        };
+        let [a, b] = births;
+        let entity = fused([a.clone(), b.clone()]);
+        let swapped = fused([b, a]);
+
+        assert!(swapped.audit.verify().is_ok());
+        assert_eq!(swapped.audit.tip(), entity.audit.tip());
+        let mut same = swapped.clone();
+        same.id = entity.id;
+        assert_ne!(same.digest(), entity.digest());
     }
 
     #[test]
