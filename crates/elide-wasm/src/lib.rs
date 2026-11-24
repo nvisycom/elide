@@ -8,8 +8,9 @@
 //! The pipeline is exposed to JavaScript as a set of opaque handles composed by
 //! static factory methods, mirroring the [`elide`] facade's own split between
 //! detection and redaction. JavaScript builds recognizers (a
-//! [`Recognizer`](recognizer::Recognizer) from patterns or a NER callback) and
-//! enrichers, folds them into an [`Analyzer`](analyzer::Analyzer) per modality,
+//! [`Recognizer`](recognizer::Recognizer) from patterns, or from a NER or LLM
+//! model behind a JS-callback [`Backend`](backend::Backend)) and enrichers,
+//! folds them into an [`Analyzer`](analyzer::Analyzer) per modality,
 //! adds each stage to an [`Orchestrator`](orchestrator::Orchestrator), and drives it
 //! over a blob with [`redact`](orchestrator::Orchestrator::redact): the format hint picks the
 //! codec, the codec decodes the bytes into a modality, and the pipeline
@@ -23,6 +24,7 @@
 
 pub mod analyzer;
 pub mod anonymizer;
+pub mod backend;
 pub mod enricher;
 pub mod error;
 pub mod layer;

@@ -27,7 +27,14 @@ and this project adheres to
   through language routing and failover alike
 - WebAssembly bindings (`elide-wasm`) that run the detect-and-redact pipeline
   in a browser, over every format but MP3; a blob with no format hint is
-  recognized by its leading bytes, and a PDF's text is located on its page
+  recognized by its leading bytes, and a PDF's text is located on its page.
+  NER, LLM, language detection, OCR, and STT models are JavaScript callbacks
+  behind a `Backend` with rate and concurrency limits, failover, and language
+  routes, and every redaction operator but pseudonymization is available.
+  Each entity reports the text it matched, its span in UTF-16 as well as
+  bytes, the recognizers and models that found it, and the operator that
+  redacted it
+- The rate limiter runs on wasm32, on the browser's clock and timer
 
 #### Formats
 
@@ -75,6 +82,9 @@ and this project adheres to
   whose edits (`include`, `relabel`, `relocate`, `suppress`,
   `suppress_within`) are recorded as `Manual` audit events attributed to its
   `by` and `because`
+- `Orchestrator::read` reads the data at locations in any part of a document,
+  embedded ones included, such as what each entity covers before
+  `anonymize_with` changes it
 - `Orchestrator::pick` records on every entity the operator `anonymize_with`
   will apply, as a `Selection` event, so a review can show the plan before
   anything is applied

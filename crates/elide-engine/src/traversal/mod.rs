@@ -7,7 +7,9 @@
 //! the stream leaves, recurse into each blob, enforce the depth limit — and differ
 //! only in *what* a stream leaf does and whether a blob child folds back.
 //! A [`Walk`] owns the shared structure; a [`PartVisitor`] supplies the
-//! per-phase leaf behavior. [`Analyze`] and [`Redact`] are the two visitors.
+//! per-phase leaf behavior. [`Analyze`] and [`Redact`] are the two phase
+//! visitors, and [`Read`] reads data at given locations without changing
+//! anything.
 
 mod phase;
 mod walk;
@@ -17,7 +19,7 @@ use elide_codec::{Document as CodecDocument, StreamMut};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
-pub(crate) use self::phase::{Analyze, Redact};
+pub(crate) use self::phase::{Analyze, Read, Redact};
 pub(crate) use self::walk::Walk;
 use crate::Orchestrator;
 use crate::analysis::StrippedRecord;
@@ -65,6 +67,13 @@ pub(crate) trait PartVisitor: Send {
 
     /// The record the walk adds each document's stripped hidden content to.
     fn stripped(&mut self) -> &mut StrippedRecord;
+
+    /// Whether the walk decodes and descends into the blob `part`. Analysis and
+    /// redaction enter every blob; a read enters only those holding a part it
+    /// reads, so an embedding it has no use for is not decoded.
+    fn enters(&self, _part: &PartId) -> bool {
+        true
+    }
 }
 
 /// A blob after the walk tried to decode it.

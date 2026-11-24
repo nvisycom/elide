@@ -5,7 +5,21 @@
 // Types-only — there is no `_shared.js`.
 
 import type { Modality } from "./dist/elide_wasm.js";
-export type { Modality, Location, Entity, Report } from "./dist/elide_wasm.js";
+export type {
+  Modality,
+  Location,
+  Span,
+  Rendered,
+  Rect,
+  Entity,
+  Source,
+  Redaction,
+  LeakProfile,
+  Report,
+  Stripped,
+  HiddenContent,
+  HiddenContentKind,
+} from "./dist/elide_wasm.js";
 
 /** The text modality: plain or structured text addressed by byte ranges. */
 export type Text = "text";

@@ -9,8 +9,8 @@ The [Elide](https://github.com/nvisycom/elide) detect-and-redact pipeline runs
 entirely in the browser — no text, image, or audio ever leaves the page. It
 covers text, tabular, image, and audio, and the DOCX, PPTX, XLSX, and PDF
 documents that hold them, combining deterministic patterns with
-browser-supplied NER, OCR, and speech-to-text models, and rewrites the input
-with a policy-driven anonymizer.
+browser-supplied NER, LLM, OCR, and speech-to-text models, and rewrites the
+input with a policy-driven anonymizer.
 
 ## Installation
 
@@ -41,7 +41,10 @@ const orchestrator = new Orchestrator().with(
 const bytes = new TextEncoder().encode("Email me at dana.reed@example.com.");
 const { redacted, entities } = await orchestrator.redact(bytes, "txt");
 new TextDecoder().decode(redacted); // -> "Email me at [EMAIL]."
-entities; // -> the detected entities, each with a label and location
+entities[0].value;    // -> "dana.reed@example.com", what it matched
+entities[0].location; // -> { kind: "text", start, end, utf16: { start, end } }
+entities[0].sources;  // -> which recognizers (and models) found it
+entities[0].redaction; // -> { operator: "replace", leakProfile: "irrecoverable" }
 ```
 
 An `Orchestrator` pairs a detect side (an `Analyzer`) with an optional redact
@@ -50,16 +53,31 @@ side (an `Anonymizer`) per modality, then runs the pipeline over a blob with
 recognize a binary format by its leading bytes. Omit the anonymizer to use the
 default policy. The orchestrator is reusable across many `redact` calls.
 
-Browser-supplied models — NER, OCR, speech-to-text — are passed as async
-callbacks; language detection is built in:
+Browser-supplied models — NER, an LLM, language detection, OCR,
+speech-to-text — are async callbacks, each wrapped in a `Backend` that can be
+rate- and concurrency-limited, fail over, or route by language, detected or
+asserted with `Orchestrator.withLanguages`:
 
 ```typescript
-import { Analyzer, Recognizer, Enricher, Layer } from "@nvisy/elide/analyzer";
+import {
+  Analyzer, Backend, Enricher, Layer, Recognizer,
+  type LlmCallback, type OcrCallback,
+} from "@nvisy/elide/analyzer";
 
-const analyzer = Analyzer.image()
-  .enrich(Enricher.ocr(async (image) => runOcr(image))) // Promise<OcrRegion[]>
+const image = Analyzer.image()
+  .enrich(Enricher.ocr(Backend.callback<OcrCallback>(runOcr))) // Promise<OcrRegion[]>
   .recognize(Recognizer.pattern({ builtinPatterns: true }))
   .layer(Layer.filter(0.5));
+
+// The recognizer renders the prompt and places the answer in the text; the
+// callback only calls the model, asking for output in `request.schema`.
+const llm = Backend.callback<LlmCallback>(async (prompt, request) =>
+  callModel(prompt, request.schema), // Promise<{ entities, model? }>
+)
+  .rateLimited({ count: 60, intervalMs: 60_000 })
+  .concurrencyLimited(4)
+  .fallbackRouted(Backend.callback<LlmCallback>(callSmallerModel));
+const text = Analyzer.text().recognize(Recognizer.llm(llm));
 ```
 
 ## Features
@@ -71,11 +89,13 @@ const analyzer = Analyzer.image()
 - **Compile-time type-safety** — each handle is branded with the modalities it
   applies to, so a wrong pairing (an OCR enricher on a text analyzer) is a
   TypeScript error, not a runtime surprise.
-- **Bring your own models** — NER, OCR, and STT are async JavaScript callbacks;
-  wire a remote endpoint, `transformers.js`, or a WebGPU model.
+- **Bring your own models** — NER, LLM, language detection, OCR, and STT are
+  async JavaScript callbacks; wire a remote endpoint, `transformers.js`, or a WebGPU model, and
+  bound it with rate and concurrency limits, a fallback, and language routes.
 - **Configurable pipelines** — reconcile/filter layers on the detect side,
-  label/fallback rules with `replace`/`mask`/`remove`/`cover`/… operators on the redact
-  side.
+  label/fallback rules on the redact side, with operators from `replace`,
+  `mask`, and `cover` to `fake`, `hmac`, `encrypt`, `generalizeDate`, `blur`,
+  and `beep`.
 - **Nothing leaves the page** — no network, no filesystem, no worker threads.
 
 ## Subpath exports
@@ -83,7 +103,7 @@ const analyzer = Analyzer.image()
 | Import | Provides |
 | --- | --- |
 | `@nvisy/elide` | `Orchestrator`, `ElideError`, the modality and result types |
-| `@nvisy/elide/analyzer` | `Analyzer`, `Recognizer`, `Enricher`, `Layer` |
+| `@nvisy/elide/analyzer` | `Analyzer`, `Recognizer`, `Enricher`, `Layer`, `Backend` |
 | `@nvisy/elide/anonymizer` | `Anonymizer`, `Rule`, `Operator`, `Label` |
 
 ## Building

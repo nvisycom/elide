@@ -1,22 +1,25 @@
 //! The STT enricher building block: speech-to-text in JavaScript.
 //!
 //! `elide-audio` ships the STT contract but no engine; the browser supplies one.
-//! [`Enricher::stt`](super::Enricher::stt) takes an async JS callback
-//! `(audio) => Promise<Segment[]>` and wraps it in an STT backend behind an
-//! [`SttEnricher`], so a text recognizer can scan the transcript and matched
-//! time spans are silenced.
+//! [`Enricher::stt`](super::Enricher::stt) takes a [`Backend`] whose callback is
+//! `(audio) => Promise<Segment[]>` and builds an [`SttEnricher`] over it, so a
+//! text recognizer can scan the transcript and matched time spans are silenced.
 
-use elide::backend::Backend;
+use elide::backend::Backend as BackendTrait;
 use elide::enrichment::stt::{SttEnricher, SttRequest, SttResponse};
 use elide::entity::audit::ModelId;
 use elide::modality::audio::TranscriptSegment;
 use elide::primitive::TimeSpan;
 use elide::{Error, Result};
-use js_sys::{Function, Promise, Uint8Array};
-use send_wrapper::SendWrapper;
+use js_sys::{Array, Uint8Array};
 use serde::Deserialize;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsValue;
+
+use crate::backend::{Backend, Composed, JsCallback};
+
+/// The component's name, and the model every response of the callback
+/// names.
+const NAME: &str = "js-callback-stt";
 
 /// One transcript segment the JS callback returns.
 #[derive(Deserialize)]
@@ -31,45 +34,23 @@ struct Segment {
 }
 
 /// An STT backend that defers transcription to a JavaScript callback.
-///
-/// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
-/// `Send + Sync` bound the enricher requires — sound on single-threaded wasm.
-pub(super) struct JsCallbackBackend {
-    callback: SendWrapper<Function>,
-}
-
-impl JsCallbackBackend {
-    fn new(callback: Function) -> Self {
-        Self {
-            callback: SendWrapper::new(callback),
-        }
-    }
-
-    /// Invoke the callback with the audio bytes and await its promise, keeping
-    /// the `!Send` work inside a [`SendWrapper`] future.
-    async fn call_js(&self, audio: Vec<u8>) -> std::result::Result<JsValue, JsValue> {
-        SendWrapper::new(async move {
-            let bytes = Uint8Array::from(audio.as_slice());
-            let ret = self.callback.call1(&JsValue::NULL, &bytes)?;
-            JsFuture::from(Promise::resolve(&ret)).await
-        })
-        .await
-    }
-}
+pub(crate) struct JsSttBackend(JsCallback);
 
 #[async_trait::async_trait]
-impl Backend for JsCallbackBackend {
+impl BackendTrait for JsSttBackend {
     type Request<'a> = SttRequest<'a>;
     type Response = SttResponse;
 
     async fn call(&self, request: SttRequest<'_>) -> Result<SttResponse> {
-        let value = self
-            .call_js(request.audio.to_vec())
-            .await
-            .map_err(super::js_to_error)?;
-        let segments: Vec<Segment> = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            Error::malformed(format!("STT callback returned an unreadable value: {e}"))
-        })?;
+        let (audio, language) = (request.audio, request.language);
+        let segments: Vec<Segment> = self
+            .0
+            .call("STT", move || {
+                let language =
+                    language.map_or(JsValue::UNDEFINED, |tag| JsValue::from_str(tag.as_str()));
+                Ok(Array::of2(&Uint8Array::from(audio), &language))
+            })
+            .await?;
         // The callback's time offsets are untrusted: reject a reversed span
         // fail-closed rather than let it be silently clamped to zero length.
         let segments = segments
@@ -87,16 +68,11 @@ impl Backend for JsCallbackBackend {
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(SttResponse::new(model(), segments))
+        Ok(SttResponse::new(ModelId::new(NAME), segments))
     }
 }
 
-/// Build an STT enricher whose transcription is the JavaScript `callback`.
-pub(super) fn build_stt(callback: Function) -> SttEnricher<JsCallbackBackend> {
-    SttEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-stt")
-}
-
-/// The model every response of the JavaScript callback names.
-fn model() -> ModelId {
-    ModelId::new("js-callback-stt")
+/// Build an STT enricher whose transcription is `backend`'s JavaScript callback.
+pub(super) fn build_stt(backend: Backend) -> SttEnricher<Composed<JsSttBackend>> {
+    SttEnricher::new(backend.build(&JsSttBackend)).with_name(NAME)
 }

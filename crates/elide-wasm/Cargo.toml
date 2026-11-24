@@ -29,10 +29,17 @@ elide = { path = "../elide", version = "0.1.0", default-features = false, featur
     "engine",
     "pattern",
     "ner",
+    "llm",
+    "llm-jinja2",
+    "ratelimit",
+    "routing",
     "ocr",
     "stt",
-    "lingua",
     "operator-fake",
+    "operator-sha2",
+    "operator-hmac",
+    "operator-aes",
+    "operator-datetime",
     "codec-text",
     "codec-csv",
     "codec-xlsx",
@@ -53,6 +60,8 @@ js-sys = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true, features = [] }
 serde-wasm-bindgen = { workspace = true, features = [] }
+serde_json = { workspace = true, features = [] }
+schemars = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 tsify = { workspace = true, features = [] }
 console_error_panic_hook = { workspace = true, features = [] }
@@ -62,9 +71,6 @@ console_error_panic_hook = { workspace = true, features = [] }
 send_wrapper = { workspace = true, features = ["futures"] }
 
 [dev-dependencies]
-# (De)serialization
-serde_json = { workspace = true, features = [] }
-
 # WebAssembly / browser bindings
 wasm-bindgen-test = { workspace = true, features = [] }
 

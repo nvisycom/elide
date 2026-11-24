@@ -4,8 +4,28 @@ use std::time::Duration;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::future::TimeoutFuture;
+#[cfg(target_arch = "wasm32")]
+use send_wrapper::SendWrapper;
 use tokio::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::{Instant, sleep};
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
+/// Wait for `duration` on the browser's `setTimeout`.
+///
+/// The timer future holds a JS closure, so it is not `Send`; [`SendWrapper`]
+/// lets it be awaited inside the `Send` futures a [`Backend`] returns. That is
+/// sound on wasm32, which runs this on one thread.
+#[cfg(target_arch = "wasm32")]
+async fn sleep(duration: Duration) {
+    // `setTimeout` takes whole milliseconds; round up so a wait never ends
+    // before the bucket has refilled.
+    let millis = u32::try_from(duration.as_micros().div_ceil(1000)).unwrap_or(u32::MAX);
+    SendWrapper::new(TimeoutFuture::new(millis)).await;
+}
 
 /// A token bucket: `capacity` tokens that refill at a steady rate.
 ///

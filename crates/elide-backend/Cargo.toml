@@ -27,8 +27,9 @@ default = []
 
 ## The runtime-bound decorators in `limit`: `ConcurrencyLimited` (a semaphore
 ## caps simultaneous calls) and `RateLimited` (a token bucket caps calls per
-## interval). Pulls the Tokio sync and time primitives.
-ratelimit = ["dep:tokio"]
+## interval). Pulls the Tokio sync and time primitives; on wasm32, the
+## rate limiter's clock and timer come from the browser instead.
+ratelimit = ["dep:tokio", "dep:web-time", "dep:gloo-timers", "dep:send_wrapper"]
 
 [dependencies]
 # Internal crates
@@ -36,7 +37,19 @@ elide-core = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-tokio = { workspace = true, features = ["sync", "time"], optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
+
+# Native builds pace the rate limiter on Tokio's clock and timer.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["time"], optional = true }
+
+# wasm32 has no Tokio clock or timer: `Instant::now()` panics there and
+# `sleep` needs a Tokio runtime. The rate limiter reads `performance.now()`
+# and sleeps on `setTimeout` instead.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = { workspace = true, features = [], optional = true }
+gloo-timers = { workspace = true, features = ["futures"], optional = true }
+send_wrapper = { workspace = true, features = ["futures"], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism

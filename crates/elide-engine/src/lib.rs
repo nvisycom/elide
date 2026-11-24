@@ -27,7 +27,7 @@ pub use self::analysis::{
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
 use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
-use self::traversal::{Analyze, Redact, Walk};
+use self::traversal::{Analyze, PartVisitor, Read, Redact, Walk};
 
 /// Drives detection and redaction across a set of documents, part by part.
 ///
@@ -467,6 +467,47 @@ impl Orchestrator {
             }
         }
         Ok(())
+    }
+
+    /// Read the data at each of `locations` in `documents`, each a location in
+    /// the part its [`PartId`] names: one result per location, in the order
+    /// given.
+    ///
+    /// The random-access counterpart to the redaction walk: a review layer
+    /// reads what an entity covers (its matched text, its cell) from the
+    /// documents it was detected in, before [`anonymize_with`] changes them.
+    /// Parts inside embedded files are reached the way [`analyze`] reached
+    /// them; an embedding holding no part to read is not decoded.
+    ///
+    /// A location fails on its own, so one unreadable location costs only its
+    /// own read: [`NotFound`](elide_core::ErrorKind::NotFound) when its part is
+    /// in none of `documents`, and [`MalformedInput`](elide_core::ErrorKind::MalformedInput)
+    /// when the part is not of modality `M` or the location addresses nothing
+    /// in it.
+    ///
+    /// # Errors
+    ///
+    /// A decode error of an embedding on the way, which leaves every location
+    /// unread.
+    ///
+    /// [`analyze`]: Self::analyze
+    /// [`anonymize_with`]: Self::anonymize_with
+    pub async fn read<M: Modality>(
+        &self,
+        mut documents: impl AsDocuments,
+        locations: &[(PartId, M::Location)],
+    ) -> Result<Vec<Result<M::Data>>> {
+        let mut visitor = Read::<M>::new(locations);
+        for document in documents.as_documents_mut().iter_mut() {
+            let prefix = document.id();
+            if !visitor.enters(&prefix) {
+                continue;
+            }
+            Walk::new(self, &mut visitor)
+                .parts(&mut document.document, &prefix, 0)
+                .await?;
+        }
+        Ok(visitor.finish())
     }
 
     /// Detect and redact a whole set of documents in one call, with no review.

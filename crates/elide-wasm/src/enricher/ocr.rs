@@ -1,25 +1,29 @@
 //! The OCR enricher building block: image text recognition in JavaScript.
 //!
 //! `elide-image` ships the OCR contract but no engine; the browser supplies one.
-//! [`Enricher::ocr`](super::Enricher::ocr) takes an async JS callback
-//! `(image) => Promise<OcrRegion[]>` and wraps it in an OCR backend behind an
-//! [`OcrEnricher`], so a text recognizer can scan the recognized image text and
-//! the matched regions are redacted from the pixels.
+//! [`Enricher::ocr`](super::Enricher::ocr) takes a [`Backend`] whose callback is
+//! `(image) => Promise<OcrRegion[]>` and builds an [`OcrEnricher`] over it, so
+//! a text recognizer can scan the recognized image text and the matched regions
+//! are redacted from the pixels.
 //!
 //! The callback returns a flat list of positioned text regions — a word, or a
 //! coarser run — each with its own box, the shape browser OCR engines emit.
 
-use elide::backend::Backend;
+use elide::Result;
+use elide::backend::Backend as BackendTrait;
 use elide::enrichment::ocr::{OcrEnricher, OcrRequest, OcrResponse};
 use elide::entity::audit::ModelId;
 use elide::modality::image::{ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, Dimensions, Point};
-use elide::{Error, Result};
-use js_sys::{Function, Promise, Uint8Array};
-use send_wrapper::SendWrapper;
+use js_sys::{Array, Uint8Array};
 use serde::Deserialize;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsValue;
+
+use crate::backend::{Backend, Composed, JsCallback};
+
+/// The component's name, and the model every response of the callback
+/// names.
+const NAME: &str = "js-callback-ocr";
 
 /// One recognized text region the JS callback returns: the text, its box (the
 /// top-left corner and size, in pixels), and an optional confidence.
@@ -57,59 +61,32 @@ impl OcrRegion {
 }
 
 /// An OCR backend that defers recognition to a JavaScript callback.
-///
-/// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
-/// `Send + Sync` bound the enricher requires — sound on single-threaded wasm.
-pub(super) struct JsCallbackBackend {
-    callback: SendWrapper<Function>,
-}
-
-impl JsCallbackBackend {
-    fn new(callback: Function) -> Self {
-        Self {
-            callback: SendWrapper::new(callback),
-        }
-    }
-
-    /// Invoke the callback with the image bytes and await its promise, keeping
-    /// the `!Send` work inside a [`SendWrapper`] future.
-    async fn call_js(&self, image: Vec<u8>) -> std::result::Result<JsValue, JsValue> {
-        SendWrapper::new(async move {
-            let bytes = Uint8Array::from(image.as_slice());
-            let ret = self.callback.call1(&JsValue::NULL, &bytes)?;
-            JsFuture::from(Promise::resolve(&ret)).await
-        })
-        .await
-    }
-}
+pub(crate) struct JsOcrBackend(JsCallback);
 
 #[async_trait::async_trait]
-impl Backend for JsCallbackBackend {
+impl BackendTrait for JsOcrBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
 
     async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
-        let value = self
-            .call_js(request.image.to_vec())
-            .await
-            .map_err(super::js_to_error)?;
-        let regions: Vec<OcrRegion> = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            Error::malformed(format!("OCR callback returned an unreadable value: {e}"))
-        })?;
+        let (image, language) = (request.image, request.language);
+        let regions: Vec<OcrRegion> = self
+            .0
+            .call("OCR", move || {
+                let language =
+                    language.map_or(JsValue::UNDEFINED, |tag| JsValue::from_str(tag.as_str()));
+                Ok(Array::of2(&Uint8Array::from(image), &language))
+            })
+            .await?;
         let regions = regions
             .into_iter()
             .map(OcrRegion::into_layout_region)
             .collect();
-        Ok(OcrResponse::new(model(), regions))
+        Ok(OcrResponse::new(ModelId::new(NAME), regions))
     }
 }
 
-/// Build an OCR enricher whose recognition is the JavaScript `callback`.
-pub(super) fn build_ocr(callback: Function) -> OcrEnricher<JsCallbackBackend> {
-    OcrEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-ocr")
-}
-
-/// The model every response of the JavaScript callback names.
-fn model() -> ModelId {
-    ModelId::new("js-callback-ocr")
+/// Build an OCR enricher whose recognition is `backend`'s JavaScript callback.
+pub(super) fn build_ocr(backend: Backend) -> OcrEnricher<Composed<JsOcrBackend>> {
+    OcrEnricher::new(backend.build(&JsOcrBackend)).with_name(NAME)
 }

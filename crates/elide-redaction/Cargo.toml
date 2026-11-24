@@ -56,7 +56,7 @@ sha2 = ["dep:sha2", "dep:hex"]
 ## The keyed `HmacHash` operator (HMAC-SHA-256 / HMAC-SHA-512) and the shared `KeyProvider`.
 hmac = ["dep:hmac", "dep:sha2", "dep:hex", "dep:zeroize"]
 ## The reversible `AesEncrypt` operator (AES-256-GCM) and the shared `KeyProvider`.
-aes = ["dep:aes-gcm", "dep:base64", "dep:zeroize"]
+aes = ["dep:aes-gcm", "dep:base64", "dep:zeroize", "dep:getrandom"]
 ## The `GeneralizeDate` operator (reduce date/timestamp granularity).
 datetime = ["dep:jiff"]
 ## The locale-aware `Fake` redaction operator based on the `fake` crate.
@@ -96,6 +96,12 @@ tracing = { workspace = true, features = [] }
 
 # Templating & schema
 schemars = { workspace = true, features = [], optional = true }
+
+# On wasm the RNG `aes-gcm` draws its nonces from needs its browser entropy
+# backend enabled (paired with the `getrandom_backend` cfg in
+# `.cargo/config.toml`). Native builds are unaffected.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"], optional = true }
 
 [dev-dependencies]
 # Internal crates

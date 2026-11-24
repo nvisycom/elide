@@ -10,104 +10,104 @@ import type {
   Audio,
 } from "./_shared.js";
 import type {
-  LanguageSet,
   PatternRecognizerConfig,
+  RateConfig,
   SameLabelScoring,
   CrossLabelConfig,
 } from "./dist/elide_wasm.js";
+import type {
+  NerCallback,
+  LlmCallback,
+  LanguageCallback,
+  OcrCallback,
+  SttCallback,
+} from "./_callbacks.js";
 
+export type * from "./_callbacks.js";
 export type {
-  LanguagePreset,
-  LanguageSet,
   PatternRecognizerConfig,
+  RateConfig,
   SameLabelScoring,
   ExclusiveTiebreaker,
   CrossLabelConfig,
 } from "./dist/elide_wasm.js";
 
-/**
- * One span a {@link NerCallback} returns: a labeled byte range in the request
- * text with the model's confidence.
- */
-export interface NerSpan {
-  /** The canonical label id (e.g. `person`, `organization`). */
-  label: string;
-  /** Start byte offset of the span in the request text. */
-  start: number;
-  /** End byte offset (exclusive). */
-  end: number;
-  /** Model confidence in `[0, 1]`. */
-  score: number;
-}
+// Carries a backend's callback type, so a NER backend does not fit where an LLM
+// backend is required. Types-only.
+declare const callbackSymbol: unique symbol;
+
+/** Any model callback a {@link Backend} can wrap. */
+export type BackendCallback =
+  | NerCallback
+  | LlmCallback
+  | LanguageCallback
+  | OcrCallback
+  | SttCallback;
 
 /**
- * The NER inference callback {@link Recognizer.ner} wraps. It receives the text
- * to scan and the label ids the recognizer wants, and returns the spans its
- * model found — a promise, or the array directly.
- */
-export type NerCallback = (
-  text: string,
-  labels: string[],
-) => NerSpan[] | Promise<NerSpan[]>;
-
-/**
- * One recognized text region an {@link OcrCallback} returns: the text and its
- * box (top-left corner and size, in pixels), with an optional confidence.
+ * A model backend whose inference is a JS callback of type `C`, with the limits
+ * and routes that bound how it is called.
  *
- * A region is the atom OCR engines emit — typically a word, but a coarser run
- * (a whole line) works too. A recognizer scans the regions' text joined by
- * spaces; a match redacts the boxes of the regions it covers.
+ * Built by {@link Backend.callback} and handed to {@link Recognizer.ner},
+ * {@link Recognizer.llm}, {@link Enricher.language}, {@link Enricher.ocr} or
+ * {@link Enricher.stt}, which
+ * call it with their own arguments. The decorators are the toolkit's
+ * `BackendExt` ones, by the same names. Each method consumes the handle and
+ * returns the wrapped one, so a stack reads innermost first:
+ *
+ * ```ts
+ * const backend = Backend.callback<NerCallback>(callModel)
+ *   .rateLimited({ count: 60, intervalMs: 60_000 })
+ *   .concurrencyLimited(4)
+ *   .fallbackRouted(Backend.callback<NerCallback>(callSmallerModel));
+ * ```
  */
-export interface OcrRegion {
-  /** The recognized text of the region. */
-  text: string;
-  /** Left edge of the box, in pixels. */
-  x: number;
-  /** Top edge of the box, in pixels. */
-  y: number;
-  /** Box width, in pixels. */
-  width: number;
-  /** Box height, in pixels. */
-  height: number;
-  /** Recognition confidence in `[0, 1]`, when the engine reports it. */
-  confidence?: number;
+export interface Backend<C extends BackendCallback = BackendCallback> {
+  readonly [callbackSymbol]?: C;
+  /**
+   * Admit calls at `rate` (`count` per `intervalMs`, after an initial `burst`
+   * that defaults to `count`), waiting when it is used up. Throws on a zero
+   * count, interval or burst.
+   */
+  rateLimited(rate: RateConfig): Backend<C>;
+  /** Run at most `max` calls at once. Throws on zero. */
+  concurrencyLimited(max: number): Backend<C>;
+  /**
+   * Send a call whose callback throws or rejects to `fallback` instead. A
+   * response that cannot be read is not retried.
+   */
+  fallbackRouted(fallback: Backend<C>): Backend<C>;
+  /**
+   * Route requests by language: this backend serves every language without a
+   * {@link route}, and requests whose language is unknown.
+   */
+  languageRouted(): Backend<C>;
+  /**
+   * Send requests in `language` (a BCP-47 tag such as `de`) to `backend`.
+   * Throws on an invalid tag, or on a backend that is not
+   * {@link languageRouted}.
+   */
+  route(language: string, backend: Backend<C>): Backend<C>;
+  free(): void;
+  [Symbol.dispose](): void;
 }
 
-/**
- * The OCR inference callback {@link Enricher.ocr} wraps. It receives the encoded
- * image bytes and returns the recognized text regions — a promise, or the array
- * directly.
- */
-export type OcrCallback = (
-  image: Uint8Array,
-) => OcrRegion[] | Promise<OcrRegion[]>;
-
-/** One transcript segment an {@link SttCallback} returns, with its time span. */
-export interface SttSegment {
-  /** The transcribed text of the segment. */
-  text: string;
-  /** Segment start, in milliseconds. */
-  startMs: number;
-  /** Segment end, in milliseconds. */
-  endMs: number;
-}
-
-/**
- * The STT inference callback {@link Enricher.stt} wraps. It receives the encoded
- * audio bytes and returns the transcript segments — a promise, or the array
- * directly.
- */
-export type SttCallback = (
-  audio: Uint8Array,
-) => SttSegment[] | Promise<SttSegment[]>;
+/** Static constructors for a {@link Backend}. */
+export const Backend: {
+  /**
+   * A backend whose inference is `callback`. Name its type to have the
+   * callback's parameters typed: `Backend.callback<NerCallback>(...)`.
+   */
+  callback<C extends BackendCallback>(callback: C): Backend<C>;
+};
 
 /**
  * An opaque recognizer handle, branded with the modalities `M` it applies to.
  *
  * Built by {@link Recognizer.pattern} or {@link Recognizer.ner} (both
- * text-shaped, so every stage) and consumed by {@link Analyzer.recognize}. The
- * contravariant brand lets a recognizer that supports more modalities fit where
- * fewer are required.
+ * text-shaped, so every stage) or {@link Recognizer.llm} (text and image), and
+ * consumed by {@link Analyzer.recognize}. The contravariant brand lets a
+ * recognizer that supports more modalities fit where fewer are required.
  */
 export interface Recognizer<M extends StageModality = StageModality>
   extends Branded<M> {
@@ -119,8 +119,15 @@ export interface Recognizer<M extends StageModality = StageModality>
 export const Recognizer: {
   /** A pattern recognizer; applies to every text-shaped modality. */
   pattern(config: PatternRecognizerConfig): Recognizer<StageModality>;
-  /** A NER recognizer from a JS callback; applies to every text-shaped modality. */
-  ner(callback: NerCallback): Recognizer<StageModality>;
+  /** A NER recognizer over a JS-callback backend; applies to every text-shaped modality. */
+  ner(backend: Backend<NerCallback>): Recognizer<StageModality>;
+  /**
+   * An LLM recognizer over a JS-callback backend; applies to the text and
+   * image modalities. The prompt is the built-in wording, or `template`, a
+   * Jinja2 template over `text` (text stages), `language`, `target_labels` and
+   * `tags`. Throws if the template does not compile.
+   */
+  llm(backend: Backend<LlmCallback>, template?: string): Recognizer<Text | Image>;
 };
 
 /**
@@ -139,12 +146,16 @@ export interface Enricher<M extends StageModality = StageModality>
 
 /** Static constructors for an {@link Enricher}. */
 export const Enricher: {
-  /** The built-in language-detection enricher; applies to every modality. */
-  language(languages: LanguageSet): Enricher<StageModality>;
-  /** An OCR enricher from a JS callback; applies to the image modality. */
-  ocr(callback: OcrCallback): Enricher<Image>;
-  /** An STT enricher from a JS callback; applies to the audio modality. */
-  stt(callback: SttCallback): Enricher<Audio>;
+  /**
+   * A language-detection enricher over a JS-callback backend; applies to every
+   * modality. Throws on a `languageRouted` backend, which has no language to
+   * route a detection by.
+   */
+  language(backend: Backend<LanguageCallback>): Enricher<StageModality>;
+  /** An OCR enricher over a JS-callback backend; applies to the image modality. */
+  ocr(backend: Backend<OcrCallback>): Enricher<Image>;
+  /** An STT enricher over a JS-callback backend; applies to the audio modality. */
+  stt(backend: Backend<SttCallback>): Enricher<Audio>;
 };
 
 /**

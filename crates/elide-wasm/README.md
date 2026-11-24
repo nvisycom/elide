@@ -23,18 +23,27 @@ matched regions blacked out), and audio (with an STT enricher its transcript is
 scanned and matched spans silenced). Documents decode into those modalities:
 DOCX, PPTX and XLSX into their text, cells, images and properties, and PDF into
 its page text and images. A blob with no format hint is recognized by its
-leading bytes. The models the browser supplies — NER, OCR, STT — arrive as
-async JavaScript callbacks; language detection is a built-in pure-Rust
-enricher.
+leading bytes. The models the browser supplies — NER, an LLM, language
+detection, OCR, STT — arrive as async JavaScript callbacks, each wrapped in a `Backend` that can be rate- and
+concurrency-limited, fail over to another backend, or route by language, like
+the toolkit's own backend decorators; the LLM recognizer renders the prompt and
+places the model's answer, the callback only calls the model. Language
+detection is a callback too, rather than compiled-in models that would make the
+module several times larger; a caller can also assert the language with
+`Orchestrator.withLanguages`, and language routes follow either.
+Redaction has every operator but pseudonymization: replace, mask, truncate,
+clamp, generalize a date, fake, hash, HMAC, encrypt, remove, cover, keep, drop
+a row or column, blur, pixelate, and beep.
 
 The pipeline is asynchronous, and in the browser its work is driven by the
 page's own event loop rather than a Rust async runtime, so nothing here spawns
 threads, opens sockets, or touches a filesystem. Only the parts of the toolkit
 that compile to WebAssembly are pulled in — detection and redaction, the
-plain-text, office, PDF, image, and WAV codecs, and the pure-Rust enrichers; the
+plain-text, office, PDF, image, and WAV codecs; the
 native codecs and engines (MP3 encoding, PDF rasterizing, in-process
-OCR/STT/LLM models) are left out of the browser build, their models delegated
-to JavaScript instead. Without rasterizing, a PDF page whose text can't be
+OCR/STT/LLM models, the rig-based LLM clients) are left out of the browser
+build, their models delegated to JavaScript instead. The rate limiter keeps
+time with the page's own `performance.now()` and `setTimeout`. Without rasterizing, a PDF page whose text can't be
 placed (in a font whose widths can't be known, or written vertically) is
 refused, and a scanned page is redacted through its images, like any image.
 

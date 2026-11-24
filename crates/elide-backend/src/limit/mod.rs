@@ -9,7 +9,9 @@
 //! request rate at the one place every call passes through.
 //!
 //! `BatchChunked` needs no runtime and is always available; the other two wait
-//! on Tokio primitives and come with the `ratelimit` feature.
+//! on Tokio primitives and come with the `ratelimit` feature. On wasm32, where
+//! Tokio has no clock or timer, `RateLimited` reads the browser's
+//! `performance.now()` and sleeps on `setTimeout`.
 
 mod batch;
 #[cfg(feature = "ratelimit")]

@@ -123,14 +123,14 @@ impl Analyzer {
     ///
     /// # Errors
     ///
-    /// Errors if an enricher does not apply to text.
+    /// Errors if an enricher or a recognizer does not apply to text.
     pub(crate) fn build_text(self) -> Result<RustAnalyzer<Text>, ElideError> {
         let mut analyzer = RustAnalyzer::new();
         for enricher in self.enrichers {
             analyzer = enricher.apply_text(analyzer)?;
         }
         for recognizer in self.recognizers {
-            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Text>());
+            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Text>()?);
         }
         Ok(with_layers(analyzer, self.layers))
     }
@@ -139,14 +139,14 @@ impl Analyzer {
     ///
     /// # Errors
     ///
-    /// Errors if an enricher does not apply to tabular.
+    /// Errors if an enricher or a recognizer does not apply to tabular.
     pub(crate) fn build_tabular(self) -> Result<RustAnalyzer<Tabular>, ElideError> {
         let mut analyzer = RustAnalyzer::new();
         for enricher in self.enrichers {
             analyzer = enricher.apply_tabular(analyzer)?;
         }
         for recognizer in self.recognizers {
-            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Tabular>());
+            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Tabular>()?);
         }
         Ok(with_layers(analyzer, self.layers))
     }
@@ -155,14 +155,14 @@ impl Analyzer {
     ///
     /// # Errors
     ///
-    /// Errors if an enricher does not apply to image.
+    /// Errors if an enricher or a recognizer does not apply to image.
     pub(crate) fn build_image(self) -> Result<RustAnalyzer<Image>, ElideError> {
         let mut analyzer = RustAnalyzer::new();
         for enricher in self.enrichers {
             analyzer = enricher.apply_image(analyzer)?;
         }
         for recognizer in self.recognizers {
-            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Image>());
+            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Image>()?);
         }
         Ok(with_layers(analyzer, self.layers))
     }
@@ -171,14 +171,14 @@ impl Analyzer {
     ///
     /// # Errors
     ///
-    /// Errors if an enricher does not apply to audio.
+    /// Errors if an enricher or a recognizer does not apply to audio.
     pub(crate) fn build_audio(self) -> Result<RustAnalyzer<Audio>, ElideError> {
         let mut analyzer = RustAnalyzer::new();
         for enricher in self.enrichers {
             analyzer = enricher.apply_audio(analyzer)?;
         }
         for recognizer in self.recognizers {
-            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Audio>());
+            analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Audio>()?);
         }
         Ok(with_layers(analyzer, self.layers))
     }

@@ -44,6 +44,13 @@ new TextDecoder().decode(redacted); // "Email me at [EMAIL]."
 Without an anonymizer, a modality uses the default policy. An orchestrator
 can redact any number of blobs.
 
+Each entity says what it matched (`value`), where (`location`, discriminated
+by `kind`; a text span in bytes and in UTF-16 code units, the offsets a
+JavaScript string indexes by), which recognizers and models found it
+(`sources`), and which operator redacted it and how much that leaks
+(`redaction`). Offsets point into the decoded text: for a document, the text
+its codec extracted, and for a PDF, the page's text.
+
 Documents work the same way: a DOCX, PPTX, XLSX, or PDF decodes into the
 modalities it holds, and each is redacted by that modality's stage. The hint
 names the format by its extension; leave it out and a binary format is
@@ -52,35 +59,69 @@ the boxes it is drawn in.
 
 ## Models in the browser
 
-Language detection is built in. NER, OCR, and speech-to-text models are
-async callbacks, so they can call an endpoint, run `transformers.js`, or use
-a WebGPU model:
+NER, LLM, language detection, OCR, and speech-to-text models are async
+callbacks, so they can call an endpoint, run `transformers.js`, use a WebGPU
+model, or use what the browser ships, like its `LanguageDetector`. Each
+callback is wrapped in a `Backend`:
 
 ```typescript
-import { Analyzer, Recognizer, Enricher, Layer } from "@nvisy/elide/analyzer";
+import {
+  Analyzer, Backend, Enricher, Layer, Recognizer, type OcrCallback,
+} from "@nvisy/elide/analyzer";
 
 const analyzer = Analyzer.image()
-  .enrich(Enricher.ocr(async (image) => runOcr(image))) // Promise<OcrRegion[]>
+  .enrich(Enricher.ocr(Backend.callback<OcrCallback>(runOcr))) // Promise<OcrRegion[]>
   .recognize(Recognizer.pattern({ builtinPatterns: true }))
   .layer(Layer.filter(0.5));
 ```
 
+A backend takes the same decorators as a Rust one: `rateLimited` admits calls
+at a rate, `concurrencyLimited` caps the calls in flight, `fallbackRouted` sends a
+call whose callback throws to another backend, and `languageRouted` with its
+`route`s sends requests in one language to another backend: the language
+`Enricher.language` detects, or the one asserted with
+`Orchestrator.withLanguages(["de"])`.
+
+The LLM recognizer works as it does in Rust: it renders the prompt, from the
+built-in wording or a Jinja2 template, and places each candidate the model
+returns in the text by its `context`. The callback gets the prompt and a
+request carrying the answer's JSON Schema, the language, and on an image stage
+the image as PNG, and returns `{ entities, model? }`:
+
+```typescript
+import { Backend, Recognizer, type LlmCallback } from "@nvisy/elide/analyzer";
+
+const llm = Recognizer.llm(
+  Backend.callback<LlmCallback>((prompt, request) => callModel(prompt, request.schema))
+    .rateLimited({ count: 60, intervalMs: 60_000 }),
+);
+```
+
 Each handle is typed with the modalities it applies to, so an OCR enricher
-on a text analyzer is a type error.
+on a text analyzer, or an LLM recognizer on a tabular one, is a type error.
+
+Every redaction operator but pseudonymization is available: besides
+`replace`, `mask`, `remove`, `cover`, and `keep`, there are `truncate`,
+`clamp`, `generalizeDate`, `fake`, `hash`, `hmac`, and `encrypt` for text and
+cells, `dropRow` and `dropColumn` for tables, `blur` and `pixelate` for
+images, and `beep` for audio. Keys for `hmac` and `encrypt` are passed as
+bytes.
 
 | Import | Provides |
 |---|---|
 | `@nvisy/elide` | `Orchestrator`, `ElideError`, the modality and result types |
-| `@nvisy/elide/analyzer` | `Analyzer`, `Recognizer`, `Enricher`, `Layer` |
+| `@nvisy/elide/analyzer` | `Analyzer`, `Recognizer`, `Enricher`, `Layer`, `Backend` |
 | `@nvisy/elide/anonymizer` | `Anonymizer`, `Rule`, `Operator`, `Label` |
 
 ## What the browser build leaves out
 
 Text, tables, images, audio, and the documents that hold them all work in
 the browser. Left out are the parts that need a native library or a network
-client: MP3, PDF page rendering, and `RigBackend`. Without page rendering, a
-PDF page whose text can't be placed (in a font whose widths can't be known,
-or written vertically) is refused.
+client: MP3, PDF page rendering, and `RigBackend`, whose place the LLM
+callback takes. Without page rendering, a PDF page whose text can't be placed
+(in a font whose widths can't be known, or written vertically) is refused.
+Language detection is a callback rather than compiled-in models, which would
+make the module several times larger.
 
 To build the package and the demo from the repository:
 
