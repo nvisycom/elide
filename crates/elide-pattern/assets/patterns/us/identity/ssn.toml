@@ -1,7 +1,9 @@
 # US Social Security Number.
 #
-# Omits very-weak variants (bare 9 digits, off-position splits).
-# Context-keyword boost is expected to lift legitimate matches.
+# The separated form scores on its own; the nine digits run together are
+# too common to, so they score below the default threshold and are kept
+# only when a context keyword lifts them ("SSN: 123456789"). Off-position
+# splits are omitted.
 
 name = "ssn"
 labels = ["government_id"]
@@ -13,4 +15,9 @@ keywords = ["social security", "ssn", "tax id", "taxpayer identification"]
 [[variants]]
 regex = '\b(\d{3})[- .](\d{2})[- .](\d{4})\b'
 score = 0.5
+validator = "us.ssn"
+
+[[variants]]
+regex = '\b\d{9}\b'
+score = 0.05
 validator = "us.ssn"
