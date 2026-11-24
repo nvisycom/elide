@@ -17,7 +17,7 @@ let analyzer = Analyzer::<Text>::new()
 ## Calibrating
 
 Recognizers score on different scales: one model's 0.8 is not another's.
-Calibration is not a layer: wrap a recognizer in a `CalibratedRecognizer` and
+Calibration is not a layer: wrap a recognizer in a `Calibrated` and
 its scores are scaled as it reports them, before any layer runs, so the layers
 compare like with like. See [recognizer decorators](recognizer-decorators.md#calibration).
 

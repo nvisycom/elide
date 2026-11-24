@@ -1,12 +1,13 @@
-//! [`Calibration`]: how a [`CalibratedRecognizer`](super::CalibratedRecognizer)
-//! rescales its recognizer's confidence.
+//! [`Calibration`]: how a [`Calibrated`](super::Calibrated)
+//! rescales its recognizer's confidence, by [`Multiplier`]s.
 
 use std::collections::HashMap;
 
 use elide_core::entity::LabelRef;
-use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use super::Multiplier;
 
 /// A recognizer's confidence multipliers: one for every label, and others for
 /// the labels whose scores run differently.
@@ -18,144 +19,111 @@ use serde::{Deserialize, Serialize};
 /// differently per label (confident on names, overconfident on organizations)
 /// takes a multiplier per label on top.
 ///
-/// A multiplier is finite and non-negative, however the calibration is built
-/// (the constructors or deserialized): a negative or NaN multiplier has no
-/// meaning as a scale, and an infinite one turns a zero score into NaN. A large
-/// finite multiplier is allowed: scaled confidence clamps to `[0, 1]`.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(try_from = "Multipliers", into = "Multipliers")
-)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(with = "Multipliers"))]
-pub struct Calibration(Multipliers);
-
-/// A [`Calibration`]'s multipliers, as written.
-#[derive(Debug, Clone, PartialEq)]
+/// Every multiplier is a [`Multiplier`], checked as it is made, so building a
+/// calibration cannot fail. The default leaves every label as it is.
+///
+/// ```
+/// use elide_core::entity::builtins;
+/// use elide_detection::decorator::calibrated::{Calibration, Multiplier};
+///
+/// const REGEX: Multiplier = Multiplier::new(0.8).unwrap();
+/// const ORGANIZATIONS: Multiplier = Multiplier::new(0.6).unwrap();
+///
+/// let calibration = Calibration::scale(REGEX)
+///     .with_label(builtins::ORGANIZATION_NAME.to_ref(), ORGANIZATIONS);
+/// assert_eq!(calibration.factor(&builtins::PERSON_NAME.to_ref()), REGEX);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-struct Multipliers {
+pub struct Calibration {
     /// The multiplier for a label with none of its own.
-    #[cfg_attr(feature = "serde", serde(default = "unit"))]
-    scale: f64,
+    #[cfg_attr(feature = "serde", serde(default))]
+    scale: Multiplier,
     /// The multipliers for labels whose scores run differently.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "HashMap::is_empty")
     )]
-    labels: HashMap<LabelRef, f64>,
-}
-
-#[cfg(feature = "serde")]
-fn unit() -> f64 {
-    1.0
+    labels: HashMap<LabelRef, Multiplier>,
 }
 
 impl Calibration {
     /// Scale every label's confidence by `factor`.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Configuration`](elide_core::ErrorKind::Configuration) if
-    /// `factor` is negative or not finite.
-    pub fn scale(factor: f64) -> Result<Self> {
-        Ok(Self(Multipliers {
-            scale: checked("every label", factor)?,
+    pub fn scale(factor: Multiplier) -> Self {
+        Self {
+            scale: factor,
             labels: HashMap::new(),
-        }))
+        }
     }
 
     /// Scale `label`'s confidence by `factor` instead.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Configuration`](elide_core::ErrorKind::Configuration) if
-    /// `factor` is negative or not finite.
-    pub fn with_label(mut self, label: impl Into<LabelRef>, factor: f64) -> Result<Self> {
-        let label = label.into();
-        let factor = checked(label.as_str(), factor)?;
-        self.0.labels.insert(label, factor);
-        Ok(self)
+    #[must_use]
+    pub fn with_label(mut self, label: LabelRef, factor: Multiplier) -> Self {
+        self.labels.insert(label, factor);
+        self
     }
 
     /// The multiplier for `label`: its own, or the one for every label.
-    pub fn factor(&self, label: &LabelRef) -> f64 {
-        self.0.labels.get(label).copied().unwrap_or(self.0.scale)
-    }
-}
-
-/// `factor`, checked to be a scale: finite and non-negative.
-fn checked(of: &str, factor: f64) -> Result<f64> {
-    if factor.is_finite() && factor >= 0.0 {
-        Ok(factor)
-    } else {
-        Err(Error::configuration(format!(
-            "calibration multiplier for {of} must be finite and non-negative, got {factor}"
-        )))
-    }
-}
-
-impl TryFrom<Multipliers> for Calibration {
-    type Error = Error;
-
-    fn try_from(multipliers: Multipliers) -> Result<Self> {
-        multipliers.labels.into_iter().try_fold(
-            Self::scale(multipliers.scale)?,
-            |calibration, (label, factor)| calibration.with_label(label, factor),
-        )
-    }
-}
-
-impl From<Calibration> for Multipliers {
-    fn from(calibration: Calibration) -> Self {
-        calibration.0
+    pub fn factor(&self, label: &LabelRef) -> Multiplier {
+        self.labels.get(label).copied().unwrap_or(self.scale)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use elide_core::ErrorKind;
+    use elide_core::entity::builtins;
 
     use super::*;
 
-    #[test]
-    fn a_label_takes_its_own_multiplier_over_the_scale() {
-        let calibration = Calibration::scale(0.8)
-            .unwrap()
-            .with_label("ORGANIZATION", 0.5)
-            .unwrap();
-        assert_eq!(calibration.factor(&LabelRef::new("PERSON_NAME")), 0.8);
-        assert_eq!(calibration.factor(&LabelRef::new("ORGANIZATION")), 0.5);
+    fn multiplier(factor: f64) -> Multiplier {
+        Multiplier::new(factor).unwrap()
     }
 
     #[test]
-    fn a_negative_or_non_finite_multiplier_is_refused() {
-        for bad in [-0.5, f64::NAN, f64::INFINITY] {
-            assert_eq!(
-                Calibration::scale(bad).unwrap_err().kind(),
-                ErrorKind::Configuration
-            );
-            let labelled = Calibration::scale(1.0).unwrap().with_label("PERSON", bad);
-            assert_eq!(labelled.unwrap_err().kind(), ErrorKind::Configuration);
-        }
+    fn a_label_takes_its_own_multiplier_over_the_scale() {
+        let organization = builtins::ORGANIZATION_NAME.to_ref();
+        let calibration =
+            Calibration::scale(multiplier(0.8)).with_label(organization.clone(), multiplier(0.5));
+        assert_eq!(
+            calibration.factor(&builtins::PERSON_NAME.to_ref()),
+            multiplier(0.8)
+        );
+        assert_eq!(calibration.factor(&organization), multiplier(0.5));
+    }
+
+    #[test]
+    fn the_default_leaves_every_label_as_it_is() {
+        let calibration = Calibration::default();
+        assert_eq!(
+            calibration.factor(&builtins::PERSON_NAME.to_ref()),
+            Multiplier::IDENTITY
+        );
     }
 
     #[cfg(feature = "serde")]
     #[test]
     fn deserializing_checks_every_multiplier() {
         let calibration: Calibration =
-            serde_json::from_str(r#"{"scale": 0.8, "labels": {"PERSON": 0.5}}"#).unwrap();
-        assert_eq!(calibration.factor(&LabelRef::new("PERSON")), 0.5);
-        assert_eq!(calibration.factor(&LabelRef::new("EMAIL")), 0.8);
+            serde_json::from_str(r#"{"scale": 0.8, "labels": {"person_name": 0.5}}"#).unwrap();
+        assert_eq!(
+            calibration.factor(&builtins::PERSON_NAME.to_ref()),
+            multiplier(0.5)
+        );
+        assert_eq!(
+            calibration.factor(&builtins::EMAIL_ADDRESS.to_ref()),
+            multiplier(0.8)
+        );
 
         let labels_only: Calibration =
-            serde_json::from_str(r#"{"labels": {"PERSON": 0.5}}"#).unwrap();
-        assert_eq!(labels_only.factor(&LabelRef::new("EMAIL")), 1.0);
+            serde_json::from_str(r#"{"labels": {"person_name": 0.5}}"#).unwrap();
+        assert_eq!(
+            labels_only.factor(&builtins::EMAIL_ADDRESS.to_ref()),
+            Multiplier::IDENTITY
+        );
 
-        for bad in [r#"{"scale": -1.0}"#, r#"{"labels": {"PERSON": -1.0}}"#] {
+        for bad in [r#"{"scale": -1.0}"#, r#"{"labels": {"person_name": -1.0}}"#] {
             assert!(serde_json::from_str::<Calibration>(bad).is_err());
         }
     }

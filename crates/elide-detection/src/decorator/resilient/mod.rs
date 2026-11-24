@@ -1,6 +1,6 @@
 //! A [`Recognizer`] decorator that turns its errors into empty results.
 //!
-//! [`ResilientRecognizer`] keeps one failing recognizer from failing the whole
+//! [`Resilient`] keeps one failing recognizer from failing the whole
 //! analysis.
 
 use elide_core::entity::Entity;
@@ -17,7 +17,7 @@ use futures::future;
 /// error, which is the safe default: for a redaction tool, a recognizer that
 /// errors has *not* vouched that its subjects are clean, and silently dropping it
 /// could leave the entities it would have caught un-redacted. Wrap a recognizer
-/// in `ResilientRecognizer` only where that trade is made deliberately — a flaky,
+/// in `Resilient` only where that trade is made deliberately — a flaky,
 /// best-effort, or optional recognizer whose failure should degrade coverage
 /// rather than stop the pipeline. Recognizers left unwrapped stay fail-fast.
 ///
@@ -30,15 +30,15 @@ use futures::future;
 ///
 /// Because it is itself a `Recognizer` over the same modality, it drops in
 /// anywhere the inner recognizer goes and composes with the other decorators
-/// (e.g. wrap an [`EscalatingRecognizer`](crate::decorator::escalation::EscalatingRecognizer)
+/// (e.g. wrap an [`Escalating`](crate::decorator::escalating::Escalating)
 /// to make its whole escalation best-effort).
 #[derive(Component)]
-pub struct ResilientRecognizer<R> {
+pub struct Resilient<R> {
     #[component(delegate)]
     inner: R,
 }
 
-impl<R> ResilientRecognizer<R> {
+impl<R> Resilient<R> {
     /// Make `inner`'s failures non-fatal: logged and turned into empty results.
     #[must_use]
     pub fn new(inner: R) -> Self {
@@ -52,7 +52,7 @@ impl<R> ResilientRecognizer<R> {
 }
 
 #[async_trait::async_trait]
-impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
+impl<M: Modality, R: Recognizer<M>> Recognizer<M> for Resilient<R> {
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         match self.inner.recognize(subject, ctx).await {
             Ok(entities) => Ok(entities),
@@ -138,7 +138,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_recognize_yields_no_entities() {
-        let recognizer = ResilientRecognizer::new(AlwaysFails);
+        let recognizer = Resilient::new(AlwaysFails);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer
@@ -150,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_batch_yields_one_empty_list_per_subject() {
-        let recognizer = ResilientRecognizer::new(AlwaysFails);
+        let recognizer = Resilient::new(AlwaysFails);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let subjects = [subject("a"), subject("b"), subject("c")];
@@ -205,7 +205,7 @@ mod tests {
     /// subject, and the others keep their findings.
     #[tokio::test]
     async fn a_failing_subject_keeps_the_others_findings() {
-        let recognizer = ResilientRecognizer::new(FailsOnBad);
+        let recognizer = Resilient::new(FailsOnBad);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let subjects = [subject("good"), subject("bad"), subject("also good")];
@@ -244,7 +244,7 @@ mod tests {
     /// A failed empty batch still answers one list per subject: none.
     #[tokio::test]
     async fn a_failed_empty_batch_returns_no_lists() {
-        let recognizer = ResilientRecognizer::new(RejectsEveryBatch);
+        let recognizer = Resilient::new(RejectsEveryBatch);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer

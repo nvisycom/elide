@@ -35,7 +35,7 @@ impl ConfidenceThreshold {
 
     /// Construct a threshold, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.
-    pub fn new(threshold: f32) -> Option<Self> {
+    pub const fn new(threshold: f32) -> Option<Self> {
         if is_unit_interval(threshold) {
             Some(Self(threshold))
         } else {

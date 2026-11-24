@@ -1,6 +1,6 @@
 //! A [`Recognizer`] decorator that windows text too long for its recognizer.
 //!
-//! [`ChunkedRecognizer`] splits an over-long text so a length-limited
+//! [`Chunked`] splits an over-long text so a length-limited
 //! recognizer sees all of it.
 
 mod chunking;
@@ -51,13 +51,13 @@ use crate::batch::expect_one_per_input;
 /// the subject's hints still sees them, since every window carries them, but
 /// one that reads the enrichment artifact (tokens) gets none inside a window.
 #[derive(Component)]
-pub struct ChunkedRecognizer<R, C = WordWindows> {
+pub struct Chunked<R, C = WordWindows> {
     #[component(delegate)]
     inner: R,
     chunking: C,
 }
 
-impl<R> ChunkedRecognizer<R, WordWindows> {
+impl<R> Chunked<R, WordWindows> {
     /// Window `inner` with the default [`WordWindows`] strategy (the GLiNER2
     /// long-document setting: 384-word windows overlapping by 64 words).
     #[must_use]
@@ -66,7 +66,7 @@ impl<R> ChunkedRecognizer<R, WordWindows> {
     }
 }
 
-impl<R, C> ChunkedRecognizer<R, C> {
+impl<R, C> Chunked<R, C> {
     /// Window `inner` with an explicit [`Chunking`] strategy.
     #[must_use]
     pub fn with_chunking(inner: R, chunking: C) -> Self {
@@ -157,7 +157,7 @@ fn dedupe_exact(entities: Vec<Entity<Text>>) -> Vec<Entity<Text>> {
 }
 
 #[async_trait::async_trait]
-impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R, C> {
+impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for Chunked<R, C> {
     async fn recognize(
         &self,
         subject: &Subject<Text>,
@@ -392,8 +392,7 @@ mod tests {
     #[tokio::test]
     async fn a_mixed_batch_is_one_inner_call() {
         let recorder = Arc::new(Recorder::default());
-        let chunked =
-            ChunkedRecognizer::with_chunking(Arc::clone(&recorder), WordWindows::new(3, 1));
+        let chunked = Chunked::with_chunking(Arc::clone(&recorder), WordWindows::new(3, 1));
         let short = subject("a needle");
         let long = subject("w0 w1 w2 w3 needle w5");
         let scope = Scope::new();
@@ -418,8 +417,7 @@ mod tests {
     #[tokio::test]
     async fn windows_carry_the_language_claims_that_reach_them() {
         let recorder = Arc::new(Recorder::default());
-        let chunked =
-            ChunkedRecognizer::with_chunking(Arc::clone(&recorder), WordWindows::new(2, 0));
+        let chunked = Chunked::with_chunking(Arc::clone(&recorder), WordWindows::new(2, 0));
         let en = LanguageTag::parse("en").unwrap();
         let uk = LanguageTag::parse("uk").unwrap();
         let mut long = subject("aa bb cc dd");
@@ -447,10 +445,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_short_text_is_recognized_in_one_call() {
-        let recognizer = ChunkedRecognizer::with_chunking(
-            FindsSubstring::new("Jane", 0.9),
-            WordWindows::new(8, 2),
-        );
+        let recognizer =
+            Chunked::with_chunking(FindsSubstring::new("Jane", 0.9), WordWindows::new(8, 2));
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer
@@ -469,10 +465,8 @@ mod tests {
         // fire — a single window means no split — delegating the *original*
         // subject so its hints and artifact survive, rather than rebuilding a
         // window subject from a slice.
-        let recognizer = ChunkedRecognizer::with_chunking(
-            FindsSubstring::new("Jane", 0.9),
-            WordWindows::new(8, 2),
-        );
+        let recognizer =
+            Chunked::with_chunking(FindsSubstring::new("Jane", 0.9), WordWindows::new(8, 2));
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer
@@ -490,10 +484,8 @@ mod tests {
     async fn a_long_text_is_windowed_and_findings_are_rebased() {
         // 10 words, size 4, overlap 1 -> step 3 -> windows [0..4][3..7][6..10][9..10].
         let text = "w0 w1 w2 NEEDLE w4 w5 w6 w7 w8 w9";
-        let recognizer = ChunkedRecognizer::with_chunking(
-            FindsSubstring::new("NEEDLE", 0.9),
-            WordWindows::new(4, 1),
-        );
+        let recognizer =
+            Chunked::with_chunking(FindsSubstring::new("NEEDLE", 0.9), WordWindows::new(4, 1));
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer.recognize(&subject(text), &ctx).await.unwrap();
@@ -514,10 +506,8 @@ mod tests {
         // keeps one. (Both report the same confidence here; the point is one
         // survives, at the correct rebased offset.)
         let text = "a b c NEEDLE d e f g h i";
-        let recognizer = ChunkedRecognizer::with_chunking(
-            FindsSubstring::new("NEEDLE", 0.8),
-            WordWindows::new(4, 2),
-        );
+        let recognizer =
+            Chunked::with_chunking(FindsSubstring::new("NEEDLE", 0.8), WordWindows::new(4, 2));
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer.recognize(&subject(text), &ctx).await.unwrap();
@@ -533,7 +523,7 @@ mod tests {
         // windowed dedup keys on (span, label), so both labels survive even when
         // the span sits in a window overlap (so each window reports both).
         let text = "a b c NEEDLE d e f g h i";
-        let recognizer = ChunkedRecognizer::with_chunking(
+        let recognizer = Chunked::with_chunking(
             FindsSubstring::labelled("NEEDLE", &["PERSON", "ORG"], 0.8),
             WordWindows::new(4, 2),
         );
@@ -587,7 +577,7 @@ mod tests {
             TextData::new("header".to_owned()),
         );
         let subject = Subject::new(TextData::new(text.to_owned())).with_hints(vec![hint]);
-        let recognizer = ChunkedRecognizer::with_chunking(
+        let recognizer = Chunked::with_chunking(
             RecordsHints {
                 per_window_hint_count: Mutex::new(Vec::new()),
             },

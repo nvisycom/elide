@@ -7,7 +7,7 @@ use std::assert_matches;
 use elide::detection::Analyzer;
 use elide::detection::filter::ThresholdLayer;
 use elide::detection::overlap::{FuseLayer, ReconcileLayer};
-use elide::recognition::decorator::calibrated::{CalibratedRecognizer, Calibration};
+use elide::recognition::decorator::calibrated::{Calibrated, Calibration, Multiplier};
 use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
@@ -179,16 +179,14 @@ async fn each_recognizer_is_calibrated_on_its_own() {
         detected("ner", "PHONE_NUMBER", (10, 14), 0.9),
     ]);
     let analyzer = Analyzer::<Text>::new()
-        .with_recognizer(CalibratedRecognizer::new(
+        .with_recognizer(Calibrated::new(
             patterns,
-            Calibration::scale(0.5).unwrap(),
+            Calibration::scale(Multiplier::new(0.5).unwrap()),
         ))
-        .with_recognizer(CalibratedRecognizer::new(
+        .with_recognizer(Calibrated::new(
             ner,
-            Calibration::scale(1.0)
-                .unwrap()
-                .with_label("PERSON", 0.8)
-                .unwrap(),
+            Calibration::default()
+                .with_label(LabelRef::new("PERSON"), Multiplier::new(0.8).unwrap()),
         ));
 
     let mut entities = analyzer

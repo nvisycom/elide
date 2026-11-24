@@ -51,8 +51,7 @@ use elide_ner::backend::NerBackendExt;
 # async fn main() -> elide_core::Result<()> {
 let backend = MyModel
     .label_scoped([builtins::PERSON_NAME.to_ref(), builtins::ADDRESS.to_ref()])
-    .label_excluded([LabelRef::new("misc")])
-    .score_scaled([builtins::PERSON_NAME.to_ref()], 1.2);
+    .label_excluded([LabelRef::new("misc")]);
 let recognizer = NerRecognizer::new(backend);
 
 let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
@@ -72,10 +71,11 @@ The crate holds:
 - **`backend::NerRequest`** and **`backend::NerResponse`** — the contract a
   NER backend speaks: text, the labels to look for (`None` for a fixed-label
   model), and the language in; canonical `NerSpan`s out.
-- **`backend::LabelScoped`**, **`LabelExcluded`**, and **`ScoreScaled`** —
-  decorators that scope a model to the labels it supports, drop labels it
-  emits but should not, and rescale chosen labels' scores. `NerBackendExt`
-  applies each by method.
+- **`backend::LabelScoped`** and **`LabelExcluded`** — decorators that scope
+  a model to the labels it supports and drop labels it emits but should not.
+  `NerBackendExt` applies each by method. To rescale a model's scores, wrap
+  the recognizer in `elide-detection`'s `Calibrated`, which records
+  the model's own score and the multiplier apart.
 - **`backend::MockBackend`** (feature `mocks`) — a backend that finds
   nothing, for tests and examples.
 
