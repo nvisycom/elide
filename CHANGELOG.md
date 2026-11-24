@@ -62,8 +62,9 @@ and this project adheres to
 - Speech-to-text and OCR enrichers that make audio and images text-recognizable
 - An `Analyzer` per modality that runs enrichers, then recognizers, then the
   layers that fuse, arbitrate, and threshold their findings; recognizer
-  decorators `resilient`, `chunked`, `escalation`, and `calibrated`, the last
-  scaling a recognizer's confidence by a multiplier for it and per label
+  decorators `resilient`, `chunked`, `escalating`, and `calibrated`, the last
+  scaling a recognizer's confidence by a multiplier for it and per label,
+  each applied by method through `RecognizerExt`
 - A caller's `Scope` names the entity types to detect (an empty catalog
   detects nothing), the asserted languages and jurisdictions, and free-form
   document tags, purpose, and audience
@@ -82,6 +83,11 @@ and this project adheres to
 - A reviewer can mark text by where it sits rather than by span: raw bytes in
   a part (DOCX, PPTX, HTML, XML, JSON, TXT) or a region of a rendered
   PDF page. Applying the report resolves each mark to the text it covers
+- Applying a report returns it applied, with each entity's redaction record;
+  a `Report` is `#[must_use]`, so dropping that record is a warning. A report
+  reads back only with audit trails that verify, and `Report::digest` covers
+  every entity and its trail, for a deployment to anchor where the report's
+  carrier cannot write
 - Applying a report fails closed: a part with entities that no registered
   pipeline can apply, or that names no part of the documents, a mark the
   document cannot place, and a location a stream cannot read or write are

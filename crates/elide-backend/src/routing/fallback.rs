@@ -12,7 +12,7 @@ type Condition = Box<dyn Fn(&Error) -> bool + Send + Sync>;
 /// Calls a primary backend and, when the call fails, retries on a fallback.
 ///
 /// A hosted model has outages, quotas, and timeouts. Without failover, a failed
-/// call either fails the whole analysis or, behind a `ResilientRecognizer`,
+/// call either fails the whole analysis or, behind a `Resilient`,
 /// silently costs coverage. With it, the request is served by another model (a
 /// second provider, a local model) and the analysis fails only when every
 /// backend has failed, so it stays fail-safe.

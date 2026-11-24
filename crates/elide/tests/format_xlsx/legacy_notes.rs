@@ -35,7 +35,7 @@ async fn drawing(collaboration: Disposition) -> String {
         .await
         .expect("decode xlsx");
     let mut documents = [Document::new("book.xlsx", handle)];
-    orchestrator
+    let _applied = orchestrator
         .anonymize(&mut documents)
         .await
         .expect("anonymize");

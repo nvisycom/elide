@@ -12,7 +12,7 @@
 //! 2. [`filter`], drop entities below a confidence threshold.
 //!
 //! A recognizer whose scores run differently from the others' is calibrated
-//! before any layer, by wrapping it in a [`CalibratedRecognizer`].
+//! before any layer, by wrapping it in a [`Calibrated`].
 //!
 //! Each stage implements [`Layer`], returning a [`LayerOutput`]. Stages are
 //! pure and synchronous, reached through their submodules (e.g.
@@ -22,7 +22,7 @@
 //! [`GroupPredicate`]: overlap::group::GroupPredicate
 //! [`FuseLayer`]: overlap::FuseLayer
 //! [`Reconciler`]: overlap::Reconciler
-//! [`CalibratedRecognizer`]: crate::decorator::calibrated::CalibratedRecognizer
+//! [`Calibrated`]: crate::decorator::calibrated::Calibrated
 
 pub mod filter;
 pub mod overlap;

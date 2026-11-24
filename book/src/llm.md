@@ -38,5 +38,5 @@ backend parses it.
 
 A language model is the most capable recognizer and the most expensive.
 To spend less on it, run it only when cheaper recognizers are unsure, with
-an `EscalatingRecognizer`; see
+an `Escalating`; see
 [Recognizer decorators](recognizer-decorators.md#escalation).

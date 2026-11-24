@@ -56,14 +56,17 @@ The supported labels belong to the model, so they sit on the backend, not
 the recognizer. Behind a [language router](routing.md), each route can
 declare its own.
 
-Three decorators in `elide::recognition::ner::backend` shape a model's labels
-and scores, each also a method of `NerBackendExt`:
+Two decorators in `elide::recognition::ner::backend` shape a model's labels,
+each also a method of `NerBackendExt`:
 
 | Decorator | Method | Does |
 |---|---|---|
 | `LabelScoped` | `label_scoped(labels)` | Asks the model only for these labels, and keeps only these |
 | `LabelExcluded` | `label_excluded(labels)` | Drops spans with these labels, such as a generic `MISC` |
-| `ScoreScaled` | `score_scaled(labels, multiplier)` | Multiplies these labels' scores: above `1.0` boosts, below demotes |
+
+To rescale a model's scores, overall or per label, wrap the recognizer in a
+`Calibrated` (see [Calibration](recognizer-decorators.md#calibration)):
+the audit trail then keeps the model's own score and the multiplier apart.
 
 Elide ships no NER model of its own: you bring one, hosted or local, by
 writing a small backend for it. See [Custom backends](custom-backends.md).
@@ -72,7 +75,7 @@ The `mocks` feature provides a `MockBackend` that finds nothing, for tests.
 ## Long texts
 
 Many NER models accept only a few hundred tokens. Wrap the recognizer in a
-`ChunkedRecognizer` to split long texts into overlapping windows; see
+`Chunked` to split long texts into overlapping windows; see
 [Recognizer decorators](recognizer-decorators.md).
 
 ## Text in images and audio

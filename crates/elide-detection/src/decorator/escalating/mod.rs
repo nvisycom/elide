@@ -1,6 +1,6 @@
 //! Run a cheap recognizer always, and a costly one only when it is worth it.
 //!
-//! See [`EscalatingRecognizer`].
+//! See [`Escalating`].
 //!
 //! A [`Recognizer`] that wraps two: a `baseline` that runs on every subject, and
 //! an `escalated` one (a hosted LLM/VLM, say) that runs only when a [`Decider`]
@@ -14,14 +14,14 @@
 //! whole call — no partial result is returned. That fail-safe is the point:
 //! escalation adds coverage, it does not gate it.
 
-mod confidence;
+mod weak_baseline;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Component, Result};
 
-pub use self::confidence::ConfidenceDecider;
+pub use self::weak_baseline::WeakBaseline;
 use crate::batch::expect_one_per_input;
 
 /// Decides whether a subject warrants the escalated recognizer.
@@ -50,7 +50,7 @@ pub trait Decider<M: Modality>: Send + Sync {
 /// between the two is left to the reconcile layer, matching the pipeline's "keep
 /// the redundant set, reconcile later" model.
 #[derive(Component)]
-pub struct EscalatingRecognizer<B, E, D> {
+pub struct Escalating<B, E, D> {
     /// Names the decorator. Each emitted entity carries its originating
     /// recognizer (the baseline or the escalated one) in its audit trail.
     #[component(delegate)]
@@ -59,7 +59,7 @@ pub struct EscalatingRecognizer<B, E, D> {
     decider: D,
 }
 
-impl<B, E, D> EscalatingRecognizer<B, E, D> {
+impl<B, E, D> Escalating<B, E, D> {
     /// Wrap `baseline` (always run) and `escalated` (run on escalation), with
     /// `decider` choosing per subject.
     #[must_use]
@@ -73,7 +73,7 @@ impl<B, E, D> EscalatingRecognizer<B, E, D> {
 }
 
 #[async_trait::async_trait]
-impl<M, B, E, D> Recognizer<M> for EscalatingRecognizer<B, E, D>
+impl<M, B, E, D> Recognizer<M> for Escalating<B, E, D>
 where
     M: Modality,
     B: Recognizer<M>,
@@ -188,8 +188,7 @@ mod tests {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer =
-            EscalatingRecognizer::new(baseline, escalated, ConfidenceDecider::default());
+        let recognizer = Escalating::new(baseline, escalated, WeakBaseline::default());
 
         let scope = Scope::new();
         let out = recognizer
@@ -211,8 +210,7 @@ mod tests {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer =
-            EscalatingRecognizer::new(baseline, escalated, ConfidenceDecider::default());
+        let recognizer = Escalating::new(baseline, escalated, WeakBaseline::default());
 
         let scope = Scope::new();
         let out = recognizer
@@ -234,8 +232,7 @@ mod tests {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer =
-            EscalatingRecognizer::new(baseline, escalated, ConfidenceDecider::default());
+        let recognizer = Escalating::new(baseline, escalated, WeakBaseline::default());
 
         let scope = Scope::new();
         let out = recognizer
@@ -261,10 +258,10 @@ mod tests {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer = EscalatingRecognizer::new(
+        let recognizer = Escalating::new(
             baseline,
             escalated,
-            ConfidenceDecider::new(elide_core::primitive::ConfidenceThreshold::MAX),
+            WeakBaseline::new(elide_core::primitive::ConfidenceThreshold::MAX),
         );
 
         let scope = Scope::new();
@@ -347,8 +344,7 @@ mod tests {
 
         let seen = Arc::new(Mutex::new(Vec::new()));
         let escalated = Batches { seen: seen.clone() };
-        let recognizer =
-            EscalatingRecognizer::new(PerSubject, escalated, ConfidenceDecider::default());
+        let recognizer = Escalating::new(PerSubject, escalated, WeakBaseline::default());
 
         let scope = Scope::new();
         let subjects = [subject("a"), subject("b"), subject("c")];

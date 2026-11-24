@@ -3,7 +3,7 @@
 use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
 
-use crate::backend::{LabelExcluded, LabelScoped, NerRequest, NerResponse, ScoreScaled};
+use crate::backend::{LabelExcluded, LabelScoped, NerRequest, NerResponse};
 
 /// Wraps a NER backend in this crate's decorators, by method.
 ///
@@ -13,7 +13,7 @@ use crate::backend::{LabelExcluded, LabelScoped, NerRequest, NerResponse, ScoreS
 /// ```ignore
 /// let backend = gliner
 ///     .label_scoped([builtins::PERSON_NAME.to_ref(), builtins::ADDRESS.to_ref()])
-///     .score_scaled([builtins::ADDRESS.to_ref()], 1.2);
+///     .label_excluded([LabelRef::new("misc")]);
 /// ```
 ///
 /// Implemented for every NER backend.
@@ -29,16 +29,6 @@ where
     /// Drop spans with any of `labels`; see [`LabelExcluded`].
     fn label_excluded(self, labels: impl IntoIterator<Item = LabelRef>) -> LabelExcluded<Self> {
         LabelExcluded::new(self, labels)
-    }
-
-    /// Multiply the scores of spans with any of `labels` by `multiplier`; see
-    /// [`ScoreScaled`].
-    fn score_scaled(
-        self,
-        labels: impl IntoIterator<Item = LabelRef>,
-        multiplier: f32,
-    ) -> ScoreScaled<Self> {
-        ScoreScaled::new(self, labels, multiplier)
     }
 }
 

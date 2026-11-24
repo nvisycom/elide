@@ -52,7 +52,7 @@ async fn redact_under(orchestrator: &Orchestrator, bytes: Bytes, metadata: Dispo
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
-    orchestrator
+    let _applied = orchestrator
         .anonymize(&mut documents)
         .await
         .expect("anonymize");
@@ -88,7 +88,7 @@ async fn labelled_fields_are_detected_and_erased_with_nothing_configured() {
         analyzed.report.part_ids().collect::<Vec<_>>()
     );
 
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await
         .expect("anonymize");
@@ -179,7 +179,7 @@ async fn a_kept_field_goes_with_its_group() {
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
-    orchestrator
+    let _applied = orchestrator
         .anonymize(&mut documents)
         .await
         .expect("anonymize");

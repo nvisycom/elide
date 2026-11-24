@@ -1285,6 +1285,7 @@ name = "elide-examples"
 version = "0.1.0"
 dependencies = [
  "elide",
+ "serde_json",
  "tokio",
 ]
 

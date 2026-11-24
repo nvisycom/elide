@@ -10,7 +10,13 @@ reviews:
           moved"); that belongs in the commit message or PR description.
         - Flag comments that only restate what the adjacent code plainly says.
         - Import with `use` at the top of the file and refer to bare names.
-          Flag fully qualified paths written inline in code.
+          Flag fully qualified paths written inline in code
+          (`std::collections::HashMap::new()`, `crate::a::b::Item`). A path
+          one module deep is the convention, not a violation: `fmt::Display`
+          after `use std::fmt;`, `io::Result`, `serde_json::from_str`,
+          `schemars::JsonSchema` in a `cfg_attr` derive, and other paths
+          gated behind a feature where a separate `use` would need its own
+          `#[cfg]`. Don't flag those.
         - `error.rs` and `primitive/` are workspace layout conventions: where
           a crate has them, they stay even when thin. Flag folding them into
           other modules.

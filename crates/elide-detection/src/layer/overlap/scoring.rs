@@ -48,10 +48,10 @@ impl Scoring for MaxConfidence {
 /// their scores are calibrated probabilities; correlated detectors (two regexes
 /// for the same pattern) inflate the score. Per-recognizer reliability is *not*
 /// a fusion concern, scale individual recognizers' scores beforehand with a
-/// [`CalibratedRecognizer`]. Associative, so it composes consistently across a cluster
+/// [`Calibrated`]. Associative, so it composes consistently across a cluster
 /// of three or more.
 ///
-/// [`CalibratedRecognizer`]: crate::decorator::calibrated::CalibratedRecognizer
+/// [`Calibrated`]: crate::decorator::calibrated::Calibrated
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoisyOrConfidence;
 

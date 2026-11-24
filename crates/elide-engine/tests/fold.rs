@@ -123,7 +123,7 @@ async fn nested_container_keeps_its_own_redaction_with_an_extensionless_id() -> 
         "every nesting level's body is analyzed; got depths {depths:?}",
     );
 
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await?;
 
@@ -175,7 +175,7 @@ async fn an_embedded_document_nothing_was_redacted_in_keeps_its_bytes() -> Resul
         .decode(outer_bytes, MOCK_EXT, HiddenContentPolicy::default())
         .await?;
     let mut documents = [Document::new("outer.mock", handle)];
-    orchestrator.anonymize(&mut documents).await?;
+    let _applied = orchestrator.anonymize(&mut documents).await?;
 
     let (outer_body, outer_parts) = decode_mock(&documents[0].document.encode()?.to_bytes());
     assert!(!outer_body.contains(PII), "outer body leaked: {outer_body}");

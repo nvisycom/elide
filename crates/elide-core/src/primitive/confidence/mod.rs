@@ -53,7 +53,7 @@ impl Confidence {
 
     /// Construct a score, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.
-    pub fn new(score: f32) -> Option<Self> {
+    pub const fn new(score: f32) -> Option<Self> {
         if is_unit_interval(score) {
             Some(Self(score))
         } else {
@@ -89,9 +89,19 @@ impl Confidence {
     /// Multiply the score by `factor`, saturating at the `[0, 1]` bounds.
     ///
     /// `0.9 * 1.2` yields `1.0`, not an out-of-range value. Used by
-    /// score-scaling steps such as the `ScoreScaled` backend decorator.
-    pub fn saturating_mul(self, factor: f32) -> Self {
-        Self::clamped(self.0 * factor)
+    /// score-scaling steps such as calibration.
+    ///
+    /// The product is taken in `f64`, so a factor too large for an `f32` still
+    /// scales a small score rather than saturating it:
+    ///
+    /// ```
+    /// use elide_core::primitive::Confidence;
+    ///
+    /// let tiny = Confidence::new(1e-40).unwrap();
+    /// assert!((tiny.saturating_mul(1e39).get() - 0.1).abs() < 1e-3);
+    /// ```
+    pub fn saturating_mul(self, factor: f64) -> Self {
+        Self::clamped((f64::from(self.0) * factor) as f32)
     }
 }
 
@@ -117,6 +127,6 @@ impl fmt::Display for Confidence {
 }
 
 /// Whether `value` is finite and within `0.0..=1.0`.
-pub(crate) fn is_unit_interval(value: f32) -> bool {
-    value.is_finite() && (0.0..=1.0).contains(&value)
+pub(crate) const fn is_unit_interval(value: f32) -> bool {
+    value.is_finite() && value >= 0.0 && value <= 1.0
 }

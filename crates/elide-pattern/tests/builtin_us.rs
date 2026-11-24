@@ -10,6 +10,7 @@ mod fixtures;
 
 use elide_core::assert_label_present;
 use elide_core::entity::builtins;
+use elide_core::primitive::ConfidenceThreshold;
 use fixtures::scan;
 
 #[tokio::test]
@@ -40,6 +41,28 @@ async fn builtin_identity() {
         builtins::POSTAL_CODE.to_ref(),
         "97477-1234",
     );
+}
+
+/// A bare nine-digit SSN is kept only beside a keyword: on its own it scores
+/// below the default threshold, and "SSN:" lifts it over.
+#[tokio::test]
+async fn a_bare_ssn_needs_its_keyword() {
+    let text = "SSN: 123456789.\n\nThe parcel left the warehouse on time as order 234567890.";
+    let (text, entities) = scan(text).await;
+    let confidence_of = |needle: &str| {
+        entities
+            .iter()
+            .filter(|e| e.label == builtins::GOVERNMENT_ID.to_ref())
+            .find(|e| {
+                e.location
+                    .range()
+                    .is_some_and(|r| text.get(r.start..r.end) == Some(needle))
+            })
+            .map(|e| e.confidence)
+    };
+    let threshold = ConfidenceThreshold::BASELINE;
+    assert!(confidence_of("123456789").is_some_and(|c| threshold.passes(c)));
+    assert!(confidence_of("234567890").is_none_or(|c| !threshold.passes(c)));
 }
 
 #[tokio::test]

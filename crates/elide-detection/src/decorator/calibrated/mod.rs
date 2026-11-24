@@ -1,18 +1,19 @@
 //! A [`Recognizer`] decorator that rescales its findings' confidence.
 //!
-//! [`CalibratedRecognizer`] brings a recognizer's scores into line with the
+//! [`Calibrated`] brings a recognizer's scores into line with the
 //! others' before overlaps are fused and arbitrated.
 
 mod calibration;
+mod multiplier;
 
 use elide_core::entity::Entity;
 use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::Modality;
-use elide_core::primitive::Confidence;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Component, Result};
 
 pub use self::calibration::Calibration;
+pub use self::multiplier::Multiplier;
 
 /// Wraps a [`Recognizer`] so that each finding's confidence is scaled by its
 /// [`Calibration`].
@@ -26,13 +27,13 @@ pub use self::calibration::Calibration;
 /// Because it is itself a `Recognizer` over the same modality, it drops in
 /// anywhere the inner recognizer goes and composes with the other decorators.
 #[derive(Component)]
-pub struct CalibratedRecognizer<R> {
+pub struct Calibrated<R> {
     #[component(delegate)]
     inner: R,
     calibration: Calibration,
 }
 
-impl<R> CalibratedRecognizer<R> {
+impl<R> Calibrated<R> {
     /// Scale `inner`'s findings by `calibration`.
     #[must_use]
     pub fn new(inner: R, calibration: Calibration) -> Self {
@@ -53,10 +54,9 @@ impl<R> CalibratedRecognizer<R> {
     fn calibrate<M: Modality>(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
         for entity in &mut entities {
             let factor = self.calibration.factor(&entity.label);
-            if factor != 1.0 {
-                let scaled =
-                    Confidence::clamped((f64::from(entity.confidence.get()) * factor) as f32);
-                entity.record(AuditEvent::calibration(scaled, factor));
+            if factor != Multiplier::IDENTITY {
+                let scaled = entity.confidence.saturating_mul(factor.get());
+                entity.record(AuditEvent::calibration(scaled, factor.get()));
             }
         }
         entities
@@ -64,7 +64,7 @@ impl<R> CalibratedRecognizer<R> {
 }
 
 #[async_trait::async_trait]
-impl<M: Modality, R: Recognizer<M>> Recognizer<M> for CalibratedRecognizer<R> {
+impl<M: Modality, R: Recognizer<M>> Recognizer<M> for Calibrated<R> {
     async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         let entities = self.inner.recognize(subject, ctx).await?;
         Ok(self.calibrate(entities))
@@ -85,14 +85,15 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for CalibratedRecognizer<R> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{AuditKind, PatternRule};
+    use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextData, TextLocation};
+    use elide_core::primitive::Confidence;
     use elide_core::recognition::Scope;
 
     use super::*;
 
-    /// Finds a `PERSON` and an `ORGANIZATION`, both at full confidence.
+    /// Finds a person and an organization name, both at full confidence.
     #[derive(Component)]
     #[component(name = "two-finds", version = "0")]
     struct TwoFinds;
@@ -104,19 +105,22 @@ mod tests {
             _subject: &Subject<Text>,
             _ctx: &Context<'_>,
         ) -> Result<Vec<Entity<Text>>> {
-            Ok(["PERSON", "ORGANIZATION"]
-                .into_iter()
-                .map(|label| {
-                    let at = TextLocation::inline(0..4);
-                    let event = AuditEvent::pattern(
-                        "two-finds",
-                        Confidence::MAX,
-                        at.clone(),
-                        PatternRule::default(),
-                    );
-                    Entity::new(LabelRef::new(label), at).with_event(event)
-                })
-                .collect())
+            Ok([
+                builtins::PERSON_NAME.to_ref(),
+                builtins::ORGANIZATION_NAME.to_ref(),
+            ]
+            .into_iter()
+            .map(|label| {
+                let at = TextLocation::inline(0..4);
+                let event = AuditEvent::pattern(
+                    "two-finds",
+                    Confidence::MAX,
+                    at.clone(),
+                    PatternRule::default(),
+                );
+                Entity::new(label, at).with_event(event)
+            })
+            .collect())
         }
     }
 
@@ -124,11 +128,11 @@ mod tests {
     /// batch path alike, and a multiplier of `1.0` records nothing.
     #[tokio::test]
     async fn findings_scale_by_their_label() {
-        let calibration = Calibration::scale(1.0)
-            .unwrap()
-            .with_label("ORGANIZATION", 0.5)
-            .unwrap();
-        let recognizer = CalibratedRecognizer::new(TwoFinds, calibration);
+        let calibration = Calibration::default().with_label(
+            builtins::ORGANIZATION_NAME.to_ref(),
+            Multiplier::new(0.5).unwrap(),
+        );
+        let recognizer = Calibrated::new(TwoFinds, calibration);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let subject = Subject::<Text>::new(TextData::new("Jane".to_owned()));
@@ -154,7 +158,8 @@ mod tests {
     /// The decorator takes the inner recognizer's identity.
     #[test]
     fn it_is_named_after_its_recognizer() {
-        let recognizer = CalibratedRecognizer::new(TwoFinds, Calibration::scale(0.5).unwrap());
+        let recognizer =
+            Calibrated::new(TwoFinds, Calibration::scale(Multiplier::new(0.5).unwrap()));
         assert_eq!(recognizer.id(), TwoFinds.id());
     }
 }

@@ -1,4 +1,4 @@
-//! [`Chunking`]: the windowing strategy [`ChunkedRecognizer`](super::ChunkedRecognizer)
+//! [`Chunking`]: the windowing strategy [`Chunked`](super::Chunked)
 //! drives, and its word-count ([`WordWindows`]) and character-count
 //! ([`CharWindows`]) implementations.
 //!

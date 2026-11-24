@@ -1,4 +1,4 @@
-//! [`ConfidenceDecider`]: escalate when the baseline's best finding is weak.
+//! [`WeakBaseline`]: escalate when the baseline's best finding is weak.
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
@@ -17,12 +17,12 @@ use super::Decider;
 /// where the costlier model earns its keep. A model-free policy, so the
 /// escalation seam can be exercised with no extra backend.
 #[derive(Debug, Clone, Copy)]
-pub struct ConfidenceDecider {
+pub struct WeakBaseline {
     /// Escalate unless some baseline entity's confidence meets this.
     threshold: ConfidenceThreshold,
 }
 
-impl ConfidenceDecider {
+impl WeakBaseline {
     /// Escalate unless the baseline produced an entity at or above `threshold`.
     #[must_use]
     pub fn new(threshold: ConfidenceThreshold) -> Self {
@@ -30,14 +30,14 @@ impl ConfidenceDecider {
     }
 }
 
-impl Default for ConfidenceDecider {
+impl Default for WeakBaseline {
     /// Escalates unless the baseline cleared [`ConfidenceThreshold::BASELINE`].
     fn default() -> Self {
         Self::new(ConfidenceThreshold::BASELINE)
     }
 }
 
-impl<M: Modality> Decider<M> for ConfidenceDecider {
+impl<M: Modality> Decider<M> for WeakBaseline {
     fn escalate(&self, _subject: &Subject<M>, baseline: &[Entity<M>]) -> bool {
         // Escalate unless some baseline entity already clears the bar. Empty
         // baseline escalates (no entity clears it), so a chunk the cheap pass

@@ -5,10 +5,9 @@
 //! spans of the call's catalog labels (`None` when the catalog is empty, leaving
 //! the backend to emit what it natively produces), then emits an entity for
 //! every canonical span the backend returns. Restricting them to the catalog is
-//! the analyzer's job, after reconciliation. Which labels a model supports,
-//! which it ignores, and how its scores scale are properties of the model, so
-//! they are backend decorators ([`LabelScoped`], [`LabelExcluded`],
-//! [`ScoreScaled`]), not recognizer settings.
+//! the analyzer's job, after reconciliation. Which labels a model supports and
+//! which it ignores are properties of the model, so they are backend
+//! decorators ([`LabelScoped`], [`LabelExcluded`]), not recognizer settings.
 //!
 //! Implements [`Recognizer<Text>`] so it composes with the
 //! rest of the platform through the same trait every other text
@@ -16,7 +15,6 @@
 //!
 //! [`LabelScoped`]: crate::backend::LabelScoped
 //! [`LabelExcluded`]: crate::backend::LabelExcluded
-//! [`ScoreScaled`]: crate::backend::ScoreScaled
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
 use elide_core::backend::{Backend, BackendBatchExt};

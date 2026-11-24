@@ -60,7 +60,7 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
     let mut documents = [Document::new("body_header_hyperlink.docx", handle)];
 
     let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
-    orchestrator
+    let _applied = orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await
         .expect("anonymize");
@@ -175,7 +175,7 @@ async fn findings_inside_property_values_are_redacted_alone() {
         .await
         .expect("decode docx");
     let mut documents = [Document::new("report.docx", handle)];
-    orchestrator
+    let _applied = orchestrator
         .anonymize(&mut documents)
         .await
         .expect("anonymize");

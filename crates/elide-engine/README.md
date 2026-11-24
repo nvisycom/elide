@@ -84,7 +84,9 @@ let mut document = registry
 let analyzed = orchestrator.analyze(&mut document).await?;
 let part = analyzed.report.part::<Text>(&document.id())?;
 assert_eq!(part.entities().len(), 1);
-orchestrator.anonymize_with(&mut document, analyzed.report).await?;
+let applied = orchestrator.anonymize_with(&mut document, analyzed.report).await?;
+// The applied report records how each entity was hidden.
+assert!(applied.part::<Text>(&document.id())?.entities()[0].is_redacted());
 
 let redacted = document.document.encode()?;
 assert!(!String::from_utf8_lossy(redacted.as_bytes()).contains("jane@"));

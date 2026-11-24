@@ -85,8 +85,8 @@ async fn an_empty_part_that_cannot_be_applied_loses_nothing() -> Result<()> {
     let report = Report::new()
         .insert_part::<Unregistered>(PartId::leaf("doc.mock"), Vec::new())
         .insert_part::<Text>(PartId::leaf("doc.mock").child("missing.txt"), Vec::new());
-    orchestrator.anonymize_with(&mut documents, report).await?;
+    let _applied = orchestrator.anonymize_with(&mut documents, report).await?;
     let report = Report::new().insert_part::<Metadata>(PartId::leaf("doc.mock"), Vec::new());
-    orchestrator.anonymize_with(&mut documents, report).await?;
+    let _applied = orchestrator.anonymize_with(&mut documents, report).await?;
     Ok(())
 }

@@ -26,9 +26,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry);
-    orchestrator
-        .anonymize(&mut document)
-        .await?;
+    let applied = orchestrator.anonymize(&mut document).await?;
+    // Each redacted field's entity carries the record of what hid it.
+    std::fs::write("photo.report.json", serde_json::to_vec(&applied)?)?;
+    println!("report digest: {}", applied.digest());
     Ok(())
 }
 ```

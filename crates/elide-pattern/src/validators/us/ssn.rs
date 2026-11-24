@@ -1,7 +1,7 @@
 //! US Social Security Number format validator.
 
-/// Return `true` if `value` is a structurally valid US SSN in
-/// `AAA-GG-SSSS` format.
+/// Return `true` if `value` is a structurally valid US SSN: `AAA-GG-SSSS`
+/// with `-`, space, or `.` between the parts, or the nine digits run together.
 ///
 /// Validates the three parts as:
 ///
@@ -12,8 +12,12 @@
 /// This is a format check only, not a verification against SSA
 /// records.
 pub fn ssn(value: &str) -> bool {
-    let parts: Vec<&str> = value.split(['-', ' ', '.']).collect();
-    if parts.len() != 3 {
+    let parts: Vec<&str> = if value.len() == 9 && value.bytes().all(|b| b.is_ascii_digit()) {
+        vec![&value[..3], &value[3..5], &value[5..]]
+    } else {
+        value.split(['-', ' ', '.']).collect()
+    };
+    if parts.len() != 3 || parts.iter().map(|part| part.len()).ne([3, 2, 4]) {
         return false;
     }
     let area: u32 = match parts[0].parse() {
@@ -49,6 +53,16 @@ mod tests {
     }
 
     #[test]
+    fn accepts_the_digits_run_together() {
+        assert!(ssn("123456789"));
+        assert!(!ssn("000456789"));
+        assert!(!ssn("666456789"));
+        assert!(!ssn("923456789"));
+        assert!(!ssn("123006789"));
+        assert!(!ssn("123450000"));
+    }
+
+    #[test]
     fn invalid_area_zero() {
         assert!(!ssn("000-45-6789"));
     }
@@ -77,7 +91,9 @@ mod tests {
     #[test]
     fn wrong_format() {
         assert!(!ssn("12345-6789"));
-        assert!(!ssn("123456789"));
+        assert!(!ssn("1234-5-6789"));
+        assert!(!ssn("12345678"));
+        assert!(!ssn("1234567890"));
         assert!(!ssn("abc-de-fghi"));
         assert!(!ssn(""));
     }
