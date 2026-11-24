@@ -57,7 +57,6 @@ pub use elide_core::{Component, Error, ErrorKind, Result};
 #[doc(no_inline)]
 pub use elide_detection::{
     Analyzer, Layer,
-    calibrate::CalibrateLayer,
     filter::ThresholdLayer,
     overlap::{
         FuseLayer, ReconcileLayer, Structural,

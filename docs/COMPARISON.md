@@ -113,8 +113,9 @@ language *detection* via `lingua` (≈75 languages) as a pre-recognition enriche
 independent of any single NER model.
 
 **Reconciliation.** Both assign confidence scores in [0, 1]. `elide` adds an
-explicit, layered reconciliation pipeline after recognition: calibrate
-(per-recognizer multiplier), overlap (same-label fusion and cross-label
+explicit, layered reconciliation pipeline after recognition, over scores
+calibrated as each recognizer reports them (a multiplier per recognizer, and
+per label): overlap (same-label fusion and cross-label
 structural arbitration for nesting and conflict), then filter (a confidence
 threshold). Presidio resolves overlaps but does not expose a comparably
 staged, swappable layer pipeline.

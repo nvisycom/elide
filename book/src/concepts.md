@@ -44,11 +44,12 @@ A redaction moves a file through a *codec*, an *analyzer*, and an
    [orchestrator](containers.md)) picks the analyzer and anonymizer for each
    part by its modality.
 2. The analyzer reads the part in chunks. Enrichers run on each chunk, then
-   all recognizers run on it concurrently.
+   all recognizers run on it concurrently. A recognizer whose scores run
+   differently from the others' is calibrated as it reports them.
 3. Each finding is *lifted* from the chunk's coordinates to the document's,
    so everything after this step speaks one coordinate system.
-4. The layers calibrate the findings' scores, merge duplicates, resolve
-   conflicts, and drop what is too weak.
+4. The layers merge duplicates, resolve conflicts, and drop what is too
+   weak.
 5. The anonymizer picks an operator for each entity, records the choice on
    its audit trail, and writes the replacements into the part.
 6. The codec encodes the document, rewriting only the redacted parts.

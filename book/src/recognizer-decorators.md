@@ -73,3 +73,28 @@ let recognizer = EscalatingRecognizer::new(
 # Ok(())
 # }
 ```
+
+## Calibration
+
+Recognizers score on different scales: a pattern hit is often `1.0`, a NER
+model's scores spread across `0.3–0.9`. `CalibratedRecognizer` scales a
+recognizer's confidence by a `Calibration`, a multiplier for every label and,
+where a model runs hot or cold on some labels, one per label, so its findings
+compare fairly with the others' when overlaps are fused and arbitrated. Each
+rescaled finding records the multiplier on its audit trail.
+
+```rust
+use elide::prelude::*;
+use elide::recognition::decorator::calibrated::{CalibratedRecognizer, Calibration};
+use elide::recognition::pattern::PatternRecognizer;
+
+# fn main() -> Result<()> {
+let patterns = PatternRecognizer::builder().with_builtin_patterns().build()?;
+
+let recognizer = CalibratedRecognizer::new(
+    patterns,
+    Calibration::scale(0.8)?.with_label("PHONE_NUMBER", 0.6)?,
+);
+# Ok(())
+# }
+```

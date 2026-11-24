@@ -236,11 +236,13 @@ Each stage is a pure, synchronous transform over the candidate set that returns
 the entities it kept and the entities it dropped. The stages are composed onto
 the find engine in the order they should run. In their usual order, they are:
 
-- **Calibrate.** Scales each entity's confidence by a per-recognizer multiplier,
-  so detectors with different score distributions are made comparable before
-  anything is compared. A checksum-backed rule-based hit and a soft neural score
-  do not mean the same thing at the same numeric value; calibration is what
-  makes the later comparisons meaningful.
+Before any stage, a recognizer whose scores run differently from the others'
+is **calibrated**: wrapped so that each finding's confidence is scaled by a
+multiplier for that recognizer, and optionally one per label, as the finding is
+reported. A checksum-backed rule-based hit and a soft neural score do not mean
+the same thing at the same numeric value; calibration is what makes the later
+comparisons meaningful. It is attached to the recognizer rather than run as a
+stage, so it always precedes them and names no recognizer by string.
 
 - **Reconcile.** Decides what happens to overlapping entities. A _grouping_
   chooses which entities cluster; two passes then act on the clusters, fusion
@@ -273,12 +275,7 @@ the find engine in the order they should run. In their usual order, they are:
   appropriate for the deployment.
 
 ```
-  raw candidate set
-         |
-         v
-+------------------+
-|    calibrate     |  rescale per-recognizer confidence
-+------------------+
+  calibrated candidate set
          |
          v
 +------------------+
@@ -296,7 +293,7 @@ the find engine in the order they should run. In their usual order, they are:
   surviving entities
 ```
 
-Order matters. Calibration before everything else makes the subsequent
+Order matters. Calibration before every stage makes the subsequent
 comparisons commensurable. Fusing same-label findings before arbitrating
 cross-label overlaps keeps concurring same-label evidence from being mistaken
 for a conflict. Filtering last means a low-confidence finding never displaces a
@@ -378,7 +375,7 @@ contracts is what allows pluralism in the recognizers.
 Detection is the concurrent evaluation of many fallible recognizers against a
 chunked decomposition of a document, followed by an optional context-boost pass,
 followed by deterministic reconciliation of the findings through a
-calibrate-overlap-filter pipeline, under the caller's scope; a reviewer's
+calibrated, overlap-then-filter pipeline, under the caller's scope; a reviewer's
 recorded corrections then decide what reaches redaction. The product is an attributable set of entities, lifted into source
 coordinates, that the toolkit hands to redaction. The model is conservative
 about what it guarantees and generous about what it allows to be extended.

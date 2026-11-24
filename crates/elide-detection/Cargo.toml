@@ -24,7 +24,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 ## Derive `serde::{Serialize, Deserialize}` on the re-exported core types and
-## on this crate's serializable config (the [`CalibrationMap`]).
+## on this crate's serializable config (a recognizer's `Calibration`).
 serde = ["dep:serde", "elide-core/serde"]
 
 ## Derive `schemars::JsonSchema` on the re-exported core types and on this
