@@ -3,33 +3,28 @@
 //!
 //! Detection yields two parallel structures, keyed the same way (by each part's
 //! [`PartId`](crate::PartId) path) but carrying opposite things. The [`Report`]
-//! holds *references*, each entity is a location into its part plus its audit
-//! trail,
-//! editable before [`anonymize_with`](crate::Orchestrator::anonymize_with). The
-//! [`ArtifactSet`] holds *content*, the enrichment those locations point into
-//! (an image's OCR `Layout`, an audio clip's STT `Transcription`), kept out
-//! of the report so it stays references-only. Persist both across a review gap
-//! and hand them to [`re_analyze`](crate::Orchestrator::re_analyze) to
-//! re-recognize without re-enriching.
+//! holds *references*, each entity a location into its part plus its audit
+//! trail, which a [`Review`](crate::Review) changes before
+//! [`anonymize_with`](crate::Orchestrator::anonymize_with). The [`ArtifactSet`]
+//! holds *content*, the enrichment those locations point into (an image's OCR
+//! `Layout`, an audio clip's STT `Transcription`), kept out of the report so it
+//! stays references-only. Persist both across a review gap and hand them to
+//! [`re_analyze`](crate::Orchestrator::re_analyze) to re-recognize without
+//! re-enriching.
 //!
-//! The crate-internal type-erased storage the two views share lives in `group`
-//! (the sealed `EntityGroup` / `ArtifactGroup`); the per-modality reconstruction
-//! `registry` and the public [`ReportDeserializer`] drive deserialization; and
-//! the serde wire form of both views lives in `serde`. With the `schema`
-//! feature, the report's hand-written `JsonSchema` lives in `schema`.
+//! The crate-internal type-erased storage the views share lives in `group`;
+//! how they cross a process boundary lives in [`wire`](crate::wire).
 
 mod artifacts;
 mod group;
 mod part;
-mod registry;
 mod report;
-#[cfg(feature = "schema")]
-mod schema;
-mod serde;
 
-/// Shared helpers for the analysis unit tests (`report`, `serde`).
+/// Shared helpers for the analysis and review unit tests.
 #[cfg(test)]
-mod test_support {
+pub(crate) mod test_support {
+    use std::ops::Range;
+
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     #[cfg(feature = "schema")]
     use elide_core::entity::audit::{Manual, ManualIntent};
@@ -43,9 +38,19 @@ mod test_support {
 
     /// A minimal [`Text`] entity carrying `label`, for building reports under test.
     pub(crate) fn text_entity(label: &str) -> Entity<Text> {
-        let loc = TextLocation::inline(0..4);
-        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternRule::default());
-        Entity::new(LabelRef::new(label), loc).with_event(event)
+        text_entity_at(label, 0..4)
+    }
+
+    /// A [`Text`] entity carrying `label`, detected at `range`.
+    pub(crate) fn text_entity_at(label: &str, range: Range<usize>) -> Entity<Text> {
+        let loc = TextLocation::inline(range);
+        Entity::pattern(
+            "t",
+            Confidence::MAX,
+            LabelRef::new(label),
+            loc,
+            PatternRule::default(),
+        )
     }
 
     /// A custom [`Text`] entity located only by source, the reviewer-add shape:
@@ -54,7 +59,10 @@ mod test_support {
     #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         let location = TextLocation::marked_source(SourceRef::new(0..4));
-        let manual = Manual::new(ManualIntent::Flag, location.clone());
+        let intent = ManualIntent::Include {
+            label: LabelRef::new(label),
+        };
+        let manual = Manual::new(intent, location.clone());
         let event = AuditEvent::manual("manual", Confidence::MAX, manual);
         Entity::new(LabelRef::new(label), location).with_event(event)
     }
@@ -66,9 +74,8 @@ mod test_support {
 }
 
 pub use self::artifacts::ArtifactSet;
-pub(crate) use self::group::{ArtifactGroup, EntityGroup};
-pub use self::part::{Part, PartMut};
-pub use self::registry::ReportDeserializer;
+pub(crate) use self::group::{ArtifactGroup, EntityGroup, ErasedGroup, GroupItem};
+pub use self::part::Part;
 pub(crate) use self::report::StrippedRecord;
 pub use self::report::{Report, StrippedItem};
 

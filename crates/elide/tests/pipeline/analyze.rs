@@ -8,7 +8,7 @@ use elide::detection::Analyzer;
 use elide::detection::filter::ThresholdLayer;
 use elide::detection::overlap::{FuseLayer, ReconcileLayer};
 use elide::recognition::decorator::calibrated::{Calibrated, Calibration, Multiplier};
-use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
+use elide_core::entity::audit::{AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
 use elide_core::primitive::Confidence;
@@ -22,16 +22,16 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
     let label = LabelRef::new(label.to_owned());
     let location = TextLocation::inline(loc.0..loc.1);
     let confidence = Confidence::new(conf).unwrap();
-    let event = AuditEvent::pattern(
+    Entity::pattern(
         recognizer.to_owned(),
         confidence,
-        location.clone(),
+        label.clone(),
+        location,
         PatternRule {
             name: label.as_str().into(),
             ..PatternRule::default()
         },
-    );
-    Entity::new(label, location).with_event(event)
+    )
 }
 
 /// Like [`detected`], but the location also carries a raw source reference, the
@@ -44,7 +44,7 @@ fn detected_with_source(
     source: SourceRef,
 ) -> Entity<Text> {
     let mut entity = detected(recognizer, label, loc, conf);
-    entity.location = entity.location.with_source([source]);
+    entity.lift(entity.location().clone().with_source([source]));
     entity
 }
 
@@ -83,19 +83,19 @@ async fn analyze_fuses_resolves_filters() {
     // filtered out below the 0.35 baseline.
     assert_eq!(entities.len(), 1);
     let phone = entities.pop().unwrap();
-    assert_eq!(phone.label, LabelRef::new("PHONE_NUMBER"));
+    assert_eq!(*phone.label(), LabelRef::new("PHONE_NUMBER"));
     // Fusion kept the higher-confidence, larger span and recorded both
     // recognitions plus a fusion event.
-    assert_eq!(phone.confidence, Confidence::new(0.95).unwrap());
-    assert_eq!(phone.location, TextLocation::inline(10..23));
-    assert_eq!(phone.audit.recognizers().count(), 2);
+    assert_eq!(phone.confidence(), Confidence::new(0.95).unwrap());
+    assert_eq!(*phone.location(), TextLocation::inline(10..23));
+    assert_eq!(phone.audit().recognizers().count(), 2);
     // The trail: 2 recognition events + 1 fusion event.
-    assert_eq!(phone.audit.events().len(), 3);
-    let last = phone.audit.events().last().unwrap();
+    assert_eq!(phone.audit().events().len(), 3);
+    let last = phone.audit().events().last().unwrap();
     assert_matches!(
         last.kind,
         AuditKind::Fusion(ref d) if d.strategy == "max");
-    assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
+    assert_eq!(phone.audit().final_confidence(), Some(phone.confidence()));
 }
 
 #[tokio::test]
@@ -134,7 +134,7 @@ async fn fusion_keeps_both_operands_source_refs() {
     let phone = entities.pop().unwrap();
     // Both source refs survive the fusion, in canonical (part-then-range) order.
     assert_eq!(
-        phone.location.source_refs(),
+        phone.location().source_refs(),
         &[
             SourceRef::in_part(200..212, "word/document.xml"),
             SourceRef::in_part(300..313, "word/header1.xml"),
@@ -147,8 +147,7 @@ async fn analyze_stamps_language_from_recognized_range() {
     use elide_core::primitive::LanguageTag;
 
     // An entity carrying a recognized_range (where it was found in the text).
-    let mut e = detected("pattern", "PERSON", (0, 5), 0.9);
-    e.recognized_range = Some(0..5);
+    let e = detected("pattern", "PERSON", (0, 5), 0.9).with_recognized_range(0..5);
 
     let analyzer = Analyzer::<Text>::new().with_recognizer(MockRecognizer::new(vec![e]));
 
@@ -164,7 +163,7 @@ async fn analyze_stamps_language_from_recognized_range() {
         .entities;
     assert_eq!(entities.len(), 1);
     assert_eq!(
-        entities[0].language.as_ref().map(|l| l.primary_subtag()),
+        entities[0].language().map(|l| l.primary_subtag()),
         Some("de")
     );
 }
@@ -197,10 +196,10 @@ async fn each_recognizer_is_calibrated_on_its_own() {
         .await
         .unwrap()
         .entities;
-    entities.sort_by_key(|entity| entity.location.range().map(|range| range.start));
+    entities.sort_by_key(|entity| entity.location().range().map(|range| range.start));
 
     // pattern 1.0 * 0.5; ner's PERSON 1.0 * 0.8; ner's PHONE_NUMBER unscaled.
-    let confidences: Vec<_> = entities.iter().map(|entity| entity.confidence).collect();
+    let confidences: Vec<_> = entities.iter().map(|entity| entity.confidence()).collect();
     assert_eq!(
         confidences,
         [0.5, 0.8, 0.9].map(|c| Confidence::new(c).unwrap())
@@ -246,7 +245,7 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
         .unwrap()
         .entities;
 
-    let labels: Vec<&str> = entities.iter().map(|e| e.label.as_str()).collect();
+    let labels: Vec<&str> = entities.iter().map(|e| e.label().as_str()).collect();
     // The nested driver's-license prefix was subsumed by the IBAN.
     assert!(
         !labels.contains(&"DRIVERS_LICENSE"),

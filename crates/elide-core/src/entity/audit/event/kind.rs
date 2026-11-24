@@ -70,7 +70,7 @@ pub enum AuditKind<M: Modality> {
     /// subject.
     Flagged(Flagged<M>),
     /// Several detections were fused into one entity.
-    Fusion(Fusion),
+    Fusion(Fusion<M>),
     /// A competing detection of a different label over the same span was
     /// resolved against this (winning) entity.
     Conflict(Conflict),
@@ -82,7 +82,7 @@ pub enum AuditKind<M: Modality> {
     /// A context keyword near the entity lifted its confidence.
     Refinement(Refinement<M>),
     /// An operator hid the entity.
-    Redaction(Redaction),
+    Redaction(Redaction<M>),
     /// An operator was *picked* to hide the entity, the redaction decision,
     /// recorded before it is applied so it can be reviewed first.
     Selection(Selection),
@@ -119,7 +119,7 @@ impl<M: Modality> AuditKind<M> {
                 m.hash_into(out);
             }
             Self::Fusion(d) => {
-                out.byte(Fusion::TAG);
+                out.byte(Fusion::<M>::TAG);
                 d.hash_into(out);
             }
             Self::Conflict(c) => {
@@ -139,7 +139,7 @@ impl<M: Modality> AuditKind<M> {
                 r.hash_into(out);
             }
             Self::Redaction(r) => {
-                out.byte(Redaction::TAG);
+                out.byte(Redaction::<M>::TAG);
                 r.hash_into(out);
             }
             Self::Selection(s) => {
@@ -176,8 +176,8 @@ impl<M: Modality> From<Flagged<M>> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Fusion> for AuditKind<M> {
-    fn from(payload: Fusion) -> Self {
+impl<M: Modality> From<Fusion<M>> for AuditKind<M> {
+    fn from(payload: Fusion<M>) -> Self {
         Self::Fusion(payload)
     }
 }
@@ -206,8 +206,8 @@ impl<M: Modality> From<Refinement<M>> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Redaction> for AuditKind<M> {
-    fn from(payload: Redaction) -> Self {
+impl<M: Modality> From<Redaction<M>> for AuditKind<M> {
+    fn from(payload: Redaction<M>) -> Self {
         Self::Redaction(payload)
     }
 }

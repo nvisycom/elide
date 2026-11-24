@@ -96,15 +96,15 @@ async fn read_text(
     let mut index: HashMap<(PartId, Option<u32>), usize> = HashMap::new();
     for (part, entity) in entities_of::<Text>(report) {
         // A hidden item flagged whole has no span of its own to read.
-        let Some(span) = entity.location.range() else {
+        let Some(span) = entity.location().range() else {
             continue;
         };
-        let page = entity.location.page();
+        let page = entity.location().page();
         let group = *index.entry((part.clone(), page)).or_insert_with(|| {
             groups.push(TextGroup {
                 part,
                 page,
-                anchor: &entity.location,
+                anchor: entity.location(),
                 entities: Vec::new(),
             });
             groups.len() - 1
@@ -140,7 +140,7 @@ async fn read_text(
             units += between.encode_utf16().count();
             offset = span.start;
             values.insert(
-                entity.id.to_string(),
+                entity.id().to_string(),
                 Matched {
                     value: value.to_owned(),
                     utf16: Some(Span {
@@ -179,7 +179,7 @@ async fn read_values<M>(
     let entities = entities_of::<M>(report);
     let locations: Vec<(PartId, M::Location)> = entities
         .iter()
-        .map(|(part, entity)| (part.clone(), entity.location.clone()))
+        .map(|(part, entity)| (part.clone(), entity.location().clone()))
         .collect();
     let Ok(reads) = orchestrator.read::<M>(&mut *document, &locations).await else {
         return;
@@ -187,7 +187,7 @@ async fn read_values<M>(
     for ((_, entity), read) in entities.iter().zip(reads) {
         if let Ok(data) = read {
             values.insert(
-                entity.id.to_string(),
+                entity.id().to_string(),
                 Matched {
                     value: data.as_ref().to_owned(),
                     utf16: None,
@@ -211,12 +211,12 @@ fn read_recognized<M: Modality>(
         };
         // An entity found other than by text (a box a vision model drew)
         // matched no text.
-        let Some(range) = entity.recognized_range.as_ref() else {
+        let Some(range) = entity.recognized_range() else {
             continue;
         };
         if let Some(value) = text(artifact).get(range.clone()) {
             values.insert(
-                entity.id.to_string(),
+                entity.id().to_string(),
                 Matched {
                     value: value.to_owned(),
                     utf16: None,
@@ -230,10 +230,10 @@ fn read_recognized<M: Modality>(
 pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
     let mut out = Vec::new();
     push::<Text>(report, &mut values, &mut out, |entity, utf16| {
-        let span = entity.location.range().cloned().unwrap_or_default();
-        let rendered = entity.location.page().map(|page| Rendered {
+        let span = entity.location().range().cloned().unwrap_or_default();
+        let rendered = entity.location().page().map(|page| Rendered {
             page,
-            rects: entity.location.rects().iter().map(Rect::from).collect(),
+            rects: entity.location().rects().iter().map(Rect::from).collect(),
         });
         Location::Text {
             start: span.start,
@@ -244,14 +244,18 @@ pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
     });
     push::<Tabular>(report, &mut values, &mut out, |entity, _| {
         Location::Tabular {
-            sheet: entity.location.sheet_name.as_ref().map(ToString::to_string),
-            row: entity.location.row_index,
-            column: entity.location.column_index,
-            span: entity.location.span.clone().map(Span::from),
+            sheet: entity
+                .location()
+                .sheet_name
+                .as_ref()
+                .map(ToString::to_string),
+            row: entity.location().row_index,
+            column: entity.location().column_index,
+            span: entity.location().span.clone().map(Span::from),
         }
     });
     push::<Image>(report, &mut values, &mut out, |entity, _| {
-        let bbox = &entity.location.bounding_box;
+        let bbox = &entity.location().bounding_box;
         Location::Image {
             x: bbox.min.x,
             y: bbox.min.y,
@@ -260,14 +264,18 @@ pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
         }
     });
     push::<Audio>(report, &mut values, &mut out, |entity, _| Location::Audio {
-        start_ms: entity.location.span.start_millis(),
-        end_ms: entity.location.span.end_millis(),
-        speaker: entity.location.speaker_id.as_ref().map(ToString::to_string),
+        start_ms: entity.location().span.start_millis(),
+        end_ms: entity.location().span.end_millis(),
+        speaker: entity
+            .location()
+            .speaker_id
+            .as_ref()
+            .map(ToString::to_string),
     });
     push::<Metadata>(report, &mut values, &mut out, |entity, _| {
         Location::Metadata {
-            key: entity.location.key.to_string(),
-            span: entity.location.span.clone().map(Span::from),
+            key: entity.location().key.to_string(),
+            span: entity.location().span.clone().map(Span::from),
         }
     });
     out
@@ -282,7 +290,7 @@ fn push<M: Modality>(
     locate: impl Fn(&RustEntity<M>, Option<Span>) -> Location,
 ) {
     for (part, entity) in entities_of::<M>(report) {
-        let id = entity.id.to_string();
+        let id = entity.id().to_string();
         let (value, utf16) = match values.remove(&id) {
             Some(matched) => (Some(matched.value), matched.utf16),
             None => (None, None),
@@ -290,11 +298,11 @@ fn push<M: Modality>(
         out.push(Entity {
             location: locate(entity, utf16),
             part: part.segments().map(str::to_owned).collect(),
-            label: entity.label.as_str().to_owned(),
+            label: entity.label().as_str().to_owned(),
             value,
-            confidence: decimal(entity.confidence),
-            language: entity.language.as_ref().map(ToString::to_string),
-            coref: entity.coref.as_ref().map(|coref| coref.as_str().to_owned()),
+            confidence: decimal(entity.confidence()),
+            language: entity.language().map(ToString::to_string),
+            coref: entity.coref().map(|coref| coref.as_str().to_owned()),
             sources: sources(entity),
             redaction: redaction(entity),
             id,
@@ -305,7 +313,7 @@ fn push<M: Modality>(
 /// Every detection in `entity`'s trail that found it.
 fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
     entity
-        .audit
+        .audit()
         .events()
         .iter()
         .filter(|event| event.is_recognition())
@@ -323,7 +331,7 @@ fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
 /// The redaction applied to `entity`: the operator the applied selection
 /// picked. `None` when nothing was applied.
 fn redaction<M: Modality>(entity: &RustEntity<M>) -> Option<Redaction> {
-    let events = entity.audit.events();
+    let events = entity.audit().events();
     let applied = events.iter().rev().find_map(|event| match &event.kind {
         AuditKind::Redaction(redaction) => Some(redaction.selection),
         _ => None,

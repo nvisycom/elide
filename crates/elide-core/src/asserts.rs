@@ -27,10 +27,10 @@ macro_rules! assert_label_present {
         $(
             let label = $label;
             assert!(
-                entities.iter().any(|e| e.label == label),
+                entities.iter().any(|e| *e.label() == label),
                 "expected an entity labeled {:?}; found {:?}",
                 label,
-                entities.iter().map(|e| e.label.clone()).collect::<Vec<_>>(),
+                entities.iter().map(|e| e.label().clone()).collect::<Vec<_>>(),
             );
         )+
     }};
@@ -51,7 +51,7 @@ macro_rules! assert_label_absent {
         let entities = &$entities;
         $(
             let label = $label;
-            let found = entities.iter().filter(|e| e.label == label).count();
+            let found = entities.iter().filter(|e| *e.label() == label).count();
             assert!(
                 found == 0,
                 "expected no entity labeled {:?}, but found {found}",

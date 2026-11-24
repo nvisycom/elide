@@ -31,8 +31,8 @@ async fn found(recognizer: &PatternRecognizer, text: &str, label: LabelRef) -> V
         .await
         .expect("recognize")
         .into_iter()
-        .filter(|e| e.label == label)
-        .map(|e| text[e.location.range().expect("text range").clone()].to_owned())
+        .filter(|e| e.label() == &label)
+        .map(|e| text[e.location().range().expect("text range").clone()].to_owned())
         .collect()
 }
 

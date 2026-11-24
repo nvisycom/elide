@@ -189,11 +189,16 @@ combined findings, which redaction was applied), and that history is **hashed
 into a tamper-evident DAG**: each audit event is a 32-byte BLAKE3 digest over its
 payload and its parents, so altering any event breaks the chain. The hashes
 are unkeyed, so a trail rewritten whole, or cut back to an earlier event,
-still verifies; the report's digest, stored where the report's carrier cannot
-write, catches both. The engine produces a serializable `Report` that records
-the same, and a run can be reconstructed from it. What `elide` deliberately
-does *not* do is persist a durable append-only log; that belongs to the runtime
-that embeds the toolkit.
+still verifies. A report therefore reads back only against a seal: its digest,
+stored where the report's carrier cannot write, or a digest keyed with a
+secret the carrier does not hold. The seal catches a rewritten or shortened
+trail, a field changed beside it, and a dropped entity. A reviewer's
+corrections arrive as a review of one report version, sealed the same way,
+and a review policy decides which of them may narrow the redaction. The
+engine produces a serializable `Report` that records the same, and a run can
+be reconstructed from it. What `elide` deliberately does *not* do is persist a
+durable append-only log; that belongs to the runtime that embeds the
+toolkit.
 
 ## 7. Deployment and licensing
 

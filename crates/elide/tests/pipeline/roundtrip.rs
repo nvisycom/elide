@@ -2,7 +2,7 @@
 //! editing → [`deserializer`] it back → [`anonymize_with`]. The
 //! reconstructed report redacts exactly as the original would have.
 //!
-//! [`deserializer`]: elide::Orchestrator::deserializer
+//! [`deserializer`]: elide::Orchestrator::restorer
 //! [`anonymize_with`]: elide::Orchestrator::anonymize_with
 
 #![cfg(all(feature = "engine", feature = "mocks", feature = "llm"))]
@@ -54,7 +54,8 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Rebuild it from the wire through the same orchestrator.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let rebuilt = orchestrator.deserializer().deserialize(&mut de)?;
+    let seal = elide::Seal::of(&report);
+    let rebuilt: elide::Report = orchestrator.restorer().restore(&seal, &mut de)?;
 
     // Same entities, same modality, audit trail intact.
     let body = rebuilt
@@ -64,7 +65,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         .expect("content reconstructed as Text");
     assert_eq!(body.len(), detected, "every detected entity survived");
     assert!(
-        body.iter().all(|e| e.audit.verify().is_ok()),
+        body.iter().all(|e| e.audit().verify().is_ok()),
         "each reconstructed entity's audit trail still verifies",
     );
 
@@ -81,7 +82,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         .expect("applied content")
         .iter()
     {
-        assert!(entity.audit.selection().is_some(), "records the pick");
+        assert!(entity.audit().selection().is_some(), "records the pick");
         assert!(entity.is_redacted(), "records the redaction");
     }
     // The document re-encodes after redaction.
@@ -102,7 +103,10 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
     // A non-empty text group against a registry with no text pipeline.
     let json = r#"{"parts":[{"id":["document"],"modality":"text","entities":[{}]}]}"#;
     let mut de = serde_json::Deserializer::from_str(json);
-    let err = match orchestrator.deserializer().deserialize(&mut de) {
+    let err = match orchestrator
+        .restorer()
+        .restore_unsealed::<elide::Report, _>(&mut de)
+    {
         Ok(_) => panic!("no text pipeline registered — should have failed"),
         Err(e) => e,
     };
@@ -110,7 +114,7 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
     Ok(())
 }
 
-/// The standalone `Report::deserializer()` rebuilds a serialized report with no
+/// The standalone `Report::restorer()` rebuilds a serialized report with no
 /// orchestrator, the review-layer path that carries no analyzers, anonymizers,
 /// or codec registry. The rebuilt report is byte-for-byte the same shape as one
 /// deserialized through the orchestrator.
@@ -133,10 +137,10 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
 
     // No orchestrator here, just the modalities the report may contain.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let rebuilt = elide::Report::deserializer()
+    let rebuilt = elide::Report::restorer()
         .with_modality::<Text>()
         .with_modality::<Image>()
-        .deserialize(&mut de)?;
+        .restore::<elide::Report, _>(&elide::Seal::of(&report), &mut de)?;
 
     assert_eq!(
         rebuilt

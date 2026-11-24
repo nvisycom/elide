@@ -1,15 +1,16 @@
 //! [`Report`]: the detected-but-not-yet-applied entities of a document set,
-//! editable per part before [`anonymize_with`].
+//! reviewed per part before [`anonymize_with`].
 //!
 //! Detection (`analyze`) and redaction (`anonymize_with`) are split so a
-//! reviewer can inspect and edit the entities in between: suppress a false
-//! positive, include a missed one, retag or retarget a span, each recorded on
-//! the entity's audit trail. A document set's entities span
-//! several coordinate systems (each named document's own modality, plus every
-//! container part's), so the report keeps them separated: every part's entities
-//! are keyed by its [`PartId`] path, each editable through a typed accessor.
-//! There is no distinct "body", a document's own content is simply its
-//! depth-1 part, keyed by the document's name.
+//! reviewer can inspect the entities in between and say what to change through
+//! a [`Review`](crate::Review): suppress a false positive, include a missed
+//! one, relabel or relocate a finding, each recorded on the entity's audit
+//! trail. A document set's entities span several coordinate systems (each
+//! named document's own modality, plus every container part's), so the report
+//! keeps them separated: every part's entities are keyed by its [`PartId`]
+//! path, each read through a typed accessor. There is no distinct "body", a
+//! document's own content is simply its depth-1 part, keyed by the document's
+//! name.
 //!
 //! The report serializes to a part-list view,
 //! `{ parts: [ { "id": ["scan-A.docx", "word/media/image1.png"], .. } ] }`,
@@ -17,8 +18,8 @@
 //! belongs to. The path is a segment array (never string-joined); each entity
 //! carries its own id, label, location, and confidence.
 //!
-//! The type-erased storage ([`EntityGroup`]) lives in [`group`](super::group),
-//! and the serde wire view in [`serde`](super::serde). Each entity carries its
+//! The type-erased storage ([`EntityGroup`]) lives in `group`, and the serde
+//! wire view in [`wire`](crate::wire). Each entity carries its
 //! own tamper-evident audit trail ([`AuditLog`]) natively, so there is no
 //! separate document-level audit type.
 //!
@@ -35,38 +36,39 @@ use elide_core::{Error, Result};
 use uuid::Uuid;
 
 use super::group::EntityGroup;
-use super::part::{Part, PartMut};
-use super::registry::ReportDeserializer;
+use super::part::Part;
 use crate::PartId;
+use crate::wire::{Restorer, part_fields};
 
-/// The detected entities of a document set, editable before apply.
+/// The detected entities of a document set, reviewed before apply.
 ///
 /// Returned by [`analyze`] and consumed by [`anonymize_with`]. Every part,
 /// each named document's own content (keyed by [`Document::id`]), and every
 /// container part within one, is keyed by its [`PartId`] path. Read a part as
-/// modality `M` with [`part`], or edit it with [`part_mut`]: the views resolve
-/// the part and check its modality once. A reviewer's edits through a [`PartMut`] (including a missed
-/// entity, suppressing a false positive, suppressing everything a region
-/// contains) are recorded on the entities' own audit trails, so the report
-/// carries them to [`anonymize_with`] and to whoever audits it after. To reach
-/// an entity when only its [`id`] is known, use [`entity_anywhere`] /
-/// [`entity_anywhere_mut`].
+/// modality `M` with [`part`]; the view resolves the part and checks its
+/// modality once. To reach an entity when only its [`id`] is known, use
+/// [`entity_anywhere`].
+///
+/// A report changes only through a [`Review`](crate::Review) applied by
+/// [`Orchestrator::review`], which checks each edit against the
+/// orchestrator's [`ReviewPolicy`](crate::ReviewPolicy) and records it on the entities' own audit
+/// trails, so the report carries every decision to [`anonymize_with`] and to
+/// whoever audits it after.
 ///
 /// A report is **pure entity data**: it carries no live document state, so
-/// it can be built from scratch ([`new`] + [`insert_part`]) and serialized to
-/// a part-list `{ parts: [..] }` view, shipped
-/// elsewhere, and reconstructed there. [`anonymize_with`] re-decodes each part
-/// from the container it is applied to, so a rebuilt report redacts just as a
-/// freshly-analyzed one does.
+/// it can be built from scratch ([`new`] + [`insert_part`]), serialized to a
+/// part-list `{ parts: [..] }` view, stored, and read back against its
+/// [`Seal`](crate::Seal) with a [`Restorer`]. [`anonymize_with`]
+/// re-decodes each part from the container it is applied to, so a rebuilt
+/// report redacts just as a freshly-analyzed one does.
 ///
 /// [`analyze`]: crate::Orchestrator::analyze
 /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
+/// [`Orchestrator::review`]: crate::Orchestrator::review
 /// [`part`]: Report::part
-/// [`part_mut`]: Report::part_mut
 /// [`Document::id`]: crate::Document::id
 /// [`id`]: elide_core::entity::Entity::id
 /// [`entity_anywhere`]: Report::entity_anywhere
-/// [`entity_anywhere_mut`]: Report::entity_anywhere_mut
 /// [`new`]: Report::new
 /// [`insert_part`]: Report::insert_part
 #[derive(Default)]
@@ -128,30 +130,33 @@ impl Report {
         Self::default()
     }
 
-    /// A [`ReportDeserializer`] that rebuilds a report without an
+    /// A [`Restorer`] that rebuilds a report without an
     /// [`Orchestrator`].
     ///
     /// It needs none of the analyzers, anonymizers, or codec registry an
     /// [`Orchestrator`] needs to *run* one. Register the modalities the report
-    /// may contain, then [`deserialize`] it:
+    /// may contain, then [`restore`] it against the seal it was written
+    /// with:
     ///
     /// ```
     /// use elide_core::modality::text::Text;
-    /// use elide_engine::Report;
+    /// use elide_engine::{Report, Seal};
     ///
-    /// let json = serde_json::to_string(&Report::new())?;
-    /// let report = Report::deserializer()
+    /// let written = Report::new();
+    /// let seal = Seal::of(&written);
+    /// let json = serde_json::to_string(&written)?;
+    /// let report: Report = Report::restorer()
     ///     .with_modality::<Text>()
-    ///     .deserialize(&mut serde_json::Deserializer::from_str(&json))?;
+    ///     .restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
     /// assert_eq!(report.part_ids().count(), 0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// [`Orchestrator`]: crate::Orchestrator
-    /// [`deserialize`]: ReportDeserializer::deserialize
+    /// [`restore`]: Restorer::restore
     #[must_use]
-    pub fn deserializer() -> ReportDeserializer {
-        ReportDeserializer::new()
+    pub fn restorer() -> Restorer {
+        Restorer::new()
     }
 
     /// Every item of hidden content stripped from the documents, ordered by part
@@ -186,45 +191,49 @@ impl Report {
         self.stripped = record;
     }
 
-    /// A digest of every entity the report carries, to anchor it against
-    /// tampering between [`analyze`] and [`anonymize_with`].
+    /// A digest of every entity the report carries: the version a
+    /// [`Review`](crate::Review) is made against, and what an unkeyed [`Seal`] of the report
+    /// records.
     ///
     /// Each entity's trail [verifies](elide_core::entity::audit::AuditLog::verify)
-    /// on its own, and a report's trails are checked as it is
-    /// [deserialized](Self::deserializer), but that cannot catch a report
-    /// rewritten whole: the trail hashes are unkeyed, so whoever rewrites an
-    /// entity can recompute its trail, and nothing ties one entity's trail to
-    /// another's, so a dropped entity, which would then go unredacted, leaves
-    /// every remaining trail intact. The digest covers every part and every
-    /// [entity](Entity::digest), its fields and trail alike, so comparing it
-    /// with one recorded where the report's carrier cannot change it (a signed
-    /// log, a write-once bucket, a timestamping service) catches any of these.
-    /// Record it again after a trusted review, whose edits change it.
+    /// on its own, but that cannot catch a report rewritten whole: the trail
+    /// hashes are unkeyed, so whoever rewrites an entity can recompute its
+    /// trail; a trail cut back to an earlier event is intact in its own right;
+    /// a label or location changed beside its trail leaves the trail as it
+    /// was; and a dropped entity, which would then go unredacted, leaves every
+    /// remaining trail intact. The digest covers every part and every
+    /// [entity](Entity::digest), its fields and trail alike, so a report read
+    /// back against its seal catches any of these. A [review](crate::Review)
+    /// changes it.
     ///
-    /// A part with no entities is left out, as a serialized report may drop it,
-    /// and the [stripped](Self::stripped) section is left out, as it is never
-    /// read back.
+    /// Parts are ordered by path and entities by id, so the digest does not
+    /// depend on the order the report was built or serialized in. A part with
+    /// no entities is left out: dropping one hides nothing, and a restorer
+    /// skips one whose modality it does not know. The
+    /// [stripped](Self::stripped) section is left out, as it is never read
+    /// back.
     ///
     /// [`analyze`]: crate::Orchestrator::analyze
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
+    /// [`Seal`]: crate::Seal
+    #[must_use]
     pub fn digest(&self) -> AuditHash {
-        let mut parts: Vec<_> = self
-            .parts
-            .iter()
-            .filter(|(_, entities)| !entities.is_empty())
-            .collect();
-        parts.sort_unstable_by_key(|(id, _)| *id);
-        let mut fields: Vec<Vec<u8>> = Vec::new();
-        for (id, entities) in parts {
-            let segments: Vec<&str> = id.segments().collect();
-            fields.push((segments.len() as u64).to_le_bytes().to_vec());
-            fields.extend(segments.iter().map(|segment| segment.as_bytes().to_vec()));
-            fields.push(entities.modality_name().as_bytes().to_vec());
-            let digests = entities.digests();
-            fields.push((digests.len() as u64).to_le_bytes().to_vec());
-            fields.extend(digests.iter().map(|digest| digest.as_bytes().to_vec()));
-        }
-        AuditHash::of_fields(fields)
+        AuditHash::of_fields(self.seal_fields())
+    }
+
+    /// The fields the report's digest covers: each part with entities, by
+    /// path, with its modality and its entities' digests by id.
+    pub(crate) fn seal_fields(&self) -> Vec<Vec<u8>> {
+        part_fields(
+            self.parts
+                .iter()
+                .filter(|(_, entities)| !entities.is_empty())
+                .map(|(id, entities)| {
+                    let digests = entities.digests();
+                    let body = digests.iter().map(|d| d.as_bytes().to_vec()).collect();
+                    (id, entities.modality_name(), body)
+                }),
+        )
     }
 
     /// Set the entities of the part `id` as modality `P`, replacing any.
@@ -236,7 +245,7 @@ impl Report {
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     pub fn insert_part<P: Modality>(mut self, id: PartId, entities: Vec<Entity<P>>) -> Self
     where
-        Vec<Entity<P>>: serde::Serialize,
+        P::Location: serde::Serialize + serde::de::DeserializeOwned,
     {
         self.parts.insert(id, Box::new(entities));
         self
@@ -256,20 +265,6 @@ impl Report {
         Ok(Part::new(typed::<M>(id, part.as_ref())?))
     }
 
-    /// The part `id`, as modality `M`, to edit.
-    ///
-    /// # Errors
-    ///
-    /// [`NotFound`](elide_core::ErrorKind::NotFound) when the report holds no
-    /// part `id`, or holds it as another modality.
-    pub fn part_mut<M: Modality>(&mut self, id: &PartId) -> Result<PartMut<'_, M>> {
-        let part = self
-            .parts
-            .get_mut(id)
-            .ok_or_else(|| Error::not_found(format!("the report holds no part `{id}`")))?;
-        Ok(PartMut::new(typed_mut::<M>(id, part.as_mut())?))
-    }
-
     /// Find an entity of modality `M` by its [`id`] in any part, read-only.
     ///
     /// For a caller that holds an entity's id but not the part it lives in.
@@ -280,21 +275,7 @@ impl Report {
         self.parts
             .iter()
             .filter_map(|(part_id, part)| typed::<M>(part_id, part.as_ref()).ok())
-            .find_map(|entities| entities.iter().find(|entity| entity.id == id))
-    }
-
-    /// Find an entity of modality `M` by its [`id`] in any part, for editing.
-    ///
-    /// The `&mut` counterpart to [`entity_anywhere`]. Parts of another modality
-    /// are skipped.
-    ///
-    /// [`id`]: elide_core::entity::Entity::id
-    /// [`entity_anywhere`]: Self::entity_anywhere
-    pub fn entity_anywhere_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
-        self.parts
-            .iter_mut()
-            .filter_map(|(part_id, part)| typed_mut::<M>(part_id, part.as_mut()).ok())
-            .find_map(|entities| entities.iter_mut().find(|entity| entity.id == id))
+            .find_map(|entities| entities.iter().find(|entity| entity.id() == id))
     }
 
     /// The [`PartId`]s of the parts the report carries, paired with each part's
@@ -316,16 +297,6 @@ fn typed<'p, M: Modality>(id: &PartId, part: &'p dyn EntityGroup) -> Result<&'p 
         .ok_or_else(|| mismatch::<M>(id))
 }
 
-/// The entities of `part` (keyed `id`), as modality `M`, to edit.
-fn typed_mut<'p, M: Modality>(
-    id: &PartId,
-    part: &'p mut dyn EntityGroup,
-) -> Result<&'p mut Vec<Entity<M>>> {
-    part.as_any_mut()
-        .downcast_mut::<Vec<Entity<M>>>()
-        .ok_or_else(|| mismatch::<M>(id))
-}
-
 /// The error for a part `id` that is not of modality `M`.
 fn mismatch<M: Modality>(id: &PartId) -> Error {
     Error::not_found(format!("part `{id}` is not {}", M::NAME))
@@ -333,86 +304,73 @@ fn mismatch<M: Modality>(id: &PartId) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
-
     use elide_core::ErrorKind;
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{Attribution, AuditKind, ManualIntent};
     use elide_core::modality::NoArtifact;
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
 
-    use super::super::test_support::{doc, text_entity};
+    use super::super::test_support::{doc, text_entity, text_entity_at as at};
     use super::*;
 
-    /// A [`Text`] entity labelled `label` at `range`.
-    fn at(label: &str, range: Range<usize>) -> Entity<Text> {
-        let mut entity = text_entity(label);
-        entity.location = TextLocation::inline(range);
-        entity
-    }
-
-    /// The digest moves with anything an entity says, edited through its
-    /// trail or behind it, and with an entity dropped; a part with no
-    /// entities leaves it be.
+    /// The digest moves with anything an entity says, on its trail or beside
+    /// it, and with an entity dropped; it does not move with the order the
+    /// entities were built in, or with a part holding none.
     #[test]
     fn the_digest_covers_every_entity_and_field() {
         let kept = at("EMAIL_ADDRESS", 0..5);
         let other = at("PERSON_NAME", 6..9);
-        let report = || {
+        let report = |entities: Vec<Entity<Text>>| {
             Report::new()
-                .insert_part::<Text>(doc(), vec![kept.clone(), other.clone()])
+                .insert_part::<Text>(doc(), entities)
                 .insert_part::<Text>(doc().child("empty"), Vec::new())
         };
-        let digest = report().digest();
-        assert_eq!(digest, report().digest());
+        let written = report(vec![kept.clone(), other.clone()]);
+        let digest = written.digest();
+        assert_eq!(report(vec![other.clone(), kept.clone()]).digest(), digest);
 
-        let mut relabelled = report();
-        relabelled
-            .part_mut::<Text>(&doc())
-            .unwrap()
-            .relabel(kept.id, "RETAGGED");
-        assert_ne!(relabelled.digest(), digest);
+        // A label or location changed beside the trail, on the wire.
+        let registry = Restorer::new().with_modality::<Text>();
+        let wire = serde_json::to_value(&written).unwrap();
+        let moved_to = serde_json::to_value(TextLocation::inline(0..2)).unwrap();
+        for (field, value) in [
+            ("label", serde_json::json!("RETAGGED")),
+            ("location", moved_to),
+        ] {
+            let mut tampered = wire.clone();
+            for entity in tampered["parts"][0]["entities"].as_array_mut().unwrap() {
+                if entity["id"] == serde_json::json!(kept.id()) {
+                    entity[field] = value.clone();
+                }
+            }
+            let read: Report = registry.restore_unsealed(tampered).unwrap();
+            assert!(read.entity_anywhere::<Text>(kept.id()).is_some());
+            assert_ne!(read.digest(), digest, "a changed {field} moves the digest");
+        }
 
-        let mut moved = report();
-        moved.entity_anywhere_mut::<Text>(kept.id).unwrap().location = TextLocation::inline(0..2);
-        assert_ne!(moved.digest(), digest);
-
-        let dropped = Report::new().insert_part::<Text>(doc(), vec![kept.clone()]);
-        assert_ne!(dropped.digest(), digest);
+        assert_ne!(report(vec![kept.clone()]).digest(), digest);
 
         let without_empty = Report::new().insert_part::<Text>(doc(), vec![kept, other]);
         assert_eq!(without_empty.digest(), digest);
     }
 
     #[test]
-    fn a_part_is_read_and_edited_by_its_id() {
+    fn a_part_is_read_by_its_id() {
         let entity = text_entity("EMAIL_ADDRESS");
-        let id = entity.id;
+        let id = entity.id();
         let part = doc().child("word/media/image1.png");
-        let mut report = Report::new().insert_part::<Text>(part.clone(), vec![entity]);
+        let report = Report::new().insert_part::<Text>(part.clone(), vec![entity]);
 
-        assert_eq!(report.part::<Text>(&part).unwrap().entities().len(), 1);
-        assert!(
-            report
-                .part_mut::<Text>(&part)
-                .unwrap()
-                .relabel(id, "RETAGGED")
-        );
+        let read = report.part::<Text>(&part).unwrap();
+        assert_eq!(read.entities().len(), 1);
         assert_eq!(
-            report
-                .part::<Text>(&part)
-                .unwrap()
-                .entity(id)
-                .unwrap()
-                .label,
-            LabelRef::new("RETAGGED"),
+            *read.entity(id).unwrap().label(),
+            LabelRef::new("EMAIL_ADDRESS")
         );
     }
 
     #[test]
     fn an_unknown_part_or_another_modality_is_not_found() {
-        let mut report = Report::new().insert_part::<Text>(doc(), vec![text_entity("X")]);
+        let report = Report::new().insert_part::<Text>(doc(), vec![text_entity("X")]);
         let missing = report.part::<Text>(&PartId::leaf("missing")).unwrap_err();
         assert_eq!(missing.kind(), ErrorKind::NotFound);
 
@@ -427,175 +385,23 @@ mod tests {
             const NAME: &'static str = "other";
         }
         assert_eq!(
-            report.part_mut::<Other>(&doc()).unwrap_err().kind(),
+            report.part::<Other>(&doc()).unwrap_err().kind(),
             ErrorKind::NotFound,
-        );
-    }
-
-    #[test]
-    fn an_included_entity_is_a_reviewers_assertion() {
-        let mut report = Report::new().insert_part::<Text>(doc(), Vec::new());
-        let id = report
-            .part_mut::<Text>(&doc())
-            .unwrap()
-            .by("reviewer-7")
-            .because(Attribution::freeform("missed by detection"))
-            .include("PERSON_NAME", TextLocation::inline(4..12));
-
-        let part = report.part::<Text>(&doc()).unwrap();
-        let entity = part.entity(id).expect("included");
-        assert_eq!(entity.confidence, Confidence::MAX);
-        let [event] = entity.audit.events() else {
-            panic!("one event");
-        };
-        assert_eq!(event.source.as_str(), "reviewer-7");
-        let AuditKind::Manual(manual) = &event.kind else {
-            panic!("a Manual event");
-        };
-        assert_eq!(manual.intent, ManualIntent::Flag);
-        assert_eq!(
-            manual.attribution,
-            Some(Attribution::freeform("missed by detection").into())
-        );
-        assert!(entity.audit.verify().is_ok());
-        assert_eq!(part.unsuppressed().count(), 1);
-    }
-
-    #[test]
-    fn a_suppressed_entity_stays_in_the_part_and_is_audited() {
-        let entity = text_entity("EMAIL_ADDRESS");
-        let id = entity.id;
-        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
-
-        let mut part = report.part_mut::<Text>(&doc()).unwrap().by("reviewer-7");
-        assert!(part.suppress(id), "suppressed");
-        assert!(!part.suppress(id), "suppressing again records nothing");
-        assert!(
-            !part.suppress(Uuid::now_v7()),
-            "an unknown id is not suppressed"
-        );
-
-        let part = report.part::<Text>(&doc()).unwrap();
-        assert_eq!(part.suppressed().count(), 1);
-        assert_eq!(part.unsuppressed().count(), 0);
-        let entity = part.entity(id).unwrap();
-        assert!(entity.audit.events().iter().any(|event| {
-            event.source.as_str() == "reviewer-7"
-                && matches!(&event.kind, AuditKind::Manual(m) if m.intent == ManualIntent::Suppress)
-        }));
-        assert!(entity.audit.verify().is_ok());
-    }
-
-    #[test]
-    fn a_retag_or_retarget_is_an_audited_amendment() {
-        let entity = text_entity("EMAIL_ADDRESS");
-        let id = entity.id;
-        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
-
-        let mut part = report
-            .part_mut::<Text>(&doc())
-            .unwrap()
-            .by("reviewer-7")
-            .because(Attribution::freeform("misread"));
-        assert!(part.relabel(id, "PHONE_NUMBER"));
-        assert!(part.relocate(id, TextLocation::inline(1..3)));
-        assert!(
-            !part.relabel(Uuid::now_v7(), "X"),
-            "an unknown id is not amended"
-        );
-
-        let part = report.part::<Text>(&doc()).unwrap();
-        let entity = part.entity(id).unwrap();
-        assert_eq!(entity.label, LabelRef::new("PHONE_NUMBER"));
-        assert_eq!(entity.location, TextLocation::inline(1..3));
-        let amendments: Vec<_> = entity
-            .audit
-            .events()
-            .iter()
-            .filter_map(|event| match &event.kind {
-                AuditKind::Manual(m) if m.intent == ManualIntent::Amend => {
-                    Some((event.source.as_str(), m.location.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            amendments,
-            [
-                ("reviewer-7", TextLocation::inline(0..4)),
-                ("reviewer-7", TextLocation::inline(1..3)),
-            ]
-        );
-        assert!(!entity.is_suppressed(), "an amendment does not suppress");
-        assert!(entity.audit.verify().is_ok());
-    }
-
-    #[test]
-    fn a_region_suppresses_only_what_it_contains() {
-        let inside = at("EMAIL_ADDRESS", 4..10);
-        let crossing = at("PERSON_NAME", 15..25);
-        let outside = at("PHONE_NUMBER", 30..40);
-        let (inside_id, crossing_id, outside_id) = (inside.id, crossing.id, outside.id);
-        let mut report = Report::new().insert_part::<Text>(doc(), vec![inside, crossing, outside]);
-
-        let region = TextLocation::inline(0..20);
-        let spared = report
-            .part_mut::<Text>(&doc())
-            .unwrap()
-            .suppress_within(&region);
-        assert_eq!(spared, [inside_id]);
-
-        let part = report.part::<Text>(&doc()).unwrap();
-        assert!(part.entity(inside_id).unwrap().is_suppressed());
-        // A finding reaching outside the region is not spared.
-        assert!(!part.entity(crossing_id).unwrap().is_suppressed());
-        assert!(!part.entity(outside_id).unwrap().is_suppressed());
-        // The decision records the region it covered.
-        let recorded = part
-            .entity(inside_id)
-            .unwrap()
-            .audit
-            .events()
-            .iter()
-            .find_map(|event| match &event.kind {
-                AuditKind::Manual(manual) => Some(manual.location.clone()),
-                _ => None,
-            });
-        assert_eq!(recorded, Some(region.clone()));
-
-        // A second pass over the same region spares nothing new.
-        assert!(
-            report
-                .part_mut::<Text>(&doc())
-                .unwrap()
-                .suppress_within(&region)
-                .is_empty()
         );
     }
 
     #[test]
     fn entity_anywhere_reaches_a_nested_part_by_id_alone() {
         let entity = text_entity("EMAIL_ADDRESS");
-        let id = entity.id;
+        let id = entity.id();
         let nested = PartId::leaf("report.docx").child("word/media/image1.png");
-        let mut report = Report::new().insert_part::<Text>(nested.clone(), vec![entity]);
+        let report = Report::new().insert_part::<Text>(nested, vec![entity]);
 
         assert_eq!(
-            report.entity_anywhere::<Text>(id).map(|e| e.label.as_str()),
-            Some("EMAIL_ADDRESS"),
-        );
-        report
-            .entity_anywhere_mut::<Text>(id)
-            .expect("nested entity is reachable by id alone")
-            .label = LabelRef::new("RETAGGED");
-        assert_eq!(
             report
-                .part::<Text>(&nested)
-                .unwrap()
-                .entity(id)
-                .unwrap()
-                .label,
-            LabelRef::new("RETAGGED"),
+                .entity_anywhere::<Text>(id)
+                .map(|e| e.label().as_str()),
+            Some("EMAIL_ADDRESS"),
         );
         assert!(report.entity_anywhere::<Text>(Uuid::now_v7()).is_none());
     }

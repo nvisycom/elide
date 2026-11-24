@@ -5,14 +5,13 @@
 use std::ops::Range;
 
 use elide::codec::FormatRegistry;
-use elide::entity::audit::{Manual, ManualIntent};
 use elide::entity::builtins;
 use elide::modality::text::{SourceRef, Text, TextLocation};
 use elide::redaction::HiddenContentPolicy;
-use elide::{ErrorKind, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
+use elide::{ErrorKind, Orchestrator, PartId, RegistryDocumentExt, Report, Result, Review};
 
 use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
-use crate::support::review::flagged;
+use crate::support::review::included;
 
 const NAME: &str = "notes.json";
 const SOURCE: &str = r#"{"note":"call 555-0100 today"}"#;
@@ -27,10 +26,7 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator> {
 /// A report holding one reviewer mark over raw source bytes `range`.
 fn marked(range: Range<usize>) -> Report {
     let mark = TextLocation::marked_source(SourceRef::new(range));
-    Report::new().insert_part::<Text>(
-        PartId::from(NAME),
-        vec![flagged(builtins::PHONE_NUMBER.to_ref(), mark)],
-    )
+    included(&PartId::from(NAME), builtins::PHONE_NUMBER.to_ref(), mark)
 }
 
 #[tokio::test]
@@ -52,7 +48,10 @@ async fn a_mark_is_redacted() -> Result<()> {
     assert!(out.contains("today"), "{out}");
     let entities = applied.part::<Text>(&document.id())?.entities();
     assert!(entities[0].is_redacted());
-    assert!(entities[0].location.range().is_some(), "resolved to a span");
+    assert!(
+        entities[0].location().range().is_some(),
+        "resolved to a span"
+    );
     Ok(())
 }
 
@@ -82,12 +81,14 @@ async fn a_suppressed_mark_is_not_resolved() -> Result<()> {
         .document(NAME, SOURCE.as_bytes(), HiddenContentPolicy::default())
         .await?;
     let mark = TextLocation::marked_source(SourceRef::new(0..1));
-    let mut entity = flagged(builtins::PHONE_NUMBER.to_ref(), mark.clone());
-    entity.record_manual(Manual::new(ManualIntent::Suppress, mark), Some("reviewer"));
-    let report = Report::new().insert_part::<Text>(PartId::from(NAME), vec![entity]);
-    let _applied = orchestrator(&registry)?
-        .anonymize_with(&mut document, report)
-        .await?;
+    let part = PartId::from(NAME);
+    let mut report = included(&part, builtins::PHONE_NUMBER.to_ref(), mark);
+    let id = report.part::<Text>(&part)?.entities()[0].id();
+    let mut review = Review::new(&report);
+    review.part::<Text>(&part)?.by("reviewer").suppress(id);
+    let orchestrator = orchestrator(&registry)?;
+    orchestrator.review(&mut report, &review)?;
+    let _applied = orchestrator.anonymize_with(&mut document, report).await?;
     assert_eq!(document.document.encode()?.decode()?, SOURCE);
     Ok(())
 }

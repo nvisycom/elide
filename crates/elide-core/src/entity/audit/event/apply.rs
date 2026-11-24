@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::{AuditHash, AuditHasher};
 use super::super::{Attribution, RuleMatch};
+use crate::entity::LabelRef;
 use crate::modality::{Modality, ModalityLocation};
 use crate::primitive::ComponentId;
 use crate::redaction::LeakProfile;
@@ -77,43 +78,64 @@ impl Selection {
 }
 
 /// The redaction *execution*: the entity was hidden by applying a
-/// [`Selection`].
+/// [`Selection`] at a location.
 ///
 /// It names that selection event by its hash, so which operator ran, why, and
 /// how much its output leaks are read from the decision itself, see
 /// [`AuditLog::applied_selection`]. [`AuditLog::verify`] checks the link names
-/// an earlier selection event on the same trail.
+/// an earlier selection event on the same trail. `location` is where the
+/// operator wrote: the entity's location, with a mark resolved to the span it
+/// covers.
 ///
 /// [`AuditLog::applied_selection`]: crate::entity::audit::AuditLog::applied_selection
 /// [`AuditLog::verify`]: crate::entity::audit::AuditLog::verify
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Redaction {
+#[cfg_attr(
+    feature = "schema",
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
+        rename = "{M}Redaction"
+    )
+)]
+pub struct Redaction<M: Modality> {
     /// The hash of the [`Selection`] event this redaction applied.
     pub selection: AuditHash,
+    /// Where the operator wrote.
+    pub location: M::Location,
 }
 
-impl Redaction {
+impl<M: Modality> Redaction<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 7;
 
-    /// A redaction applying the [`Selection`] event whose hash is `selection`.
-    pub fn new(selection: AuditHash) -> Self {
-        Self { selection }
+    /// A redaction applying the [`Selection`] event whose hash is `selection`
+    /// at `location`.
+    pub fn new(selection: AuditHash, location: M::Location) -> Self {
+        Self {
+            selection,
+            location,
+        }
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         out.raw(self.selection.as_bytes());
+        out.bytes(&self.location.hash());
     }
 }
 
-/// A human override: an entity a reviewer added, flagged, or suppressed.
+/// A human override: an entity a reviewer included, suppressed, relabelled,
+/// or relocated.
 ///
-/// An entity a reviewer added by hand, or a detected one they marked to ignore.
 /// Its provenance is a person's decision, not a recognizer's, so the trail
-/// records *why* (an [`Attribution`], when supplied). *Who* made the override
-/// is the event's [`source`], not a payload field.
+/// records what the decision set and *why* (an [`Attribution`], when
+/// supplied). *Who* made the override is the event's [`source`], not a payload
+/// field.
 ///
 /// [`source`]: super::AuditEvent::source
 #[derive(Debug, Clone)]
@@ -131,14 +153,17 @@ impl Redaction {
     )
 )]
 pub struct Manual<M: Modality> {
-    /// Which human decision this records: including a missed entity, or
-    /// suppressing a detected one. This is the authority on whether the entity
-    /// is redacted, [`AuditLog::is_suppressed`] reads it, so there is no
-    /// separate flag to keep in sync.
+    /// Which human decision this records, with the label it set when it set
+    /// one. This is the authority on whether the entity is redacted,
+    /// [`AuditLog::is_suppressed`] reads it, so there is no separate flag to
+    /// keep in sync.
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
+    #[cfg_attr(feature = "serde", serde(flatten))]
     pub intent: ManualIntent,
-    /// Where the override applies, in modality-native coordinates.
+    /// Where the override applies, in modality-native coordinates: the
+    /// entity's location after an include or a relocation, or the region a
+    /// suppression covered.
     pub location: M::Location,
     /// The reviewer's rationale, when supplied (e.g. a freeform
     /// `"false positive"`, or a cited authority). `None` for an unexplained
@@ -173,38 +198,69 @@ impl<M: Modality> Manual<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
-        out.byte(self.intent as u8);
+        self.intent.hash_into(out);
         out.bytes(&self.location.hash());
         hash_opt_attribution(out, self.attribution.as_ref());
     }
 }
 
-/// Which reviewer decision a [`Manual`] event records about a finding.
+/// Which reviewer decision a [`Manual`] event records, with what it set.
 ///
-/// [`Flag`](ManualIntent::Flag) a miss, [`Suppress`](ManualIntent::Suppress) a
-/// false positive, or [`Amend`](ManualIntent::Amend) an existing finding.
-// Explicit discriminants: `Manual::hash_into` folds `intent as u8` into the
-// tamper-evident hash, so these values are part of the hash. Pinning them makes
-// that dependence visible and keeps a reorder or mid-enum insertion from
-// silently changing an event's hash. Append new variants with the next value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
+/// [`Include`](ManualIntent::Include) a miss, [`Suppress`](ManualIntent::Suppress)
+/// a false positive, or amend a finding: [`Relabel`](ManualIntent::Relabel) it
+/// or [`Relocate`](ManualIntent::Relocate) it to the event's location.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "serde", serde(tag = "intent", rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(tag = "intent", rename_all = "snake_case")
+)]
 pub enum ManualIntent {
-    /// A reviewer flagged an entity detection missed (a false negative). The
-    /// entity is redacted like any detected one.
-    Flag = 0,
+    /// A reviewer included an entity of `label` that detection missed (a false
+    /// negative), at the event's location. It is redacted like any detected
+    /// one.
+    Include {
+        /// The label the reviewer gave the entity.
+        label: LabelRef,
+    },
     /// A reviewer marked a detected entity to leave alone (a false positive).
     /// The redaction pass skips it, see [`AuditLog::is_suppressed`].
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
-    Suppress = 1,
-    /// A reviewer amended an existing entity, retagged its label, adjusted its
-    /// span, or changed another attribute. The entity stays and is redacted
-    /// normally; this records that a human changed it.
-    Amend = 2,
+    Suppress,
+    /// A reviewer gave the entity the label `label`.
+    Relabel {
+        /// The label the entity has from this event on.
+        label: LabelRef,
+    },
+    /// A reviewer moved the entity to the event's location.
+    Relocate,
+}
+
+impl ManualIntent {
+    /// This intent's discriminant byte, folded into the hash. Pinned so a
+    /// reordered or inserted variant cannot silently change a recorded hash;
+    /// append new variants with the next value.
+    const fn tag(&self) -> u8 {
+        match self {
+            Self::Include { .. } => 0,
+            Self::Suppress => 1,
+            Self::Relabel { .. } => 2,
+            Self::Relocate => 3,
+        }
+    }
+
+    fn hash_into(&self, out: &mut AuditHasher) {
+        out.byte(self.tag());
+        match self {
+            Self::Include { label } | Self::Relabel { label } => {
+                out.bytes(label.as_str().as_bytes());
+            }
+            Self::Suppress | Self::Relocate => {}
+        }
+    }
 }
 
 /// Fold an optional [`Attribution`] into `out`: a presence byte, then the

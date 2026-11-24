@@ -29,6 +29,7 @@ pub use self::recognition::{Flagged, Model, ModelId, Pattern, PatternRule};
 pub use self::reconcile::{Calibration, Conflict, Contested, Fusion, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
+use crate::entity::LabelRef;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 use crate::redaction::HiddenContentKind;
@@ -46,7 +47,7 @@ use crate::redaction::HiddenContentKind;
 ///
 /// Each event links to its [`parents`] by their [`hash`]: a birth event (a
 /// recognizer's first detection) has no parents, a normal step has one, and a
-/// [fusion](crate::entity::audit::AuditLog::record_fusion) has several. Its own
+/// [fusion](crate::entity::Entity::fuse) has several. Its own
 /// [`hash`] folds the
 /// payload together with the parents' hashes, so altering any event breaks
 /// every event downstream of it: [`AuditLog::verify`] walks the DAG and
@@ -173,26 +174,46 @@ impl<M: Modality> AuditEvent<M> {
 
     /// A recognition event from a pattern or dictionary recognizer's match.
     ///
-    /// The `source` recognizer's `rule` matched at `location`.
+    /// The `source` recognizer's `rule` matched `label` at `location`.
     pub fn pattern(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
+        label: impl Into<LabelRef>,
         location: M::Location,
         rule: PatternRule,
     ) -> Self {
-        Self::new(source, confidence, Pattern { location, rule })
+        let label = label.into();
+        Self::new(
+            source,
+            confidence,
+            Pattern {
+                label,
+                location,
+                rule,
+            },
+        )
     }
 
     /// A recognition event from a model or NER recognizer's match.
     ///
-    /// The `source` recognizer matched at `location` with `model`.
+    /// The `source` recognizer matched `label` at `location` with `model`.
     pub fn model(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
+        label: impl Into<LabelRef>,
         location: M::Location,
         model: ModelId,
     ) -> Self {
-        Self::new(source, confidence, Model { location, model })
+        let label = label.into();
+        Self::new(
+            source,
+            confidence,
+            Model {
+                label,
+                location,
+                model,
+            },
+        )
     }
 
     /// A flagged item: the `source` format labels an item of hidden content of
@@ -202,18 +223,32 @@ impl<M: Modality> AuditEvent<M> {
     pub fn flagged(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
+        label: impl Into<LabelRef>,
         location: M::Location,
         content: HiddenContentKind,
     ) -> Self {
-        Self::new(source, confidence, Flagged { location, content })
+        let label = label.into();
+        Self::new(
+            source,
+            confidence,
+            Flagged {
+                label,
+                location,
+                content,
+            },
+        )
     }
 
-    /// A fusion event combining several detections of one finding. Its
-    /// `confidence` is the pooled score of the fused entities; the `source` is
-    /// the fusion strategy's name.
-    pub fn fusion(strategy: impl Into<HipStr<'static>>, confidence: Confidence) -> Self {
+    /// A fusion event combining several detections of one finding into one at
+    /// `location`, the union of theirs. Its `confidence` is the pooled score
+    /// of the fused entities; the `source` is the fusion strategy's name.
+    pub fn fusion(
+        strategy: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        location: M::Location,
+    ) -> Self {
         let strategy = strategy.into();
-        Self::new(strategy.clone(), confidence, Fusion { strategy })
+        Self::new(strategy.clone(), confidence, Fusion { strategy, location })
     }
 
     /// Conflict-resolution event: a competing detection was arbitrated against
@@ -255,11 +290,11 @@ impl<M: Modality> AuditEvent<M> {
 
     /// A redaction event: the `source` operator applied a selection.
     ///
-    /// The selection `redaction` names is the one applied; the entity's
-    /// `confidence` is unchanged.
+    /// The selection `redaction` names is the one applied, at the location it
+    /// names; the entity's `confidence` is unchanged.
     pub fn redaction(
         source: impl Into<HipStr<'static>>,
-        redaction: Redaction,
+        redaction: Redaction<M>,
         confidence: Confidence,
     ) -> Self {
         Self::new(source, confidence, redaction)

@@ -4,7 +4,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::hash::AuditHasher;
+use super::hash::{AuditHash, AuditHasher};
 
 /// Author-supplied rationale for a redaction: *under what authority* it was made.
 ///
@@ -159,6 +159,14 @@ impl Attribution {
         CitedAttribution::new(authority, citation)
     }
 
+    /// The attribution's digest: the bytes an audit event folds in for it,
+    /// hashed on their own, for a record that names one outside a trail.
+    pub fn digest(&self) -> AuditHash {
+        let mut hasher = AuditHasher::new();
+        self.hash_into(&mut hasher);
+        hasher.finish()
+    }
+
     /// Fold this attribution's identifying bytes into the audit hash,
     /// dispatching to the shape's own `hash_into`: a discriminant byte tags the
     /// kind, then each field, so any edit to the recorded rationale breaks the
@@ -185,7 +193,6 @@ impl From<CitedAttribution> for Attribution {
 
 #[cfg(test)]
 mod tests {
-    use super::super::hash::AuditHash;
     use super::*;
 
     fn hashed(a: &Attribution) -> AuditHash {

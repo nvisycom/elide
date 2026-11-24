@@ -77,7 +77,7 @@ let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
 let analysis = analyzer.analyze(text, &scope).await?;
 
 for entity in &analysis.entities {
-    println!("{} ({})", entity.label.as_str(), entity.confidence);
+    println!("{} ({})", entity.label().as_str(), entity.confidence());
 }
 # Ok(())
 # }

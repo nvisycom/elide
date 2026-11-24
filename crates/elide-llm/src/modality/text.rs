@@ -69,9 +69,10 @@ mod tests {
         let first = lift(text, vec![candidate("Alice", "c1"), candidate("Bob", "c1")]);
         let second = lift(text, vec![candidate("Alice", "c1")]);
 
-        assert_eq!(first[0].coref, first[1].coref, "one call, one cluster");
+        assert_eq!(first[0].coref(), first[1].coref(), "one call, one cluster");
         assert_ne!(
-            first[0].coref, second[0].coref,
+            first[0].coref(),
+            second[0].coref(),
             "calls never share a cluster"
         );
     }

@@ -57,7 +57,7 @@ let recognizer = NerRecognizer::new(backend);
 let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
 let subject = Subject::<Text>::new(TextData::new("Jane Doe lives in Berlin"));
 let entities = recognizer.recognize(&subject, &Context::new(&scope)).await?;
-assert_eq!(entities[0].label.as_str(), "person_name");
+assert_eq!(entities[0].label().as_str(), "person_name");
 # Ok(())
 # }
 ```

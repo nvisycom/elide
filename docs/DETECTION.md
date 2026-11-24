@@ -238,17 +238,26 @@ recognizer accumulates is rebuilt for each payload and discarded with it.
 
 A caller corrects detection on its result, not by steering it. Detection
 returns a report of the reconciled entities, keyed by the document part each
-lies in, and redaction applies that report. Between the two, a reviewer
-suppresses a false positive, suppresses every entity a region contains,
-includes an entity detection missed, or amends one's label or span.
+lies in, and redaction applies that report. Between the two, a reviewer's
+decisions arrive as a review: suppress a false positive, suppress every
+entity a region contains, include an entity detection missed, or amend one's
+label or span. The review names the version of the report it was made
+against, and applies whole or not at all.
 
 A correction is addressed to one part, in that part's own coordinates: a
 region of a page header never touches the body. A region spares only what it
 contains whole, so a finding that reaches past it is still redacted and
 nothing outside the region is spared. Each correction is recorded on the
-entity it touches as a human decision, with who made it and why, and a
-suppressed entity stays in the report rather than vanishing, so the record of
-what was found and what a person chose to keep is never lost.
+entity it touches as a human decision, with who made it, why, and what it
+set, and a suppressed entity stays in the report rather than vanishing, so the
+record of what was found and what a person chose to keep is never lost.
+
+A correction that can leave content unredacted (a suppression, a relabel, a
+relocation off any of the old span) narrows the redaction, and a caller's
+review policy decides who may make one: it can protect labels no correction
+may narrow, and require a reason. An inclusion only adds to what is hidden,
+so any reviewer may make one. The policy reads the names a review carries;
+authenticating the reviewer who sent it is the caller's.
 
 ## 8. Reconciliation and Conflict Resolution
 

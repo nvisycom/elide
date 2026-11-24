@@ -96,7 +96,8 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
         "re_analyze detects the same email — the seeded Layout was reused, not re-OCR'd",
     );
     assert_eq!(
-        again[0].label, found[0].label,
+        again[0].label(),
+        found[0].label(),
         "the re-run finds the same label as the first pass",
     );
     Ok(())
@@ -119,7 +120,7 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
 }
 
 /// The persist path: serialize `analyze`'s artifacts, ship them across a review
-/// gap, then `Orchestrator::deserializer` them back and feed the
+/// gap, then `Orchestrator::restorer` them back and feed the
 /// rebuilt set to `re_analyze`, the OCR text survives the wire, so the re-run
 /// reuses it against an empty OCR backend rather than re-OCR'ing.
 #[tokio::test]
@@ -137,13 +138,14 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let analyzed = first.analyze(&mut document).await?;
     assert_eq!(image_entities(&analyzed).len(), 1);
     let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
+    let seal = elide::Seal::of(&analyzed.artifacts);
 
     // Rebuild the ArtifactSet from the wire through the orchestrator, then re-run
     // against an EMPTY OCR backend: detection survives only because the restored
     // Layout carried the text through deserialize.
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
     let mut de = serde_json::Deserializer::from_str(&json);
-    let restored = second.deserializer().deserialize_artifacts(&mut de)?;
+    let restored: elide::ArtifactSet = second.restorer().restore(&seal, &mut de)?;
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;

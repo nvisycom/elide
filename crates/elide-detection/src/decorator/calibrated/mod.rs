@@ -53,9 +53,9 @@ impl<R> Calibrated<R> {
     /// Scale each of `entities` by its label's multiplier.
     fn calibrate<M: Modality>(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
         for entity in &mut entities {
-            let factor = self.calibration.factor(&entity.label);
+            let factor = self.calibration.factor(entity.label());
             if factor != Multiplier::IDENTITY {
-                let scaled = entity.confidence.saturating_mul(factor.get());
+                let scaled = entity.confidence().saturating_mul(factor.get());
                 entity.record(AuditEvent::calibration(scaled, factor.get()));
             }
         }
@@ -112,13 +112,13 @@ mod tests {
             .into_iter()
             .map(|label| {
                 let at = TextLocation::inline(0..4);
-                let event = AuditEvent::pattern(
+                Entity::pattern(
                     "two-finds",
                     Confidence::MAX,
-                    at.clone(),
+                    label,
+                    at,
                     PatternRule::default(),
-                );
-                Entity::new(label, at).with_event(event)
+                )
             })
             .collect())
         }
@@ -144,14 +144,14 @@ mod tests {
             let [person, organization] = &found[..] else {
                 panic!("two findings");
             };
-            assert_eq!(person.confidence, Confidence::MAX);
-            assert_eq!(person.audit.events().len(), 1);
-            assert_eq!(organization.confidence, Confidence::new(0.5).unwrap());
+            assert_eq!(person.confidence(), Confidence::MAX);
+            assert_eq!(person.audit().events().len(), 1);
+            assert_eq!(organization.confidence(), Confidence::new(0.5).unwrap());
             assert!(matches!(
-                organization.audit.events().last().unwrap().kind,
+                organization.audit().events().last().unwrap().kind,
                 AuditKind::Calibration(_)
             ));
-            assert!(organization.audit.verify().is_ok());
+            assert!(organization.audit().verify().is_ok());
         }
     }
 

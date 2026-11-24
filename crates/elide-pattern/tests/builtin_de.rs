@@ -76,7 +76,7 @@ async fn builtin_contact() {
     assert!(
         !entities
             .iter()
-            .any(|e| e.label == builtins::NATIONALITY.to_ref()),
+            .any(|e| e.label() == &builtins::NATIONALITY.to_ref()),
         "english-language NATIONALITY dictionary should not match on a DE fixture",
     );
     // Sanity: at least one PLZ entity surfaced.

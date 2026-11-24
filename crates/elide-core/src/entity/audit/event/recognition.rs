@@ -1,7 +1,7 @@
 //! Recognition payloads: a [`Pattern`] or [`Model`] recognizer matched an
-//! entity, each carrying the match [`location`](Pattern::location) and what
-//! matched ([`PatternRule`] / [`ModelId`]), or a format [`Flagged`] an item of
-//! hidden content.
+//! entity, each carrying the [`label`](Pattern::label) it found, the match
+//! [`location`](Pattern::location), and what matched ([`PatternRule`] /
+//! [`ModelId`]), or a format [`Flagged`] an item of hidden content.
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -12,12 +12,14 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
+use crate::entity::LabelRef;
 use crate::modality::{Modality, ModalityLocation};
 use crate::redaction::HiddenContentKind;
 
-/// Detail of a pattern or dictionary recognition: the rule and its location.
+/// Detail of a pattern or dictionary recognition: what it found, where, and by
+/// which rule.
 ///
-/// The [`PatternRule`] in `rule` matched at `location`.
+/// The [`PatternRule`] in `rule` matched `label` at `location`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -33,6 +35,8 @@ use crate::redaction::HiddenContentKind;
     )
 )]
 pub struct Pattern<M: Modality> {
+    /// The label the recognizer found.
+    pub label: LabelRef,
     /// Where the recognizer matched.
     pub location: M::Location,
     /// The rule that matched.
@@ -45,6 +49,7 @@ impl<M: Modality> Pattern<M> {
     pub(crate) const TAG: u8 = 0;
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         out.bytes(self.rule.name.as_bytes());
         out.opt(self.rule.regex.as_ref().map(|s| s.as_bytes()));
@@ -52,9 +57,10 @@ impl<M: Modality> Pattern<M> {
     }
 }
 
-/// Detail of a model or NER recognition: the model and where it matched.
+/// Detail of a model or NER recognition: what it found, where, and by which
+/// model.
 ///
-/// The model named by `model` matched at `location`.
+/// The model named by `model` matched `label` at `location`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -70,6 +76,8 @@ impl<M: Modality> Pattern<M> {
     )
 )]
 pub struct Model<M: Modality> {
+    /// The label the recognizer found.
+    pub label: LabelRef,
     /// Where the recognizer matched.
     pub location: M::Location,
     /// Model metadata (name, version).
@@ -81,6 +89,7 @@ impl<M: Modality> Model<M> {
     pub(crate) const TAG: u8 = 1;
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         out.bytes(self.model.name.as_bytes());
         out.opt(self.model.version.as_ref().map(|s| s.as_bytes()));
@@ -90,8 +99,8 @@ impl<M: Modality> Model<M> {
 /// Detail of a flagged item: hidden content made a redaction subject.
 ///
 /// An item of hidden content its format labels (a metadata field, a comment, an
-/// author, a tracked deletion) was made a redaction subject at `location`, with
-/// its kind in `content`.
+/// author, a tracked deletion) was made a redaction subject of `label` at
+/// `location`, with its kind in `content`.
 ///
 /// Distinct from [`Pattern`]/[`Model`] because a flagged item is not *matched*
 /// out of free content: the format names it, and it is simply present. There
@@ -112,6 +121,8 @@ impl<M: Modality> Model<M> {
     )
 )]
 pub struct Flagged<M: Modality> {
+    /// The label the item was flagged as.
+    pub label: LabelRef,
     /// The item's location.
     pub location: M::Location,
     /// The kind of hidden content the item is, whose
@@ -124,6 +135,7 @@ impl<M: Modality> Flagged<M> {
     pub(crate) const TAG: u8 = 10;
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         out.byte(self.content as u8);
     }

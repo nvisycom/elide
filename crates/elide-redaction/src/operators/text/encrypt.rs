@@ -155,7 +155,7 @@ impl<M: TextRedactable> Operator<M> for AesEncrypt {
         entity: &Entity<M>,
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
-        let ciphertext = self.encrypt_str(&entity.label, data.as_ref())?;
+        let ciphertext = self.encrypt_str(entity.label(), data.as_ref())?;
         Ok(Some(M::Replacement::from(TextReplacement::replaced(
             ciphertext,
         ))))
@@ -175,7 +175,7 @@ impl<M: TextRedactable<Data = TextData>> ReversibleOperator<M> for AesEncrypt {
         // Only a text treatment carries a recoverable ciphertext.
         let text: Result<TextReplacement, _> = replacement.clone().try_into();
         match text {
-            Ok(text) => self.decrypt_replacement(&entity.label, &text),
+            Ok(text) => self.decrypt_replacement(entity.label(), &text),
             Err(_) => Ok(None),
         }
     }
@@ -184,7 +184,7 @@ impl<M: TextRedactable<Data = TextData>> ReversibleOperator<M> for AesEncrypt {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::entity::audit::PatternRule;
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -193,13 +193,13 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::inline(0..5);
-        let event = AuditEvent::pattern(
+        Entity::pattern(
             "t",
             Confidence::MAX,
-            location.clone(),
+            LabelRef::new("email_address"),
+            location,
             PatternRule::default(),
-        );
-        Entity::new(LabelRef::new("email_address"), location).with_event(event)
+        )
     }
 
     fn encryptor() -> AesEncrypt {
@@ -274,15 +274,23 @@ mod tests {
 
         let card = {
             let loc = TextLocation::inline(0..5);
-            let event =
-                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternRule::default());
-            Entity::<Text>::new(LabelRef::new("payment_card"), loc).with_event(event)
+            Entity::<Text>::pattern(
+                "t",
+                Confidence::MAX,
+                LabelRef::new("payment_card"),
+                loc,
+                PatternRule::default(),
+            )
         };
         let ssn = {
             let loc = TextLocation::inline(0..5);
-            let event =
-                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternRule::default());
-            Entity::<Text>::new(LabelRef::new("ssn"), loc).with_event(event)
+            Entity::<Text>::pattern(
+                "t",
+                Confidence::MAX,
+                LabelRef::new("ssn"),
+                loc,
+                PatternRule::default(),
+            )
         };
 
         let replacement = encrypt(&op, &card, "secret").await;

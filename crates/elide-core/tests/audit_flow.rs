@@ -21,20 +21,14 @@ fn recognized(label: &LabelRef, location: TextLocation, event: AuditEvent<Text>)
     Entity::new(label.clone(), location).with_event(event)
 }
 
-/// A trivial "highest confidence wins" fusion: absorb every other entity's
-/// trail, then record a fusion event joining both trails' heads, what
-/// the toolkit fusion step does, assembled here by hand from core parts.
+/// A trivial "highest confidence wins" fusion: the strongest entity absorbs
+/// every other, keeping its own location and score, as the toolkit fusion step
+/// does with a fused span and a pooled score.
 fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
-    entities.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    entities.sort_by(|a, b| b.confidence().partial_cmp(&a.confidence()).unwrap());
     let mut base = entities.remove(0);
-    let base_head = base.audit.head_hash();
-    let mut parents = vec![base_head];
-    for other in entities {
-        parents.push(other.audit.head_hash());
-        base.audit.absorb(other.audit.events().iter().cloned());
-    }
-    base.audit
-        .record_fusion(AuditEvent::fusion("max", base.confidence), parents);
+    let (confidence, location) = (base.confidence(), base.location().clone());
+    base.fuse(&mut entities, "max", confidence, location);
     base
 }
 
@@ -50,6 +44,7 @@ fn two_recognizers_fuse_into_one() {
         AuditEvent::pattern(
             "us-phone-pattern",
             pattern_conf,
+            phone.clone(),
             TextLocation::inline(10..22),
             PatternRule {
                 name: "phone".into(),
@@ -67,6 +62,7 @@ fn two_recognizers_fuse_into_one() {
         AuditEvent::model(
             "ner-model",
             ner_conf,
+            phone.clone(),
             TextLocation::inline(10..23),
             ModelId {
                 name: "ner-model".into(),
@@ -76,38 +72,35 @@ fn two_recognizers_fuse_into_one() {
     );
 
     // Fuse both into one audited entity.
-    let mut entity = fuse_max_confidence(vec![pattern, ner]);
+    let entity = fuse_max_confidence(vec![pattern, ner]);
 
     // The fusion kept the highest-confidence layer's location and score.
-    assert_eq!(entity.label, phone);
-    assert_eq!(entity.confidence, Confidence::new(0.95).unwrap());
+    assert_eq!(*entity.label(), phone);
+    assert_eq!(entity.confidence(), Confidence::new(0.95).unwrap());
 
     // The entity has a fresh v7 identity.
-    assert_eq!(entity.id.get_version_num(), 7);
+    assert_eq!(entity.id().get_version_num(), 7);
 
     // Coreference is unset by default; it can be attached.
-    assert!(entity.coref.is_none());
-    entity.coref = Some(EntityCoRef::new("ref-1"));
-    assert_eq!(
-        entity.coref.as_ref().map(EntityCoRef::as_str),
-        Some("ref-1")
-    );
+    assert!(entity.coref().is_none());
+    let entity = entity.with_coref(EntityCoRef::new("ref-1"));
+    assert_eq!(entity.coref().map(EntityCoRef::as_str), Some("ref-1"));
 
     // Both recognitions survive, plus a fusion event.
-    assert_eq!(entity.audit.recognizers().count(), 2);
-    assert_eq!(entity.audit.events().len(), 3);
+    assert_eq!(entity.audit().recognizers().count(), 2);
+    assert_eq!(entity.audit().events().len(), 3);
     assert_matches!(
-        entity.audit.events().last().unwrap().kind,
+        entity.audit().events().last().unwrap().kind,
         AuditKind::Fusion(ref dedup) if dedup.strategy == "max");
     assert_eq!(
-        entity.audit.final_confidence(),
+        entity.audit().final_confidence(),
         Some(Confidence::new(0.95).unwrap())
     );
 
     // The fusion event names both recognizers' heads as its parents, and the
     // whole DAG verifies.
-    assert_eq!(entity.audit.events().last().unwrap().parents().len(), 2);
-    assert!(entity.audit.verify().is_ok());
+    assert_eq!(entity.audit().events().last().unwrap().parents().len(), 2);
+    assert!(entity.audit().verify().is_ok());
 }
 
 #[test]
@@ -286,7 +279,7 @@ fn operator_trait_shape() {
             // Pure: computes the replacement, mutates nothing.
             Ok(Some(TextReplacement::Replaced(format!(
                 "[{}]",
-                entity.label.as_str()
+                entity.label().as_str()
             ))))
         }
     }

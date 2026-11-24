@@ -154,15 +154,14 @@ mod tests {
 
     #[test]
     fn retain_declared_keeps_only_in_catalog_labels() {
-        use crate::entity::audit::{AuditEvent, PatternRule};
+        use crate::entity::audit::PatternRule;
         use crate::modality::text::{Text, TextLocation};
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
             let loc = TextLocation::inline(0..1);
             let conf = Confidence::new(0.9).unwrap();
-            let event = AuditEvent::pattern("t", conf, loc.clone(), PatternRule::default());
-            Entity::new(LabelRef::new(label), loc).with_event(event)
+            Entity::pattern("t", conf, LabelRef::new(label), loc, PatternRule::default())
         }
 
         let catalog: LabelCatalog = [Label::new("email_address", "email")].into_iter().collect();

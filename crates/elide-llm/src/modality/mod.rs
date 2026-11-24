@@ -9,7 +9,7 @@ mod image;
 mod localize;
 mod text;
 
-use elide_core::entity::audit::{AuditEvent, ModelId};
+use elide_core::entity::audit::ModelId;
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
@@ -84,13 +84,14 @@ impl<'a> Lifter<'a> {
             );
             return None;
         };
-        let event = AuditEvent::model(
+        let label = LabelRef::new(label);
+        let entity = Entity::model(
             self.source.clone(),
             confidence,
-            location.clone(),
+            label,
+            location,
             self.model.clone(),
         );
-        let entity = Entity::new(LabelRef::new(label), location).with_event(event);
         // The model groups mentions of the same real-world entity under a
         // shared handle; scoped to this call, it is the entity's coreference
         // cluster.

@@ -14,7 +14,7 @@ derives `Component` and implements `Recognizer<M>`:
   answer for several at once.
 
 ```rust
-use elide::entity::audit::{AuditEvent, PatternRule};
+use elide::entity::audit::PatternRule;
 use elide::modality::text::TextLocation;
 use elide::prelude::*;
 use elide::recognition::{Context, Subject};
@@ -37,16 +37,15 @@ impl Recognizer<Text> for TicketRecognizer {
                 (digits > 0).then(|| start..start + 4 + digits)
             })
             .map(|span| {
-                let location = TextLocation::inline(span.clone());
-                let event = AuditEvent::pattern(
+                let rule = PatternRule { name: "ops-ticket".into(), ..PatternRule::default() };
+                Entity::pattern(
                     "ticket-recognizer",
                     confidence,
-                    location.clone(),
-                    PatternRule { name: "ops-ticket".into(), ..PatternRule::default() },
-                );
-                Entity::new(builtins::INTERNAL_ID.to_ref(), location)
-                    .with_recognized_range(span)
-                    .with_event(event)
+                    builtins::INTERNAL_ID.to_ref(),
+                    TextLocation::inline(span.clone()),
+                    rule,
+                )
+                .with_recognized_range(span)
             })
             .collect();
         Ok(entities)

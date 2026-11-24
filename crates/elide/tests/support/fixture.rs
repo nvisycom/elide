@@ -339,7 +339,7 @@ impl Fixture {
     ) -> Result<PipelineOutcome<M>>
     where
         M: TextRecognizable,
-        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         Replace: Operator<M>,
         Mask: Operator<M>,
@@ -366,7 +366,7 @@ impl Fixture {
     ) -> Result<PipelineOutcome<M>>
     where
         M: TextRecognizable,
-        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         Replace: Operator<M>,
         Mask: Operator<M>,

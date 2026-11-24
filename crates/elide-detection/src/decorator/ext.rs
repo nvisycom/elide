@@ -60,7 +60,7 @@ impl<R: Component> RecognizerExt for R {}
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::entity::audit::PatternRule;
     use elide_core::entity::{Entity, builtins};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
@@ -88,15 +88,13 @@ mod tests {
                 return Err(Error::recognition("boom"));
             }
             let at = TextLocation::inline(0..4);
-            let event = AuditEvent::pattern(
+            Ok(vec![Entity::pattern(
                 "one-find",
                 Confidence::MAX,
-                at.clone(),
+                builtins::PERSON_NAME.to_ref(),
+                at,
                 PatternRule::default(),
-            );
-            Ok(vec![
-                Entity::new(builtins::PERSON_NAME.to_ref(), at).with_event(event),
-            ])
+            )])
         }
     }
 
@@ -114,7 +112,7 @@ mod tests {
             .recognize(&subject, &ctx)
             .await
             .unwrap();
-        assert_eq!(found[0].confidence, Confidence::new(0.5).unwrap());
+        assert_eq!(found[0].confidence(), Confidence::new(0.5).unwrap());
 
         let failed = OneFind { fails: true }
             .calibrated(Calibration::scale(HALF))

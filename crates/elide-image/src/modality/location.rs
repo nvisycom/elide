@@ -165,7 +165,7 @@ mod tests {
         let a = loc(0.0, 0.0, 10.0, 10.0);
         let b = loc(5.0, 5.0, 10.0, 10.0);
         assert!(a.overlaps(&b));
-        let b_page2 = b.clone().with_page(2);
+        let b_page2 = b.with_page(2);
         assert!(!a.overlaps(&b_page2));
     }
 

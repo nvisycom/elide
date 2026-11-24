@@ -9,7 +9,7 @@
 //! never collide with a same-named part in another document). Each entry is
 //! tagged with its [`modality`](elide_core::modality::Modality::NAME) so the
 //! orchestrator can route it back on deserialization. Reconstruction is driven
-//! by the [`ReportDeserializer`]: the wire form
+//! by the [`Restorer`]: the wire form
 //! drops the concrete modality type, deserialization is not object-safe, so each
 //! group is buffered and replayed through the per-modality parser resolved from
 //! the registry.
@@ -27,13 +27,14 @@
 //! to nothing, an unregistered modality, or an absent/null `artifact` field,
 //! is simply dropped, and a re-run re-enriches.
 //!
-//! [`Report`]: super::report::Report
-//! [`ArtifactSet`]: super::artifacts::ArtifactSet
+//! [`Report`]: crate::Report
+//! [`ArtifactSet`]: crate::ArtifactSet
 
 use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 
+use elide_core::entity::audit::AuditHash;
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
 use serde::de::{
     DeserializeSeed, Deserializer, Error as DeError, IgnoredAny, IntoDeserializer, MapAccess,
@@ -42,11 +43,10 @@ use serde::de::{
 use serde::ser::{Serialize, Serializer};
 use serde_value::Value;
 
-use super::artifacts::ArtifactSet;
-use super::group::{ArtifactGroup, EntityGroup};
-use super::registry::{ModalityEntry, ReportDeserializer};
-use super::report::Report;
+use super::restorer::{ModalityEntry, Parser, Restorer};
 use crate::PartId;
+use crate::analysis::{ArtifactGroup, ArtifactSet, EntityGroup, Report};
+use crate::review::{EditGroup, Review};
 
 /// A part's [`PartId`] path serialized as a segment array, the wire key. A
 /// path is never string-joined (a segment can contain any delimiter), so it
@@ -61,7 +61,7 @@ impl Serialize for PathField<'_> {
 
 /// A type-erased value (a part's entities or artifact) serialized through
 /// erasure.
-struct Erased<'a, T: ?Sized>(&'a T);
+pub(crate) struct Erased<'a, T: ?Sized>(pub(crate) &'a T);
 
 impl<T: erased_serde::Serialize + ?Sized> Serialize for Erased<'_, T> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -141,6 +141,44 @@ impl Serialize for Report {
             })
             .collect();
         ReportWire { parts, stripped }.serialize(serializer)
+    }
+}
+
+/// One part of a review on the wire. `modality` tags which `Vec<Edit<M>>` the
+/// edits parse back as.
+#[derive(serde::Serialize)]
+struct EditEntry<'a> {
+    id: PathField<'a>,
+    modality: &'static str,
+    edits: Erased<'a, dyn EditGroup>,
+}
+
+/// The whole review on the wire.
+#[derive(serde::Serialize)]
+#[serde(rename = "Review")]
+struct ReviewWire<'a> {
+    against: AuditHash,
+    parts: Vec<EditEntry<'a>>,
+}
+
+impl Serialize for Review {
+    /// Serialize to `{ against, parts: [ { id: [seg..], modality, edits } ] }`,
+    /// the parts in the order the review first edited them.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let parts = self
+            .parts
+            .iter()
+            .map(|(id, edits)| EditEntry {
+                id: PathField(id),
+                modality: edits.modality_name(),
+                edits: Erased(edits.as_ref()),
+            })
+            .collect();
+        ReviewWire {
+            against: self.against,
+            parts,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -227,34 +265,47 @@ impl Leaf for EntityLeaf {
         name: &str,
         value: Value,
     ) -> Result<Option<Box<dyn EntityGroup>>, E> {
-        // Entities are required: an absent/null `entities` field (`Value::Unit`)
-        // is malformed, not "no entities", since unlike an artifact, a missing
-        // entity group could be silently dropping a reviewer's edits.
-        let count = match &value {
-            Value::Unit => return Err(E::missing_field("entities")),
-            Value::Seq(items) => items.len(),
-            _ => return Err(E::custom("`entities` must be an array")),
-        };
-        let Some((_, entry)) = entry else {
-            // Unregistered modality: skip only an empty group (nothing to lose,
-            // as in `analyze`); reject a non-empty one, whose entities a reviewer
-            // may have edited.
-            if count == 0 {
-                return Ok(None);
-            }
-            return Err(E::custom(format!(
-                "no registered modality for `{name}` (its {count} entities would be dropped)"
-            )));
-        };
-
-        // Replay the buffered entities through the modality's parser.
-        let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(value.into_deserializer());
-        (entry.parse)(&mut erased).map(Some).map_err(E::custom)
+        parse_required(
+            Self::FIELD,
+            entry.map(|(_, entry)| entry.parse_entities),
+            name,
+            value,
+        )
     }
 
     fn set_part(report: &mut Report, id: PartId, entities: Box<dyn EntityGroup>) {
         report.parts.insert(id, entities);
     }
+}
+
+/// Parse the buffered `value` of a required `field` (`entities` or `edits`)
+/// with `parser`, the registered modality `name`'s.
+///
+/// The field must be an array: an absent or null one is malformed, not empty,
+/// since it could be a reviewer's work silently dropped. An unregistered
+/// modality is skipped only when its array is empty (nothing to lose, as in
+/// `analyze`), and rejected otherwise.
+fn parse_required<T, E: DeError>(
+    field: &'static str,
+    parser: Option<Parser<T>>,
+    name: &str,
+    value: Value,
+) -> Result<Option<T>, E> {
+    let count = match &value {
+        Value::Unit => return Err(E::missing_field(field)),
+        Value::Seq(items) => items.len(),
+        _ => return Err(E::custom(format!("`{field}` must be an array"))),
+    };
+    let Some(parser) = parser else {
+        if count == 0 {
+            return Ok(None);
+        }
+        return Err(E::custom(format!(
+            "no registered modality for `{name}` (its {count} {field} would be dropped)"
+        )));
+    };
+    let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(value.into_deserializer());
+    parser(&mut erased).map(Some).map_err(E::custom)
 }
 
 /// The artifact leaf: a group's `artifact` reconstructs as a boxed
@@ -309,6 +360,43 @@ impl Leaf for ArtifactLeaf {
     }
 }
 
+/// The review leaf: a part's `edits` reconstruct as a boxed `Vec<Edit<M>>`.
+/// An unregistered modality is skipped only when empty; a non-empty one is a
+/// hard error, since dropping its edits could leave an include unapplied.
+pub(super) struct EditLeaf;
+
+/// A review's parts, as the generic seeds assemble them.
+#[derive(Default)]
+pub(super) struct ReviewParts(Vec<(PartId, Box<dyn EditGroup>)>);
+
+impl Leaf for EditLeaf {
+    type Parsed = Box<dyn EditGroup>;
+    type Set = ReviewParts;
+
+    const FIELD: &'static str = "edits";
+    const GROUP_EXPECTING: &'static str = "a { id, modality, edits } part entry";
+    const GROUP_NAME: &'static str = "EditEntry";
+    const SET_EXPECTING: &'static str = "a { against, parts: [..] } review";
+    const SET_NAME: &'static str = "Review";
+
+    fn parse<E: DeError>(
+        entry: Option<(&'static str, ModalityEntry)>,
+        name: &str,
+        value: Value,
+    ) -> Result<Option<Box<dyn EditGroup>>, E> {
+        parse_required(
+            Self::FIELD,
+            entry.map(|(_, entry)| entry.parse_edits),
+            name,
+            value,
+        )
+    }
+
+    fn set_part(parts: &mut ReviewParts, id: PartId, edits: Box<dyn EditGroup>) {
+        parts.0.push((id, edits));
+    }
+}
+
 /// A serialized part entry: `{ id: [seg..], modality, X }` (`X` is `entities`
 /// or `artifact`). Deserializes by buffering all three fields (in any order, a
 /// review layer may reorder keys), resolving the `modality`'s registered entry,
@@ -317,12 +405,12 @@ impl Leaf for ArtifactLeaf {
 /// unregistered-modality policy skips the group, the id is still returned so a
 /// later duplicate is caught).
 struct PartEntrySeed<'a, L> {
-    registry: &'a ReportDeserializer,
+    registry: &'a Restorer,
     _leaf: PhantomData<L>,
 }
 
 impl<'a, L> PartEntrySeed<'a, L> {
-    fn new(registry: &'a ReportDeserializer) -> Self {
+    fn new(registry: &'a Restorer) -> Self {
         Self {
             registry,
             _leaf: PhantomData,
@@ -394,12 +482,12 @@ impl<'de, L: Leaf> Visitor<'de> for PartEntrySeed<'_, L> {
 /// `parts` is an array of `{ id, modality, X }` entries, each keyed by its full
 /// [`PartId`] path.
 struct PartsSeed<'a, L> {
-    registry: &'a ReportDeserializer,
+    registry: &'a Restorer,
     _leaf: PhantomData<L>,
 }
 
 impl<'a, L> PartsSeed<'a, L> {
-    fn new(registry: &'a ReportDeserializer) -> Self {
+    fn new(registry: &'a Restorer) -> Self {
         Self {
             registry,
             _leaf: PhantomData,
@@ -445,15 +533,14 @@ impl<'de, L: Leaf> Visitor<'de> for PartsSeed<'_, L> {
 
 /// The whole-set seed: `{ parts: [..] }`, each entry parsed through the registry.
 /// Generic over the [`Leaf`]; the [`ReportSeed`] / [`ArtifactSetSeed`] aliases
-/// pin it to the two views. Drives [`ReportDeserializer::deserialize`] and
-/// [`ReportDeserializer::deserialize_artifacts`].
+/// pin it to the two views. Drives [`Restorer::restore`] for both.
 pub(super) struct SetSeed<'a, L> {
-    registry: &'a ReportDeserializer,
+    registry: &'a Restorer,
     _leaf: PhantomData<L>,
 }
 
 impl<'a, L> SetSeed<'a, L> {
-    pub(super) fn new(registry: &'a ReportDeserializer) -> Self {
+    pub(super) fn new(registry: &'a Restorer) -> Self {
         Self {
             registry,
             _leaf: PhantomData,
@@ -504,29 +591,89 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
     }
 }
 
+/// Reconstructs a [`Review`] from its `{ against, parts: [..] }` wire form:
+/// the digest it was made against, and its parts through the [`EditLeaf`].
+pub(super) struct ReviewSeed<'a> {
+    registry: &'a Restorer,
+}
+
+impl<'a> ReviewSeed<'a> {
+    pub(super) fn new(registry: &'a Restorer) -> Self {
+        Self { registry }
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for ReviewSeed<'_> {
+    type Value = Review;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Review, D::Error> {
+        deserializer.deserialize_struct(EditLeaf::SET_NAME, &["against", "parts"], self)
+    }
+}
+
+impl<'de> Visitor<'de> for ReviewSeed<'_> {
+    type Value = Review;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(EditLeaf::SET_EXPECTING)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Review, A::Error> {
+        let mut against: Option<AuditHash> = None;
+        let mut parts: Option<ReviewParts> = None;
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "against" => {
+                    if against.is_some() {
+                        return Err(DeError::duplicate_field("against"));
+                    }
+                    against = Some(map.next_value()?);
+                }
+                "parts" => {
+                    if parts.is_some() {
+                        return Err(DeError::duplicate_field("parts"));
+                    }
+                    parts = Some(map.next_value_seed(PartsSeed::<EditLeaf>::new(self.registry))?);
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(Review {
+            against: against.ok_or_else(|| DeError::missing_field("against"))?,
+            parts: parts.unwrap_or_default().0,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
+    #[cfg(feature = "schema")]
+    use elide_core::entity::audit::Attribution;
     use elide_core::modality::text::Text;
+    #[cfg(feature = "schema")]
+    use elide_core::modality::text::TextLocation;
     #[cfg(feature = "image")]
     use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
     #[cfg(feature = "image")]
     use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
-    #[cfg(feature = "schema")]
-    use super::super::test_support::source_only_entity;
-    use super::super::test_support::{doc, text_entity};
     use super::*;
     use crate::PartId;
     use crate::analysis::StrippedRecord;
+    #[cfg(feature = "schema")]
+    use crate::analysis::test_support::source_only_entity;
+    use crate::analysis::test_support::{doc, text_entity};
 
     /// A registry with `Text` registered, the unit under test needs only the
     /// group parsers, not a full orchestrator.
-    fn text_registry() -> ReportDeserializer {
-        ReportDeserializer::new().with_modality::<Text>()
+    fn text_registry() -> Restorer {
+        Restorer::new().with_modality::<Text>()
     }
 
-    fn round_trip(report: &Report, registry: &ReportDeserializer) -> Report {
+    fn round_trip(report: &Report, registry: &Restorer) -> Report {
         let json = serde_json::to_string(report).expect("serialize");
         let mut de = serde_json::Deserializer::from_str(&json);
         match ReportSeed::new(registry).deserialize(&mut de) {
@@ -650,6 +797,37 @@ mod tests {
         }
     }
 
+    /// The review-side drift guard, mirroring the report's: a serialized
+    /// [`Review`] with every kind of edit validates against its hand-written
+    /// schema.
+    #[cfg(feature = "schema")]
+    #[test]
+    fn serialized_reviews_validate_against_the_schema() {
+        let schema = serde_json::to_value(schemars::schema_for!(Review)).unwrap();
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id();
+        let report = Report::new().insert_part::<Text>(doc(), vec![entity]);
+
+        let mut review = Review::new(&report);
+        let mut part = review
+            .part::<Text>(&doc())
+            .unwrap()
+            .by("reviewer-7")
+            .because(Attribution::freeform("why"));
+        let included = part.include("PERSON_NAME", TextLocation::inline(8..12));
+        part.relabel(included, "ORGANIZATION")
+            .relocate(id, TextLocation::inline(0..6))
+            .suppress(id)
+            .suppress_within(TextLocation::inline(0..20));
+
+        for review in [review, Review::new(&report)] {
+            let json = serde_json::to_value(&review).unwrap();
+            if let Err(e) = jsonschema::validate(&schema, &json) {
+                panic!("serialized review does not match its schema: {e}\n{json:#}");
+            }
+        }
+    }
+
     /// The artifact-side drift guard, mirroring the report's: a serialized
     /// [`ArtifactSet`] validates against its hand-written schema, so a change to
     /// one that is not made to the other fails here rather than handing a
@@ -693,14 +871,14 @@ mod tests {
             .expect("sole document reconstructed")
             .entities();
         assert_eq!(entities.len(), 1);
-        assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
+        assert_eq!(*entities[0].label(), LabelRef::new("EMAIL_ADDRESS"));
         assert!(
-            entities[0].audit.verify().is_ok(),
+            entities[0].audit().verify().is_ok(),
             "the audit trail survives"
         );
     }
 
-    /// The public [`Report::deserializer`] rebuilds a report with no orchestrator,
+    /// The public [`Report::restorer`] rebuilds a report with no orchestrator,
     /// no analyzers, anonymizers, or codec registry.
     #[test]
     fn report_deserializer_rebuilds_without_an_orchestrator() {
@@ -708,15 +886,15 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
 
         let mut de = serde_json::Deserializer::from_str(&json);
-        let back = Report::deserializer()
+        let back: Report = Report::restorer()
             .with_modality::<Text>()
-            .deserialize(&mut de)
+            .restore(&crate::Seal::of(&report), &mut de)
             .expect("rebuilt");
         let entities = back
             .part::<Text>(&doc())
             .expect("sole document reconstructed")
             .entities();
-        assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
+        assert_eq!(*entities[0].label(), LabelRef::new("EMAIL_ADDRESS"));
     }
 
     #[test]
@@ -734,7 +912,7 @@ mod tests {
             .expect("nested part reconstructed by its full path")
             .entities();
         assert_eq!(p.len(), 1);
-        assert_eq!(p[0].label, LabelRef::new("B"));
+        assert_eq!(*p[0].label(), LabelRef::new("B"));
     }
 
     /// Two documents that share a nested part's local id keep distinct full
@@ -752,13 +930,13 @@ mod tests {
         assert_eq!(
             back.part::<Text>(&a)
                 .ok()
-                .map(|p| p.entities()[0].label.as_str()),
+                .map(|p| p.entities()[0].label().as_str()),
             Some("A"),
         );
         assert_eq!(
             back.part::<Text>(&b)
                 .ok()
-                .map(|p| p.entities()[0].label.as_str()),
+                .map(|p| p.entities()[0].label().as_str()),
             Some("B"),
         );
     }
@@ -826,8 +1004,8 @@ mod tests {
             .expect("entry reconstructed")
             .entities();
         assert_eq!(entities.len(), 1, "the buffered entity survived reordering");
-        assert_eq!(entities[0].label, LabelRef::new("EMAIL_ADDRESS"));
-        assert!(entities[0].audit.verify().is_ok(), "audit data survived");
+        assert_eq!(*entities[0].label(), LabelRef::new("EMAIL_ADDRESS"));
+        assert!(entities[0].audit().verify().is_ok(), "audit data survived");
     }
 
     /// An unknown entry field (a later format version) is ignored, matching the
@@ -934,10 +1112,11 @@ mod tests {
         // Both reconstruct through the registry: the document as the same Layout,
         // and the nested part as an *empty* Layout that is present (Some), so a
         // re-run seeds it and the enricher skips, rather than re-OCR'ing a blank.
-        let registry = ReportDeserializer::new().with_modality::<Image>();
+        let registry = Restorer::new().with_modality::<Image>();
         let json = serde_json::to_string(&set).unwrap();
         let mut de = serde_json::Deserializer::from_str(&json);
-        let back = registry.deserialize_artifacts(&mut de).expect("artifacts");
+        let seal = crate::Seal::of(&set);
+        let back: ArtifactSet = registry.restore(&seal, &mut de).expect("artifacts");
         let restored = back.part::<Image>(&doc()).expect("layout reconstructed");
         assert_eq!(restored, &layout);
         assert_eq!(restored.text(), "hi Alice");
@@ -945,6 +1124,15 @@ mod tests {
             .part::<Image>(&blank)
             .expect("the enriched-empty part is present, not dropped");
         assert!(part.is_empty(), "it round-trips as the empty Layout it was");
+
+        // A layout changed on the way, its text hidden from detection, does
+        // not read back against the seal.
+        let altered = json.replace("Alice", "Alfie");
+        let mut de = serde_json::Deserializer::from_str(&altered);
+        let Err(err) = registry.restore::<ArtifactSet, _>(&seal, &mut de) else {
+            panic!("an altered layout must not read back");
+        };
+        assert_eq!(err.kind(), elide_core::ErrorKind::Integrity);
     }
 
     /// An entry whose `artifact` field is `null`, or absent entirely, is
@@ -955,7 +1143,7 @@ mod tests {
     #[cfg(feature = "image")]
     #[test]
     fn a_null_or_absent_artifact_is_dropped() {
-        let registry = ReportDeserializer::new().with_modality::<Image>();
+        let registry = Restorer::new().with_modality::<Image>();
 
         for json in [
             r#"{ "parts": [{ "id": ["document"], "modality": "image", "artifact": null }] }"#,
@@ -964,7 +1152,7 @@ mod tests {
         ] {
             let mut de = serde_json::Deserializer::from_str(json);
             let set = registry
-                .deserialize_artifacts(&mut de)
+                .restore_unsealed::<ArtifactSet, _>(&mut de)
                 .expect("a null/absent artifact deserializes without error");
             assert!(
                 set.part::<Image>(&doc()).is_none(),

@@ -120,7 +120,7 @@ async fn anonymize_predicate_gates_on_confidence() {
     let cutoff = ConfidenceThreshold::clamped(0.5);
     Anonymizer::<Text>::new()
         .with(Rule::predicate(
-            move |cx| !cutoff.passes(cx.entity.confidence),
+            move |cx| !cutoff.passes(cx.entity.confidence()),
             Keep,
         ))
         .with(Rule::fallback(Remove))
@@ -177,7 +177,7 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
         .with(Rule::predicate(
             |cx| {
                 cx.catalog
-                    .get(&cx.entity.label)
+                    .get(cx.entity.label())
                     .is_some_and(|l| l.has_tag("financial"))
             },
             Mask::stars(),
@@ -226,11 +226,11 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
 
     // The Selection records the decision, and the Redaction names it.
     let selection = entities[0]
-        .audit
+        .audit()
         .selection()
         .expect("a Selection was recorded");
     assert_eq!(selection.operator.name, "replace");
-    assert_eq!(entities[0].audit.applied_selection(), Some(selection));
+    assert_eq!(entities[0].audit().applied_selection(), Some(selection));
     // Automatic why: matched the exact-label rule.
     assert_eq!(
         selection.matched_by,
@@ -258,12 +258,12 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
         .unwrap();
 
     let selection = entities[0]
-        .audit
+        .audit()
         .selection()
         .expect("a Selection was recorded");
     assert_eq!(selection.matched_by, RuleMatch::Fallback);
     assert!(selection.attribution.is_none());
-    assert!(entities[0].audit.is_redacted());
+    assert!(entities[0].audit().is_redacted());
 }
 
 #[tokio::test]
@@ -282,7 +282,7 @@ async fn because_records_a_freeform_attribution() {
         .unwrap();
 
     let attribution = entities[0]
-        .audit
+        .audit()
         .selection()
         .and_then(|selection| selection.attribution.clone())
         .expect("attribution recorded");
@@ -311,7 +311,7 @@ async fn because_records_a_cited_attribution() {
         .unwrap();
 
     let attribution = entities[0]
-        .audit
+        .audit()
         .selection()
         .and_then(|selection| selection.attribution.clone())
         .expect("attribution recorded");

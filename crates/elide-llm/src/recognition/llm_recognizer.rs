@@ -265,7 +265,7 @@ mod tests {
             .await
             .unwrap();
 
-        let AuditKind::Model(event) = &out[0].audit.events()[0].kind else {
+        let AuditKind::Model(event) = &out[0].audit().events()[0].kind else {
             panic!("a model event");
         };
         assert_eq!(event.model.name, "jane-finder");
@@ -284,7 +284,7 @@ mod tests {
         let batch = recognizer.recognize_batch(&[&subject], &ctx).await.unwrap();
 
         for entity in single.iter().chain(&batch[0]) {
-            assert_eq!(entity.audit.events()[0].source, "llm-strict");
+            assert_eq!(entity.audit().events()[0].source, "llm-strict");
         }
     }
 

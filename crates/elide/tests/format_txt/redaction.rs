@@ -76,7 +76,7 @@ async fn txt_detects_and_redacts() -> Result<()> {
     );
     for entity in &outcome.audited {
         let last = entity
-            .audit
+            .audit()
             .events()
             .last()
             .expect("an applied entity has at least one event");

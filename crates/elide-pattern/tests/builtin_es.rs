@@ -50,7 +50,7 @@ async fn builtin_contact() {
     assert!(
         !entities
             .iter()
-            .any(|e| e.label == builtins::NATIONALITY.to_ref()),
+            .any(|e| e.label() == &builtins::NATIONALITY.to_ref()),
         "english-language NATIONALITY dictionary should not match on an ES fixture",
     );
     assert_label_present!(entities, builtins::POSTAL_CODE.to_ref());

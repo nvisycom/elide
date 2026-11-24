@@ -169,7 +169,8 @@ where
             // is left as it is.
             let entities = typed::<M>(entities)?;
             for entity in entities.iter_mut().filter(|entity| !entity.is_suppressed()) {
-                entity.location = stream.resolve(entity.location.clone())?;
+                let resolved = stream.resolve(entity.location().clone())?;
+                entity.lift(resolved);
             }
             self.anonymizer
                 .anonymize(&mut stream, entities, scope)

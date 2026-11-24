@@ -18,7 +18,7 @@
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
 use elide_core::backend::{Backend, BackendBatchExt};
-use elide_core::entity::audit::{AuditEvent, ModelId};
+use elide_core::entity::audit::ModelId;
 use elide_core::entity::{Entity, Label};
 use elide_core::modality::TextRecognizable;
 use elide_core::recognition::{Context, Recognizer, Subject};
@@ -175,16 +175,15 @@ fn entities<M: TextRecognizable>(
         .into_iter()
         .filter_map(|span| {
             let location = M::locate(span.offset.clone(), subject.data(), subject.artifact())?;
-            let event = AuditEvent::model(
-                source.clone(),
-                span.confidence,
-                location.clone(),
-                model.clone(),
-            );
             Some(
-                Entity::new(span.label, location)
-                    .with_recognized_range(span.offset)
-                    .with_event(event),
+                Entity::model(
+                    source.clone(),
+                    span.confidence,
+                    span.label.clone(),
+                    location,
+                    model.clone(),
+                )
+                .with_recognized_range(span.offset),
             )
         })
         .collect()
@@ -306,7 +305,7 @@ mod tests {
         let batch = recognizer.recognize_batch(&[&subject], &ctx).await.unwrap();
 
         for entity in single.iter().chain(&batch[0]) {
-            assert_eq!(entity.audit.events()[0].source, "ner-clinical");
+            assert_eq!(entity.audit().events()[0].source, "ner-clinical");
         }
     }
 
@@ -342,7 +341,7 @@ mod tests {
         let out = recognizer.recognize(&subject, &ctx).await.unwrap();
 
         assert_eq!(out.len(), 1, "the out-of-catalog EMAIL span is kept");
-        let AuditKind::Model(event) = &out[0].audit.events()[0].kind else {
+        let AuditKind::Model(event) = &out[0].audit().events()[0].kind else {
             panic!("a model event");
         };
         assert_eq!(event.model.name, "batch-counting");

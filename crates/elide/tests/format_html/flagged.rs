@@ -8,7 +8,7 @@ use elide::entity::LabelCatalog;
 use elide::modality::text::{Text, TextLocation};
 use elide::recognition::Scope;
 use elide::redaction::{Disposition, HiddenContentPolicy};
-use elide::{Document, Orchestrator};
+use elide::{Document, Orchestrator, Review};
 
 /// `raw` decoded under `policy`, run under `scope`, with each part of the
 /// report's document the `region` contains suppressed, re-encoded.
@@ -34,10 +34,14 @@ async fn redact_sparing(
         .expect("analyze")
         .report;
     if let Some(region) = region {
-        report
-            .part_mut::<Text>(&documents[0].id())
+        let mut review = Review::new(&report);
+        review
+            .part::<Text>(&documents[0].id())
             .expect("the page is text")
-            .suppress_within(&TextLocation::inline(region));
+            .suppress_within(TextLocation::inline(region));
+        orchestrator
+            .review(&mut report, &review)
+            .expect("the review is accepted");
     }
     let _applied = orchestrator
         .anonymize_with(&mut documents, report)

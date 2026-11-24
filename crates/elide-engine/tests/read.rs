@@ -5,7 +5,7 @@
 //! nest.
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, encode_mock, mock_format};
-use elide_core::entity::audit::{AuditEvent, PatternRule};
+use elide_core::entity::audit::PatternRule;
 use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
@@ -39,13 +39,13 @@ impl Recognizer<Text> for PiiRecognizer {
             .match_indices(PII)
             .map(|(start, _)| {
                 let location = TextLocation::inline(start..start + PII.len());
-                let event = AuditEvent::pattern(
+                Entity::pattern(
                     "mock-pii",
                     Confidence::MAX,
-                    location.clone(),
+                    EMAIL_ADDRESS.to_ref(),
+                    location,
                     PatternRule::default(),
-                );
-                Entity::new(EMAIL_ADDRESS.to_ref(), location).with_event(event)
+                )
             })
             .collect())
     }
@@ -96,7 +96,7 @@ async fn entities_read_back_as_what_they_cover_at_every_level() -> Result<()> {
         .collect();
     for id in ids {
         for entity in analyzed.report.part::<Text>(&id)?.entities() {
-            locations.push((id.clone(), entity.location.clone()));
+            locations.push((id.clone(), entity.location().clone()));
         }
     }
     let depths: Vec<usize> = locations.iter().map(|(id, _)| id.depth()).collect();

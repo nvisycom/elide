@@ -38,17 +38,27 @@ impl AuditHash {
         &self.0.0
     }
 
+    /// Whether `self` and `other` are the same digest, compared in constant
+    /// time, so checking a keyed digest leaks nothing about it through
+    /// timing.
+    pub fn matches(&self, other: &Self) -> bool {
+        blake3::Hash::from_bytes(self.0.0) == blake3::Hash::from_bytes(other.0.0)
+    }
+
     /// The digest of `fields` in order, each length-prefixed so no two lists
     /// of fields share one (`["ab", "c"]` differs from `["a", "bc"]`).
     pub fn of_fields<F: AsRef<[u8]>>(fields: impl IntoIterator<Item = F>) -> Self {
-        let mut hasher = AuditHasher::new();
-        let mut count = 0u64;
-        for field in fields {
-            hasher.bytes(field.as_ref());
-            count += 1;
-        }
-        hasher.raw(&count.to_le_bytes());
-        hasher.finish()
+        AuditHasher::new().fields(fields)
+    }
+
+    /// The keyed digest of `fields` under `key`: BLAKE3 in keyed mode over the
+    /// same encoding as [`of_fields`](Self::of_fields), a message
+    /// authentication code that only a holder of `key` can compute.
+    pub fn of_fields_keyed<F: AsRef<[u8]>>(
+        key: &[u8; 32],
+        fields: impl IntoIterator<Item = F>,
+    ) -> Self {
+        AuditHasher(blake3::Hasher::new_keyed(key)).fields(fields)
     }
 }
 
@@ -101,6 +111,18 @@ impl AuditHasher {
             }
             None => self.byte(0),
         }
+    }
+
+    /// Fold in `fields` in order, each length-prefixed, then their count, and
+    /// finish.
+    fn fields<F: AsRef<[u8]>>(mut self, fields: impl IntoIterator<Item = F>) -> AuditHash {
+        let mut count = 0u64;
+        for field in fields {
+            self.bytes(field.as_ref());
+            count += 1;
+        }
+        self.raw(&count.to_le_bytes());
+        self.finish()
     }
 
     /// Finish hashing and return the digest.

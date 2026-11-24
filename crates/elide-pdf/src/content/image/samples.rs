@@ -565,7 +565,7 @@ mod tests {
         keyed.dict.set("Mask", vec![1.into(), 1.into()]);
         assert_eq!(samples(&doc, &keyed).unwrap(), [1, 2]);
         // An index decode array other than the identity is not read.
-        let mut decoded = indexed.clone();
+        let mut decoded = indexed;
         decoded.dict.set("Decode", vec![0.into(), 1.into()]);
         assert!(samples(&doc, &decoded).is_err());
         decoded.dict.set("Decode", vec![0.into(), 255.into()]);

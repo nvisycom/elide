@@ -25,14 +25,15 @@ fn redacted_entity(label: &str) -> Entity<Text> {
         .with_event(AuditEvent::pattern(
             "t",
             conf,
+            LabelRef::new(label),
             location,
             PatternRule::default(),
         ))
         .with_event(AuditEvent::selection(selection, conf));
-    let picked = entity.audit.selection_event().unwrap().hash();
+    let picked = entity.audit().selection_event().unwrap().hash();
     entity.with_event(AuditEvent::redaction(
         "remove",
-        Redaction::new(picked),
+        Redaction::new(picked, TextLocation::inline(0..5)),
         conf,
     ))
 }
@@ -42,7 +43,7 @@ fn entity_audit_trail_is_reachable_and_verifies() {
     let entity = redacted_entity("EMAIL_ADDRESS");
 
     // The trail records every event, linked, and verifies.
-    let events = entity.audit.events();
+    let events = entity.audit().events();
     assert_eq!(events.len(), 3);
     assert_matches!(events[0].kind, AuditKind::Pattern(_));
     assert_matches!(events[1].kind, AuditKind::Selection(_));
@@ -50,17 +51,17 @@ fn entity_audit_trail_is_reachable_and_verifies() {
     // The redaction follows the pick (its single parent) and names it.
     assert_eq!(events[2].parents(), [events[1].hash()]);
     assert_eq!(
-        entity.audit.redaction().map(|r| r.selection),
+        entity.audit().redaction().map(|r| r.selection),
         Some(events[1].hash())
     );
     assert_eq!(
         entity
-            .audit
+            .audit()
             .applied_selection()
             .map(|s| s.operator.name.as_str()),
         Some("remove")
     );
-    assert!(entity.audit.verify().is_ok());
+    assert!(entity.audit().verify().is_ok());
 }
 
 /// Tamper-evidence over the *stored* form: serialize the trail, edit the JSON,
@@ -70,7 +71,7 @@ fn entity_audit_trail_is_reachable_and_verifies() {
 #[test]
 fn tampering_with_the_serialized_trail_breaks_verification() {
     let entity = redacted_entity("EMAIL_ADDRESS");
-    let mut value = serde_json::to_value(&entity.audit).unwrap();
+    let mut value = serde_json::to_value(entity.audit()).unwrap();
 
     // Rewrite the detected label's confidence in the stored trail, leaving its
     // stored hash intact.
@@ -85,7 +86,7 @@ fn tampering_with_the_serialized_trail_breaks_verification() {
 #[test]
 fn appending_a_valid_tail_event_breaks_verification() {
     let entity = redacted_entity("EMAIL_ADDRESS");
-    let value = serde_json::to_value(&entity.audit).unwrap();
+    let value = serde_json::to_value(entity.audit()).unwrap();
     let events = value.as_array().unwrap();
 
     // Re-append the (self-consistent) last event: it still chains from a real
@@ -102,10 +103,10 @@ fn appending_a_valid_tail_event_breaks_verification() {
 #[cfg(feature = "serde")]
 #[test]
 fn inserting_an_orphan_event_breaks_verification() {
-    let victim = serde_json::to_value(&redacted_entity("EMAIL_ADDRESS").audit).unwrap();
+    let victim = serde_json::to_value(redacted_entity("EMAIL_ADDRESS").audit()).unwrap();
     // A different entity's birth event: distinct hash, parentless, valid on its
     // own, but unrelated to the victim trail.
-    let foreign = serde_json::to_value(&redacted_entity("PHONE_NUMBER").audit).unwrap();
+    let foreign = serde_json::to_value(redacted_entity("PHONE_NUMBER").audit()).unwrap();
     let foreign_birth = foreign.as_array().unwrap()[0].clone();
 
     let mut forged = victim.as_array().unwrap().clone();

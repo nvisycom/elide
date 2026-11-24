@@ -20,7 +20,7 @@ let text = TextData::new("Write to dana.reed@example.com");
 let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
 let analysis = analyzer.analyze(text, &scope).await?;
 
-assert_eq!(analysis.entities[0].label, builtins::EMAIL_ADDRESS.to_ref());
+assert_eq!(*analysis.entities[0].label(), builtins::EMAIL_ADDRESS.to_ref());
 # Ok(())
 # }
 ```

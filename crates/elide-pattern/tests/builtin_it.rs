@@ -50,7 +50,7 @@ async fn builtin_finance() {
     assert!(
         !entities
             .iter()
-            .any(|e| e.label == builtins::NATIONALITY.to_ref()),
+            .any(|e| e.label() == &builtins::NATIONALITY.to_ref()),
         "english-language NATIONALITY dictionary should not match on an IT fixture",
     );
     assert_label_present!(entities, builtins::TAX_ID.to_ref());

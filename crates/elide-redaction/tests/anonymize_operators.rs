@@ -163,8 +163,7 @@ async fn clamp_renders_the_bucket_in_the_entity_language() {
         .with(LanguageTag::parse("fr").unwrap(), "90 ou plus".to_owned());
 
     // "âge 94": 'â' is two bytes, so "94" sits at bytes 5..7.
-    let mut fr_entity = Entity::fixture("age", (5, 7));
-    fr_entity.language = Some(LanguageTag::parse("fr").unwrap());
+    let fr_entity = Entity::fixture("age", (5, 7)).with_language(LanguageTag::parse("fr").unwrap());
 
     let out = anonymize_one(
         Anonymizer::<Text>::new().with(Rule::label(

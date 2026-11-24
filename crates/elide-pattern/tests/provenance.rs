@@ -22,7 +22,7 @@ async fn a_validated_match_records_its_validator() {
 
     let (source, rule) = entities
         .iter()
-        .flat_map(|e| e.audit.events())
+        .flat_map(|e| e.audit().events())
         .find_map(|event| match &event.kind {
             AuditKind::Pattern(pattern) => Some((&event.source, &pattern.rule)),
             _ => None,

@@ -37,7 +37,7 @@ use crate::{Error, Result};
 ///
 /// The events form a **directed acyclic graph**, not a flat list. A recognizer
 /// records a birth event (no parents); each later step links to the event it
-/// follows; and a [fusion](Self::record_fusion) links to *several* parents at
+/// follows; and a [fusion](crate::entity::Entity::fuse) links to *several* parents at
 /// once: the heads of the trails it combines. This is the true shape of a
 /// deduplicated entity: two recognizers are siblings, then a fusion joins them.
 /// The events are stored in the order they were recorded, which is a
@@ -104,13 +104,6 @@ where
 }
 
 impl<M: Modality> AuditLog<M> {
-    /// An audit log seeded with a single birth `event` (no parents).
-    pub fn new(event: AuditEvent<M>) -> Self {
-        let mut log = Self { events: Vec::new() };
-        log.record(event);
-        log
-    }
-
     /// The recorded events, in order.
     pub fn events(&self) -> &[AuditEvent<M>] {
         &self.events
@@ -129,7 +122,7 @@ impl<M: Modality> AuditLog<M> {
     /// For a fusion step that folds one entity's trail into another's:
     /// take the events by value and [`absorb`](Self::absorb) them, so their
     /// hashes carry over without cloning.
-    pub fn into_events(self) -> Vec<AuditEvent<M>> {
+    pub(crate) fn into_events(self) -> Vec<AuditEvent<M>> {
         self.events
     }
 
@@ -143,20 +136,13 @@ impl<M: Modality> AuditLog<M> {
         self.events.is_empty()
     }
 
-    /// The hash at the head of the trail: the last recorded event's hash, or
-    /// [`AuditHash::GENESIS`] for an empty log. This is what the next
-    /// [`record`](Self::record) will link from.
-    pub fn head_hash(&self) -> AuditHash {
-        self.events.last().map_or(AuditHash::GENESIS, |e| e.hash)
-    }
-
     /// Move another trail's events into this log, preserving their hashes.
     ///
     /// Used by a fusion step before [`record_fusion`](Self::record_fusion):
     /// the absorbed events keep their own parent links (they are self-contained
     /// sub-DAGs), and the fusion event then names both trails' heads as its
     /// parents.
-    pub fn absorb(&mut self, events: impl IntoIterator<Item = AuditEvent<M>>) {
+    pub(crate) fn absorb(&mut self, events: impl IntoIterator<Item = AuditEvent<M>>) {
         self.events.extend(events);
     }
 
@@ -198,7 +184,7 @@ impl<M: Modality> AuditLog<M> {
     /// redacted (e.g. suppressed, or not yet applied).
     ///
     /// [`Redaction`]: crate::entity::audit::Redaction
-    pub fn redaction(&self) -> Option<&Redaction> {
+    pub fn redaction(&self) -> Option<&Redaction<M>> {
         self.events.iter().rev().find_map(|e| match &e.kind {
             AuditKind::Redaction(r) => Some(r),
             _ => None,
@@ -243,11 +229,12 @@ impl<M: Modality> AuditLog<M> {
 
     /// Whether a reviewer has suppressed this entity with a [`Manual`] event.
     ///
-    /// That is, its most recent [`Manual`] event carries
-    /// [`ManualIntent::Suppress`]. The audit trail is the single source of
-    /// truth: there is no separate flag to keep in sync. A
-    /// [flagged](ManualIntent::Flag) or [amended](ManualIntent::Amend) entity
-    /// is not suppressed, and is redacted like any detection.
+    /// That is, of its [`Manual`] events that decide redaction (an include or a
+    /// suppression), the most recent is [`ManualIntent::Suppress`]. A relabel
+    /// or relocation decides nothing about it and is skipped. The audit trail
+    /// is the single source of truth: there is no separate flag to keep in
+    /// sync. An included or amended entity is not suppressed, and is redacted
+    /// like any detection.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
@@ -256,12 +243,14 @@ impl<M: Modality> AuditLog<M> {
             .iter()
             .rev()
             .find_map(|e| match &e.kind {
-                // `Amend` is provenance-only, it does not decide suppression, so
-                // an amendment after a `Suppress` must not clear it. Skip it and
-                // read the most recent `Flag`/`Suppress` decision.
-                AuditKind::Manual(m) if m.intent != ManualIntent::Amend => {
-                    Some(m.intent == ManualIntent::Suppress)
-                }
+                // A relabel or relocation amends the entity without deciding
+                // suppression, so one after a `Suppress` must not clear it. Skip
+                // it and read the most recent `Include`/`Suppress` decision.
+                AuditKind::Manual(m) => match m.intent {
+                    ManualIntent::Suppress => Some(true),
+                    ManualIntent::Include { .. } => Some(false),
+                    ManualIntent::Relabel { .. } | ManualIntent::Relocate => None,
+                },
                 _ => None,
             })
             .unwrap_or(false)
@@ -292,7 +281,7 @@ impl<M: Modality> AuditLog<M> {
     ///
     /// It links to the last recorded event (or nothing, for the first event),
     /// and its hash is computed over its payload and that parent.
-    pub fn record(&mut self, mut event: AuditEvent<M>) {
+    pub(crate) fn record(&mut self, mut event: AuditEvent<M>) {
         event.parents = match self.events.last() {
             Some(head) => vec![head.hash],
             None => Vec::new(),
@@ -310,7 +299,11 @@ impl<M: Modality> AuditLog<M> {
     /// into this log; their hashes are unchanged, so no earlier event is
     /// re-linked. This is what a fusion step records to join two trails
     /// without imposing a false linear order between them.
-    pub fn record_fusion(&mut self, mut event: AuditEvent<M>, parents: impl Into<Vec<AuditHash>>) {
+    pub(crate) fn record_fusion(
+        &mut self,
+        mut event: AuditEvent<M>,
+        parents: impl Into<Vec<AuditHash>>,
+    ) {
         event.parents = parents.into();
         event.hash = event.digest();
         self.events.push(event);
@@ -446,6 +439,7 @@ mod tests {
             AuditEvent::pattern(
                 "pattern",
                 conf,
+                "ssn",
                 at.clone(),
                 PatternRule {
                     name: "ssn".into(),
@@ -456,14 +450,21 @@ mod tests {
             AuditEvent::model(
                 "model",
                 conf,
+                "ssn",
                 at.clone(),
                 ModelId {
                     name: "ner".into(),
                     version: Some("2".into()),
                 },
             ),
-            AuditEvent::flagged("codec", conf, at.clone(), HiddenContentKind::Collaboration),
-            AuditEvent::fusion("union", conf),
+            AuditEvent::flagged(
+                "codec",
+                conf,
+                "author",
+                at.clone(),
+                HiddenContentKind::Collaboration,
+            ),
+            AuditEvent::fusion("union", conf, at.clone()),
             AuditEvent::conflict(Conflict::new(LabelRef::new("iban"), conf, "longest"), conf),
             AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
             AuditEvent::calibration(conf, 0.5),
@@ -491,14 +492,26 @@ mod tests {
         let selection = log.selection_event().unwrap().hash();
         log.record(fixed(AuditEvent::redaction(
             operator.name,
-            Redaction::new(selection),
+            Redaction::new(selection, at.clone()),
             conf,
         )));
-        log.record(fixed(AuditEvent::manual(
-            "reviewer",
-            conf,
-            Manual::new(ManualIntent::Suppress, at).with_attribution(why),
-        )));
+        let decisions = [
+            ManualIntent::Include {
+                label: LabelRef::new("ssn"),
+            },
+            ManualIntent::Relabel {
+                label: LabelRef::new("iban"),
+            },
+            ManualIntent::Relocate,
+            ManualIntent::Suppress,
+        ];
+        for intent in decisions {
+            log.record(fixed(AuditEvent::manual(
+                "reviewer",
+                conf,
+                Manual::new(intent, at.clone()).with_attribution(why.clone()),
+            )));
+        }
         log
     }
 
@@ -514,29 +527,22 @@ mod tests {
     }
 
     /// The digests of [`every_kind`]'s events, in order.
-    const PINNED: [&str; 11] = [
+    const PINNED: [&str; 14] = [
         // pattern
-        "efd6aa450cea4b05d8b578402db5265e36b8d8ceba1e92dd68970b94fc6e2ff9",
-        // model
-        "be2a8bc8d489f497b7e7e57aad9d95576ba406a6306d7606bc91aacba48266e3",
-        // flagged
-        "05d48e609b150c7180fad9163c4e96bd160e540df3f2c5f7eb9c5a57b74937f3",
-        // fusion
-        "d1b7c5290a168246ebb9cb2c5f4f3c16ede35f42637c7bb58dba1329d434d88c",
-        // conflict
-        "d7481599219daeab60f7ba1e35723a622a86fed5160a607228841fe3408b6575",
-        // contested
-        "aefaa238ba40ee2e07dda0ede908400dc9831e6b504c1af9f02e02175dbb7734",
-        // calibration
-        "19339f127087e661d20b90dc538aabc28f52dbed5b0ccb5bddafa470adae91c2",
-        // refinement
-        "e2e2678477a3aec58d3ff282764714ae7ec1ed06f3db3c79122e85e5d5881dab",
-        // selection
-        "f1f6a95e400b1a8aadec9dfe910d7ac178f3691e1c7aeaffac4b5d8486fffd72",
-        // redaction
-        "b43f22e45b1964e65e7e5d310ba0e15df92a3bde426486723258b89dc43e1d00",
-        // manual
-        "e6f24991d01066dfc708b4de5647d2b9e5c1d577a9c2104ad222511abc804a6e",
+        "b7477bb6abdc47b2c6dac8fbb51c3cef8172b290890b914911c2a388bdbe5ac6", // model
+        "7b70bef40e3e4238b01306089e0316f61fcd523aff3dd4e96ff27de2638483a0", // flagged
+        "e9cc009ab815ebbbfad9bf9206cd37ea5e05c6bdcfb77028d518cbde5804f6f2", // fusion
+        "0e445e2bafb49966a3ecd7bcc49ede674fc3f001d6df0c4a74676f7fd85330a4", // conflict
+        "56fbc7f604ac1ac22a9a0a1dbdaaa8745d9a6d5428f05201eafe80cd67e25810", // contested
+        "e21c5d890694ab7f70379171a67805d5047e1711ef6e2011c64b4cdd02a139e9", // calibration
+        "dd00f9fcd32529be12054e84393ff63c2c18ba2d79da336c1af789e62ddbd184", // refinement
+        "380b1bb0094e616af52b8a6677b068822b531a89f38473b3d2d637482cfaa9ab", // selection
+        "93b3341d6c97c725d335793628c8499fb6791b4ff2cb60fbea8bc5a2a595d1c2", // redaction
+        "178a9ac0cb639b05ac771f88605acfb7b95e17cf074b028cb8c4064023600631", // include
+        "90d2b992fcce7bded6d393902f586c727dadf0ba673450c9695e1cc4b92d5885", // relabel
+        "2133fc33dc6de9f8a4c93b0755491901ec6b7d7797d09667eb9fd5206a4d1e10", // relocate
+        "a0cc529f42e94062aa1f9f8d54b462f9b5b1d33e4df56d23dcd1fa5fe322629e", // suppress
+        "27fac92b47c427323fe39f4aa00bf6b7573653e79659d23a7ffc566527fddcc9",
     ];
 
     /// Editing any recorded payload field breaks verification.
@@ -594,16 +600,18 @@ mod tests {
     fn a_redaction_naming_no_selection_breaks_verification() {
         let conf = Confidence::new(0.5).unwrap();
         let at = TextLocation::inline(0..2);
-        let mut log = AuditLog::<Text>::new(AuditEvent::pattern(
+        let mut log = AuditLog::<Text>::default();
+        log.record(AuditEvent::pattern(
             "pattern",
             conf,
-            at,
+            "ssn",
+            at.clone(),
             PatternRule::default(),
         ));
         let detection = log.events()[0].hash();
         log.record(AuditEvent::redaction(
             "mask",
-            Redaction::new(detection),
+            Redaction::new(detection, at),
             conf,
         ));
 

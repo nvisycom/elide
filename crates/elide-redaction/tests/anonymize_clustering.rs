@@ -56,7 +56,7 @@ async fn overlap_merges_under_safest_operator() {
     // Both entities record a redaction by the winning operator.
     for entity in &entities {
         let redacted = entity
-            .audit
+            .audit()
             .applied_selection()
             .is_some_and(|s| s.operator.name == "remove");
         assert!(redacted, "every member records the erase redaction");
@@ -92,9 +92,9 @@ async fn non_coalescible_overlap_stays_separate() {
     // union() is None, so clustering must keep them apart.
     let full = elide_core::primitive::UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
     let mut a = Entity::fixture("A", (0, 5));
-    a.location = a.location.clone().with_rects(1, [full]);
+    a.lift(a.location().clone().with_rects(1, [full]));
     let mut b = Entity::fixture("B", (0, 5));
-    b.location = b.location.clone().with_rects(2, [full]);
+    b.lift(b.location().clone().with_rects(2, [full]));
     let mut entities = vec![a, b];
 
     Anonymizer::new()

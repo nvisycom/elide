@@ -138,7 +138,8 @@ impl<M: Modality> ChunkReader<M> for TypedStream<'_, M> {
     }
 
     fn lift(&self, chunk: &Chunk<M>, mut entity: Entity<M>) -> Option<Entity<M>> {
-        entity.location = self.stream.lift(chunk, entity.location)?;
+        let location = self.stream.lift(chunk, entity.location().clone())?;
+        entity.lift(location);
         Some(entity)
     }
 }

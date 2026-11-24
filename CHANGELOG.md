@@ -78,12 +78,22 @@ and this project adheres to
 
 #### Review
 
-- A `Report` is read and edited through typed part views, keyed by `PartId`
-  (a document's own content by `Document::id`): `part` returns a `Part`
-  (`entities`, `entity`, `suppressed`, `unsuppressed`), `part_mut` a `PartMut`
-  whose edits (`include`, `relabel`, `relocate`, `suppress`,
-  `suppress_within`) are recorded as `Manual` audit events attributed to its
-  `by` and `because`
+- A `Report` is read through typed part views, keyed by `PartId` (a
+  document's own content by `Document::id`): `part` returns a `Part`
+  (`entities`, `entity`, `suppressed`, `unsuppressed`)
+- A reviewer's decisions are a `Review`, made against one version of a
+  report and applied by `Orchestrator::review`: `include`, `relabel`,
+  `relocate`, `suppress`, and `suppress_within`, each attributed to its `by`
+  and `because` and recorded as a `Manual` audit event naming what it set.
+  The review applies whole or not at all, only to the report version it was
+  made against, so it cannot be applied twice or replace a newer one
+- A `ReviewPolicy` decides which edits a review may make, shown each as a
+  `ProposedEdit`: the decision it records, the entities whose redaction it
+  narrows, and its actor and reason. The standard policies each check one
+  thing, `Protect` (labels no edit may narrow: suppress, relabel, or relocate
+  off any of the old location), `RequireActor`, and `RequireReason` (to
+  narrow), and combine with `and`; a closure is a policy too. A refused review
+  fails with `ErrorKind::Refused`
 - `Orchestrator::read` reads the data at locations in any part of a document,
   embedded ones included, such as what each entity covers before
   `anonymize_with` changes it
@@ -94,10 +104,24 @@ and this project adheres to
   a part (DOCX, PPTX, HTML, XML, JSON, TXT) or a region of a rendered
   PDF page. Applying the report resolves each mark to the text it covers
 - Applying a report returns it applied, with each entity's redaction record;
-  a `Report` is `#[must_use]`, so dropping that record is a warning. A report
-  reads back only with audit trails that verify, and `Report::digest` covers
-  every entity and its trail, for a deployment to anchor where the report's
-  carrier cannot write
+  a `Report` is `#[must_use]`, so dropping that record is a warning
+- Audit events record what each decision set: a recognition its label and
+  location, a fusion the merged location, a redaction the location it wrote
+- An `Entity` is born from its first event (`Entity::pattern`, `model`,
+  `flagged`, `included`), so its label and location are the event's; it is
+  read through accessors (`label()`, `location()`, `confidence()`, `audit()`,
+  …) and changes only through what records it (`record`, `record_manual`,
+  `fuse`), where every recorded decision takes effect, or through `lift`,
+  which moves it to another coordinate space for the same content
+- A report, review, or artifact set reads back only against a `Seal`, plain
+  data made when it is written: `Seal::of`, an unkeyed digest kept where the
+  carrier cannot write, or `Seal::keyed`, a MAC under a `SealKey` the carrier
+  does not hold, checked with the key set by `with_seal_key`. A report's seal
+  covers every entity's fields and audit trail, by part and entity id; a
+  review's the report version it was made against and every edit; an artifact
+  set's every artifact as serialized. `Restorer::restore` checks it,
+  and `restore_unsealed` skips the check by name. Reports and reviews written
+  before this release do not read back
 - Applying a report fails closed: a part with entities that no registered
   pipeline can apply, or that names no part of the documents, a mark the
   document cannot place, and a location a stream cannot read or write are

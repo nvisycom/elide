@@ -227,7 +227,7 @@ mod tests {
         // Different column never overlaps.
         assert!(!a.overlaps(&TabularLocation::new(0, 1)));
         // Different sheet never overlaps, same cell.
-        let a_s1 = a.clone().with_sheet_name("Sheet1");
+        let a_s1 = a.with_sheet_name("Sheet1");
         let b_s2 = b.with_sheet_name("Sheet2");
         assert!(!a_s1.overlaps(&b_s2));
     }

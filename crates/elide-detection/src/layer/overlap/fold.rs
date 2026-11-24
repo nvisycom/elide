@@ -83,11 +83,11 @@ fn record_conflicts<M: Modality>(
             continue; // winner later lost elsewhere; its claim travels nowhere
         }
         let conflict = Conflict::new(
-            entities[loser].label.clone(),
-            entities[loser].confidence,
+            entities[loser].label().clone(),
+            entities[loser].confidence(),
             name.to_owned(),
         );
-        let event = AuditEvent::conflict(conflict, entities[winner].confidence);
+        let event = AuditEvent::conflict(conflict, entities[winner].confidence());
         entities[winner].record(event);
     }
 }
@@ -105,19 +105,19 @@ fn record_contests<M: Modality>(
         }
         let on_a = AuditEvent::contested(
             Contested::new(
-                entities[b].label.clone(),
-                entities[b].confidence,
+                entities[b].label().clone(),
+                entities[b].confidence(),
                 name.to_owned(),
             ),
-            entities[a].confidence,
+            entities[a].confidence(),
         );
         let on_b = AuditEvent::contested(
             Contested::new(
-                entities[a].label.clone(),
-                entities[a].confidence,
+                entities[a].label().clone(),
+                entities[a].confidence(),
                 name.to_owned(),
             ),
-            entities[b].confidence,
+            entities[b].confidence(),
         );
         entities[a].record(on_a);
         entities[b].record(on_b);

@@ -47,7 +47,7 @@ let recognizer = PatternRecognizer::builder()
 let scope = Scope::new();
 let subject = Subject::<Text>::new(TextData::new("EMP-12345, jane@example.com"));
 let entities = recognizer.recognize(&subject, &Context::new(&scope)).await?;
-let labels: Vec<&str> = entities.iter().map(|e| e.label.as_str()).collect();
+let labels: Vec<&str> = entities.iter().map(|e| e.label().as_str()).collect();
 assert!(labels.contains(&"internal_id"));
 assert!(labels.contains(&"email_address"));
 # Ok(())

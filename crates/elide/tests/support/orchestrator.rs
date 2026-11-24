@@ -217,7 +217,7 @@ impl TestOrchestrator {
     pub fn with_body<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
-        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Location: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
     {
         self.inner = self.inner.with_modality::<M>(analyzer, anonymizer);

@@ -94,7 +94,7 @@ mod tests {
         };
         let entities = lift(batch, &data);
         assert_eq!(entities.len(), 1);
-        let bbox = entities[0].location.bounding_box;
+        let bbox = entities[0].location().bounding_box;
         assert_eq!(bbox.min.x, 0.0);
         assert_eq!(bbox.max.x, 50.0);
         assert_eq!(bbox.max.y, 80.0);
@@ -111,7 +111,7 @@ mod tests {
         let batch = Candidates {
             entities: vec![candidate(0.5, 1.2, -0.1, 0.0)],
         };
-        let bbox = lift(batch, &data)[0].location.bounding_box;
+        let bbox = lift(batch, &data)[0].location().bounding_box;
         assert_eq!((bbox.min.x, bbox.min.y), (0.0, 0.0));
         assert_eq!((bbox.max.x, bbox.max.y), (50.0, 80.0));
     }

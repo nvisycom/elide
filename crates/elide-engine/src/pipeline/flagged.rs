@@ -7,11 +7,10 @@ use std::any::{Any, TypeId};
 
 use elide_codec::{FlaggedItem, TypedStream};
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{Attribution, AuditEvent};
+use elide_core::entity::audit::Attribution;
 use elide_core::modality::Modality;
 use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::Text;
-use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
 use elide_core::redaction::{Disposition, HiddenContentPolicy, Operator};
 use elide_core::{Error, Result};
@@ -46,7 +45,7 @@ where
     Remove: Operator<M>,
 {
     Rule::predicate(
-        |cx: &MatchContext<'_, M>| cx.entity.audit.is_flagged(),
+        |cx: &MatchContext<'_, M>| cx.entity.audit().is_flagged(),
         Remove,
     )
     .because(Attribution::freeform(FLAGGED_ATTRIBUTION))
@@ -103,13 +102,12 @@ fn selects<M: Modality>(policy: HiddenContentPolicy, scope: &Scope, item: &Flagg
 /// A flagged item is present or it is not, nothing probabilistic to weigh, so
 /// the entity carries [`Confidence::MAX`].
 fn entity<M: Modality>(source: &str, item: FlaggedItem<M>) -> Entity<M> {
-    let event = AuditEvent::flagged(
+    Entity::flagged(
         source.to_owned(),
-        Confidence::MAX,
+        item.label.clone(),
         item.location.clone(),
         item.kind,
-    );
-    Entity::new(item.label, item.location).with_event(event)
+    )
 }
 
 #[cfg(test)]

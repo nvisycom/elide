@@ -10,21 +10,25 @@ pub mod audit;
 mod coref;
 mod label;
 
+use std::mem;
 use std::ops::Range;
 
+use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[cfg(feature = "fixtures")]
-use self::audit::PatternRule;
-use self::audit::{AuditEvent, AuditHash, AuditHasher, AuditLog, Manual, ManualIntent};
+use self::audit::{
+    Attribution, AuditEvent, AuditHash, AuditHasher, AuditKind, AuditLog, Manual, ManualIntent,
+    ModelId, PatternRule,
+};
 pub use self::coref::EntityCoRef;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 #[cfg(feature = "fixtures")]
 use crate::modality::text::{Text, TextLocation};
 use crate::modality::{Modality, ModalityLocation};
 use crate::primitive::{Confidence, LanguageTag};
+use crate::redaction::HiddenContentKind;
 
 /// Detected piece of sensitive information within some medium.
 ///
@@ -66,23 +70,23 @@ use crate::primitive::{Confidence, LanguageTag};
 pub struct Entity<M: Modality> {
     /// Stable unique identity for this entity (time-ordered UUIDv7), minted
     /// when the entity is assembled.
-    pub id: Uuid,
+    pub(crate) id: Uuid,
     /// What kind of sensitive information this is (resolved via a
     /// [`LabelCatalog`]).
-    pub label: LabelRef,
+    pub(crate) label: LabelRef,
     /// Location of the entity within the medium (fused, if it came from more
     /// than one detection).
-    pub location: M::Location,
+    pub(crate) location: M::Location,
     /// Effective confidence in `0.0..=1.0` (fused, if applicable).
-    pub confidence: Confidence,
+    pub(crate) confidence: Confidence,
     /// Coreference identifier, if a recognizer resolved this entity as one
     /// mention of a cluster. Entities sharing an [`EntityCoRef`] denote the
     /// same real-world thing.
-    pub coref: Option<EntityCoRef>,
+    pub(crate) coref: Option<EntityCoRef>,
     /// The language of this entity's surrounding text, when a recognizer
     /// resolved one. `None` when unknown or language-agnostic.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    pub language: Option<LanguageTag>,
+    pub(crate) language: Option<LanguageTag>,
     /// Byte range of the match in the *recognized text* it was found in (the
     /// OCR layout text, the audio transcript, or the text payload itself),
     /// the stable key back into that enrichment artifact, where the rich
@@ -96,7 +100,7 @@ pub struct Entity<M: Modality> {
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub recognized_range: Option<Range<usize>>,
+    pub(crate) recognized_range: Option<Range<usize>>,
     /// Tamper-evident audit trail: every contributing detection, the fusion
     /// event if any, and the redaction that hid it, as a hash-linked DAG. It is
     /// also the single source of truth for whether a reviewer
@@ -104,7 +108,7 @@ pub struct Entity<M: Modality> {
     /// [`Manual`] event on this trail, not a separate flag.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
-    pub audit: AuditLog<M>,
+    pub(crate) audit: AuditLog<M>,
 }
 
 impl<M: Modality> Entity<M> {
@@ -127,6 +131,174 @@ impl<M: Modality> Entity<M> {
             recognized_range: None,
             audit: AuditLog::default(),
         }
+    }
+
+    /// An entity the `source` pattern recognizer found: `label` at
+    /// `location`, matched by `rule`, at `confidence`. Its fields are its
+    /// birth event's.
+    pub fn pattern(
+        source: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+        rule: PatternRule,
+    ) -> Self {
+        let label = label.into();
+        Self::new(label.clone(), location.clone()).with_event(AuditEvent::pattern(
+            source, confidence, label, location, rule,
+        ))
+    }
+
+    /// An entity the `source` model recognizer found: `label` at `location`,
+    /// matched by `model`, at `confidence`. Its fields are its birth event's.
+    pub fn model(
+        source: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+        model: ModelId,
+    ) -> Self {
+        let label = label.into();
+        Self::new(label.clone(), location.clone()).with_event(AuditEvent::model(
+            source, confidence, label, location, model,
+        ))
+    }
+
+    /// An item of hidden content the `source` format flagged as `label` at
+    /// `location`, of kind `content`. Present rather than matched, so it
+    /// carries [`Confidence::MAX`]. Its fields are its birth event's.
+    pub fn flagged(
+        source: impl Into<HipStr<'static>>,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+        content: HiddenContentKind,
+    ) -> Self {
+        let label = label.into();
+        Self::new(label.clone(), location.clone()).with_event(AuditEvent::flagged(
+            source,
+            Confidence::MAX,
+            label,
+            location,
+            content,
+        ))
+    }
+
+    /// An entity a reviewer included: `label` at `location`, with the id
+    /// `id` the review chose, recorded as an [`Include`] by `actor` (or
+    /// `"manual"`) for `attribution`. A reviewer's assertion is certain, so it
+    /// carries [`Confidence::MAX`].
+    ///
+    /// [`Include`]: ManualIntent::Include
+    pub fn included(
+        id: Uuid,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+        attribution: Option<Attribution>,
+        actor: Option<&str>,
+    ) -> Self {
+        let label = label.into();
+        let mut entity = Self::new(label.clone(), location.clone());
+        entity.id = id;
+        let manual = Manual {
+            intent: ManualIntent::Include { label },
+            location,
+            attribution,
+        };
+        entity.record_manual(manual, actor);
+        entity
+    }
+
+    /// The entity's identity, a time-ordered UUIDv7.
+    #[must_use]
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    /// What kind of sensitive information the entity is.
+    #[must_use]
+    pub fn label(&self) -> &LabelRef {
+        &self.label
+    }
+
+    /// Where the entity sits in its medium.
+    #[must_use]
+    pub fn location(&self) -> &M::Location {
+        &self.location
+    }
+
+    /// The entity's confidence, the confidence of its trail's last event.
+    #[must_use]
+    pub fn confidence(&self) -> Confidence {
+        self.confidence
+    }
+
+    /// The coreference cluster the entity is one mention of, if resolved.
+    #[must_use]
+    pub fn coref(&self) -> Option<&EntityCoRef> {
+        self.coref.as_ref()
+    }
+
+    /// The language of the entity's surrounding text, if resolved.
+    #[must_use]
+    pub fn language(&self) -> Option<&LanguageTag> {
+        self.language.as_ref()
+    }
+
+    /// Where the entity matched in the text it was recognized in, the key back
+    /// into an OCR layout or a transcript.
+    #[must_use]
+    pub fn recognized_range(&self) -> Option<Range<usize>> {
+        self.recognized_range.clone()
+    }
+
+    /// The entity's audit trail.
+    #[must_use]
+    pub fn audit(&self) -> &AuditLog<M> {
+        &self.audit
+    }
+
+    /// Give the entity `location`, the location it has in another coordinate
+    /// space for the same content.
+    ///
+    /// For moving a finding between coordinate spaces that name the same
+    /// content: from a chunk into its document, or a mark to the span of text
+    /// it covers. It records nothing, as it changes where the coordinates are
+    /// measured from, not what the entity covers; a change of what it covers
+    /// is a decision, recorded by [`record_manual`](Self::record_manual) or
+    /// [`fuse`](Self::fuse).
+    pub fn lift(&mut self, location: M::Location) {
+        self.location = location;
+    }
+
+    /// Fuse `absorbed`, detections of the same finding, into this entity at
+    /// `location`, the span covering them all, with the pooled `confidence`,
+    /// as the fusion `strategy` decided.
+    ///
+    /// Every absorbed trail moves into this one, leaving each absorbed entity
+    /// with an empty trail, and a fusion event recording `location` joins the
+    /// trails' tips. A trail with no events contributes no tip.
+    pub fn fuse(
+        &mut self,
+        absorbed: &mut [Entity<M>],
+        strategy: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        location: M::Location,
+    ) {
+        let mut heads = Vec::with_capacity(absorbed.len() + 1);
+        if !self.audit.is_empty() {
+            heads.push(self.audit.tip());
+        }
+        for other in absorbed {
+            if !other.audit.is_empty() {
+                heads.push(other.audit.tip());
+            }
+            let events = mem::take(&mut other.audit).into_events();
+            self.audit.absorb(events);
+        }
+        self.location = location.clone();
+        self.confidence = confidence;
+        self.audit
+            .record_fusion(AuditEvent::fusion(strategy, confidence, location), heads);
     }
 
     /// A digest of everything the entity says: its id, label, location,
@@ -176,9 +348,30 @@ impl<M: Modality> Entity<M> {
     }
 
     /// Record `event` on the audit trail in place, the `&mut` counterpart to
-    /// [`with_event`](Self::with_event): the entity's confidence becomes the
-    /// event's.
+    /// [`with_event`](Self::with_event), and apply what it decided.
+    ///
+    /// The entity's confidence becomes the event's. A reviewer's [`Manual`]
+    /// decision sets the label or location it names, and a [`Fusion`] moves
+    /// the entity to the fused location, so no event is on the trail without
+    /// its effect on the entity. Every other event records what happened to the
+    /// entity without changing its label or location.
+    ///
+    /// [`Manual`]: crate::entity::audit::Manual
+    /// [`Fusion`]: crate::entity::audit::Fusion
     pub fn record(&mut self, event: AuditEvent<M>) {
+        match &event.kind {
+            AuditKind::Manual(manual) => match &manual.intent {
+                ManualIntent::Include { label } => {
+                    self.label = label.clone();
+                    self.location = manual.location.clone();
+                }
+                ManualIntent::Relabel { label } => self.label = label.clone(),
+                ManualIntent::Relocate => self.location = manual.location.clone(),
+                ManualIntent::Suppress => {}
+            },
+            AuditKind::Fusion(fusion) => self.location = fusion.location.clone(),
+            _ => {}
+        }
         self.confidence = event.confidence;
         self.audit.record(event);
     }
@@ -205,21 +398,27 @@ impl<M: Modality> Entity<M> {
         self
     }
 
-    /// Record a reviewer's [`Manual`] override on this entity's trail.
+    /// Apply a reviewer's [`Manual`] decision and record it on the trail, with
+    /// this entity's confidence, through [`record`](Self::record).
     ///
-    /// `manual` says what the reviewer decided and where it applies: this
-    /// entity's own location, or the region a decision covered when it spans
-    /// more than one entity. The event's confidence is this entity's own, so a
-    /// caller cannot record a stale score. `actor` names who made the override
-    /// and becomes the event's source, `"manual"` when `None`.
+    /// The decision and its record are one step, so a field a reviewer changed
+    /// is always on the trail with what it was set to: an [`Include`] or a
+    /// [`Relabel`] sets the label, an [`Include`] or a [`Relocate`] moves the
+    /// entity to the decision's location, and a [`Suppress`] leaves the fields
+    /// as they are, its location naming the region the decision covered. The
+    /// event's confidence is this entity's own, so a caller cannot record a
+    /// stale score. `actor` names who made the decision and becomes the event's
+    /// source, `"manual"` when `None`.
     ///
-    /// A [`Suppress`] override is idempotent: if the entity is already
-    /// [suppressed](Self::is_suppressed), nothing is recorded, so re-applying an
-    /// override does not grow the trail. `Flag` and `Amend` always record.
-    /// Returns whether an event was recorded.
+    /// A [`Suppress`] is idempotent: if the entity is already
+    /// [suppressed](Self::is_suppressed), nothing is recorded, so re-applying
+    /// one does not grow the trail. Returns whether an event was recorded.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
-    /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`Include`]: ManualIntent::Include
+    /// [`Suppress`]: ManualIntent::Suppress
+    /// [`Relabel`]: ManualIntent::Relabel
+    /// [`Relocate`]: ManualIntent::Relocate
     pub fn record_manual(&mut self, manual: Manual<M>, actor: Option<&str>) -> bool {
         if manual.intent == ManualIntent::Suppress && self.is_suppressed() {
             return false;
@@ -266,9 +465,8 @@ impl Entity<Text> {
     /// confidence-gated selection tests.
     pub fn fixture_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Self {
         let location = TextLocation::inline(loc.0..loc.1);
-        let event =
-            AuditEvent::pattern("test", confidence, location.clone(), PatternRule::default());
-        Entity::new(LabelRef::new(label.to_owned()), location).with_event(event)
+        let label = LabelRef::new(label.to_owned());
+        Entity::pattern("test", confidence, label, location, PatternRule::default())
     }
 }
 
@@ -281,8 +479,7 @@ mod tests {
     fn text_entity() -> Entity<Text> {
         let loc = TextLocation::inline(0..5);
         let conf = Confidence::MAX;
-        let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternRule::default());
-        Entity::new(LabelRef::new("NAME"), loc).with_event(birth)
+        Entity::pattern("t", conf, "NAME", loc, PatternRule::default())
     }
 
     /// Two recognizers' findings fused: swapping the sibling births leaves a
@@ -292,12 +489,16 @@ mod tests {
         let loc = TextLocation::inline(0..5);
         let conf = Confidence::MAX;
         let births = [
-            AuditEvent::pattern("a", conf, loc.clone(), PatternRule::default()),
-            AuditEvent::pattern("b", conf, loc.clone(), PatternRule::default()),
+            AuditEvent::pattern("a", conf, "NAME", loc.clone(), PatternRule::default()),
+            AuditEvent::pattern("b", conf, "NAME", loc.clone(), PatternRule::default()),
         ]
-        .map(|birth| AuditLog::new(birth).into_events().remove(0));
+        .map(|birth| {
+            let mut log = AuditLog::default();
+            log.record(birth);
+            log.into_events().remove(0)
+        });
         let parents: Vec<_> = births.iter().map(AuditEvent::hash).collect();
-        let fusion = AuditEvent::fusion("max", conf);
+        let fusion = AuditEvent::fusion("max", conf, loc.clone());
         // The same fusion over the same parents; only the births' order differs.
         let fused = |births: [AuditEvent<Text>; 2]| {
             let mut entity = Entity::<Text>::new("NAME", loc.clone());
@@ -311,7 +512,7 @@ mod tests {
 
         assert!(swapped.audit.verify().is_ok());
         assert_eq!(swapped.audit.tip(), entity.audit.tip());
-        let mut same = swapped.clone();
+        let mut same = swapped;
         same.id = entity.id;
         assert_ne!(same.digest(), entity.digest());
     }
@@ -332,10 +533,17 @@ mod tests {
             .with_event(AuditEvent::pattern(
                 "a",
                 low,
+                "NAME",
                 loc.clone(),
                 PatternRule::default(),
             ))
-            .with_event(AuditEvent::pattern("b", high, loc, PatternRule::default()));
+            .with_event(AuditEvent::pattern(
+                "b",
+                high,
+                "NAME",
+                loc,
+                PatternRule::default(),
+            ));
         assert_eq!(entity.confidence, high);
         assert_eq!(entity.audit.final_confidence(), Some(high));
         assert!(entity.audit.verify().is_ok());
@@ -355,19 +563,32 @@ mod tests {
         assert!(entity.is_suppressed());
     }
 
-    /// An amended entity is a human override (a `Manual` event) but *not*
-    /// suppressed, only `Suppress` skips redaction; `Amend` is provenance-only.
+    /// A relabel and a relocation set the fields they name, and record what
+    /// they set, without suppressing the entity.
     #[test]
-    fn an_amended_entity_is_not_suppressed() {
+    fn an_amendment_sets_its_field_and_records_it() {
         let mut entity = text_entity();
-        let loc = entity.location.clone();
-        entity
-            .audit
-            .record(AuditEvent::manual("reviewer-7", entity.confidence, {
-                Manual::new(ManualIntent::Amend, loc)
-                    .with_attribution(Attribution::freeform("retagged"))
-            }));
-        assert!(!entity.is_suppressed(), "amend does not suppress");
+        let moved = TextLocation::inline(1..4);
+        assert!(
+            entity.record_manual(
+                Manual::new(
+                    ManualIntent::Relabel {
+                        label: LabelRef::new("ORG"),
+                    },
+                    entity.location.clone(),
+                )
+                .with_attribution(Attribution::freeform("retagged")),
+                Some("reviewer-7"),
+            )
+        );
+        assert!(entity.record_manual(
+            Manual::new(ManualIntent::Relocate, moved.clone()),
+            Some("reviewer-7"),
+        ));
+
+        assert_eq!(entity.label, LabelRef::new("ORG"));
+        assert_eq!(entity.location, moved);
+        assert!(!entity.is_suppressed(), "an amendment does not suppress");
         assert!(entity.audit.verify().is_ok());
     }
 
@@ -400,10 +621,33 @@ mod tests {
         assert!(entity.audit.verify().is_ok());
     }
 
-    /// An `Amend` *after* a `Suppress` must not clear the suppression, `Amend`
-    /// is provenance-only, so the earlier `Suppress` decision still stands.
+    /// A decision recorded through [`Entity::record`] still takes effect: no
+    /// event is on the trail without its effect on the entity.
     #[test]
-    fn amend_after_suppress_stays_suppressed() {
+    fn a_recorded_decision_takes_effect() {
+        let mut entity = text_entity();
+        let moved = TextLocation::inline(2..4);
+        entity.record(AuditEvent::manual(
+            "reviewer-7",
+            entity.confidence,
+            Manual::new(
+                ManualIntent::Relabel {
+                    label: LabelRef::new("ORG"),
+                },
+                entity.location.clone(),
+            ),
+        ));
+        entity.record(AuditEvent::fusion("max", entity.confidence, moved.clone()));
+
+        assert_eq!(entity.label, LabelRef::new("ORG"));
+        assert_eq!(entity.location, moved);
+        assert!(entity.audit.verify().is_ok());
+    }
+
+    /// An amendment *after* a `Suppress` must not clear the suppression: it
+    /// decides nothing about redaction, so the earlier `Suppress` still stands.
+    #[test]
+    fn an_amendment_after_a_suppression_stays_suppressed() {
         let mut entity = text_entity();
         let loc = entity.location.clone();
         entity.record_manual(
@@ -411,16 +655,18 @@ mod tests {
             Some("reviewer-7"),
         );
         assert!(entity.is_suppressed(), "suppressed by the reviewer");
-        // A later amendment (e.g. retag) is recorded but leaves the entity
-        // suppressed.
-        entity.audit.record(AuditEvent::manual(
-            "reviewer-7",
-            entity.confidence,
-            Manual::new(ManualIntent::Amend, loc),
-        ));
+        entity.record_manual(
+            Manual::new(
+                ManualIntent::Relabel {
+                    label: LabelRef::new("ORG"),
+                },
+                loc,
+            ),
+            Some("reviewer-7"),
+        );
         assert!(
             entity.is_suppressed(),
-            "amend after suppress keeps the suppression",
+            "an amendment after a suppression keeps it",
         );
         assert!(entity.audit.verify().is_ok());
     }

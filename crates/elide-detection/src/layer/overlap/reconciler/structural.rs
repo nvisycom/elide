@@ -135,13 +135,13 @@ where
         // code inside an address), keep both. The comparison is inclusive so a
         // difference of exactly `margin` subsumes rather than slipping through.
         let subsumed = |inner: &Entity<M>, outer: &Entity<M>| {
-            inner.confidence.get() + self.margin <= outer.confidence.get()
+            inner.confidence().get() + self.margin <= outer.confidence().get()
         };
-        let overlap = a.location.overlap(&b.location);
+        let overlap = a.location().overlap(b.location());
         // Each containing the other is the same extent, which `overlap` reports
         // as a containment: two labels claiming exactly one span, the plainest
         // conflict, not a nesting.
-        if overlap == Overlap::Contains && b.location.overlap(&a.location) == Overlap::Contains {
+        if overlap == Overlap::Contains && b.location().overlap(a.location()) == Overlap::Contains {
             return self.settle(a, b);
         }
         match overlap {

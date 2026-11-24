@@ -148,7 +148,7 @@ fn composite_id(primary: &ComponentId, fallback: &ComponentId) -> ComponentId {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::entity::audit::PatternRule;
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::primitive::Confidence;
 
@@ -157,13 +157,13 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::inline(0..3);
-        let event = AuditEvent::pattern(
+        Entity::pattern(
             "t",
             Confidence::MAX,
-            location.clone(),
+            LabelRef::new("age"),
+            location,
             PatternRule::default(),
-        );
-        Entity::new(LabelRef::new("age"), location).with_event(event)
+        )
     }
 
     #[tokio::test]

@@ -50,9 +50,9 @@ pub(crate) fn fake_value<M: Modality>(
     seed: u64,
     default_language: &LanguageTag,
 ) -> Option<String> {
-    let locale = locale_for(entity.language.as_ref(), default_language);
+    let locale = locale_for(entity.language(), default_language);
     let mut rng = rng_for(seed, Identity::from(entity));
-    Context::new(locale, entity.label.as_str(), original).generate(&mut rng)
+    Context::new(locale, entity.label().as_str(), original).generate(&mut rng)
 }
 
 /// A deterministic opaque UUIDv4 token for `entity`, the fallback when a label

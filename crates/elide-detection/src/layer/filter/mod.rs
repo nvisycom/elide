@@ -24,7 +24,7 @@ impl ThresholdLayer {
 
     /// Whether `entity` clears the threshold.
     pub fn passes<M: Modality>(&self, entity: &Entity<M>) -> bool {
-        self.threshold.passes(entity.confidence)
+        self.threshold.passes(entity.confidence())
     }
 }
 

@@ -157,7 +157,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
+    use elide_core::entity::audit::{AuditKind, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -168,12 +168,17 @@ mod tests {
     fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
         let loc = TextLocation::inline(start..end);
         let confidence = Confidence::new(conf).unwrap();
-        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternRule::default());
-        Entity::new(LabelRef::new(label), loc).with_event(event)
+        Entity::pattern(
+            "t",
+            confidence,
+            LabelRef::new(label),
+            loc,
+            PatternRule::default(),
+        )
     }
 
     fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {
-        entity.audit.events().iter().any(|e| f(&e.kind))
+        entity.audit().events().iter().any(|e| f(&e.kind))
     }
 
     fn structural() -> ReconcileLayer<CrossLabel, Structural> {
@@ -200,7 +205,7 @@ mod tests {
         ];
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 1);
-        assert_eq!(out.kept[0].label, LabelRef::new("iban"));
+        assert_eq!(*out.kept[0].label(), LabelRef::new("iban"));
         assert_eq!(out.dropped.len(), 1);
     }
 
@@ -215,7 +220,7 @@ mod tests {
         ];
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 1);
-        assert_eq!(out.kept[0].label, LabelRef::new("payment_card"));
+        assert_eq!(*out.kept[0].label(), LabelRef::new("payment_card"));
         assert_eq!(out.dropped.len(), 1);
     }
 
@@ -230,7 +235,7 @@ mod tests {
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 1);
         assert_eq!(out.dropped.len(), 1);
-        assert_eq!(out.kept[0].label, LabelRef::new("PERSON_NAME"));
+        assert_eq!(*out.kept[0].label(), LabelRef::new("PERSON_NAME"));
         assert!(has_kind(&out.kept[0], |k| matches!(
             k,
             AuditKind::Conflict(c) if c.competing_label == LabelRef::new("ORGANIZATION")
@@ -265,7 +270,7 @@ mod tests {
             for entities in [vec![person(), org()], vec![org(), person()]] {
                 let out = structural().apply(entities);
                 assert_eq!(out.kept.len(), 1);
-                assert_eq!(out.kept[0].label, LabelRef::new("ORGANIZATION"));
+                assert_eq!(*out.kept[0].label(), LabelRef::new("ORGANIZATION"));
                 assert!(has_kind(&out.kept[0], |k| matches!(
                     k,
                     AuditKind::Conflict(c) if c.competing_label == LabelRef::new("PERSON_NAME")

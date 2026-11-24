@@ -52,13 +52,13 @@ async fn a_bare_ssn_needs_its_keyword() {
     let confidence_of = |needle: &str| {
         entities
             .iter()
-            .filter(|e| e.label == builtins::GOVERNMENT_ID.to_ref())
+            .filter(|e| e.label() == &builtins::GOVERNMENT_ID.to_ref())
             .find(|e| {
-                e.location
+                e.location()
                     .range()
                     .is_some_and(|r| text.get(r.start..r.end) == Some(needle))
             })
-            .map(|e| e.confidence)
+            .map(|e| e.confidence())
     };
     let threshold = ConfidenceThreshold::BASELINE;
     assert!(confidence_of("123456789").is_some_and(|c| threshold.passes(c)));

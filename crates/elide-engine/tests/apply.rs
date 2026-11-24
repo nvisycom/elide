@@ -3,7 +3,7 @@
 
 use elide_codec::mocks::{MOCK_EXT, encode_mock, mock_format};
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{AuditEvent, PatternRule};
+use elide_core::entity::audit::PatternRule;
 use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::{Text, TextLocation};
@@ -30,13 +30,13 @@ impl Modality for Unregistered {
 /// An entity of modality `M` over the first four bytes.
 fn entity<M: Modality<Location = TextLocation>>() -> Entity<M> {
     let location = TextLocation::inline(0..4);
-    let event = AuditEvent::pattern(
+    Entity::pattern(
         "test",
         Confidence::MAX,
-        location.clone(),
+        EMAIL_ADDRESS.to_ref(),
+        location,
         PatternRule::default(),
-    );
-    Entity::new(EMAIL_ADDRESS.to_ref(), location).with_event(event)
+    )
 }
 
 /// An orchestrator over the mock format and one mock document named `doc.mock`.

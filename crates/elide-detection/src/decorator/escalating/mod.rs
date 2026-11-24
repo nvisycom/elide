@@ -122,7 +122,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elide_core::Component;
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::entity::audit::PatternRule;
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -137,16 +137,16 @@ mod tests {
         let label = LabelRef::new(label.to_owned());
         let location = TextLocation::inline(0..1);
         let confidence = Confidence::new(confidence).unwrap();
-        let event = AuditEvent::pattern(
+        Entity::pattern(
             "baseline",
             confidence,
-            location.clone(),
+            label.clone(),
+            location,
             PatternRule {
                 name: label.as_str().into(),
                 ..PatternRule::default()
             },
-        );
-        Entity::new(label, location).with_event(event)
+        )
     }
 
     /// A recognizer that replays canned entities and counts how often it ran, so

@@ -50,12 +50,12 @@ impl<M: Modality> GroupPredicate<M> for SameLabel {
     type Bucket = LabelRef;
 
     fn bucket(&self, entity: &Entity<M>) -> LabelRef {
-        entity.label.clone()
+        entity.label().clone()
     }
 
     fn is_grouped(&self, a: &Entity<M>, b: &Entity<M>) -> bool {
         // The bucket already guarantees equal labels; only overlap remains.
-        a.location.overlaps(&b.location)
+        a.location().overlaps(b.location())
     }
 }
 
@@ -75,6 +75,6 @@ impl<M: Modality> GroupPredicate<M> for CrossLabel {
     fn bucket(&self, _entity: &Entity<M>) {}
 
     fn is_grouped(&self, a: &Entity<M>, b: &Entity<M>) -> bool {
-        a.label != b.label && a.location.overlaps(&b.location)
+        a.label() != b.label() && a.location().overlaps(b.location())
     }
 }
