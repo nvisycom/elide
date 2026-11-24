@@ -91,7 +91,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## LAME
 
-`elide-audio` encodes MP3 with LAME, through `mp3lame-sys`, which compiles it from source and links it statically. It is built only with the opt-in `mp3` feature; a binary built without it contains no LAME code.
+`elide-audio` encodes MP3 with LAME, through `mp3lame-sys`, which compiles it from source and links it statically. It is built only with `elide-audio`'s opt-in `mp3` feature (`codec-mp3` or `codec-audio` on `elide`); a binary built without it contains no LAME code.
 
 LAME is licensed under the GNU Library General Public License, version 2 or (at your option) any later version; `mp3lame-sys` distributes it under version 3. A binary that contains it must be accompanied by that license's text and must let its recipient relink it against a modified LAME, for example by providing the application's object files. LAME's source is at <https://lame.sourceforge.io/>, and the version built here is the one `mp3lame-sys` bundles, at <https://github.com/DoumanAsh/mp3lame-sys>.
 
@@ -145,7 +145,7 @@ SOFTWARE.
 
 ## Mozilla CA certificates
 
-`elide-llm` connects to model providers over TLS with `rustls`, through `rig-reqwest`, which bundles Mozilla's root certificate store (via [webpki-roots](https://github.com/rustls/webpki-roots)'s `webpki-root-certs`). Any binary built with `elide-llm` contains it. The store is shared under the Community Data License Agreement – Permissive 2.0, whose text must accompany it:
+`elide-llm`'s `rig` backend connects to model providers over TLS with `rustls`, through `rig-reqwest`, which bundles Mozilla's root certificate store (via [webpki-roots](https://github.com/rustls/webpki-roots)'s `webpki-root-certs`). Any binary built with that backend contains it: the `rig` feature, or a provider feature that enables it (`openai-gpt`, `anthropic-claude`, `google-gemini`; `llm-rig` on `elide`). A binary built with only the `mocks` backend does not. The store is shared under the Community Data License Agreement – Permissive 2.0, whose text must accompany it:
 
 ```text
 # Community Data License Agreement - Permissive - Version 2.0
@@ -213,7 +213,7 @@ insights.
 
 ## Symphonia
 
-`elide-audio` decodes audio with [Symphonia](https://github.com/pdeljanov/Symphonia), licensed under the Mozilla Public License 2.0. Any binary built with `elide-audio` contains it. Its source, including the version built here, is available at <https://github.com/pdeljanov/Symphonia>, and the license at <https://mozilla.org/MPL/2.0/>.
+`elide-audio` decodes audio with [Symphonia](https://github.com/pdeljanov/Symphonia), licensed under the Mozilla Public License 2.0. Any binary built with `elide-audio`'s `wav` or `mp3` feature (`codec-wav`, `codec-mp3` or `codec-audio` on `elide`) contains it; one built with neither does not. Its source, including the version built here, is available at <https://github.com/pdeljanov/Symphonia>, and the license at <https://mozilla.org/MPL/2.0/>.
 
 ```text
 Copyright (c) 2019-2026 The Project Symphonia Developers.
