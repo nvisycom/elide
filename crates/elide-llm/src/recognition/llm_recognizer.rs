@@ -125,7 +125,12 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
         let prompt = self.prompt.build(subject, ctx)?;
         let response = self.backend.call(request(&prompt, subject, ctx)).await?;
         let candidates = response.candidates.entities.len();
-        let entities = B::Modality::lift(response.candidates, subject.data(), &response.model);
+        let entities = B::Modality::lift(
+            response.candidates,
+            subject.data(),
+            &self.name,
+            &response.model,
+        );
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
@@ -159,7 +164,12 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
             .into_iter()
             .zip(subjects)
             .map(|(response, subject)| {
-                B::Modality::lift(response.candidates, subject.data(), &response.model)
+                B::Modality::lift(
+                    response.candidates,
+                    subject.data(),
+                    &self.name,
+                    &response.model,
+                )
             })
             .collect();
         tracing::debug!(
@@ -259,6 +269,23 @@ mod tests {
             panic!("a model event");
         };
         assert_eq!(event.model.name, "jane-finder");
+    }
+
+    /// Entities name the recognizer that found them, as `with_name` set it,
+    /// on the single and the batch path alike.
+    #[tokio::test]
+    async fn entities_name_their_recognizer() {
+        let recognizer = LlmRecognizer::with_default(Jane::default()).with_name("llm-strict");
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let subject = Subject::<Text>::new(TextData::new("Jane"));
+
+        let single = recognizer.recognize(&subject, &ctx).await.unwrap();
+        let batch = recognizer.recognize_batch(&[&subject], &ctx).await.unwrap();
+
+        for entity in single.iter().chain(&batch[0]) {
+            assert_eq!(entity.audit.events()[0].source, "llm-strict");
+        }
     }
 
     #[tokio::test]

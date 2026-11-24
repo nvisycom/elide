@@ -5,14 +5,14 @@
 //! them. They are composed onto an [`Analyzer`], which runs them in order after
 //! detection. The shipped stages, in their usual order:
 //!
-//! 1. [`calibrate`], scale each entity's confidence by a per-recognizer
-//!    multiplier, so detectors with different score distributions are
-//!    comparable before reconciliation.
-//! 2. [`overlap`], decide what happens to overlapping entities: cluster them
+//! 1. [`overlap`], decide what happens to overlapping entities: cluster them
 //!    ([`GroupPredicate`]), fuse each cluster of the same finding
 //!    ([`FuseLayer`]), and arbitrate cross-label pairs ([`Reconciler`]):
 //!    keep, contest, or resolve.
-//! 3. [`filter`], drop entities below a confidence threshold.
+//! 2. [`filter`], drop entities below a confidence threshold.
+//!
+//! A recognizer whose scores run differently from the others' is calibrated
+//! before any layer, by wrapping it in a [`CalibratedRecognizer`].
 //!
 //! Each stage implements [`Layer`], returning a [`LayerOutput`]. Stages are
 //! pure and synchronous, reached through their submodules (e.g.
@@ -22,8 +22,8 @@
 //! [`GroupPredicate`]: overlap::group::GroupPredicate
 //! [`FuseLayer`]: overlap::FuseLayer
 //! [`Reconciler`]: overlap::Reconciler
+//! [`CalibratedRecognizer`]: crate::decorator::calibrated::CalibratedRecognizer
 
-pub mod calibrate;
 pub mod filter;
 pub mod overlap;
 
@@ -68,13 +68,11 @@ impl<M: Modality> LayerOutput<M> {
 /// a `Vec<Entity<M>>` in memory with no I/O, so unlike recognition there is no
 /// async here. Concrete layers: [`FuseLayer`] (fuse each cluster of the same
 /// finding), [`ReconcileLayer`] (keep, contest, or resolve each overlapping
-/// pair), [`ThresholdLayer`] (drop by confidence), [`CalibrateLayer`] (rescale
-/// confidence).
+/// pair), [`ThresholdLayer`] (drop by confidence).
 ///
 /// [`FuseLayer`]: overlap::FuseLayer
 /// [`ReconcileLayer`]: overlap::ReconcileLayer
 /// [`ThresholdLayer`]: filter::ThresholdLayer
-/// [`CalibrateLayer`]: calibrate::CalibrateLayer
 pub trait Layer<M: Modality>: Send + Sync {
     /// Apply this stage to `entities`.
     fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M>;

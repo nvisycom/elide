@@ -36,6 +36,9 @@ pub use elide_core::recognition::{Context, LabelMap, Recognizer, Scope, ScopeMet
 /// - [`EscalatingRecognizer`] runs a cheap baseline recognizer always and a
 ///   costly one (a hosted LLM/VLM, say) only on the subjects a [`Decider`] —
 ///   e.g. [`ConfidenceDecider`] — picks from what the baseline found.
+/// - [`CalibratedRecognizer`] scales the inner recognizer's confidence by a
+///   [`Calibration`] (a multiplier for it, and per label), so its scores
+///   compare fairly with the others' before the layers reconcile them.
 ///
 /// Re-exported from [`elide_detection`].
 ///
@@ -49,6 +52,8 @@ pub use elide_core::recognition::{Context, LabelMap, Recognizer, Scope, ScopeMet
 /// [`EscalatingRecognizer`]: elide_detection::decorator::escalation::EscalatingRecognizer
 /// [`Decider`]: elide_detection::decorator::escalation::Decider
 /// [`ConfidenceDecider`]: elide_detection::decorator::escalation::ConfidenceDecider
+/// [`CalibratedRecognizer`]: elide_detection::decorator::calibrated::CalibratedRecognizer
+/// [`Calibration`]: elide_detection::decorator::calibrated::Calibration
 pub mod decorator {
     #[doc(inline)]
     pub use elide_detection::decorator::*;

@@ -28,6 +28,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use elide_core::entity::Entity;
+use elide_core::entity::audit::AuditHash;
 use elide_core::modality::Modality;
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
@@ -184,6 +185,47 @@ impl Report {
         self.stripped = record;
     }
 
+    /// A digest of every entity the report carries, to anchor it against
+    /// tampering between [`analyze`] and [`anonymize_with`].
+    ///
+    /// Each entity's trail [verifies](elide_core::entity::audit::AuditLog::verify)
+    /// on its own, and a report's trails are checked as it is
+    /// [deserialized](Self::deserializer), but that cannot catch a report
+    /// rewritten whole: the trail hashes are unkeyed, so whoever rewrites an
+    /// entity can recompute its trail, and nothing ties one entity's trail to
+    /// another's, so a dropped entity, which would then go unredacted, leaves
+    /// every remaining trail intact. The digest covers every part and every
+    /// [entity](Entity::digest), its fields and trail alike, so comparing it
+    /// with one recorded where the report's carrier cannot change it (a signed
+    /// log, a write-once bucket, a timestamping service) catches any of these.
+    /// Record it again after a trusted review, whose edits change it.
+    ///
+    /// A part with no entities is left out, as a serialized report may drop it,
+    /// and the [stripped](Self::stripped) section is left out, as it is never
+    /// read back.
+    ///
+    /// [`analyze`]: crate::Orchestrator::analyze
+    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
+    pub fn digest(&self) -> AuditHash {
+        let mut parts: Vec<_> = self
+            .parts
+            .iter()
+            .filter(|(_, entities)| !entities.is_empty())
+            .collect();
+        parts.sort_unstable_by_key(|(id, _)| *id);
+        let mut fields: Vec<Vec<u8>> = Vec::new();
+        for (id, entities) in parts {
+            let segments: Vec<&str> = id.segments().collect();
+            fields.push((segments.len() as u64).to_le_bytes().to_vec());
+            fields.extend(segments.iter().map(|segment| segment.as_bytes().to_vec()));
+            fields.push(entities.modality_name().as_bytes().to_vec());
+            let digests = entities.digests();
+            fields.push((digests.len() as u64).to_le_bytes().to_vec());
+            fields.extend(digests.iter().map(|digest| digest.as_bytes().to_vec()));
+        }
+        AuditHash::of_fields(fields)
+    }
+
     /// Set the entities of the part `id` as modality `P`, replacing any.
     ///
     /// For rebuilding a report from out-of-band entities. [`anonymize_with`]
@@ -308,6 +350,39 @@ mod tests {
         let mut entity = text_entity(label);
         entity.location = TextLocation::inline(range);
         entity
+    }
+
+    /// The digest moves with anything an entity says, edited through its
+    /// trail or behind it, and with an entity dropped; a part with no
+    /// entities leaves it be.
+    #[test]
+    fn the_digest_covers_every_entity_and_field() {
+        let kept = at("EMAIL_ADDRESS", 0..5);
+        let other = at("PERSON_NAME", 6..9);
+        let report = || {
+            Report::new()
+                .insert_part::<Text>(doc(), vec![kept.clone(), other.clone()])
+                .insert_part::<Text>(doc().child("empty"), Vec::new())
+        };
+        let digest = report().digest();
+        assert_eq!(digest, report().digest());
+
+        let mut relabelled = report();
+        relabelled
+            .part_mut::<Text>(&doc())
+            .unwrap()
+            .relabel(kept.id, "RETAGGED");
+        assert_ne!(relabelled.digest(), digest);
+
+        let mut moved = report();
+        moved.entity_anywhere_mut::<Text>(kept.id).unwrap().location = TextLocation::inline(0..2);
+        assert_ne!(moved.digest(), digest);
+
+        let dropped = Report::new().insert_part::<Text>(doc(), vec![kept.clone()]);
+        assert_ne!(dropped.digest(), digest);
+
+        let without_empty = Report::new().insert_part::<Text>(doc(), vec![kept, other]);
+        assert_eq!(without_empty.digest(), digest);
     }
 
     #[test]

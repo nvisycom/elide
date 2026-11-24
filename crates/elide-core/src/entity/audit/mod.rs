@@ -8,7 +8,9 @@ mod hash;
 mod rule_match;
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
@@ -16,6 +18,7 @@ pub use self::event::{
     Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
 };
 pub use self::hash::AuditHash;
+pub(crate) use self::hash::AuditHasher;
 pub use self::rule_match::RuleMatch;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
@@ -57,7 +60,7 @@ use crate::{Error, Result};
 /// [`final_confidence`]: Self::final_confidence
 /// [`verify`]: Self::verify
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(
     feature = "serde",
     serde(
@@ -79,6 +82,27 @@ pub struct AuditLog<M: Modality> {
     events: Vec<AuditEvent<M>>,
 }
 
+/// A trail deserializes only once it [verifies](AuditLog::verify): a loaded
+/// trail whose hashes or links do not hold (an event altered, an event cut
+/// below its tip, an event appended past it) is rejected as it is read, so no
+/// caller can act on one without checking it. A trail cut back to an earlier
+/// tip is intact in its own right and reads back; only a tip or report
+/// digest held elsewhere tells it apart.
+#[cfg(feature = "serde")]
+impl<'de, M> Deserialize<'de> for AuditLog<M>
+where
+    M: Modality,
+    M::Location: Serialize + for<'a> Deserialize<'a>,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let log = Self {
+            events: Vec::deserialize(deserializer)?,
+        };
+        log.verify().map_err(D::Error::custom)?;
+        Ok(log)
+    }
+}
+
 impl<M: Modality> AuditLog<M> {
     /// An audit log seeded with a single birth `event` (no parents).
     pub fn new(event: AuditEvent<M>) -> Self {
@@ -90,6 +114,14 @@ impl<M: Modality> AuditLog<M> {
     /// The recorded events, in order.
     pub fn events(&self) -> &[AuditEvent<M>] {
         &self.events
+    }
+
+    /// The hash of the trail's last event, which every earlier event's hash
+    /// is folded into, or [`GENESIS`](AuditHash::GENESIS) for an empty trail.
+    pub fn tip(&self) -> AuditHash {
+        self.events
+            .last()
+            .map_or(AuditHash::GENESIS, AuditEvent::hash)
     }
 
     /// Consume the log, yielding its events in order.
@@ -296,14 +328,22 @@ impl<M: Modality> AuditLog<M> {
     /// - every [`Redaction`] names an *earlier* [`Selection`] event, the
     ///   decision it applied; and
     /// - the DAG has exactly **one sink** and it is the last event, while every
-    ///   other event is some later event's parent. This anchors the trail's
-    ///   length and its tip: an appended tail event, an inserted orphan
-    ///   (birth) event, or a deleted leaf leaves either a second sink or an
-    ///   unreferenced event, and is caught here.
+    ///   other event is some later event's parent: an appended tail event, an
+    ///   inserted orphan (birth) event, or a deleted leaf below the tip leaves
+    ///   either a second sink or an unreferenced event, and is caught here.
     ///
     /// Independent sibling events (two recognizers that later fuse) have no
     /// ordering between them, so a permutation that keeps every parent before
     /// its children is an equivalent DAG, not a tamper.
+    ///
+    /// What it cannot catch is a trail rewritten whole. The hashes are unkeyed,
+    /// so whoever rewrites every event can recompute every hash; and a trail
+    /// cut back to an earlier event, its tip dropped, is a shorter trail that
+    /// is intact in its own right. Both need the trail's tip compared against
+    /// one held where its writer cannot change it: see
+    /// `Report::digest` in `elide-engine`, which anchors a whole report.
+    ///
+    /// A trail deserializes only once it verifies.
     ///
     /// Returns `Ok(())` for an intact DAG (an empty log trivially passes), or an
     /// [`Error`] of kind [`ErrorKind::Integrity`](crate::ErrorKind::Integrity) naming the first break. This
@@ -508,6 +548,25 @@ mod tests {
         };
         selection.leak_profile = LeakProfile::Irrecoverable;
         assert!(log.verify().is_err());
+    }
+
+    /// An intact trail reads back as written; one altered in transit, or with
+    /// an event cut from its middle, does not read back at all.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_trail_deserializes_only_once_it_verifies() {
+        let log = every_kind();
+        let json = serde_json::to_value(&log).unwrap();
+        let read: AuditLog<Text> = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(read.events().len(), log.events().len());
+
+        let mut altered = json.clone();
+        altered[0]["confidence"] = serde_json::json!(0.99);
+        assert!(serde_json::from_value::<AuditLog<Text>>(altered).is_err());
+
+        let mut cut = json;
+        cut.as_array_mut().unwrap().remove(0);
+        assert!(serde_json::from_value::<AuditLog<Text>>(cut).is_err());
     }
 
     /// A selection recorded after a redaction changes the plan, not what the

@@ -13,6 +13,7 @@ use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
+use hipstr::HipStr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -30,10 +31,14 @@ pub trait LlmModality: Modality + Sized {
     type Item: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static;
 
     /// Lift an extracted candidate batch into entities, in this modality's
-    /// coordinate space, against the source `data`, each attributed to
-    /// `model`.
-    fn lift(batch: Candidates<Self::Item>, data: &Self::Data, model: &ModelId)
-    -> Vec<Entity<Self>>;
+    /// coordinate space, against the source `data`, each attributed to the
+    /// recognizer named `source` running `model`.
+    fn lift(
+        batch: Candidates<Self::Item>,
+        data: &Self::Data,
+        source: &HipStr<'static>,
+        model: &ModelId,
+    ) -> Vec<Entity<Self>>;
 }
 
 const TARGET: &str = "elide_llm::modality";
@@ -45,14 +50,14 @@ const DEFAULT_CONFIDENCE: f64 = 0.5;
 /// Builds the entities of one recognizer call: each attributed to the call's
 /// model, with the model's coreference handles scoped to the call.
 pub(crate) struct Lifter<'a> {
-    source: &'static str,
+    source: &'a HipStr<'static>,
     model: &'a ModelId,
     scope: CorefScope,
 }
 
 impl<'a> Lifter<'a> {
     /// A lifter for one call, its audit events naming `source` and `model`.
-    pub(crate) fn new(source: &'static str, model: &'a ModelId) -> Self {
+    pub(crate) fn new(source: &'a HipStr<'static>, model: &'a ModelId) -> Self {
         Self {
             source,
             model,
@@ -80,7 +85,7 @@ impl<'a> Lifter<'a> {
             return None;
         };
         let event = AuditEvent::model(
-            self.source,
+            self.source.clone(),
             confidence,
             location.clone(),
             self.model.clone(),

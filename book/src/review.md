@@ -98,7 +98,19 @@ earlier `Selection`.
 
 A `Report` serializes, so detection and redaction can run in different
 processes, or days apart with a review queue between them.
-`Report::deserializer()` reads one back.
+`Report::deserializer()` reads one back, and refuses one whose audit trails do
+not verify: an event altered in transit, or cut from below a trail's last
+event, fails the read.
+
+That check has limits. The trail hashes are not keyed, so whoever rewrites a
+whole entity can recompute its trail; a trail cut back to an earlier event is
+intact in its own right; and trails are per entity, so dropping an entity
+outright leaves every other trail intact. To catch those, record
+`report.digest()` after analysis (and again after a trusted review, since
+edits change it) somewhere the report's carrier cannot write, such as a
+signed log, a write-once bucket, or a timestamping service, and compare it
+with the digest of the report you are about to apply. The digest covers every
+entity's fields and trail.
 
 The analysis also returns `artifacts`: the OCR layouts and transcripts it
 produced. Pass them to `re_analyze` to detect again, under a new scope or

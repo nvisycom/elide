@@ -535,6 +535,27 @@ mod tests {
         }
     }
 
+    /// A report reads back with the digest it was written with, and one whose
+    /// trail was altered in transit does not read back at all.
+    #[test]
+    fn a_report_reads_back_only_with_intact_trails() {
+        let report = Report::new().insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")]);
+        assert_eq!(
+            round_trip(&report, &text_registry()).digest(),
+            report.digest()
+        );
+
+        let mut value = serde_json::to_value(&report).unwrap();
+        value["parts"][0]["entities"][0]["audit"][0]["confidence"] = serde_json::json!(0.01);
+        let json = value.to_string();
+        let mut de = serde_json::Deserializer::from_str(&json);
+        assert!(
+            ReportSeed::new(&text_registry())
+                .deserialize(&mut de)
+                .is_err()
+        );
+    }
+
     #[test]
     fn serializes_to_part_list_view() {
         // The `{ parts: [..] }` shape is exercised end to end (with a real

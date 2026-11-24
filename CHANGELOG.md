@@ -61,8 +61,9 @@ and this project adheres to
   backend
 - Speech-to-text and OCR enrichers that make audio and images text-recognizable
 - An `Analyzer` per modality that runs enrichers, then recognizers, then the
-  layers that calibrate, fuse, arbitrate, and threshold their findings;
-  recognizer decorators `resilient`, `chunked`, and `escalation`
+  layers that fuse, arbitrate, and threshold their findings; recognizer
+  decorators `resilient`, `chunked`, `escalation`, and `calibrated`, the last
+  scaling a recognizer's confidence by a multiplier for it and per label
 - A caller's `Scope` names the entity types to detect (an empty catalog
   detects nothing), the asserted languages and jurisdictions, and free-form
   document tags, purpose, and audience

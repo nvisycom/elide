@@ -108,7 +108,7 @@ where
         };
         let response = self.backend.call(request).await?;
         let spans = response.spans.len();
-        let entities = entities(response.spans, subject, &response.model);
+        let entities = entities(response.spans, subject, &self.name, &response.model);
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
@@ -146,7 +146,8 @@ where
         let responses = self.backend.call_aligned(requests).await?;
         let spans: usize = responses.iter().map(|response| response.spans.len()).sum();
         for (&index, response) in targets.iter().zip(responses) {
-            per_subject[index] = entities(response.spans, subjects[index], &response.model);
+            per_subject[index] =
+                entities(response.spans, subjects[index], &self.name, &response.model);
         }
         let placed: usize = per_subject.iter().map(Vec::len).sum();
         tracing::debug!(
@@ -163,19 +164,25 @@ where
     }
 }
 
-/// The entities for `spans`, located in `subject` and attributed to
-/// `model`. A span whose range can't be placed in the medium (an
+/// The entities for `spans`, located in `subject` and attributed to the
+/// recognizer named `source` running `model`. A span whose range can't be placed in the medium (an
 /// OCR/transcript range no enrichment covers) is dropped.
 fn entities<M: TextRecognizable>(
     spans: Vec<NerSpan>,
     subject: &Subject<M>,
+    source: &HipStr<'static>,
     model: &ModelId,
 ) -> Vec<Entity<M>> {
     spans
         .into_iter()
         .filter_map(|span| {
             let location = M::locate(span.offset.clone(), subject.data(), subject.artifact())?;
-            let event = AuditEvent::model("ner", span.confidence, location.clone(), model.clone());
+            let event = AuditEvent::model(
+                source.clone(),
+                span.confidence,
+                location.clone(),
+                model.clone(),
+            );
             Some(
                 Entity::new(span.label, location)
                     .with_recognized_range(span.offset)
@@ -286,6 +293,23 @@ mod tests {
         // One recognition per subject, each with the backend's one span.
         assert_eq!(out.len(), 3);
         assert!(out.iter().all(|entities| entities.len() == 1));
+    }
+
+    /// Entities name the recognizer that found them, as `with_name` set it,
+    /// on the single and the batch path alike.
+    #[tokio::test]
+    async fn entities_name_their_recognizer() {
+        let recognizer = NerRecognizer::new(BatchCounting::default()).with_name("ner-clinical");
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let subject = Subject::<Text>::new(TextData::new("a".to_owned()));
+
+        let single = recognizer.recognize(&subject, &ctx).await.unwrap();
+        let batch = recognizer.recognize_batch(&[&subject], &ctx).await.unwrap();
+
+        for entity in single.iter().chain(&batch[0]) {
+            assert_eq!(entity.audit.events()[0].source, "ner-clinical");
+        }
     }
 
     /// A backend that shorts the batch must error, not silently leave the tail

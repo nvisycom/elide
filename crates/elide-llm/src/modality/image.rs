@@ -5,6 +5,7 @@ use elide_core::entity::Entity;
 use elide_core::entity::audit::ModelId;
 use elide_image::modality::{Image, ImageData, ImageLocation};
 use elide_image::primitive::UnitBoundingBoxExt;
+use hipstr::HipStr;
 
 use super::{Lifter, LlmModality};
 use crate::candidates::{Candidates, ImageCandidate};
@@ -17,13 +18,14 @@ impl LlmModality for Image {
     fn lift(
         batch: Candidates<ImageCandidate>,
         data: &ImageData,
+        source: &HipStr<'static>,
         model: &ModelId,
     ) -> Vec<Entity<Image>> {
         // The model reports boxes in normalised `0.0..=1.0` coordinates; scaling
         // them to pixels needs the image's pixel size, an intrinsic fact of the
         // decoded payload.
         let dims = data.dimensions();
-        let lifter = Lifter::new("llm-image", model);
+        let lifter = Lifter::new(source, model);
         batch
             .entities
             .into_iter()
@@ -55,6 +57,15 @@ mod tests {
     use super::*;
     use crate::candidates::UnitBox;
 
+    fn lift(batch: Candidates<ImageCandidate>, data: &ImageData) -> Vec<Entity<Image>> {
+        Image::lift(
+            batch,
+            data,
+            &HipStr::borrowed("llm"),
+            &ModelId::new("model"),
+        )
+    }
+
     fn candidate(x_min: f64, y_min: f64, x_max: f64, y_max: f64) -> ImageCandidate {
         ImageCandidate {
             bbox: UnitBox {
@@ -81,7 +92,7 @@ mod tests {
         let batch = Candidates {
             entities: vec![candidate(0.0, 0.0, 0.5, 1.0)],
         };
-        let entities = Image::lift(batch, &data, &ModelId::new("model"));
+        let entities = lift(batch, &data);
         assert_eq!(entities.len(), 1);
         let bbox = entities[0].location.bounding_box;
         assert_eq!(bbox.min.x, 0.0);
@@ -100,9 +111,7 @@ mod tests {
         let batch = Candidates {
             entities: vec![candidate(0.5, 1.2, -0.1, 0.0)],
         };
-        let bbox = Image::lift(batch, &data, &ModelId::new("model"))[0]
-            .location
-            .bounding_box;
+        let bbox = lift(batch, &data)[0].location.bounding_box;
         assert_eq!((bbox.min.x, bbox.min.y), (0.0, 0.0));
         assert_eq!((bbox.max.x, bbox.max.y), (50.0, 80.0));
     }
@@ -121,6 +130,6 @@ mod tests {
                 candidate(f64::NAN, 0.0, 0.5, 0.5),
             ],
         };
-        assert!(Image::lift(batch, &data, &ModelId::new("model")).is_empty());
+        assert!(lift(batch, &data).is_empty());
     }
 }

@@ -5,9 +5,9 @@
 use std::assert_matches;
 
 use elide::detection::Analyzer;
-use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::ThresholdLayer;
 use elide::detection::overlap::{FuseLayer, ReconcileLayer};
+use elide::recognition::decorator::calibrated::{CalibratedRecognizer, Calibration};
 use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
@@ -69,7 +69,6 @@ async fn analyze_fuses_resolves_filters() {
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(a)
         .with_recognizer(b)
-        .with_layer(CalibrateLayer::new(CalibrationMap::new())) // identity (empty)
         .with_layer(FuseLayer::max())
         .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default());
@@ -170,26 +169,44 @@ async fn analyze_stamps_language_from_recognized_range() {
     );
 }
 
-#[test]
-fn calibrate_scales_by_originating_recognizer() {
-    use elide::detection::Layer;
-
-    // "pattern" always fires at 1.0; calibrate it down by 0.5.
-    let calibration = CalibrationMap::from_multipliers([("pattern", 0.5), ("ner", 0.8)]).unwrap();
-    let layer = CalibrateLayer::new(calibration);
-
-    let entities = vec![
-        detected("pattern", "PHONE_NUMBER", (0, 4), 1.0),
+/// Each recognizer is calibrated on its own, per label, before the layers see
+/// its findings: two recognizers finding one label scale apart.
+#[tokio::test]
+async fn each_recognizer_is_calibrated_on_its_own() {
+    let patterns = MockRecognizer::new(vec![detected("pattern", "PHONE_NUMBER", (0, 4), 1.0)]);
+    let ner = MockRecognizer::new(vec![
         detected("ner", "PERSON", (5, 9), 1.0),
-        detected("unknown", "EMAIL_ADDRESS", (10, 14), 0.9),
-    ];
-    let out = layer.apply(entities);
-    assert!(out.dropped.is_empty(), "calibrate never drops");
+        detected("ner", "PHONE_NUMBER", (10, 14), 0.9),
+    ]);
+    let analyzer = Analyzer::<Text>::new()
+        .with_recognizer(CalibratedRecognizer::new(
+            patterns,
+            Calibration::scale(0.5).unwrap(),
+        ))
+        .with_recognizer(CalibratedRecognizer::new(
+            ner,
+            Calibration::scale(1.0)
+                .unwrap()
+                .with_label("PERSON", 0.8)
+                .unwrap(),
+        ));
 
-    // pattern 1.0 * 0.5 = 0.5; ner 1.0 * 0.8 = 0.8; unknown unchanged.
-    assert_eq!(out.kept[0].confidence, Confidence::new(0.5).unwrap());
-    assert_eq!(out.kept[1].confidence, Confidence::new(0.8).unwrap());
-    assert_eq!(out.kept[2].confidence, Confidence::new(0.9).unwrap());
+    let mut entities = analyzer
+        .analyze(
+            TextData::new("0123 Jane 4567"),
+            &scope_for(&["PHONE_NUMBER", "PERSON"]),
+        )
+        .await
+        .unwrap()
+        .entities;
+    entities.sort_by_key(|entity| entity.location.range().map(|range| range.start));
+
+    // pattern 1.0 * 0.5; ner's PERSON 1.0 * 0.8; ner's PHONE_NUMBER unscaled.
+    let confidences: Vec<_> = entities.iter().map(|entity| entity.confidence).collect();
+    assert_eq!(
+        confidences,
+        [0.5, 0.8, 0.9].map(|c| Confidence::new(c).unwrap())
+    );
 }
 
 /// A strong out-of-catalog detection reconciles first, subsuming a weak

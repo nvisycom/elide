@@ -17,8 +17,9 @@ let analyzer = Analyzer::<Text>::new()
 ## Calibrating
 
 Recognizers score on different scales: one model's 0.8 is not another's.
-`CalibrateLayer` maps each recognizer's scores onto a common scale with a
-`CalibrationMap`, so later layers compare like with like. Put it first.
+Calibration is not a layer: wrap a recognizer in a `CalibratedRecognizer` and
+its scores are scaled as it reports them, before any layer runs, so the layers
+compare like with like. See [recognizer decorators](recognizer-decorators.md#calibration).
 
 ## Same label
 

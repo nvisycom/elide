@@ -11,6 +11,8 @@
 //!   recognizer sees all of it.
 //! - [`EscalatingRecognizer`] runs a cheap baseline always and a costly
 //!   recognizer only on the subjects a [`Decider`] picks.
+//! - [`CalibratedRecognizer`] scales the inner recognizer's confidence by a
+//!   [`Calibration`], so its scores compare fairly with the others'.
 //!
 //! [`Recognizer`]: elide_core::recognition::Recognizer
 //! [`ResilientRecognizer`]: resilient::ResilientRecognizer
@@ -20,7 +22,10 @@
 //! [`CharWindows`]: chunked::CharWindows
 //! [`EscalatingRecognizer`]: escalation::EscalatingRecognizer
 //! [`Decider`]: escalation::Decider
+//! [`CalibratedRecognizer`]: calibrated::CalibratedRecognizer
+//! [`Calibration`]: calibrated::Calibration
 
+pub mod calibrated;
 pub mod chunked;
 pub mod escalation;
 pub mod resilient;
