@@ -127,7 +127,7 @@ impl PatternRecognizer {
         subject: &Subject<M>,
     ) -> Option<Entity<M>> {
         let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
-        let event = AuditEvent::pattern("pattern", raw.score, location.clone(), raw.rule);
+        let event = AuditEvent::pattern(self.id().name, raw.score, location.clone(), raw.rule);
         Some(
             Entity::new(raw.label, location)
                 .with_recognized_range(raw.range)

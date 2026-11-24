@@ -1,5 +1,6 @@
-//! End-to-end: a pattern match records the rule that found it.
+//! End-to-end: a pattern match records the recognizer and rule that found it.
 
+use elide_core::Component;
 use elide_core::entity::audit::AuditKind;
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
@@ -19,14 +20,15 @@ async fn a_validated_match_records_its_validator() {
         .await
         .expect("recognize");
 
-    let rule = entities
+    let (source, rule) = entities
         .iter()
         .flat_map(|e| e.audit.events())
         .find_map(|event| match &event.kind {
-            AuditKind::Pattern(pattern) => Some(&pattern.rule),
+            AuditKind::Pattern(pattern) => Some((&event.source, &pattern.rule)),
             _ => None,
         })
         .expect("a pattern event");
+    assert_eq!(*source, recognizer.id().name);
     assert_eq!(rule.name, "ssn");
     assert_eq!(rule.validator.as_deref(), Some("us.ssn"));
     assert!(rule.regex.is_some());

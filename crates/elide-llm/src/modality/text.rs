@@ -4,6 +4,7 @@
 use elide_core::entity::Entity;
 use elide_core::entity::audit::ModelId;
 use elide_core::modality::text::{Text, TextData, TextLocation};
+use hipstr::HipStr;
 
 use super::localize::localize_all;
 use super::{Lifter, LlmModality};
@@ -15,9 +16,10 @@ impl LlmModality for Text {
     fn lift(
         batch: Candidates<TextCandidate>,
         data: &TextData,
+        source: &HipStr<'static>,
         model: &ModelId,
     ) -> Vec<Entity<Text>> {
-        let lifter = Lifter::new("llm-ner", model);
+        let lifter = Lifter::new(source, model);
         localize_all(data.text.as_str(), batch.entities)
             .into_iter()
             .filter_map(|localized| {
@@ -54,6 +56,7 @@ mod tests {
                 entities: candidates,
             },
             &TextData::new(text),
+            &HipStr::borrowed("llm"),
             &ModelId::new("model"),
         )
     }
