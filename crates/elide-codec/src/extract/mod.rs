@@ -57,7 +57,9 @@ pub use self::stream::ExtractStream;
 /// OffsetMap)` for an OOXML block, …).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtractedItem<A> {
-    /// The location of this item in the document.
+    /// The location of this item in the document. It describes the value as
+    /// read, and stays as it was when a redaction rewrites `value`, so source
+    /// references keep addressing the source as read.
     pub address: A,
     /// Text-node text, comment body, attribute value, or element text.
     pub value: String,

@@ -227,6 +227,25 @@ mod tests {
         chunk_where(&mut doc, |text| text == "jane%40example.com");
     }
 
+    /// After a write, a finding lifts to its bytes in the source as read,
+    /// through both the write and the references before it.
+    #[tokio::test]
+    async fn a_finding_after_a_write_lifts_to_the_source_as_read() {
+        let raw = "<r><n>long &amp; secret</n></r>";
+        let mut doc = load(raw);
+        redact(&mut doc, &[("long", "X")]).await;
+        let chunk = chunk_where(&mut doc, |text| text == "X & secret");
+        let local = chunk.data.as_str().find("secret").unwrap();
+        let lifted = doc
+            .stream
+            .lift(&chunk, TextLocation::inline(local..local + 6))
+            .expect("lifts");
+        let at = raw.find("secret").unwrap();
+        assert_eq!(lifted.source_refs(), [SourceRef::new(at..at + 6)]);
+        redact(&mut doc, &[("secret", "Y")]).await;
+        assert_eq!(doc.encoded(), "<r><n>X &amp; Y</n></r>");
+    }
+
     #[test]
     fn encode_unchanged_round_trips_verbatim() {
         let raw = "<?xml version=\"1.0\"?>\n<root attr=\"x\">\n  <name>Alice</name>\n  <!-- note -->\n</root>\n";

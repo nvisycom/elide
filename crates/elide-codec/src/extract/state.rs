@@ -6,7 +6,7 @@ use std::ops::Range;
 use elide_core::modality::text::TextReplacement;
 use elide_core::{Error, Result};
 
-use super::{ExtractedItem, ItemEdit, Passage};
+use super::{ExtractedItem, ItemEdit, OffsetMap, Passage};
 use crate::string::{ContiguousSpan, RedactRange};
 
 /// The mutable decoded item stream of a structured document, owned by its
@@ -24,13 +24,40 @@ pub(super) struct SpliceState<A> {
     pub(super) items: Vec<ExtractedItem<A>>,
     /// The cumulative byte-offset index over `items`.
     pub(super) item_starts: Vec<usize>,
+    /// Each item's map from its current value back to its value as read,
+    /// which its address maps onto the source: the identity until a
+    /// redaction, then one atomic run per stretch a redaction replaced.
+    reads: Vec<OffsetMap>,
 }
 
 impl<A> SpliceState<A> {
     /// Build the state (and its offset index) from a decoded item stream.
     pub(super) fn new(items: Vec<ExtractedItem<A>>) -> Self {
         let item_starts = compute_item_starts(&items);
-        Self { items, item_starts }
+        let reads = items
+            .iter()
+            .map(|item| OffsetMap::identity(0, item.value.len()))
+            .collect();
+        Self {
+            items,
+            item_starts,
+            reads,
+        }
+    }
+
+    /// The range of `item`'s value as read that `local`, a range of its
+    /// current value, covers; `None` for one covering none of it.
+    ///
+    /// A range touching what a redaction wrote covers all it replaced.
+    pub(super) fn read_range(&self, item: usize, local: Range<usize>) -> Option<Range<usize>> {
+        hull(&self.reads.get(item)?.raw_ranges(local))
+    }
+
+    /// The range of `item`'s current value that `read`, a range of its value
+    /// as read, now covers: what a redaction wrote over it, where it touches
+    /// one.
+    pub(super) fn current_range(&self, item: usize, read: Range<usize>) -> Option<Range<usize>> {
+        hull(&self.reads.get(item)?.decoded_ranges(read))
     }
 
     /// The item whose value contains `byte_offset` in the concatenated stream.
@@ -67,8 +94,14 @@ impl<A> SpliceState<A> {
     /// past the stream. An item `range` only touches at an edge is left out,
     /// unless `range` is empty and touches nothing else.
     pub(super) fn covering(&self, range: Range<usize>) -> Option<Vec<ItemEdit>> {
-        if range.start > range.end || range.end > *self.item_starts.last()? {
+        let end = *self.item_starts.last()?;
+        if range.start > range.end || range.end > end {
             return None;
+        }
+        // An empty range at the end of the stream, where a removal at the end
+        // leaves one, touches no item.
+        if range.is_empty() && range.start == end {
+            return Some(Vec::new());
         }
         let first = self.item_for(range.start)?;
         let mut edits = Vec::new();
@@ -204,15 +237,26 @@ impl<A> SpliceState<A> {
             let before_len = self.items[item].value.len();
             let value = &mut self.items[item].value;
             if covered {
-                value.redact_with(replacement, local)?;
+                value.redact_with(replacement, local.clone())?;
             } else {
                 let text = if item == first { written.as_str() } else { "" };
-                value.redact_range(text, local)?;
+                value.redact_range(text, local.clone())?;
             }
-            let delta = self.items[item].value.len() as isize - before_len as isize;
-            self.shift_starts_after(item, delta);
+            let after_len = self.items[item].value.len();
+            if !local.is_empty() {
+                self.record(item, local, before_len, after_len);
+            }
+            self.shift_starts_after(item, after_len as isize - before_len as isize);
         }
         Ok(())
+    }
+
+    /// Record a redaction of `local` in `item`, which took its value from
+    /// `before` bytes to `after`: what was written there maps onto all it
+    /// replaced, the rest onto itself.
+    fn record(&mut self, item: usize, local: Range<usize>, before: usize, after: usize) {
+        let written = local.len() + after - before;
+        self.reads[item] = self.reads[item].edited(local, written, before);
     }
 
     /// Shift every offset after item `i` by `delta` (an edit's length change).
@@ -224,6 +268,11 @@ impl<A> SpliceState<A> {
             *s = s.saturating_add_signed(delta);
         }
     }
+}
+
+/// The range from the first of `ranges` to the last.
+fn hull(ranges: &[Range<usize>]) -> Option<Range<usize>> {
+    Some(ranges.first()?.start..ranges.last()?.end)
 }
 
 /// Cumulative byte-offset table over the items: `[0, len(item[0]),

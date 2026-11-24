@@ -17,6 +17,7 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
+use elide_codec::extract::OffsetMap;
 use elide_codec::string::{ContiguousSpan, DisjointSpans, RedactRange};
 use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::text::{Marked, Text, TextData, TextLocation};
@@ -46,6 +47,12 @@ pub fn format() -> Format {
 pub(crate) struct TxtHandler {
     text: String,
     blocks: Vec<Range<usize>>,
+    /// The map from `text` back to the text as read, which every source
+    /// reference addresses: the identity until a redaction, then one atomic
+    /// run per stretch a redaction replaced.
+    reads: OffsetMap,
+    /// The length of the text as read.
+    read_len: usize,
 }
 
 impl Stream<Text> for TxtHandler {
@@ -81,9 +88,13 @@ impl Stream<Text> for TxtHandler {
                 "a source reference names a container part, but plain text has none",
             ));
         }
-        let span = self
-            .text
-            .contiguous_span(refs.iter().map(|source| source.range.clone()))?;
+        // A reference addresses the text as read; take it to where it reads
+        // now, through every redaction since.
+        let pieces = refs
+            .iter()
+            .map(|source| self.current_range(&source.range))
+            .collect::<Result<Vec<_>>>()?;
+        let span = self.text.contiguous_span(pieces)?;
         Ok(TextLocation::source(span, refs.clone()))
     }
 
@@ -134,8 +145,13 @@ impl DataWriter<Text> for TxtHandler {
         spans.ensure_disjoint()?;
         redactions.sort_by_position();
         for (location, replacement) in redactions.into_iter().rev() {
-            self.text
-                .redact_with(&replacement, span(&location)?.clone())?;
+            let span = span(&location)?.clone();
+            let before = self.text.len();
+            self.text.redact_with(&replacement, span.clone())?;
+            if !span.is_empty() {
+                let written = span.len() + self.text.len() - before;
+                self.reads = self.reads.edited(span, written, before);
+            }
         }
         // A redaction moves the text after it, and the blocks with it.
         self.blocks = paragraph_blocks(&self.text);
@@ -147,7 +163,30 @@ impl TxtHandler {
     /// A handler over the document's raw text.
     pub(crate) fn new(text: String) -> Self {
         let blocks = paragraph_blocks(&text);
-        Self { text, blocks }
+        Self {
+            reads: OffsetMap::identity(0, text.len()),
+            read_len: text.len(),
+            text,
+            blocks,
+        }
+    }
+
+    /// Where `read`, a range of the text as read, reads now.
+    ///
+    /// # Errors
+    ///
+    /// [`MalformedInput`] for a range the text as read does not hold.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    fn current_range(&self, read: &Range<usize>) -> Result<Range<usize>> {
+        let ranges = self.reads.decoded_ranges(read.clone());
+        match (ranges.first(), ranges.last()) {
+            (Some(first), Some(last)) if read.end <= self.read_len => Ok(first.start..last.end),
+            _ => Err(Error::malformed(format!(
+                "source range {}..{} is outside the text ({} bytes as read)",
+                read.start, read.end, self.read_len
+            ))),
+        }
     }
 
     /// The document text. Test-only inspection helper.
@@ -355,6 +394,36 @@ mod tests {
             .expect_err("splits a character");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         assert_eq!(h.text(), src);
+    }
+
+    /// After a write, a source reference still addresses the text as read:
+    /// it finds what it named where that now reads, or what replaced it.
+    #[tokio::test]
+    async fn a_mark_after_a_write_addresses_the_text_as_read() -> Result<()> {
+        let src = "long secret and Bob";
+        let mut h = handler(src);
+        h.write_at(Redactions::from([(
+            TextLocation::inline(0..4),
+            TextReplacement::replaced("X"),
+        )]))
+        .await?;
+        assert_eq!(h.text(), "X secret and Bob");
+        let mark = |range| TextLocation::marked_source(SourceRef::new(range));
+        let bob = src.find("Bob").unwrap();
+        let resolved = h.resolve(mark(bob..bob + 3))?;
+        assert_eq!(h.read_at(&resolved).await?.as_str(), "Bob");
+        // `ong` was replaced by `X`.
+        let resolved = h.resolve(mark(1..4))?;
+        assert_eq!(h.read_at(&resolved).await?.as_str(), "X");
+        h.write_at(Redactions::from([(
+            h.resolve(mark(bob..bob + 3))?,
+            TextReplacement::replaced("[B]"),
+        )]))
+        .await?;
+        assert_eq!(h.text(), "X secret and [B]");
+        // A range the text as read never held is refused.
+        assert!(h.resolve(mark(18..25)).is_err());
+        Ok(())
     }
 
     /// After a write the blocks follow the text: each reads its paragraph as

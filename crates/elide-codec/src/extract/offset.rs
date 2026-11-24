@@ -50,7 +50,14 @@ impl OffsetRun {
 
     /// The part of `decoded` this run covers, and the raw bytes it maps
     /// onto: the matching stretch of an identity run, all of an entity's.
+    ///
+    /// A removal, whose decoded range is empty, is under `decoded` when its
+    /// point lies in it, at that point.
     fn under(&self, decoded: &Range<usize>) -> Option<(Range<usize>, Range<usize>)> {
+        if self.decoded.is_empty() {
+            let at = self.decoded.start;
+            return (decoded.start <= at && at < decoded.end).then(|| (at..at, self.raw.clone()));
+        }
         let start = decoded.start.max(self.decoded.start);
         let end = decoded.end.min(self.decoded.end);
         if start >= end {
@@ -138,11 +145,11 @@ impl OffsetMap {
         let mut next = 0;
         for run in &inner.runs {
             let mid = &run.raw;
-            while self
-                .runs
-                .get(next)
-                .is_some_and(|outer| outer.decoded.end <= mid.start)
-            {
+            // A removal at `mid.start` lies under this run, not the one before.
+            while self.runs.get(next).is_some_and(|outer| {
+                outer.decoded.end < mid.start
+                    || (outer.decoded.end == mid.start && !outer.decoded.is_empty())
+            }) {
                 next += 1;
             }
             let under = self.runs[next..]
@@ -172,6 +179,17 @@ impl OffsetMap {
                 }
             }
         }
+        // A removal at the end of this map's text lies under no run; it stays
+        // at the end.
+        let (end, mid_end) = inner
+            .runs
+            .last()
+            .map_or((0, 0), |run| (run.decoded.end, run.raw.end));
+        for outer in &self.runs[next..] {
+            if outer.decoded.is_empty() && outer.decoded.start == mid_end {
+                push(OffsetRun::entity(end..end, outer.raw.clone()));
+            }
+        }
         OffsetMap::new(runs)
     }
 
@@ -188,6 +206,27 @@ impl OffsetMap {
     /// empty range or one outside the mapped text.
     pub fn raw_ranges(&self, decoded: Range<usize>) -> Vec<Range<usize>> {
         self.translate(decoded, |run| &run.decoded, |run| &run.raw)
+    }
+
+    /// This map once the stretch `replaced` of its decoded text, `len` bytes
+    /// long, is rewritten with `written` bytes: what was written maps
+    /// atomically onto all `replaced` mapped onto, the rest as before.
+    ///
+    /// A map that starts as the identity over a text and takes each edit so
+    /// maps the edited text back onto the text as it was.
+    #[must_use]
+    pub fn edited(&self, replaced: Range<usize>, written: usize, len: usize) -> OffsetMap {
+        let end = replaced.start + written;
+        let after = len - replaced.len() + written;
+        let mut runs = Vec::with_capacity(3);
+        if replaced.start > 0 {
+            runs.push(OffsetRun::identity(0..replaced.start, 0..replaced.start));
+        }
+        runs.push(OffsetRun::entity(replaced.start..end, replaced.clone()));
+        if end < after {
+            runs.push(OffsetRun::identity(end..after, replaced.end..len));
+        }
+        self.compose(&OffsetMap::new(runs))
     }
 
     /// What writing `value` over the text this map read as `read` rewrites:
@@ -372,6 +411,55 @@ mod tests {
             outer.compose(&inner),
             OffsetMap::new(vec![OffsetRun::entity(0..2, 0..9)])
         );
+    }
+
+    /// Each edit maps what it wrote onto all it replaced, through the edits
+    /// before it.
+    #[test]
+    fn an_edited_map_maps_back_to_the_text_as_it_was() {
+        // "long secret" → "X secret" → "X Y".
+        let map = OffsetMap::identity(0, 11)
+            .edited(0..4, 1, 11)
+            .edited(2..8, 1, 8);
+        assert_eq!(map.raw_ranges(0..1), vec![0..4]);
+        assert_eq!(map.raw_ranges(1..2), vec![4..5]);
+        assert_eq!(map.raw_ranges(2..3), vec![5..11]);
+        assert_eq!(map.decoded_ranges(6..8), vec![2..3]);
+        // A removal leaves an empty run where the text was.
+        let map = OffsetMap::identity(0, 11).edited(4..11, 0, 11);
+        assert_eq!(map.decoded_ranges(5..8), vec![4..4]);
+        assert_eq!(map.raw_ranges(0..4), vec![0..4]);
+    }
+
+    /// A removal stays where its text was through the edits after it, at the
+    /// start, in the middle, and at the end of the text.
+    #[test]
+    fn a_removal_outlives_later_edits() {
+        // "abc" without "b", then "a" → "X": "Xc".
+        let map = OffsetMap::identity(0, 3)
+            .edited(1..2, 0, 3)
+            .edited(0..1, 1, 2);
+        assert_eq!(map.decoded_ranges(1..2), vec![1..1]);
+        assert_eq!(map.raw_ranges(0..1), vec![0..1]);
+        assert_eq!(map.raw_ranges(1..2), vec![2..3]);
+        // "abc" without "a", then "c" → "Y": "bY".
+        let map = OffsetMap::identity(0, 3)
+            .edited(0..1, 0, 3)
+            .edited(1..2, 1, 2);
+        assert_eq!(map.decoded_ranges(0..1), vec![0..0]);
+        assert_eq!(map.raw_ranges(0..2), vec![1..3]);
+        // "abc" without "c", then "a" → "X": "Xb".
+        let map = OffsetMap::identity(0, 3)
+            .edited(2..3, 0, 3)
+            .edited(0..1, 1, 2);
+        assert_eq!(map.decoded_ranges(2..3), vec![2..2]);
+        assert_eq!(map.raw_ranges(0..2), vec![0..2]);
+        // A later edit over where the text was takes it in.
+        let map = OffsetMap::identity(0, 3)
+            .edited(1..2, 0, 3)
+            .edited(0..2, 1, 2);
+        assert_eq!(map.raw_ranges(0..1), vec![0..3]);
+        assert_eq!(map.decoded_ranges(1..2), vec![0..1]);
     }
 
     /// Only the changed stretch is rewritten, widened to whole entities.

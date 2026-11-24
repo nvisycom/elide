@@ -16,11 +16,16 @@ use super::{ExtractedItem, ItemEdit};
 /// The default addresses nothing (empty / `None`), for a stream whose address
 /// carries no source pre-image.
 ///
+/// Both directions work in an item's value **as read**, the value its address
+/// was built from, never `item.value`, which a redaction rewrites. The stream
+/// translates between the two: a range of what a redaction wrote maps onto
+/// all it replaced, and a range of what it replaced onto all it wrote.
+///
 /// Owned by an [`ExtractStream`](super::ExtractStream); it is stateless (the
 /// item stream is passed in).
 pub trait SourceAddresser<A>: Send + Sync {
     /// The exact raw source byte range(s) that `local` (a byte range within
-    /// `item`'s decoded value) came from.
+    /// `item`'s decoded value as read) came from.
     ///
     /// Usually one range, but a decoded range that crosses an entity
     /// substitution (a DOCX `&amp;`) maps back to several non-contiguous raw
@@ -33,7 +38,8 @@ pub trait SourceAddresser<A>: Send + Sync {
     }
 
     /// Reverse of [`source_span`](Self::source_span): locate the items and the
-    /// decoded-local byte ranges that the raw `source` references address.
+    /// byte ranges of their decoded values as read that the raw `source`
+    /// references address.
     ///
     /// This is what lets a redaction target a span the caller has only in raw
     /// source coordinates, e.g. an entity a review layer added by selecting

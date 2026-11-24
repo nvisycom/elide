@@ -8,7 +8,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
-use super::{ExtractedItem, Passage, SourceAddresser, SpliceState};
+use super::{ExtractedItem, ItemEdit, Passage, SourceAddresser, SpliceState};
 use crate::string::DisjointSpans;
 use crate::{FlaggedItem, FormatId, Stream};
 
@@ -51,6 +51,10 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
     /// range(s) it came from, item by item, when the addresser can map them
     /// (markup, whose item value is a verbatim source slice; OOXML, via its
     /// per-block offset map). A separator has no source text of its own.
+    ///
+    /// The addresser maps an item's value as read, so each part of `range` is
+    /// first taken back to the value as read: after a redaction, what it wrote
+    /// maps onto the source bytes it replaced, and the rest onto its own.
     fn source_location(&self, range: Range<usize>) -> TextLocation {
         let state = &self.state;
         let source: Vec<SourceRef> = state
@@ -60,10 +64,11 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
             .filter(|edit| {
                 !edit.local.is_empty() && state.items[edit.item].passage != Passage::Separator
             })
-            .flat_map(|edit| {
-                self.addresser
-                    .source_span(&state.items[edit.item], edit.local)
+            .filter_map(|edit| {
+                let read = state.read_range(edit.item, edit.local)?;
+                Some(self.addresser.source_span(&state.items[edit.item], read))
             })
+            .flatten()
             .collect();
         TextLocation::source(range, source)
     }
@@ -100,7 +105,20 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
                 "a rendered-page mark does not address a structured document",
             ));
         };
-        let pieces = self.addresser.locate_source(&state.items, refs);
+        // The addresser locates a reference in an item's value as read; take
+        // each back to the value as it now reads.
+        let pieces: Vec<ItemEdit> = self
+            .addresser
+            .locate_source(&state.items, refs)
+            .into_iter()
+            .map(|ItemEdit { item, local }| {
+                Some(ItemEdit {
+                    local: state.current_range(item, local)?,
+                    item,
+                })
+            })
+            .collect::<Option<_>>()
+            .unwrap_or_default();
         if pieces.is_empty() {
             let refs: Vec<String> = refs
                 .iter()
@@ -249,7 +267,8 @@ mod tests {
     impl SourceAddresser<()> for Unaddressed {}
 
     /// Addresses each item's value as its own source: a reference is a range
-    /// of the concatenated values, within one item.
+    /// of the concatenated values, within one item. It reads `item.value`, so
+    /// it holds only before a write, when each value is as read.
     struct Identity;
 
     impl SourceAddresser<()> for Identity {
@@ -476,5 +495,161 @@ mod tests {
         assert!(stream.read_at(&mark).await.is_err());
         let batch = Redactions::from([(past, TextReplacement::Removed)]);
         assert!(stream.write_at(batch).await.is_err());
+    }
+
+    /// Addresses each item by the source range its value was read from,
+    /// byte for byte.
+    struct Spans;
+
+    impl SourceAddresser<Range<usize>> for Spans {
+        fn source_span(
+            &self,
+            item: &ExtractedItem<Range<usize>>,
+            local: Range<usize>,
+        ) -> Vec<SourceRef> {
+            let start = item.address.start;
+            vec![SourceRef::new(start + local.start..start + local.end)]
+        }
+
+        fn locate_source(
+            &self,
+            items: &[ExtractedItem<Range<usize>>],
+            source: &[SourceRef],
+        ) -> Vec<ItemEdit> {
+            source
+                .iter()
+                .filter_map(|SourceRef { range, .. }| {
+                    let item = items.iter().position(|item| {
+                        item.address.start <= range.start && range.end <= item.address.end
+                    })?;
+                    let start = items[item].address.start;
+                    Some(ItemEdit {
+                        item,
+                        local: range.start - start..range.end - start,
+                    })
+                })
+                .collect()
+        }
+    }
+
+    /// `{"a":"long secret","b":"Bob"}` as read: its two values, at their
+    /// source bytes.
+    fn spans() -> ExtractStream<Range<usize>> {
+        let item = |value: &str, at: usize| ExtractedItem {
+            address: at..at + value.len(),
+            value: value.to_owned(),
+            hints: Vec::new(),
+            passage: Passage::Start,
+            flag: None,
+        };
+        let items = vec![item("long secret", 6), item("Bob", 24)];
+        ExtractStream::new(FormatId::new("test"), items, Spans)
+    }
+
+    /// After a write, source references still address the source as read:
+    /// text a redaction left lifts to its own bytes there, what it wrote to
+    /// the bytes it replaced, and a reference to them finds them where they
+    /// now read.
+    #[tokio::test]
+    async fn source_references_address_the_source_as_read_after_a_write() {
+        let mut stream = spans();
+        stream
+            .write_at(Redactions::from([(
+                TextLocation::inline(0..4),
+                TextReplacement::replaced("X"),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&stream), ["X secret", "Bob"]);
+        let chunk = stream.chunks().unwrap().remove(0);
+        // `secret`, now at 2..8, read at source 11..17.
+        let lifted = stream.lift(&chunk, TextLocation::inline(2..8)).unwrap();
+        assert_eq!(lifted.source_refs(), [SourceRef::new(11..17)]);
+        // `X` stands for all of `long`.
+        let lifted = stream.lift(&chunk, TextLocation::inline(0..1)).unwrap();
+        assert_eq!(lifted.source_refs(), [SourceRef::new(6..10)]);
+        // A reference to `secret`, and one to `ong`, which `X` replaced.
+        let mark = |range| TextLocation::marked_source(SourceRef::new(range));
+        assert_eq!(stream.resolve(mark(11..17)).unwrap().range(), Some(&(2..8)));
+        assert_eq!(stream.resolve(mark(7..10)).unwrap().range(), Some(&(0..1)));
+        // A reference to bytes a removal took resolves to where they were, and
+        // redacts nothing.
+        let mut removed = spans();
+        removed
+            .write_at(Redactions::from([(
+                TextLocation::inline(4..11),
+                TextReplacement::Removed,
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&removed), ["long", "Bob"]);
+        assert_eq!(
+            removed.resolve(mark(12..15)).unwrap().range(),
+            Some(&(4..4))
+        );
+        removed
+            .write_at(Redactions::from([(
+                mark(12..15),
+                TextReplacement::replaced("Y"),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&removed), ["long", "Bob"]);
+        // And the next item's references are unmoved by the edit before it.
+        assert_eq!(
+            stream.resolve(mark(24..27)).unwrap().range(),
+            Some(&(8..11))
+        );
+        stream
+            .write_at(Redactions::from([(
+                mark(11..17),
+                TextReplacement::replaced("Y"),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&stream), ["X Y", "Bob"]);
+    }
+
+    /// A reference to bytes a removal took at the end of the stream resolves
+    /// to the empty span there, and redacts nothing; one past the stream is
+    /// still refused.
+    #[tokio::test]
+    async fn a_removal_at_the_end_of_the_stream_resolves_empty() {
+        let item = ExtractedItem {
+            address: 6..17,
+            value: "long secret".to_owned(),
+            hints: Vec::new(),
+            passage: Passage::Start,
+            flag: None,
+        };
+        let mut stream = ExtractStream::new(FormatId::new("test"), vec![item], Spans);
+        stream
+            .write_at(Redactions::from([(
+                TextLocation::inline(4..11),
+                TextReplacement::Removed,
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&stream), ["long"]);
+        let mark = |range| TextLocation::marked_source(SourceRef::new(range));
+        assert_eq!(stream.resolve(mark(12..15)).unwrap().range(), Some(&(4..4)));
+        stream
+            .write_at(Redactions::from([(
+                mark(12..15),
+                TextReplacement::replaced("Y"),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&stream), ["long"]);
+        let past = TextLocation::inline(4..5);
+        assert!(stream.read_at(&past).await.is_err());
+    }
+
+    fn values_of<A: Send + Sync + 'static>(stream: &ExtractStream<A>) -> Vec<String> {
+        stream
+            .items()
+            .iter()
+            .map(|item| item.value.clone())
+            .collect()
     }
 }
