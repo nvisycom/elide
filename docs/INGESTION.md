@@ -271,10 +271,10 @@ First, untouched content serializes byte for byte where the format permits.
 Plain text, JSON, HTML, XML, and the parts of an Office package are
 byte-identical outside the redacted spans, once the decode has removed their
 hidden content: an HTML attribute keeps its quoting, an Office package keeps
-every part a redaction did not touch. A CSV is written back from its rows: it
-keeps its delimiter, line endings, and trailing newline, but its quoting is
-normalized, a field quoted only where it needs to be. A document with no redactions and no hidden content
-round-trips unchanged.
+every part a redaction did not touch. A document in one of these formats with
+no redactions and no hidden content round-trips unchanged. A CSV is written
+back from its rows: it keeps its delimiter, line endings, and trailing newline,
+but its quoting is normalized, a field quoted only where it needs to be.
 
 Second, touched units serialize their mutated value through format-aware
 write-back. A text replacement is escaped for where it lands: a character
