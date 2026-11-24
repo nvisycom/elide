@@ -94,8 +94,14 @@ impl<A> SpliceState<A> {
     /// past the stream. An item `range` only touches at an edge is left out,
     /// unless `range` is empty and touches nothing else.
     pub(super) fn covering(&self, range: Range<usize>) -> Option<Vec<ItemEdit>> {
-        if range.start > range.end || range.end > *self.item_starts.last()? {
+        let end = *self.item_starts.last()?;
+        if range.start > range.end || range.end > end {
             return None;
+        }
+        // An empty range at the end of the stream, where a removal at the end
+        // leaves one, touches no item.
+        if range.is_empty() && range.start == end {
+            return Some(Vec::new());
         }
         let first = self.item_for(range.start)?;
         let mut edits = Vec::new();

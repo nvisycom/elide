@@ -610,6 +610,41 @@ mod tests {
         assert_eq!(values_of(&stream), ["X Y", "Bob"]);
     }
 
+    /// A reference to bytes a removal took at the end of the stream resolves
+    /// to the empty span there, and redacts nothing; one past the stream is
+    /// still refused.
+    #[tokio::test]
+    async fn a_removal_at_the_end_of_the_stream_resolves_empty() {
+        let item = ExtractedItem {
+            address: 6..17,
+            value: "long secret".to_owned(),
+            hints: Vec::new(),
+            passage: Passage::Start,
+            flag: None,
+        };
+        let mut stream = ExtractStream::new(FormatId::new("test"), vec![item], Spans);
+        stream
+            .write_at(Redactions::from([(
+                TextLocation::inline(4..11),
+                TextReplacement::Removed,
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&stream), ["long"]);
+        let mark = |range| TextLocation::marked_source(SourceRef::new(range));
+        assert_eq!(stream.resolve(mark(12..15)).unwrap().range(), Some(&(4..4)));
+        stream
+            .write_at(Redactions::from([(
+                mark(12..15),
+                TextReplacement::replaced("Y"),
+            )]))
+            .await
+            .unwrap();
+        assert_eq!(values_of(&stream), ["long"]);
+        let past = TextLocation::inline(4..5);
+        assert!(stream.read_at(&past).await.is_err());
+    }
+
     fn values_of<A: Send + Sync + 'static>(stream: &ExtractStream<A>) -> Vec<String> {
         stream
             .items()
