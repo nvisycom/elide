@@ -71,14 +71,26 @@ pub async fn run(
     bytes: &[u8],
     hint: Option<&str>,
 ) -> (Vec<u8>, Vec<Value>) {
+    let (redacted, entities, _) = run_stripping(pipeline, bytes, hint).await;
+    (redacted, entities)
+}
+
+/// The redacted bytes, the entities, and the hidden content stripped by a run
+/// of `pipeline` over `bytes`, of the format `hint` names.
+pub async fn run_stripping(
+    pipeline: &Orchestrator,
+    bytes: &[u8],
+    hint: Option<&str>,
+) -> (Vec<u8>, Vec<Value>, Vec<Value>) {
     let report: JsValue = ok(pipeline
         .redact(bytes.to_vec(), hint.map(str::to_owned))
         .await)
     .into();
-    let redacted = Uint8Array::new(&Reflect::get(&report, &"redacted".into()).unwrap()).to_vec();
-    let entities =
-        serde_wasm_bindgen::from_value(Reflect::get(&report, &"entities".into()).unwrap()).unwrap();
-    (redacted, entities)
+    let field = |name: &str| Reflect::get(&report, &name.into()).unwrap();
+    let redacted = Uint8Array::new(&field("redacted")).to_vec();
+    let entities = serde_wasm_bindgen::from_value(field("entities")).unwrap();
+    let stripped = serde_wasm_bindgen::from_value(field("stripped")).unwrap();
+    (redacted, entities, stripped)
 }
 
 /// The redacted text and the entities of a run of `pipeline` over `text`.
