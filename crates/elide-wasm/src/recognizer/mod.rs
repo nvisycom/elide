@@ -81,9 +81,13 @@ impl Recognizer {
     /// Promise<LlmResponse>`. The request carries the stage's `modality`, the
     /// JSON `schema` the response's `entities` follow, the call's `language` when
     /// known, and on an image stage the `image` as PNG bytes. The response is
-    /// `{ entities, model? }`. Rust places each entity in the source, so the
-    /// model returns values, labels and a `context` that occurs once around
-    /// each value, not offsets.
+    /// `{ entities, model? }`, whose entities follow the stage:
+    ///
+    /// - on a text stage, each is a `value` and `label` with a `context` that
+    ///   occurs once in the text around the value, which Rust uses to place
+    ///   it, so no offsets are needed;
+    /// - on an image stage, each is a `label` and a box, `x_min`, `y_min`,
+    ///   `x_max` and `y_max` as fractions of the image's width and height.
     ///
     /// The prompt is the built-in wording, or `template`, a Jinja2 template
     /// over `text` (text stages), `language`, `target_labels` and `tags`.

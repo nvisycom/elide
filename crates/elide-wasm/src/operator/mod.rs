@@ -361,8 +361,8 @@ impl Operator {
     }
 
     /// Replace a number at or past a bound by the bound's label, like an age
-    /// of `94` by `90+` (text, tabular). A number within the bounds, or a
-    /// value that is not a number, is left as it is.
+    /// of `94` by `90+` (text, tabular). A number within the bounds is left as
+    /// it is; a value that is not a number is removed.
     ///
     /// # Errors
     ///
@@ -411,7 +411,7 @@ impl Operator {
 
     /// Reduce a date or timestamp to a coarser granularity, like `1987-03-14`
     /// to `1987` (text, tabular). A value that is not a date in the configured
-    /// style is left as it is. Without `config`, it keeps the year of an ISO
+    /// style is removed. Without `config`, it keeps the year of an ISO
     /// 8601 date.
     ///
     /// # Errors

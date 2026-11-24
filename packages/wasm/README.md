@@ -6,7 +6,8 @@
 In-browser PII detection and redaction, compiled to WebAssembly.
 
 The [Elide](https://github.com/nvisycom/elide) detect-and-redact pipeline runs
-entirely in the browser — no text, image, or audio ever leaves the page. It
+entirely in the browser: Elide itself sends no text, image, or audio anywhere,
+and whether a model you plug in does is up to its callback. It
 covers text, tabular, image, and audio, and the DOCX, PPTX, XLSX, and PDF
 documents that hold them, combining deterministic patterns with
 browser-supplied NER, LLM, OCR, and speech-to-text models, and rewrites the
@@ -96,7 +97,8 @@ const text = Analyzer.text().recognize(Recognizer.llm(llm));
   label/fallback rules on the redact side, with operators from `replace`,
   `mask`, and `cover` to `fake`, `hmac`, `encrypt`, `generalizeDate`, `blur`,
   and `beep`.
-- **Nothing leaves the page** — no network, no filesystem, no worker threads.
+- **No requests of its own** — Elide makes no network requests and needs no
+  filesystem or worker threads; only your callbacks reach out, if they do.
 
 ## Subpath exports
 

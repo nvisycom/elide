@@ -39,6 +39,10 @@ export type {
  * add a modality's stage with {@link with} (the {@link Analyzer}'s modality
  * selects the codec path and redaction policy), then run it over a blob with
  * {@link redact}. Reusable across calls.
+ *
+ * {@link with} and {@link withLanguages} consume the orchestrator and return
+ * the configured one, to be used in its place. One that throws consumes it
+ * too, so after an error the pipeline is built again from a new orchestrator.
  */
 export class Orchestrator {
   constructor();

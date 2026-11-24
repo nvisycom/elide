@@ -66,13 +66,15 @@ export const Operator: {
   truncate(config: TruncateConfig): Operator<Text | Tabular>;
   /**
    * Replace a number at or past a bound by the bound's label, like an age of
-   * `94` by `90+` (text, tabular). Throws if `config` sets no bound, a bound
+   * `94` by `90+` (text, tabular). A number within the bounds is left as it
+   * is; a value that is not a number is removed. Throws if `config` sets no bound, a bound
    * that is not finite, or a floor not below its ceiling.
    */
   clamp(config: ClampConfig): Operator<Text | Tabular>;
   /**
    * Reduce a date to a coarser granularity, like `1987-03-14` to `1987`
-   * (text, tabular). Without `config`, keeps the year of an ISO 8601 date.
+   * (text, tabular). A value that is not a date in the configured style is
+   * removed. Without `config`, keeps the year of an ISO 8601 date.
    */
   generalizeDate(config?: GeneralizeDateConfig): Operator<Text | Tabular>;
   /**

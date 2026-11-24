@@ -61,6 +61,23 @@ async fn an_llm_recognizer_finds_what_its_model_answers() {
     assert!(!redacted.contains("Alice"), "{redacted}");
 }
 
+/// On an image stage the request carries the image as PNG bytes in a
+/// `Uint8Array`, and the region the callback answers is found.
+#[wasm_bindgen_test]
+async fn an_llm_recognizer_gets_the_image_as_png_bytes() {
+    let callback = function(
+        "prompt, request",
+        "if (request.modality !== 'image') throw new Error('modality ' + request.modality); \
+         if (!(request.image instanceof Uint8Array)) throw new Error('image is not a Uint8Array'); \
+         if (request.image[0] !== 0x89 || request.image[1] !== 0x50) throw new Error('not a PNG'); \
+         return { entities: [{ x_min: 0.1, y_min: 0.1, x_max: 0.5, y_max: 0.5, label: 'person_name', confidence: 0.9 }] };",
+    );
+    let recognizer = ok(Recognizer::llm(Backend::callback(callback), None));
+    let pipeline = ok(Orchestrator::new().with(Analyzer::image().recognize(recognizer), None));
+    let (_, entities) = common::run(&pipeline, PNG, Some("png")).await;
+    assert_eq!(labels(&entities), ["person_name"]);
+}
+
 /// A template replaces the built-in wording.
 #[wasm_bindgen_test]
 async fn an_llm_template_words_the_prompt() {

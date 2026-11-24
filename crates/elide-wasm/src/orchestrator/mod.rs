@@ -11,6 +11,7 @@ use elide::prelude::*;
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
+use self::entities::{read_matched, to_entities};
 pub use self::report::{
     Entity, HiddenContent, HiddenContentKind, LeakProfile, Location, Modality, Rect, Redaction,
     Rendered, Report, Source, Span, Stripped,
@@ -28,6 +29,11 @@ use crate::error::{ElideError, ElideErrorKind, language_tags};
 /// Add a modality's stage with [`with`](Self::with) — an [`Analyzer`] paired with
 /// the modality's redaction policy — then run it over a blob with
 /// [`redact`](Self::redact). Reusable across calls.
+///
+/// [`with`](Self::with) and [`withLanguages`](Self::with_languages) consume the
+/// orchestrator and return the configured one, to be used in its place. One
+/// that throws consumes it too, so after an error the pipeline is built again
+/// from a new orchestrator.
 #[wasm_bindgen]
 pub struct Orchestrator {
     orchestrator: CoreOrchestrator,
@@ -196,9 +202,9 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: Option<String>) -> R
     // it, then redact.
     let core = pipeline.core();
     let analyzed = core.analyze(&mut document).await?;
-    let values = self::entities::read(core, &mut document, &analyzed).await;
+    let values = read_matched(core, &mut document, &analyzed).await;
     let report = core.anonymize_with(&mut document, analyzed.report).await?;
-    let entities = self::entities::entities(&report, values);
+    let entities = to_entities(&report, values);
 
     let stripped = report
         .stripped()

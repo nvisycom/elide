@@ -123,7 +123,7 @@ impl<M: LlmInput> BackendTrait for JsLlmBackend<M> {
             .callback
             .call("LLM", move || {
                 let details = details
-                    .serialize(&Serializer::json_compatible())
+                    .serialize(&Serializer::json_compatible().serialize_bytes_as_arrays(false))
                     .map_err(|e| {
                         Error::processing(format!("could not build the LLM request: {e}"))
                     })?;

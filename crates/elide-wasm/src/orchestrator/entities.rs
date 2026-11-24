@@ -53,7 +53,7 @@ fn entities_of<M: Modality>(report: &Report) -> Vec<(PartId, &RustEntity<M>)> {
 /// The values are for display, so reading them never fails a run: an entity
 /// whose location cannot be read, or whose part cannot be reached again, has
 /// no value.
-pub(super) async fn read(
+pub(super) async fn read_matched(
     orchestrator: &Orchestrator,
     document: &mut Document,
     analyzed: &AnalyzedDocument,
@@ -227,7 +227,7 @@ fn read_recognized<M: Modality>(
 }
 
 /// Every entity of the applied `report`, with what `values` holds of each.
-pub(super) fn entities(report: &Report, mut values: Values) -> Vec<Entity> {
+pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
     let mut out = Vec::new();
     push::<Text>(report, &mut values, &mut out, |entity, utf16| {
         let span = entity.location.range().cloned().unwrap_or_default();
