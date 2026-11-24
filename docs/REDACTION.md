@@ -1,12 +1,11 @@
 # Redaction
 
 A conceptual white paper on the redaction layer of the toolkit, the multimodal
-PII/PHI detection-and-redaction system separated out of the runtime. The
-audience is a privacy engineer evaluating the architecture; the goal is to
-describe the model, not the implementation. It is one of a series of three
-papers: detection produces the entities this paper consumes (see the Detection
-paper), and ingestion supplies the codec handle this paper writes through (see
-the Ingestion paper). Extending the catalogue of transformations is a matter of
+PII/PHI detection-and-redaction library. The audience is a privacy engineer
+evaluating the architecture; the goal is to describe the model, not the
+implementation. Detection produces the entities this paper consumes (see the
+Detection paper), and ingestion supplies the streams this paper writes through
+(see the Ingestion paper). Extending the catalogue of transformations is a matter of
 the operator contract, documented in the API reference.
 
 ## Abstract
@@ -51,11 +50,16 @@ an entity and the bytes it covers, produce a replacement and a declaration of
 how much of the original that replacement leaks.
 
 The toolkit does not own the policy that maps an entity to an operator. The
-caller, typically the engine that embeds the toolkit, selects operators by
-wiring them into the redaction engine before any document is processed. The
-binding is a table from label to operator: a label such as a phone-number type
-is bound to a concrete operator, and a single fallback operator covers any label
-not otherwise bound. The hide phase consults that table once per entity.
+caller, typically the application that embeds the toolkit, states it as an
+ordered list of rules wired into the redaction engine before any document is
+processed. A rule pairs a selector with an operator: a label (a phone-number
+type), a tag the label carries in the catalog (every label tagged `pii`), a
+predicate over the entity and the call's scope (its confidence, the request's
+purpose or audience), or a fallback that matches everything. For each entity
+the first matching rule picks the operator; an entity no rule matches is left
+as it is, so a policy that must hide everything ends in a fallback. A rule may
+also carry the reason it exists, the policy clause that requires it, which is
+recorded on every entity it decides.
 
 ## 2. Operator Taxonomy
 
@@ -72,33 +76,47 @@ planned batch is written back.
             |                                |
          operator                  reversible operator
             |                                |
- +----+-----+------+------+            (deanonymize
- |    |     |      |      |             direction,
-keep mask  hash  replace remove         key-held)
+   keep, remove, cover,              encrypt, pseudonymize
+   replace, mask, truncate,          (a deanonymize direction,
+   clamp, generalize-date,            key- or vault-held)
+   hash, fake, blur, pixelate,
+   beep, drop row/column
 ```
 
-The shipped catalogue is uniform in shape, and every catalogue entry is a
-text-modality operator:
+The shipped catalogue is uniform in shape. For text, and for every modality
+whose values are text:
 
 - A **passthrough operator** lets the value through verbatim. It records that an
   entity was inspected and consciously preserved. Absence of an operator and an
   explicit decision to keep are semantically different.
+- A **removal operator** removes the value. Surrounding content closes around
+  the hole, and nothing marks where it was.
+- A **cover operator** hides the value in place and keeps its extent: one block
+  character per character of text, a box over a PDF's glyphs.
 - A **template substitution operator** substitutes a templated token for the
   span, expanding placeholders for the entity's label and matched text and
   defaulting to a bracketed label. The simplest operator; also the most prone to
   leakage when the template is naive.
-- A **masking operator** rewrites the span character by character, preserving
-  length. It keeps an optional prefix and suffix and replaces the interior with
-  a mask character. A masked card number stays the same length and still parses
-  as a card number, but its information content is gone.
-- A **one-way hash operator** produces a digest, optionally salted, rendered as
-  lowercase hex. The original is absent from the artifact, but identical inputs
+- **Masking and truncation operators** keep part of the value: a mask rewrites
+  it character by character, keeping an optional prefix and suffix and
+  preserving its length, so a masked card number still parses as one; a
+  truncation keeps only a prefix or a suffix.
+- **Generalizing operators** coarsen a value instead of hiding it: a clamp
+  collapses numbers beyond a bound into a bucket (an age of 94 becomes `90+`),
+  and a date generalizer keeps a date's year or month. A value of the wrong
+  shape, text that is not a number or a date, is declined, and by default
+  removed.
+- **Digest operators** produce a one-way digest, plain or salted SHA-2 or a
+  keyed HMAC. The original is absent from the artifact, but identical inputs
   produce identical outputs, preserving equality joins at the cost of
   dictionary-attack exposure.
-- A **removal operator** removes the span. The replacement disappears and
-  surrounding bytes close around the hole. The strongest text operator and the
-  most format-disruptive; some codecs cannot honor it without producing invalid
-  output.
+- A **synthesizing operator** replaces the value with a realistic stand-in of
+  the same kind, another name or another address, generated for the entity's
+  label and language, so token distributions stay useful.
+
+Image, audio, and tabular content add operators of their own: blur and
+pixelation for image regions, a tone over an audio interval, and the dropping
+of a whole row or column of a table.
 
 These are the operators a caller binds to labels. Reversible operators, which
 recover an original later, form a second category and are the subject of
@@ -154,7 +172,8 @@ Modality     Location           Replacement primitive
 Text         byte range         replace | cover | remove
 Tabular      cell coordinate    replace | cover | remove, or drop row/column
 Image        bounding box       blur | pixelate | cover
-Audio        time interval      beep | silence | remove
+Audio        time interval      beep | cover (silence) | remove
+Metadata     field key          replace | cover | remove
 ```
 
 **Text.** A location is a half-open byte range. The replacement is a
@@ -176,13 +195,16 @@ treatment, and its flavors are not interchangeable: a Gaussian blur preserves a
 rough silhouette, mosaic pixelation preserves coarse color statistics, and a
 cover, a solid box, preserves nothing but the region's extent. An image can't
 lose its pixels, so it has no removal: a region can only be covered in place.
-The image operators produce these treatments, and the image codec handler
+The image operators produce these treatments, and the image codec
 applies them.
 
 **Audio.** A location is a time interval. The replacement value silences the
 interval (its amplitude is zeroed), beeps over it, or removes it (the buffer
 shrinks and downstream timestamps shift). As with image, the audio operators
-produce these treatments, and the audio codec handler applies them.
+produce these treatments, and the audio codec applies them.
+
+**Metadata.** A location is a field's key. A field's value is text, so the text
+operators apply to it; removing it drops the field.
 
 The split is deliberate. The text operators are written once against a
 text-backed notion that text, tabular and metadata satisfy, so a single masking
@@ -201,10 +223,14 @@ deanonymize direction: given an entity and the replacement that was written, it
 recovers the original data, returning nothing when a particular replacement
 cannot be reversed. An operator that holds a key, a vault reference, or a
 pseudonym map implements that extended contract; an irreversible operator does
-not, and the type system records that fact. Pseudonymization, encryption, and
-tokenization are the reversible operators: each substitutes the entity for a
-surrogate that an authorized holder of the corresponding secret can map back to
-the original.
+not, and the type system records that fact. Pseudonymization and encryption are the
+reversible operators: each substitutes the entity for a surrogate that an
+authorized holder of the corresponding secret can map back to the original.
+Encryption carries the original in its ciphertext and needs only the key.
+Pseudonymization keeps the mapping in a vault, one surrogate per original, or
+per coreference cluster so every mention of one person gets the same
+surrogate. A deanonymizer applies the reverse direction to a redacted
+document.
 
 The distinction matters because reversible operators carry obligations the
 others do not. They require key management, rotation, and access controls. They
@@ -228,11 +254,20 @@ value can come back, and the toolkit says so in both the type and the profile.
 
 A document typically produces many entities. The redaction engine does not
 rewrite the document entity by entity. It first _plans_ a batch of rewrites: for
-each entity it resolves the bound operator (falling back if necessary), reads
-the covered bytes through the codec handle (see the Ingestion paper), runs the
-operator to obtain a replacement value, and records one location-and-replacement
-pair. Only after the whole batch is planned does it write back, by handing the
-batch to the codec handle's writer.
+each entity it picks the operator its rules select, reads the covered data
+through the stream (see the Ingestion paper), runs the operator to obtain a
+replacement value, and records one location-and-replacement pair. Only after
+the whole batch is planned does it write back, by handing the batch to the
+stream.
+
+The choice of operator can be made, and shown, before anything is written. A
+_pick_ records on each entity the operator it will get, the leak profile of
+that operator, the rule that chose it, and the rule's reason, as an event on
+the entity's audit trail. Applying the batch then records which pick it
+applied, recording a new pick first if an edit changed the decision since.
+When no edit intervenes, the plan a reviewer was shown is the plan that ran;
+when one does, the trail records the pick that was applied in its place, so
+the divergence is visible.
 
 Planning before writing exists because writing is destructive and ordering
 matters. For codecs whose write step shifts byte offsets, text, tabular, and any
@@ -261,7 +296,8 @@ After redaction, the modified artifact re-serializes to its original container
 format. A redacted CSV is still a valid CSV; a redacted PDF is still a valid
 PDF; a redacted WAV is still a valid WAV. Two properties follow. First,
 non-redacted bytes are preserved: when the codec supports it, every byte outside
-a redaction span is byte-for-byte identical to the input. Re-encoding the whole
+a redaction span is byte-for-byte identical to the input, once the content the
+toolkit strips at decode is gone (see the Ingestion paper). Re-encoding the whole
 artifact would be simpler but would subtly alter content the caller never
 intended to touch: floating-point columns re-rounded, image compression
 artifacts shifted, audio samples re-quantized. The toolkit treats avoidable
@@ -273,7 +309,7 @@ The cost is that the hide phase threads its writes through codec-specific
 writers that understand how to splice modifications into the original stream
 (see the Ingestion paper). The redaction engine itself is modality-generic; the
 knowledge of how to apply a batch to a particular container lives in the codec
-handler behind the writer boundary. The benefit is that the toolkit can be
+behind the stream boundary. The benefit is that the toolkit can be
 inserted into a pipeline without forcing every consumer to tolerate a
 re-serialized variant of its input.
 
@@ -287,15 +323,17 @@ adjacent concerns to the engine that embeds it.
   per deployment. The caller wires operators to labels, with a fallback, before
   any document is processed. Selecting operators by deployment, by jurisdiction,
   or by data-release target is the embedding engine's job.
-- **Audit persistence.** The hide phase plans and applies redactions; it does
-  not maintain a durable, append-only audit log of every decision and execution.
-  A deployment that needs a compliance record builds it around the planned
-  batch.
-- **Human override at the seam.** The toolkit consumes the entity set produced
-  by detection (see the Detection paper) and acts on it. Presenting detected
-  entities to a reviewer and collecting accept, reject, or re-operator decisions
-  before the destructive write is an interface concern owned by the embedding
-  service.
+- **Audit persistence.** Every pick and every applied redaction is recorded
+  on its entity's hash-linked audit trail, and the report that carries them
+  serializes. The toolkit does not persist that record; a deployment that needs
+  a durable compliance log keeps the report itself, and can store its digest
+  apart, somewhere the report's carrier cannot write, to protect its entities
+  and their trails. The digest does not cover the report's record of stripped
+  hidden content.
+- **The review interface.** The toolkit records a reviewer's corrections on the
+  report between detection and redaction (see the Detection paper), and its
+  picks show what redaction will do. Presenting them to a person and
+  collecting the decisions is the embedding application's interface.
 - **External key management.** A reversible operator consumes a key; it does not
   source it. Vault integration, HSM-backed signing, key rotation, and access
   policy are deployment integrations.

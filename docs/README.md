@@ -35,9 +35,9 @@ below reflects the flow of a document through the toolkit.
 
 | Document                  | Subject                                                                                                                                                                                                                                                                                                  |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Ingestion](INGESTION.md) | How raw bytes become a typed, addressable handle on which the rest of the toolkit operates: format resolution, the decoder-and-handle split, streaming by chunk, the decode-redact-encode loop, and the uniform promotion of chunk-local coordinates to source coordinates.                              |
-| [Detection](DETECTION.md) | The composition of rule-based, statistical, and generative recognizers into a single layer that produces a unified set of entity annotations, including the per-call scope, the treatment of overlap, disagreement, and confidence between recognizers, and a reviewer's recorded corrections. |
-| [Redaction](REDACTION.md) | The translation of detected entities into concrete rewrites or removals on the original document, the catalogue of operator kinds, the leak profile that classifies each, the per-modality replacement semantics, and the reversible-operator boundary.                                                  |
+| [Ingestion](INGESTION.md) | How raw bytes become a document of typed, addressable streams on which the rest of the toolkit operates: format resolution, hidden content stripped at decode, streams and embedded files, the decode-redact-encode loop, and the uniform promotion of chunk-local coordinates to source coordinates. |
+| [Detection](DETECTION.md) | The composition of enrichers and of rule-based, statistical, and generative recognizers into a single layer that produces a unified set of entity annotations, including the per-call scope, the treatment of overlap, disagreement, and confidence between recognizers, and a reviewer's recorded corrections. |
+| [Redaction](REDACTION.md) | The translation of detected entities into concrete rewrites or removals on the original document: the rules that pick an operator, the catalogue of operator kinds, the leak profile that classifies each, the per-modality replacement semantics, and the reversible-operator boundary. |
 | [Comparison](COMPARISON.md) | How `elide` relates to Presidio, the closest prior art: the shared recognizer/operator model, the differences by design (multimodal core, format ownership, provenance-first audit, Rust/WASM), and an honest account of where Presidio is more complete today.                                  |
 
 ## Glossary
@@ -56,7 +56,11 @@ They are conceptual definitions, not references to any particular interface.
 - **Location**: the modality-specific address that identifies where an entity
   lives in its host document: a character span, a row and column, a pixel
   region, a time interval, or, for metadata, the key of an out-of-band field.
-- **Chunk**: a unit of a document a handle yields while streaming, in the
+- **Stream**: one modality's redactable content within a decoded document (a
+  text body, a table's cells, an image's pixels, a clip, a document's metadata
+  fields). A document is its streams plus its embedded files, each decoded as
+  a document of its own.
+- **Chunk**: a unit of a stream (a passage, a cell, a frame, a clip), in the
   modality's own coordinate system. A recognizer sees a chunk and reports
   findings in chunk-local coordinates.
 - **Lifting**: the promotion of a chunk-local location to a source-global one,
@@ -69,7 +73,7 @@ They are conceptual definitions, not references to any particular interface.
   in the host document so that it no longer conveys the sensitive information it
   originally carried.
 - **Operator**: the transformation that performs one redaction. Each entity is
-  assigned an operator, selected by the caller per label, that emits the
+  assigned an operator, picked by the caller's rules, that emits the
   replacement value for that entity.
 - **Leak profile**: the classification of how much a redaction leaves
   observable: irrecoverable, partial, or recoverable.
@@ -82,4 +86,5 @@ They are conceptual definitions, not references to any particular interface.
   where the original redaction was declared reversible and the reverser holds
   the requisite authority.
 - **Scope**: the per-call set of controls the caller asserts: languages,
-  jurisdictions, document labels, and the catalog of entity types to find.
+  jurisdictions, the document's tags and the request's purpose and audience,
+  and the catalog of entity types to find.

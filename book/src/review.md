@@ -88,6 +88,14 @@ who made it (`by`) and why (`because`), so a human decision is never mistaken
 for an automatic one. Afterwards, `suppressed` and `unsuppressed` on a part
 list which entities redaction leaves alone and which it considers.
 
+A report keeps no matched values, so to show the reviewer what each entity
+covers, read it from the documents before they are redacted:
+`orchestrator.read::<Text>(&mut documents, &locations)` takes `(PartId,
+location)` pairs, in any part including those inside embedded files, and
+returns the data at each. A location fails on its own, so one the documents
+cannot read costs only its own result, but an embedded file that fails to
+decode on the way fails the whole read.
+
 To show the reviewer what redaction will do, not only what was found, call
 `orchestrator.pick(&mut report)`. Each entity records the operator it will get,
 how much that operator's output leaks, the rule that chose it, and the policy's
@@ -111,8 +119,9 @@ event, fails the read.
 
 That check has limits. The trail hashes are not keyed, so whoever rewrites a
 whole entity can recompute its trail; a trail cut back to an earlier event is
-intact in its own right; and trails are per entity, so dropping an entity
-outright leaves every other trail intact. To catch those, record
+intact in its own right, so a reviewer's last edit can be dropped without
+trace; and trails are per entity, so dropping an entity outright leaves every
+other trail intact. To catch those, record
 `report.digest()` after analysis (and again after a trusted review, since
 edits change it) somewhere the report's carrier cannot write, such as a
 signed log, a write-once bucket, or a timestamping service, and compare it

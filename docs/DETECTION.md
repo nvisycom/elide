@@ -12,8 +12,7 @@ and all confidence regimes. Multiple recognizer families run concurrently
 against decomposed document fragments; their findings are lifted into a shared
 coordinate system and reconciled through a deterministic layer pipeline into
 the set of entities the toolkit hands, through a reviewer's corrections, to
-redaction. This is the second paper in a series
-of three; ingestion and redaction are treated in their own papers.
+redaction. Ingestion and redaction are treated in their own papers.
 Implementation details and the extension surfaces are out of scope here and are
 covered by the API reference.
 
@@ -77,7 +76,10 @@ names, free-form addresses) but their behavior is bounded by the distribution of
 their training data. They are noisy near class boundaries and at the edges of
 supported languages, and they are sensitive to domain shift. A mock backend
 stands in where a real model is not wired up, so the rest of the layer can be
-exercised without one.
+exercised without one. The toolkit ships the recognizer and the
+backend contract it calls, not a model: a deployment supplies one, a hosted
+service or a local model, and the recognizer projects that model's labels onto
+the toolkit's taxonomy.
 
 ### 2.3 Generative Recognition
 
@@ -86,16 +88,18 @@ model for visual payloads, to enumerate entities within a fragment. They are
 valuable for categories that resist both rule authorship and supervised
 training: open-class identifiers, paraphrased references to sensitive
 attributes, contextual mentions ("the patient," "my attorney"). They are the
-most expensive recognition path and the least calibrated. Their utility is highest where the other families are weakest. As
-with the statistical family, a mock backend exists so the surrounding machinery
-can run without a live model.
+most expensive recognition path and the least calibrated. Their utility is
+highest where the other families are weakest. The toolkit ships a backend for
+hosted and local providers, and its prompts can be replaced. As with the
+statistical family, a mock backend exists so the surrounding machinery can run
+without a live model.
 
 ### 2.4 No Dominant Strategy
 
 None of these families subsumes the others. Each has a precision-recall profile
 shaped by its operating principle. The toolkit does not elect a winner: it runs
 the families in parallel and defers the question of which finding to keep to a
-later stage that has access to all the evidence at once. The find engine is the
+later stage that has access to all the evidence at once. The analyzer is the
 entry point that holds the recognizer population and drives it. Recognizers are
 registered with it once; at analysis time it runs them concurrently and collects
 their entities into one candidate set.
@@ -112,6 +116,18 @@ recognizer  recognizer   recognizer
                 |
          candidate set
 ```
+
+### 2.5 Decorating a Recognizer
+
+How a recognizer runs is separate from what it recognizes. A decorator wraps a
+recognizer and is a recognizer itself, so decorators compose and go anywhere a
+recognizer does. One makes a failure optional, for a hosted model whose
+timeout should cost coverage rather than the whole analysis; by default a
+recognizer that errors fails the analysis, because it has not vouched that the
+content is clean. One splits a long text into overlapping windows for a model
+that accepts only so much input, and moves the findings back into place. One
+escalates, running an expensive recognizer only where a cheap one's findings
+are too weak. And one calibrates a recognizer's scores (section 8).
 
 ## 3. Chunking and Lifting
 
@@ -134,7 +150,14 @@ evidence. A recognizer states a local truth ("a match spanning these bytes of
 this chunk"); the lift promotes that truth to source coordinates without the
 recognizer ever needing to know the outer geometry.
 
-## 4. Modality Boundaries
+## 4. Enrichment and Modality Boundaries
+
+Before recognizers run, enrichers add what they need: the language of a text,
+the words an OCR engine reads off an image, the transcript a speech-to-text
+engine makes of a clip. Enrichers run in order, each able to read what the ones
+before it produced; their products are kept with the analysis as artifacts, so
+a later analysis under a new scope can reuse them instead of running OCR or
+transcription again.
 
 Recognition is organized by the _nature of the payload_ presented to a
 recognizer, not by the modality of the source document. Text recognizers operate
@@ -156,7 +179,9 @@ The recognizer population is also open across modalities. Adding a native image
 recognizer that emits bounding-box findings, or a native audio recognizer that
 emits time-interval findings, does not perturb the existing text recognizers;
 the new recognizer is registered alongside the existing ones and contributes
-evidence on the same terms. The registry is a fan-out point, not a closed
+evidence on the same terms. A finding in an image's OCR text or a clip's
+transcript is moved back onto the image's boxes or the clip's time span, so it
+is redacted where it appears. The registry is a fan-out point, not a closed
 taxonomy.
 
 ## 5. Context Enhancement
@@ -185,15 +210,16 @@ distinct kinds of state, separated by who owns them.
 
 The per-call scope holds what the _caller_ asserts about an entire analysis and
 is shared, immutable, across every payload of it: the languages and
-jurisdictions to honor, document-level classification labels, the catalog of
-entity types to find, and a correlation id for tracing. It is built once
-and passed by reference into the find engine.
+jurisdictions to honor, the document's tags and the request's purpose and
+audience, the catalog of entity types to find, and a correlation id for
+tracing. It is built once
+and passed by reference into the analyzer.
 
 The per-payload context is the working view a recognizer actually sees. It
 borrows the scope and adds the state produced while processing one payload: NLP
 artifacts (tokens, lemmas, and the like, computed once and read back on demand),
 languages detected for this payload, and the context hints described above. The
-find engine builds a fresh context per payload, so working state never leaks
+analyzer builds a fresh context per payload, so working state never leaks
 between payloads. Recognizers query the call's languages, jurisdictions, and
 labels through the context, which folds the caller's assertions together with
 what was detected, rather than reaching into the scope directly.
@@ -234,7 +260,7 @@ layered pipeline reduces this to a clean, reconciled set.
 
 Each stage is a pure, synchronous transform over the candidate set that returns
 the entities it kept and the entities it dropped. The stages are composed onto
-the find engine in the order they should run. In their usual order, they are:
+the analyzer in the order they should run. In their usual order, they are:
 
 Before any stage, a recognizer whose scores run differently from the others'
 is **calibrated**: wrapped so that each finding's confidence is scaled by a
@@ -349,12 +375,14 @@ silently. Generative recall is bounded by the model: hallucinated entities and
 missed entities are both possible, and the confidence the model assigns its own
 output is not necessarily informative.
 
-Image and audio are honest gaps. Today, visual and acoustic payloads are reached
-only through the generative family, a vision-language model prompted on a
-region. Optical-character and speech-to-text extraction, which lets text
-recognizers run over regions and segments drawn from images and audio, is
-supplied by a backend bound to the recognizer; the toolkit defines the seam and
-leaves the backend to the deployment.
+Image and audio detection is shallower than text detection. Visual and
+acoustic content is reached through enrichment, which lets the text
+recognizers run over the words an image shows or a clip says, and through the
+generative family, a vision-language model prompted on an image. The toolkit
+ships a pure-Rust OCR engine; speech-to-text is a backend the deployment
+supplies. No specialized image or audio recognizer, a face or license-plate
+detector, a speaker-identification model, ships today, though each would be an
+ordinary recognizer of its modality.
 
 The toolkit does not promise zero leakage. It promises that detection is
 pluralistic, that evidence is calibrated and reconciled deterministically, that
@@ -365,15 +393,17 @@ on its own data and tune its recognizer population, calibration, and thresholds
 accordingly.
 
 The architecture is open at every layer where recall can fail: recognizers can
-be added, rules extended, models replaced, enhancers and layers reconfigured.
+be added, rules extended, models replaced, enrichers, decorators, and layers
+reconfigured.
 The closed surfaces are the ones that must be stable: the chunking and lifting
 model, the reconciliation pipeline, and the shape of the entity. Stability in the
 contracts is what allows pluralism in the recognizers.
 
 ## 11. Summary
 
-Detection is the concurrent evaluation of many fallible recognizers against a
-chunked decomposition of a document, followed by an optional context-boost pass,
+Detection is the concurrent evaluation of many fallible recognizers, after
+whatever enrichment they need, against a chunked decomposition of a document,
+with context weighed as each pattern match is scored,
 followed by deterministic reconciliation of the findings through a
 calibrated, overlap-then-filter pipeline, under the caller's scope; a reviewer's
 recorded corrections then decide what reaches redaction. The product is an attributable set of entities, lifted into source

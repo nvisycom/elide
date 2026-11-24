@@ -5,9 +5,9 @@ A redaction moves a file through a *codec*, an *analyzer*, and an
 
 ```text
              ┌───────┐ decode ┌──────────┐
-  bytes ───▶ │ Codec │ ─────▶ │ Document │ parts: text, tables, images, audio,
-             └───────┘        └──────────┘        metadata
-                 ▲                 │ stream (per part)
+  bytes ───▶ │ Codec │ ─────▶ │ Document │ streams: text, tables, images,
+             └───────┘        └──────────┘          audio, metadata
+                 ▲                 │ stream by stream
           encode │                 ▼
                  │      ┌──────────────────────────────────┐
                  │      │ Analyzer                         │
@@ -24,9 +24,10 @@ A redaction moves a file through a *codec*, an *analyzer*, and an
   (a byte span), `Tabular` (a cell), `Image` (a region of pixels), `Audio` (a
   time interval), and `Metadata` (a named field). Most types are generic over
   it, such as `Analyzer<Text>` or `Entity<Image>`.
-- **A codec** reads a file into a `Document`, a list of parts, each a stream
-  in one modality. A text file is one part; a DOCX is body text, embedded
-  images, and properties. See [Formats](formats.md).
+- **A codec** reads a file into a `Document`: its *streams*, each the content
+  of one modality, and the files embedded in it, each decoded as a document of
+  its own. A text file is one stream; a DOCX is its body text and properties
+  as streams, and its images as embedded files. See [Formats](formats.md).
 - **An entity** is one occurrence of sensitive data: a label (such as
   `email_address`), a location, a confidence, and an audit trail.
 - **An analyzer** finds entities in one modality. *Enrichers* run first and
