@@ -32,14 +32,15 @@ and through Spark/Databricks and Azure integrations. It is MIT-licensed, mature
 (~11k GitHub stars), and battle-tested, with first-class spaCy, Stanza, and
 Transformers integration and a broad catalogue of predefined recognizers.
 
-**Elide** is a Rust library, a workspace of ~18 focused crates behind an `elide`
-facade, that detects and redacts PII across text, tabular data, images, audio,
-and container metadata. It is Apache-2.0-licensed and explicitly a *toolkit*: it
-detects and redacts, and does not host a server, schedule work, or persist an
-audit log (those belong to an embedding runtime). It compiles to WebAssembly, and
-a subset (pattern/dictionary detection plus the redaction operators) runs
-entirely in the browser via the published `@nvisy/elide` package. Its API is
-not yet stable.
+**Elide** is a Rust library, a workspace of about twenty focused crates behind
+an `elide` facade, that detects and redacts PII across text, tabular data,
+images, audio, and document metadata. It is Apache-2.0-licensed and explicitly
+a *toolkit*: it detects and redacts, and does not host a server, schedule work,
+or persist an audit log (those belong to an embedding runtime). It compiles to
+WebAssembly, and the `@nvisy/elide` npm package runs the detect-and-redact
+pipeline in the browser over every format but MP3, with its NER, LLM,
+language-detection, OCR, and speech-to-text models supplied as JavaScript
+callbacks. Its API is not yet stable.
 
 The clearest structural contrast: Presidio is a two-stage pipeline (AnalyzerEngine
 → AnonymizerEngine) delivered as a small set of Python packages; `elide` is a
@@ -61,9 +62,9 @@ Elide treats five modalities as first-class, each with its own coordinate system
 | --- | --- | --- | --- |
 | Text | half-open byte range | pattern (built in), LLM (built in), NER (contract, backend supplied downstream) | mask, replace, truncate, clamp, generalize-date, hash (SHA-2/HMAC), encrypt (AES-256-GCM), pseudonymize, fake, keep, remove, cover |
 | Tabular | cell coordinate (row/col, span) | reuses the text recognizers per cell | the text operators per cell, plus drop-column and drop-row |
-| Image | pixel bounding box | LLM/VLM (built in), or OCR to text (contract, backend supplied downstream) | blur, pixelate, fill, cover, remove |
-| Audio | half-open time span (ms) | STT to text (contract, backend supplied downstream) | silence, beep |
-| Metadata | out-of-band field | EXIF / OOXML docProps surfaced as redactable sub-parts | strip |
+| Image | pixel bounding box | LLM/VLM (built in), or OCR to text (pure-Rust engine built in) | blur, pixelate, cover |
+| Audio | half-open time span (ms) | STT to text (contract, backend supplied downstream) | beep, cover (silence), remove (cut) |
+| Metadata | named field | EXIF and document properties, scanned as content or flagged field by field | the text operators, and remove |
 
 Audio, and container metadata as a distinct redaction target, are modalities
 Presidio does not address at all. The architectural note is about detection
@@ -79,8 +80,9 @@ working instance of exactly this shape on the image side. What is not yet
 implemented is a *specialized* image or audio detector: today Elide reaches those
 modalities through that generative recognizer, or by lifting them to text with an
 OCR or speech-to-text enricher and running the text recognizers. Both paths are
-wired end to end; the OCR and speech-to-text backends themselves are supplied by
-the deployment (the crates define the contract and ship a reference mock).
+wired end to end. OCR ships a pure-Rust engine; the speech-to-text backend is
+supplied by the deployment (the crate defines the contract and ships a
+reference mock).
 
 ## 3. Detection
 
@@ -110,7 +112,8 @@ releases. Roughly comparable, with different provider defaults.
 **Language.** Presidio supports multiple languages but binds one NLP model per
 analyzer instance, with English the most complete. `elide` performs per-region
 language *detection* via `lingua` (≈75 languages) as a pre-recognition enricher,
-independent of any single NER model.
+independent of any single NER model, and routes each model call to a backend
+for its language.
 
 **Reconciliation.** Both assign confidence scores in [0, 1]. `elide` adds an
 explicit, layered reconciliation pipeline after recognition, over scores
@@ -139,13 +142,13 @@ for audio, and `DropColumn`/`DropRow` for tabular data. Each operator declares a
 trait boundary: `AesEncrypt` implements the reversible contract (AES-256-GCM with
 a pluggable key provider) and `Deanonymizer` recovers through it;
 `Pseudonymize` uses a vault plus a generator. Reversibility for image and audio
-is not yet supported (`Deanonymizer` is text-backed today).
+is not supported: their operators destroy what they cover.
 
 Both aim to change only what must change. `elide` makes byte-faithful round-trip
 a design principle: redaction plans a batch and writes it back through codec
 writers, and bytes outside a redacted span are preserved verbatim where the
-format allows it (plain text, JSON, CSV, and OOXML are byte-identical outside the
-redacted spans). Because Presidio operates on already-extracted text or
+format allows it (plain text, JSON, CSV, HTML, XML, and OOXML are byte-identical
+outside the redacted spans, once the hidden content stripped at decode is gone). Because Presidio operates on already-extracted text or
 DataFrames rather than files, byte-fidelity of the original container is the
 caller's concern, not Presidio's.
 
@@ -156,13 +159,17 @@ layer.** Its engines operate on already-extracted content: text strings, pandas
 DataFrames, JSON objects, and image pixels. Parsing a `.docx`, native PDF text, a
 `.csv`, or HTML into that content is the caller's responsibility.
 
-Elide owns the codec layer end to end. `elide-codec` decodes bytes to a typed,
-addressable handle, mediates redaction, and re-encodes to the original format.
-The formats it handles include txt/json/html/xml, csv/xlsx, docx/pptx
-(byte-faithful via the OPC package model), born-digital pdf (fail-closed glyph
-deletion), and png/jpeg/tiff/wav/mp3.
-It also redacts container **metadata** (image EXIF and OOXML document
-properties) as distinct sub-parts, which is out of scope for Presidio entirely.
+Elide owns the codec layer end to end. Its codecs decode bytes into a document
+of typed, addressable streams, with embedded files decoded as documents of
+their own, mediate redaction, and re-encode to the original format. The formats
+it handles include txt/json/html/xml, csv/xlsx, docx/pptx (byte-faithful via the
+OPC package model), pdf (glyphs removed from the content stream, optionally
+under a cover box, with scanned pages rendered for OCR), and
+png/jpeg/tiff/wav/mp3. Decoding also strips the hidden content a reader never
+sees (scripts, comments, tracked revisions, metadata) under a caller's policy,
+and every encode checks the output carries none. Document **metadata** (EXIF and
+document properties) can instead be kept and redacted field by field,
+which is out of scope for Presidio entirely.
 
 ## 6. Provenance and audit
 
@@ -187,9 +194,9 @@ durable append-only log; that belongs to the runtime that embeds the toolkit.
 
 **Deployment.** Presidio runs as a Python library, as Docker/REST services, and
 through Spark/Databricks and Azure. `elide` is a Rust library with an
-`unsafe`-free core, plus a WebAssembly build: the pattern/dictionary detectors
-and the redaction operators run in the browser with no network, threads, or
-filesystem, shipped as the `@nvisy/elide` npm package with a live demo.
+`unsafe`-free core, plus a WebAssembly build that runs the pipeline in the
+browser with no threads or filesystem and no network requests of its own,
+shipped as the `@nvisy/elide` npm package with a live demo.
 `elide` intentionally ships no server; a gateway or orchestrating runtime is a
 separate concern.
 
@@ -207,9 +214,11 @@ writing:
 - **Turnkey NER.** Presidio ships real spaCy/Stanza/Transformers models out of
   the box. `elide-ner` defines the recognizer contract and ships a reference
   mock; wiring a real model backend is a downstream integration.
-- **Image OCR.** Presidio's image redactor works today with Tesseract. `elide`'s
-  OCR and speech-to-text enrichers define their backend contracts and ship
-  reference mocks, so its native image and audio *detection* is not yet turnkey.
+- **Speech-to-text and specialized vision.** `elide` ships a pure-Rust OCR
+  engine, but its speech-to-text enricher defines a backend contract and ships
+  a reference mock, and no face or license-plate detector ships, so audio
+  detection is not turnkey and image detection is limited to OCR text and a
+  vision-language model.
 - **Maturity and ecosystem.** Presidio is years more mature, widely deployed, and
   carries a large community, a broad predefined-recognizer catalogue, DICOM
   support, and deep Azure/Spark integration. `elide`'s API is explicitly unstable.

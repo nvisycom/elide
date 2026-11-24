@@ -10,11 +10,11 @@ heterogeneous bytes, resolves them to a typed representation that detection can
 address, mediates the mutation that redaction performs, and re-emits bytes in
 the original format without losing fidelity. This paper describes the conceptual
 model that governs the codec layer. The toolkit is a library, not a service; the
-codec layer is the half that turns raw bytes into a typed, addressable,
-streamable handle and re-encodes them after redaction. We treat formats not as a
-catalogue but as instances of a single abstraction, the typed handle, and we
-describe the coordinate systems, mutation contract, and round-trip guarantees
-that hold across the abstraction.
+codec layer is the half that turns raw bytes into a document of typed,
+addressable streams and writes it back after redaction. We treat formats not as
+a catalogue but as instances of a single abstraction, the decoded document, and
+we describe the coordinate systems, mutation contract, and round-trip guarantees
+that hold across it.
 
 ## 1. The Decoding Problem
 
@@ -24,16 +24,16 @@ representation against which detection can operate and into which redaction can
 write. The difficulty is that no two formats agree on what either of those
 operations means.
 
-A plain-text file encoded in UTF-8 differs from the same text in another
-encoding not just at the byte level but in the unit of indexing a recognizer
-must use. A structured document hides its strings behind escape sequences, so
-the text a recognizer sees is not the text the file contains. Markup languages
-resolve entity references and decode attribute values, presenting the recognizer
+A structured document hides its strings behind escape sequences, so the text a
+recognizer sees is not the text the file contains. Markup languages resolve
+character references and decode attribute values, presenting the recognizer
 with a view that may have no direct byte correspondence to the source. Delimited
-text formats negotiate quoting rules whose details depend on a dialect. Images
-speak in pixel coordinates; audio speaks in time. Each format also disagrees on
-what counts as a redactable unit: a span of characters, a scalar value, a
-rectangle in pixel space, a half-open interval of audio samples.
+text formats negotiate quoting rules whose details depend on a dialect. Office
+documents scatter one page's text across several parts of a zip package. A PDF
+holds its text as drawing operators, glyph by glyph. Images speak in pixel
+coordinates; audio speaks in time. Each format also disagrees on what counts as
+a redactable unit: a span of characters, a cell, a rectangle in pixel space, a
+half-open interval of audio.
 
 The codec layer is the discipline of generalizing over these formats without
 erasing them. A naive approach would coerce everything into one common type, say
@@ -44,36 +44,30 @@ bytes arrive to the moment bytes leave.
 
 ## 2. The Content Bundle
 
-Content does not arrive as a single object. It arrives as several orthogonal
-facets that the toolkit keeps separate on purpose. The carrier is the content
-bundle: the raw bytes plus a small set of caller-supplied descriptors.
+Content arrives as a bundle: the raw bytes plus the descriptors a caller knows
+about them.
 
 ```
-                  content bundle
-                         |
-  +----------+-----------+-----------+
-  |          |           |           |
-bytes     filename   content-type  encoding
-  |          |           |           |
-raw       caller-      caller-     charset
-payload   supplied     supplied    of the
-(the      hint         MIME hint   bytes
-datum)    "report.txt" "text/csv"  (UTF-8)
+         content bundle
+                |
+    +-----------+-----------+
+    |           |           |
+  bytes     filename   content type
+    |           |           |
+  raw       caller-     caller-
+  payload   supplied    supplied
+  (the      hint        MIME hint
+  datum)    "report.txt" "text/csv"
 ```
 
 The split is not cosmetic. The raw bytes are the datum; they are what the caller
-handed in, and they are treated as immutable. The filename and content-type are
+handed in, and they are treated as immutable. The filename and content type are
 caller-supplied descriptors and may be wrong, by accident or otherwise: they are
 hints used to choose a decoder, not facts the codec layer trusts about the
-content. The encoding records the charset of the bytes so that a textual decode
-produces the right characters.
-
-The bundle also carries the conveniences a decoder needs without re-deriving
-them: it can report its extension from the filename, decode itself to a string
-under its declared encoding, and compute a content digest over its bytes.
-Keeping the descriptors beside the bytes, rather than fused into them, keeps the
-trust boundary legible: a decoder can ask whether a fact came from the caller's
-claim or from the bytes themselves, and treat it accordingly.
+content. Keeping the descriptors beside the bytes, rather than fused into them,
+keeps the trust boundary legible: a decoder can tell a fact that came from the
+caller's claim from one read off the bytes themselves. Textual formats read the
+bytes as UTF-8.
 
 ## 3. Format Resolution
 
@@ -82,132 +76,154 @@ The codec layer resolves format identity through a format registry, which
 consults signals in priority order:
 
 ```
-filename extension  ->  content-type hint
-     (1)                     (2)
+filename extension  ->  content type  ->  leading bytes
+       (1)                  (2)               (3)
 ```
 
-A registry can be built pre-populated with every enabled built-in format.
-Decoding by an explicit extension resolves the decoder registered for that
-extension. Decoding from the content itself consults the bundle's own extension
-first and falls back to its declared content-type. Each registered format
-descriptor advertises the extensions and content-types it answers to, and the
-registry indexes them so resolution is a lookup rather than a scan.
+A registry can be built pre-populated with every enabled built-in format, and a
+caller can register its own formats or replace a built-in one with a
+differently configured instance (a CSV dialect, say). Decoding by an explicit
+extension resolves the decoder registered for that extension. Decoding from the
+bundle consults its extension first and its content type second; each format
+advertises the extensions and content types it answers to, and the registry
+indexes them so resolution is a lookup rather than a scan.
 
-The toolkit does not perform deep magic-byte sniffing. This is a deliberate
-design choice with a real cost. Deployments that need probabilistic format
-detection, accepting inputs whose origin provides no reliable metadata, for
-instance, must add a sniffer upstream. Inside the toolkit, format identity is
-treated as supplied: the codec decodes according to what it was told. The
-tradeoff is precision for predictability. A toolkit that re-identifies formats
-can disagree with the caller about what was supplied, and that disagreement
-becomes a class of bug that does not exist when the caller is authoritative.
+Only a bundle that asserts neither falls through to the third signal, the
+magic number its leading bytes carry, and only when sniffing is enabled. Binary
+formats carry such a signature; text formats do not, so they always need a
+claim. A claim that names no registered format is still a claim: it fails
+rather than falling through to the sniff, because a toolkit that overrules the
+caller's assertion about what was supplied creates a class of disagreement that
+does not exist when the caller is authoritative.
 
-## 4. The Typed Handle
+## 4. Hidden Content at the Boundary
 
-Once decoded, content is no longer a byte stream; it is a typed handle whose
-type encodes the modality. The handle is the central abstraction of the codec
-layer, and every downstream stage operates through it.
+A file carries more than its readers see: an author and an edit history,
+tracked deletions, reviewers' comments, a thumbnail of the first page, a
+script. Redacting the visible text and shipping the rest leaks exactly what the
+redaction was meant to hide. The codec layer therefore treats decode as a
+sanitizing step, not only a parsing one.
 
-Decoding is a two-step lowering. The registry first returns an untyped handle:
-it knows its stable format identifier and carries the decoded content, but it
-does not yet commit the caller to a modality at the type level. The caller then
-refines it into a concrete typed handle, which succeeds when the modality
-matches and hands the untyped handle back otherwise, so the caller can try
-another modality without losing it. This keeps format resolution, a runtime
-decision over bytes, separate from modality typing, a compile-time guarantee
-over the decoded view.
+Each format rebuilds the document from an allowlist as it decodes it: an HTML
+element is copied only if it renders, an Office part only if the schema allows
+its elements where they sit, a PDF object only if it draws a page, links one, or
+is an attached file. Whatever is left out is recorded by what it is. Two
+categories, metadata and collaboration (comments, revisions, annotations), are
+the caller's choice through a hidden-content policy: drop them, keep them for
+detection to scan as content, or flag every field so redaction decides it. The
+rest, scripts and other active content above all, is always removed. Detection
+therefore sees exactly what the redacted file will carry.
 
-A handle exposes five capabilities:
+The boundary is checked again on the way out. Before encoded bytes are
+returned, the format validates them: they must hold no hidden content the
+decode would strip, no structure it does not recognize, and no dangling
+internal reference. A document that fails the check is refused rather than
+returned.
 
-1. **Streaming chunking.** The handle yields redactable units in document order,
-   producing one chunk at a time or signaling end-of-stream. A chunk may carry a
-   span of text, a value in a structured document, a region of an image, a
-   segment of audio. The stream advances a cursor; it does not materialize the
-   entire decoded view.
-2. **Random-access retrieval.** Given a location, the handle returns the unit at
-   that location, supporting stages that revisit units out of document order.
-3. **In-place mutation.** Redaction does not rewrite the handle from scratch; it
-   writes replacements at the locations the recognizer identified. Mutation is
-   addressed by location and confined to the units the policy named.
-4. **Re-encoding.** The handle serializes itself back to a content bundle in the
-   same format as the input.
-5. **Coordinate lifting.** Given a chunk-local location a recognizer saw, the
-   handle returns the corresponding source-global location.
+## 5. The Decoded Document
 
-The handle's type is parameterized on the modality. Downstream code that holds a
-text handle does not need to ask what kind of content it carries; the type
-already encodes it, and a routine written for text handles cannot accept an
-image handle by mistake.
+Once decoded, content is no longer a byte stream; it is a document of three
+kinds of thing:
 
-## 5. Decoders and Handles
+```
+                      document
+                         |
+        +----------------+----------------+
+        |                |                |
+  native document     streams           blobs
+  (the format's      (one per         (embedded files,
+   own model,         modality it      each decoded as a
+   which writes       carries, each    document of its
+   itself out)        addressable)     own)
+```
 
-The codec layer separates the act of decoding from the decoded thing. The
-decoder is the per-format machine: given a content bundle, it produces a decoded
-representation. That decoded representation is the handle that streams and
-redacts. A format descriptor binds the two together for the registry: it carries
-a stable format identifier, the extensions and content-types it answers to, and
-a decoder to invoke. Registering a format is registering its decoder, and once
-registered the format is available to detection and to redaction without further
-wiring.
+The **native document** is the format's own decoded model: a re-zipped package
+of parts for an Office file, an object graph for a PDF, a single buffer for a
+plain-text file. It owns the streams and knows how to write the document back
+into native bytes, and how to check the result.
 
-The decoded representation is where the five capabilities live. A handle reports
-its format, serializes itself, streams chunks, lifts locations, and supports
-random-access reads and writes for retrieval and mutation. The default lift is
-the identity, which a verbatim-text handle is content to inherit and which other
-handles override.
+A **stream** is one modality's redactable content: a text body, a table's
+cells, an image's pixels, an audio clip, a document's metadata fields. A plain
+text file is one stream; a workbook is its cells as a tabular stream and its
+comments and drawings as a text stream; an image is its pixels, plus its
+metadata as a stream of its own when the policy keeps metadata for redaction.
+Each stream has a document-local id and is typed by its modality: the document
+lends its streams type-erased, and a caller refines one into a stream of a
+concrete modality, so a routine written for text cannot receive an image by
+mistake.
 
-Adding a format means writing a decoder that produces a handle and a format
-descriptor that names it. Nothing else in the pipeline changes: detection,
-redaction, and re-encoding all speak through the handle, so a new format becomes
-available everywhere the moment its decoder is registered.
+A **blob** is a file embedded in the document: an image in a DOCX, a PDF's
+attachment or scanned page. A blob is not a stream. It carries its bytes and a
+hint at its format, is decoded through the same registry as a document of its
+own, and is redacted with the same machinery; its redacted bytes then fold back
+into its parent. A blob no format can read is removed, along with everything
+that references it, rather than shipped unread.
 
-## 6. Modality Boundaries Within a Document
+Adding a format means writing a loader that produces such a document and a
+format descriptor that names it. Nothing else in the pipeline changes:
+detection, redaction, and re-encoding all speak through streams and blobs, so a
+new format becomes available everywhere the moment it is registered.
+
+## 6. The Stream Contract
+
+A stream exposes five capabilities:
+
+1. **Chunking.** The stream hands back its redactable units in document order:
+   a passage of text, a cell, an image frame, a clip. The chunks are
+   materialized when the document is decoded, so reading them never re-parses
+   the source.
+2. **Flagging.** The stream lists the hidden content it keeps and its format
+   labels (metadata fields, comments and their authors, tracked deletions),
+   so a policy that flags hidden content can have each item decided on its own.
+3. **Random-access reading.** Given a location, the stream returns the data at
+   it, for stages that revisit units out of order: a review that shows what an
+   entity covers, an operator that reads the value it replaces.
+4. **Batch writing.** Redaction does not rewrite the stream from scratch; it
+   writes a batch of replacements at the locations the recognizers identified,
+   confined to the units the policy named.
+5. **Lifting.** Given a location a recognizer reported in one chunk's own
+   coordinates, the stream returns the corresponding location in the source.
+
+A stream does not write bytes; the native document that owns it does. That
+split is what lets one container hold streams of several modalities and still
+write itself out as one file.
+
+## 7. Modality Boundaries Within a Document
 
 A modality ties together three things: the data a chunk carries, the location
 that addresses it, and the replacement that redaction writes. The toolkit
 defines five modalities:
 
 ```
-modality   data            location            replacement
----------+---------------+-------------------+----------------------
-text     | text payload  | byte span         | replace / cover / remove
-tabular  | text payload  | row/column + span | replace / cover / remove
-image    | pixel buffer  | bounding box      | blur/pixelate/cover
-audio    | sample stream | time span (ms)    | beep / silence / remove
-metadata | field value   | out-of-band key   | drop / rewrite
+modality   data            location             replacement
+---------+---------------+--------------------+-------------------------
+text     | text payload  | byte span          | replace / cover / remove
+tabular  | text payload  | row/column + span  | replace / cover / remove,
+         |               |                    | drop row / drop column
+image    | pixel buffer  | bounding box       | blur / pixelate / cover
+audio    | sample stream | time span (ms)     | beep / cover / remove
+metadata | field value   | out-of-band key    | remove / cover / replace
 ```
 
-Text addresses a span within the decoded payload. Tabular reuses the text
-payload and replacement unchanged, because a cell is, at heart, a piece of text;
-only its location differs, carrying a row index, a column index, and the
-cell-local span. Image addresses a rectangle in pixel space and replaces it by
-compositing a blur, a pixelation, or a solid block. Audio addresses a half-open
-interval of time and replaces it with silence or removal.
+Text addresses a span within the decoded payload; a span read off a rendered
+PDF page also carries the page and the boxes its glyphs occupy, so a redaction
+can cover them where they are drawn. Tabular reuses the text payload and
+replacement unchanged, because a cell is, at heart, a piece of text; only its
+location differs, carrying a row index, a column index, and the cell-local
+span. Image addresses a rectangle in pixel space and replaces it by compositing
+a blur, a pixelation, or a solid block. Audio addresses a half-open interval of
+time and replaces it with a tone, silence, or a cut.
 
 Metadata is the odd modality of the five: its subjects are not spans within the
 decoded content but a document's named out-of-band fields, a photo's EXIF tags
 or a Word document's core properties, each a `key -> value` pair that can name a
 person, place, device, or time just as content can. A field is addressed by its
-key rather than a spatial or temporal coordinate, and, being atomic, is redacted
-by dropping or rewriting it whole. The *source* of a field is not a modality
-distinction: EXIF, document properties, and filesystem attributes are all one
-metadata modality, told apart by which part of the document they belong to, and
-each format's handler reads and writes its own metadata within its single
-encode.
+key rather than a spatial or temporal coordinate. The *source* of a field is not
+a modality distinction: EXIF and document properties are one metadata modality,
+told apart by the document they belong to, and each format reads and writes its
+own metadata within its single encode.
 
-Some formats produce a homogeneous decoded view: a plain-text file decodes to
-text, an image file decodes to an image, an audio file decodes to audio. Others
-carry internal structure that the handle exposes as a stream of distinct chunks.
-A markup page mixes textual body content, attribute values, embedded scripts,
-and structural markup, each with its own redaction semantics; the handle streams
-the redactable pieces in document order and knows, at encode time, how to write
-each mutated value back into its container slot. A text span escapes itself back
-into the format's rules; an image region overwrites its pixel range; a tabular
-value re-serializes into its cell. The recognizer addresses chunks; the handle
-delegates re-encoding to the write-back logic each chunk's location implies. The
-handle is then mutated by redaction (see the Redaction paper).
-
-## 7. The Decode-Redact-Encode Loop
+## 8. The Decode-Redact-Encode Loop
 
 The lifecycle of content inside the codec layer is a single loop:
 
@@ -215,137 +231,133 @@ The lifecycle of content inside the codec layer is a single loop:
 bytes (content bundle)
   |
   v
-decode  --->  typed handle  --->  read chunk  ---+
-                    ^                             |
-                    |                          chunk
-                    |                             |
-               write at loc                       v
-                    |                        recognizer
-                    |                             |
-                    |                          findings
-                    |                             |
-                    |                             v
-                    |                          lift to
-                    |                          source
-                    |                          locations
-                    |                             |
-                    +-----------------------------+
-                    |
-                    v
-                 encode
-                    |
-                    v
-              bytes (content bundle)
+decode (sanitize) ---> document ---> stream ---> chunk
+                          |            ^           |
+                        blobs          |       recognizer
+                          |            |           |
+                   (decode each as     |       findings
+                    a document, run    |           |
+                    the same loop)     |           v
+                          |            |    lift to source
+                          |            |       locations
+                          |            |           |
+                          |       write batch <----+
+                          |            |
+                          +-----> encode (post-order)
+                                       |
+                                    validate
+                                       |
+                                       v
+                          bytes (content bundle)
 ```
 
-The handle is decoded once. It streams chunks into the recognizer, which
-identifies sensitive regions in the decoded view of each chunk. The handle lifts
-those regions from chunk-local locations back to source-global ones. The policy
-stage decides what to do with each finding, and replacements are written to the
-handle at source-global locations. The handle then serializes the mutated
-content back to format-native bytes as a fresh content bundle. There is no
-second decode pass and no separate write phase: the handle is the medium through
-which decoding, recognition, and re-encoding communicate.
+The document is decoded once, its hidden content handled on the way in. Its
+streams yield chunks to the recognizers, which identify sensitive regions in
+the decoded view of each chunk; each stream lifts those regions from
+chunk-local locations back to source ones. The policy stage decides what to do
+with each finding, and the replacements are written to the stream as a batch.
+Each blob runs the same loop as a document of its own, so an image in a DOCX is
+detected and redacted as an image. Encoding is post-order: a nested container
+is written before the level above needs its bytes. The native document then
+writes the whole into format-native bytes and validates them. There is no
+second decode pass: the decoded document is the medium through which decoding,
+recognition, redaction, and re-encoding communicate.
 
-## 8. The Encode Round-Trip Contract
+## 9. The Encode Round-Trip Contract
 
 Re-encoding has a two-clause contract.
 
-First, untouched units serialize byte-for-byte where the format permits. For
-formats whose handles preserve a verbatim view of the source, plain text, JSON,
-HTML, and CSV among them, the encoder copies untouched bytes directly. The
-output of a document with no mutations, and nothing stripped at decode, is
-byte-identical to the input. A CSV handle, for instance, retains its delimiter
-and trailing-newline convention so that re-serialization reproduces the source
-exactly.
+First, untouched content serializes byte for byte where the format permits.
+Plain text, JSON, CSV, HTML, XML, and the parts of an Office package are
+byte-identical outside the redacted spans, once the decode has removed their
+hidden content: a CSV keeps its delimiter and trailing-newline convention, an
+HTML attribute keeps its quoting, an Office package keeps every part a
+redaction did not touch. A document with no redactions and no hidden content
+round-trips unchanged.
 
 Second, touched units serialize their mutated value through format-aware
-write-back. A text replacement is escaped according to the format's rules. A
-redacted image region is composited into the output pixel buffer and the image
-is re-encoded to its original raster format. An audio segment is silenced or
-removed in the sample stream and the stream is re-encoded.
+write-back. A text replacement is escaped for where it lands: a character
+reference in markup, an escape sequence in JSON, an inline string in place of
+a shared one in a spreadsheet. A PDF's glyphs are removed from its content
+stream and, for a cover, a box is drawn where they stood. A redacted image
+region is composited into the pixel buffer and the image re-encoded; an audio
+interval is replaced in the sample stream and the clip re-encoded.
 
-Some formats cannot satisfy the first clause completely. Markup languages
-discard structural information during parsing: attribute ordering, whitespace
-between tags, default values left implicit. For these formats, re-encoding
-necessarily re-parses and re-serializes, producing output that is semantically
-equivalent but not byte-identical to the input. The toolkit makes this tradeoff
-explicit per format rather than silently degrading round-trip fidelity across
-the board.
+Some formats cannot satisfy the first clause completely. An image or audio
+clip is re-encoded whole, and a lossy format (JPEG, MP3) is re-compressed
+whole. A PDF is rebuilt from the objects its decode kept. The toolkit makes
+these tradeoffs explicit per format rather than degrading round-trip fidelity
+silently across the board, and a write it cannot place exactly (an
+out-of-bounds, overlapping, or mid-character replacement) fails the encode
+rather than producing a partly redacted file.
 
-## 9. Coordinate Systems and Lifting
+## 10. Coordinate Systems and Lifting
 
 The recognizer and the encoder do not speak the same coordinate language. A
 recognizer sees the decoded payload of a chunk: escape sequences resolved,
-content extracted from containers, character encodings normalized. Its locations
+content extracted from containers, glyphs mapped to characters. Its locations
 index into that decoded, chunk-local view. The encoder must address the source.
 A mutation expressed in chunk-local coordinates would land on the wrong bytes,
-sometimes by a few characters, sometimes by an entire escape sequence, sometimes
-by a chunk boundary.
+sometimes by a few characters, sometimes by an entire escape sequence,
+sometimes by a chunk boundary.
 
 The lifting contract closes this gap. It is uniform across every modality:
-lifting takes a chunk-local location and returns the corresponding source-global
+lifting takes a chunk-local location and returns the corresponding source
 location, or nothing when the local location has no source pre-image. The
-operation is location to location; there is no byte-range special case, and no
-modality is privileged. The same promotion runs across every modality whose
-locations are chunk-local coordinates (text, tabular, image, and audio); what
-varies is only the bookkeeping each handle supplies behind that uniform
-operation:
+operation is location to location; no modality is privileged. What varies is
+only the bookkeeping each stream supplies behind that uniform operation:
 
 ```
-handle                      lifting mechanism
+stream                      lifting mechanism
 --------------------------+-----------------------------------------
 verbatim text             | add the chunk's source offset
-escaped textual formats   | walk an escape table built at decode
+escaped textual formats   | walk the offset map built at decode
 tabular                   | fill in the cell's row and column
-image                     | translate the bounding box into the page
+image                     | translate the bounding box into the frame
 audio                     | shift the time span by the chunk's start
 ```
 
-For verbatim text the lift adds an offset, recovering the source position of a
-chunk-local span. A structured format like JSON walks the escape table it built
-during decode, so a location over decoded characters maps back across the escape
-sequences that separate them. A cell handle fills in its row and column to
-produce a tabular location. An image handle translates a chunk-local bounding
-box into its place on the page; an audio handle shifts a time span by the
-chunk's start time. In every case the recognizer worked in chunk-local
-coordinates and the handle alone knows how to promote them to source-global
-ones. Those promoted, source-coordinate entities are what feed detection (see
-the Detection paper).
+For verbatim text the lift adds an offset. A format that escapes its text (JSON,
+markup, OOXML) builds an offset map as it decodes, so a location over decoded
+characters maps back across the escape sequences that separate them. A cell
+stream fills in its row and column; an image stream translates a chunk-local
+box into its frame; an audio stream shifts a time span by the chunk's start.
+In every case the recognizer worked in chunk-local coordinates and the stream
+alone knows how to promote them. Those promoted, source-coordinate entities are
+what detection hands on (see the Detection paper).
 
 The uniform lift is what allows recognizers to be format-agnostic and
 modality-agnostic in the same stroke. A recognizer for personal names does not
 need to know about escape sequences, cell geometry, or sample rates; it operates
-on a chunk's decoded data and returns chunk-local locations, and the handle is
+on a chunk's decoded data and returns chunk-local locations, and the stream is
 responsible for translating those into something the encoder can act on.
 
-## 10. Compression and Encryption Boundaries
+## 11. Compression and Encryption Boundaries
 
-The toolkit operates on decoded bytes. It receives a content bundle whose
-payload is already in the clear and produces a content bundle in the same form.
-Inputs that arrive compressed or encrypted at rest, and transport-level
-cryptography generally, are the caller's concern: the caller decompresses and
-decrypts before handing bytes to the codec layer and may re-compress or
-re-encrypt after receiving the redacted bytes back. Persistence to storage,
-upload handling, and transport encryption belong to the embedding engine, not
-the toolkit. The codec layer holds no keys and manages no transport security;
-keeping that boundary outside the toolkit keeps both the toolkit's surface and
-the deployment's key custody simpler than conflating them would.
+The toolkit operates on bytes in the clear. Inputs that arrive compressed or
+encrypted at rest, and transport-level cryptography generally, are the caller's
+concern: the caller decompresses and decrypts before handing bytes to the codec
+layer and may re-compress or re-encrypt the redacted bytes it receives back.
+Compression inside a format, the zip of an Office package or a PDF's stream
+filters, is the format's own business and is handled by its codec. Persistence,
+upload handling, and transport encryption belong to the embedding application,
+not the toolkit. The codec layer holds no keys and manages no transport
+security; keeping that boundary outside the toolkit keeps both the toolkit's
+surface and the deployment's key custody simpler than conflating them would.
 
-## 11. Honest Scope
+## 12. Honest Scope
 
-The codec layer covers a curated set of formats. The text modality covers plain
-text, JSON, HTML, and XML. The tabular modality covers CSV with a byte-faithful
-round-trip. The image modality covers PNG, JPEG, and TIFF; the audio modality
-covers WAV and MP3. Each format is a plug-in behind the same decoder and handle
-contracts, so the set is open to extension rather than fixed: a new format joins
-by registering its descriptor, with no change to the recognizers or operators
-above it.
-
-The architecture treats new format support as a plug-in concern: adding a format
-means implementing a decoder that produces a handle and a descriptor that
-registers it. Once both exist, the format is available to detection, to
-redaction, and to every downstream stage without further changes.
+The codec layer covers a curated set of formats. The text modality covers
+plain text, JSON, HTML, and XML; the tabular modality covers CSV and the cells
+of an XLSX workbook; DOCX, PPTX, and XLSX are containers of text, tables,
+embedded images, and properties. PDF covers born-digital text layers, attached
+files, and embedded images; rendering scanned pages for OCR needs the native
+PDFium library. The image modality covers PNG, JPEG, and TIFF; the audio
+modality covers WAV and MP3. The WebAssembly build reads every format but MP3,
+and PDF without page rendering. Each format is a plug-in behind the same loader
+and document contracts, so the set is open to extension rather than fixed: a
+new format joins by registering its descriptor, with no change to the
+recognizers or operators above it.
 
 New formats require code. They do not require pipeline changes or coordination
 across stages. This is the property the codec abstraction was designed to

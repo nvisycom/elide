@@ -61,11 +61,19 @@ feature flags:
 | `elide-pattern` | Regex, dictionary, and checksum recognition |
 | `elide-ner` | Named-entity recognition over a model backend |
 | `elide-llm` | LLM and VLM recognition, and the `RigBackend` |
+| `elide-lingua` | Language detection with lingua |
 | `elide-redaction` | The redaction operators, and the `Anonymizer` and `Deanonymizer` that apply them |
-| `elide-backend` | Backend decorators: metering, rate limits, routing |
+| `elide-fake` | The `Fake` operator: realistic stand-ins by label and language |
+| `elide-backend` | Backend decorators: batching, rate limits, routing, and failover |
 | `elide-engine` | The `Orchestrator` for multi-part documents |
 | `elide-image`, `elide-audio` | The image and audio modalities, OCR, and speech-to-text |
+| `elide-codec` | The codec contracts: `Document`, `Stream`, and `Format` |
 | `elide-plain`, `elide-markup`, `elide-office`, `elide-pdf` | Format codecs |
+| `elide-format` | The `FormatRegistry` that assembles the codecs |
+| `elide-macros` | Derive macros for components and backend requests |
+
+`elide-wasm`, the WebAssembly bindings behind the `@nvisy/elide` npm package,
+is not part of the facade; see [WebAssembly](browser.md).
 
 The API reference is on [docs.nvisy.com](https://docs.nvisy.com). This book is
 the guide: it explains how the pieces fit together, chapter by chapter.

@@ -88,6 +88,13 @@ who made it (`by`) and why (`because`), so a human decision is never mistaken
 for an automatic one. Afterwards, `suppressed` and `unsuppressed` on a part
 list which entities redaction leaves alone and which it considers.
 
+A report keeps no matched values, so to show the reviewer what each entity
+covers, read it from the documents before they are redacted:
+`orchestrator.read::<Text>(&mut documents, &locations)` takes `(PartId,
+location)` pairs, in any part including those inside embedded files, and
+returns the data at each. A location fails on its own, so one the documents
+cannot read costs only its own result.
+
 To show the reviewer what redaction will do, not only what was found, call
 `orchestrator.pick(&mut report)`. Each entity records the operator it will get,
 how much that operator's output leaks, the rule that chose it, and the policy's
