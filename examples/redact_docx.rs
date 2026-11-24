@@ -72,7 +72,9 @@ async fn main() -> Result<()> {
     //    part, write the parts back, and re-encode the package. The enrichment
     //    (`analyzed.artifacts`) is not needed to redact; it is what a re-run
     //    would reuse. The applied report is the record of what was redacted:
-    //    keep it, or anchor its digest where whoever carries it cannot write.
+    //    keep it, and anchor its digest where whoever carries it cannot write.
+    //    The digest covers the entities and their trails, not the record of
+    //    stripped hidden content.
     let applied = orchestrator
         .anonymize_with(&mut document, analyzed.report)
         .await?;
@@ -87,6 +89,17 @@ async fn main() -> Result<()> {
         "\nwrote redacted {} bytes -> {out_path}",
         encoded.as_bytes().len()
     );
+
+    // 6. Keep the applied report beside it: every entity's trail and the
+    //    hidden content stripped. Reading it back with
+    //    `Report::deserializer()` verifies each trail.
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/data/contact.redacted.report.json"
+    );
+    let report = serde_json::to_vec_pretty(&applied).expect("serialize the applied report");
+    std::fs::write(report_path, report).expect("write the applied report");
+    println!("wrote the applied report -> {report_path}");
 
     Ok(())
 }

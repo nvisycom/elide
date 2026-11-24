@@ -10,7 +10,10 @@ use elide::entity::audit::Attribution;
 use elide::modality::text::TextLocation;
 use elide::prelude::*;
 
-# async fn review(orchestrator: Orchestrator, mut document: Document) -> Result<()> {
+# async fn review(
+#     orchestrator: Orchestrator,
+#     mut document: Document,
+# ) -> std::result::Result<(), Box<dyn std::error::Error>> {
 let analyzed = orchestrator.analyze(&mut document).await?;
 let mut report = analyzed.report;
 
@@ -43,8 +46,10 @@ report
     .by("reviewer-7")
     .suppress_within(&TextLocation::inline(0..120));
 
-// The applied report carries each entity's redaction record: keep it.
+// The applied report carries each entity's trail, redaction included: keep
+// it. Its digest covers the entities, not the stripped section.
 let applied = orchestrator.anonymize_with(&mut document, report).await?;
+std::fs::write("contract.report.json", serde_json::to_vec(&applied)?)?;
 println!("report digest: {}", applied.digest());
 # Ok(())
 # }

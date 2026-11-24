@@ -90,8 +90,18 @@ impl Confidence {
     ///
     /// `0.9 * 1.2` yields `1.0`, not an out-of-range value. Used by
     /// score-scaling steps such as calibration.
-    pub fn saturating_mul(self, factor: f32) -> Self {
-        Self::clamped(self.0 * factor)
+    ///
+    /// The product is taken in `f64`, so a factor too large for an `f32` still
+    /// scales a small score rather than saturating it:
+    ///
+    /// ```
+    /// use elide_core::primitive::Confidence;
+    ///
+    /// let tiny = Confidence::new(1e-40).unwrap();
+    /// assert!((tiny.saturating_mul(1e39).get() - 0.1).abs() < 1e-3);
+    /// ```
+    pub fn saturating_mul(self, factor: f64) -> Self {
+        Self::clamped((f64::from(self.0) * factor) as f32)
     }
 }
 

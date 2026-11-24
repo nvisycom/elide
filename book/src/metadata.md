@@ -28,6 +28,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_registry(registry);
     let applied = orchestrator.anonymize(&mut document).await?;
     // Each redacted field's entity carries the record of what hid it.
+    std::fs::write("photo.report.json", serde_json::to_vec(&applied)?)?;
     println!("report digest: {}", applied.digest());
     Ok(())
 }

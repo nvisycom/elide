@@ -15,9 +15,9 @@ ships no NER model; a backend is a small adapter you write for yours.
 
 A backend returns spans already carrying the toolkit's canonical labels, so
 consumers reason about one taxonomy whatever the upstream model. Which labels
-a model supports, which it emits but should be dropped, and how its scores
-compare are properties of the model, so they are decorators on its backend
-rather than recognizer settings.
+a model supports and which it emits but should be dropped are properties of
+the model, so they are decorators on its backend rather than recognizer
+settings.
 
 ```rust
 use elide_core::entity::{LabelCatalog, LabelRef, builtins};

@@ -55,7 +55,7 @@ impl<R> Calibrated<R> {
         for entity in &mut entities {
             let factor = self.calibration.factor(&entity.label);
             if factor != Multiplier::IDENTITY {
-                let scaled = entity.confidence.saturating_mul(factor.get() as f32);
+                let scaled = entity.confidence.saturating_mul(factor.get());
                 entity.record(AuditEvent::calibration(scaled, factor.get()));
             }
         }
