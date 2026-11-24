@@ -119,8 +119,9 @@ event, fails the read.
 
 That check has limits. The trail hashes are not keyed, so whoever rewrites a
 whole entity can recompute its trail; a trail cut back to an earlier event is
-intact in its own right; and trails are per entity, so dropping an entity
-outright leaves every other trail intact. To catch those, record
+intact in its own right, so a reviewer's last edit can be dropped without
+trace; and trails are per entity, so dropping an entity outright leaves every
+other trail intact. To catch those, record
 `report.digest()` after analysis (and again after a trusted review, since
 edits change it) somewhere the report's carrier cannot write, such as a
 signed log, a write-once bucket, or a timestamping service, and compare it

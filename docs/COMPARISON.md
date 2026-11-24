@@ -187,10 +187,13 @@ Elide makes the audit trail a first-class, structural object. Every entity
 carries its full history (which recognizers found it, how reconciliation
 combined findings, which redaction was applied), and that history is **hashed
 into a tamper-evident DAG**: each audit event is a 32-byte BLAKE3 digest over its
-payload and its parents, so altering any event breaks the chain. The engine
-produces a serializable `Report` that records the same, and a run can be
-reconstructed from it. What `elide` deliberately does *not* do is persist a
-durable append-only log; that belongs to the runtime that embeds the toolkit.
+payload and its parents, so altering any event breaks the chain. The hashes
+are unkeyed, so a trail rewritten whole, or cut back to an earlier event,
+still verifies; the report's digest, stored where the report's carrier cannot
+write, catches both. The engine produces a serializable `Report` that records
+the same, and a run can be reconstructed from it. What `elide` deliberately
+does *not* do is persist a durable append-only log; that belongs to the runtime
+that embeds the toolkit.
 
 ## 7. Deployment and licensing
 

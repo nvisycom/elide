@@ -327,8 +327,9 @@ adjacent concerns to the engine that embeds it.
   on its entity's hash-linked audit trail, and the report that carries them
   serializes. The toolkit does not persist that record; a deployment that needs
   a durable compliance log keeps the report itself, and can store its digest
-  apart, somewhere the report's carrier cannot write, to protect its
-  integrity.
+  apart, somewhere the report's carrier cannot write, to protect its entities
+  and their trails. The digest does not cover the report's record of stripped
+  hidden content.
 - **The review interface.** The toolkit records a reviewer's corrections on the
   report between detection and redaction (see the Detection paper), and its
   picks show what redaction will do. Presenting them to a person and
