@@ -268,11 +268,12 @@ recognition, redaction, and re-encoding communicate.
 Re-encoding has a two-clause contract.
 
 First, untouched content serializes byte for byte where the format permits.
-Plain text, JSON, CSV, HTML, XML, and the parts of an Office package are
+Plain text, JSON, HTML, XML, and the parts of an Office package are
 byte-identical outside the redacted spans, once the decode has removed their
-hidden content: a CSV keeps its delimiter and trailing-newline convention, an
-HTML attribute keeps its quoting, an Office package keeps every part a
-redaction did not touch. A document with no redactions and no hidden content
+hidden content: an HTML attribute keeps its quoting, an Office package keeps
+every part a redaction did not touch. A CSV is written back from its rows: it
+keeps its delimiter, line endings, and trailing newline, but its quoting is
+normalized, a field quoted only where it needs to be. A document with no redactions and no hidden content
 round-trips unchanged.
 
 Second, touched units serialize their mutated value through format-aware

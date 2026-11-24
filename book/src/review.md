@@ -93,7 +93,8 @@ covers, read it from the documents before they are redacted:
 `orchestrator.read::<Text>(&mut documents, &locations)` takes `(PartId,
 location)` pairs, in any part including those inside embedded files, and
 returns the data at each. A location fails on its own, so one the documents
-cannot read costs only its own result.
+cannot read costs only its own result, but an embedded file that fails to
+decode on the way fails the whole read.
 
 To show the reviewer what redaction will do, not only what was found, call
 `orchestrator.pick(&mut report)`. Each entity records the operator it will get,

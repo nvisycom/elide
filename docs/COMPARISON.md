@@ -147,8 +147,9 @@ is not supported: their operators destroy what they cover.
 Both aim to change only what must change. `elide` makes byte-faithful round-trip
 a design principle: redaction plans a batch and writes it back through codec
 writers, and bytes outside a redacted span are preserved verbatim where the
-format allows it (plain text, JSON, CSV, HTML, XML, and OOXML are byte-identical
-outside the redacted spans, once the hidden content stripped at decode is gone). Because Presidio operates on already-extracted text or
+format allows it (plain text, JSON, HTML, XML, and OOXML are byte-identical
+outside the redacted spans, once the hidden content stripped at decode is gone;
+CSV keeps its dialect but normalizes quoting). Because Presidio operates on already-extracted text or
 DataFrames rather than files, byte-fidelity of the original container is the
 caller's concern, not Presidio's.
 
@@ -167,8 +168,9 @@ OPC package model), pdf (glyphs removed from the content stream, optionally
 under a cover box, with scanned pages rendered for OCR), and
 png/jpeg/tiff/wav/mp3. Decoding also strips the hidden content a reader never
 sees (scripts, comments, tracked revisions, metadata) under a caller's policy,
-and every encode checks the output carries none. Document **metadata** (EXIF and
-document properties) can instead be kept and redacted field by field,
+and every encode checks that the output carries none of what that policy
+strips. Document **metadata** (EXIF and document properties) can instead be
+kept and redacted field by field,
 which is out of scope for Presidio entirely.
 
 ## 6. Provenance and audit

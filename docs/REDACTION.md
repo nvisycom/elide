@@ -264,8 +264,10 @@ The choice of operator can be made, and shown, before anything is written. A
 _pick_ records on each entity the operator it will get, the leak profile of
 that operator, the rule that chose it, and the rule's reason, as an event on
 the entity's audit trail. Applying the batch then records which pick it
-applied, recording a new pick first if an edit changed the decision since. The
-plan a reviewer was shown is therefore provably the plan that ran.
+applied, recording a new pick first if an edit changed the decision since.
+When no edit intervenes, the plan a reviewer was shown is the plan that ran;
+when one does, the trail records the pick that was applied in its place, so
+the divergence is visible.
 
 Planning before writing exists because writing is destructive and ordering
 matters. For codecs whose write step shifts byte offsets, text, tabular, and any
@@ -324,8 +326,9 @@ adjacent concerns to the engine that embeds it.
 - **Audit persistence.** Every pick and every applied redaction is recorded
   on its entity's hash-linked audit trail, and the report that carries them
   serializes. The toolkit does not persist that record; a deployment that needs
-  a durable compliance log stores the report, or its digest, somewhere the
-  report's carrier cannot write.
+  a durable compliance log keeps the report itself, and can store its digest
+  apart, somewhere the report's carrier cannot write, to protect its
+  integrity.
 - **The review interface.** The toolkit records a reviewer's corrections on the
   report between detection and redaction (see the Detection paper), and its
   picks show what redaction will do. Presenting them to a person and
