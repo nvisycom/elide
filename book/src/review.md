@@ -10,7 +10,7 @@ reviewer's decisions arrive as a `Review`, which `review` applies.
 use elide::entity::audit::Attribution;
 use elide::modality::text::TextLocation;
 use elide::prelude::*;
-use elide::{Protect, RequireActor, RequireReason, Review, ReviewPolicy};
+use elide::{Protect, RequireReason, Review, ReviewPolicy};
 
 # async fn review(
 #     orchestrator: Orchestrator,
@@ -18,10 +18,8 @@ use elide::{Protect, RequireActor, RequireReason, Review, ReviewPolicy};
 # ) -> std::result::Result<(), Box<dyn std::error::Error>> {
 let orchestrator = orchestrator.with_review_policy(
     // Nobody may spare a government ID, and whoever spares anything else
-    // must say who they are and why.
-    Protect::labels([builtins::GOVERNMENT_ID.to_ref()])
-        .and(RequireActor)
-        .and(RequireReason),
+    // must say why.
+    Protect::labels([builtins::GOVERNMENT_ID.to_ref()]).and(RequireReason),
 );
 let analyzed = orchestrator.analyze(&mut document).await?;
 let mut report = analyzed.report;
@@ -36,7 +34,6 @@ for (part, _) in report.part_ids() {
         if reviewer_says_not_sensitive {
             review
                 .part::<Text>(part)?
-                .by("reviewer-7")
                 .because(Attribution::freeform("public company address"))
                 .suppress(entity.id());
         }
@@ -47,12 +44,12 @@ for (part, _) in report.part_ids() {
 // letterhead, in one edit.
 review
     .part::<Text>(&document.id())?
-    .by("reviewer-7")
     .because(Attribution::freeform("letterhead"))
     .suppress_within(TextLocation::inline(0..120));
 
-// Apply it: every edit, if the policy accepts them all, or none.
-orchestrator.review(&mut report, &review)?;
+// Apply it as the reviewer the deployment authenticated: every edit, if the
+// policy accepts them all, or none.
+orchestrator.review(&mut report, &review, "reviewer-7")?;
 
 // The applied report carries each entity's trail, every decision included:
 // keep it. Its digest covers the entities, not the stripped section.
@@ -108,36 +105,42 @@ operator by where an entity sits). The orchestrator's `ReviewPolicy` sees
 every edit, and decides on those. It is shown each edit as a
 `ProposedEdit`: the decision it records, the entities whose redaction it
 narrows, and who made it and why. Each standard policy checks one thing:
-`Protect` keeps labels from being narrowed, `RequireActor` wants every edit
-attributed, and `RequireReason` wants every narrowing edit explained. `and`
-combines them, and a deployment's own rules are a `ReviewPolicy` too, or a
-closure. The default accepts every edit. Letting only some reviewers narrow,
-say:
+`Protect` keeps labels from being narrowed, and `RequireReason` wants every
+narrowing edit explained. `and` combines them, and a deployment's own rules
+are a `ReviewPolicy` too, or a closure. The default accepts every edit.
+Letting only some reviewers narrow, say:
 
 ```rust,ignore
 let narrowers = ["reviewer-7", "lead-2"];
 let policy = Protect::labels(["SSN"]).and(move |edit: &ProposedEdit<'_>| {
-    match edit.by {
-        Some(actor) if !edit.narrows() || narrowers.contains(&actor) => Ok(()),
-        _ => Err(Error::refused("only a lead reviewer may narrow a redaction")),
+    if edit.narrows() && !narrowers.contains(&edit.by) {
+        return Err(Error::refused("only a lead reviewer may narrow a redaction"));
     }
+    Ok(())
 });
 ```
+
+Overlapping entities are redacted as one span under the safest operator
+among them, so an edit to one can leave its neighbours under a leakier one.
+An edit therefore narrows every entity overlapping what it touches as well:
+`Protect` refuses suppressing an entity that overlaps a protected one.
 
 Each edit is checked as the edits before it left the part, so an entity
 moved into a region is protected there. A review the policy refuses is
 refused whole, with an error of kind `Refused`, and the report is left as it
 was.
 
-The policy checks what a review claims, not who sent it: `by` is a name the
-review carries. Authenticate reviewers before their reviews reach `review`.
+A review carries what was decided and why, not who decided it: `review`
+takes the actor, as the deployment authenticated the reviewer who sent it,
+and records it on every decision. So a review cannot speak for anyone else,
+and a policy reading `by` reads who actually sent it.
 
 A review is bound to the report it was made against: `Review::new` records
 the report's digest, and `review` refuses a review made against another
-report, or an earlier version of this one. Applying a review changes the
-digest, so the same review cannot be applied twice, and an older one cannot
-replace a newer. A review that would change nothing is refused for the same
-reason, so check `is_empty` before sending one.
+report, or an earlier version of this one. A review that changes the report
+changes its digest, so it cannot be applied twice, and an older one cannot
+replace a newer. One that changes nothing can apply again, and changes
+nothing again.
 
 ## Showing the reviewer
 
@@ -171,40 +174,29 @@ names that one. `audit.applied_selection()` reads what a redaction ran, and
 A `Report` and a `Review` both serialize, so detection, review, and redaction
 can run in different processes, or days apart with a review queue between
 them. Neither can protect itself against whoever carries it. Each entity's
-trail is hash-linked, but the hashes are not keyed: whoever rewrites an
-entity can recompute its trail, a trail cut back to an earlier event is
-intact in its own right, a label or location changed beside its trail leaves
-the trail as it was, and dropping an entity or an edit leaves everything else
-intact.
+trail is hash-linked, and everything the entity says is read from it, so a
+label or location changed beside it is refused. But the hashes are not
+keyed: whoever rewrites an entity can recompute its trail, a trail cut back
+to an earlier event is intact in its own right, and dropping an entity or an
+edit leaves everything else intact.
 
-So each is sealed when it is written and reads back only against its seal.
-The same restorer does both, `Report::restorer()` or
-`orchestrator.restorer()`: `seal(&report)` makes a `Seal`, plain data to
-store, and `restore(&seal, ..)` reads the report back and refuses it if it
-does not match. Seal a report after the `pick` or `review` that last changed
-it. The restorer's configuration chooses the scheme, for both:
+So each reads back only against the digest it had when it was written:
+keep `report.digest()` when the report is stored, and read it back with
+`restore(&digest, ..)` on `Report::restorer()` or `orchestrator.restorer()`,
+which refuses a report whose digest differs. The digest protects only if the
+carrier cannot change it too: keep it on the side that wrote the report, in
+a write-once store, or signed with a key the deployment holds.
 
-- Without a key, an unkeyed digest. Anyone can compute one, so keep it where
-  the carrier cannot write: a signed log, a write-once bucket, a timestamping
-  service.
-- With a `SealKey` set by `with_seal_key` on the restorer or the
-  orchestrator, a digest keyed with it. Only a holder of the key can compute
-  one, so it can be stored beside what it covers, as long as the carrier
-  does not hold the key.
-
-The seal never chooses its own scheme: a restorer with a key accepts only a
-keyed seal, so a carrier cannot swap one for a digest of a value it changed.
-
-A report's seal covers its id, minted when the report is created, and every
-entity's fields and trail, by part and entity id, so the order a report was
-built or serialized in does not matter, and two reports with the same
-findings never seal alike. A review's covers the report it was made against
-and every edit, who made it, and why. `restore_unsealed` skips the check, for
-a value only shown, or one that never left the side that reads it.
+A report's digest covers its id, minted when the report is created, and
+every entity's fields and trail, by part and entity id, so the order a
+report was built or serialized in does not matter, and two reports with the
+same findings never digest alike. A review's covers the report it was made
+against and every edit and its reason. `restore_unchecked` skips the check,
+for a value only shown, or one that never left the side that reads it.
 
 The analysis also returns `artifacts`: the OCR layouts and transcripts it
 produced. Pass them to `re_analyze` to detect again, under a new scope or
 with another recognizer, without running OCR or speech-to-text a second
 time. An altered layout would change what detection reads, so an artifact set
-is sealed and read back the same way, its seal covering every artifact as it
-was serialized.
+is read back against its digest the same way, the digest covering every
+artifact as it was serialized.

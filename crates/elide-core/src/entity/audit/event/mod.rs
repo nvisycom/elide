@@ -25,14 +25,12 @@ use serde::{Deserialize, Serialize};
 
 pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
 pub use self::kind::AuditKind;
-pub use self::recognition::{Flagged, Model, ModelId, Pattern, PatternRule};
+pub use self::recognition::{Annotation, Flagged, Model, ModelId, Pattern, PatternRule};
 pub use self::reconcile::{Calibration, Conflict, Contested, Fusion, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
-use crate::entity::LabelRef;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
-use crate::redaction::HiddenContentKind;
 
 /// One node of an entity's audit DAG: something that happened to the entity.
 ///
@@ -118,7 +116,7 @@ impl<M: Modality> AuditEvent<M> {
     /// `Redaction::new(..).into()`). [`parents`] is empty and [`hash`] is
     /// [`GENESIS`] until [`AuditLog`] records it and assigns the links.
     ///
-    /// The kind-specific constructors ([`pattern`], [`redaction`], …) are
+    /// The kind-specific constructors ([`fusion`], [`redaction`], …) are
     /// convenience wrappers that derive `source` and build the kind for you;
     /// reach for `new` to set an explicit source (e.g. a reviewer's id on a
     /// [`manual`] override) or to build a kind the wrappers don't cover.
@@ -127,7 +125,7 @@ impl<M: Modality> AuditEvent<M> {
     /// [`hash`]: Self::hash
     /// [`GENESIS`]: AuditHash::GENESIS
     /// [`AuditLog`]: crate::entity::audit::AuditLog
-    /// [`pattern`]: Self::pattern
+    /// [`fusion`]: Self::fusion
     /// [`redaction`]: Self::redaction
     /// [`manual`]: Self::manual
     pub fn new(
@@ -170,73 +168,6 @@ impl<M: Modality> AuditEvent<M> {
         hasher.raw(&self.confidence.get().to_le_bytes());
         self.kind.hash_into(&mut hasher);
         hasher.finish()
-    }
-
-    /// A recognition event from a pattern or dictionary recognizer's match.
-    ///
-    /// The `source` recognizer's `rule` matched `label` at `location`.
-    pub fn pattern(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        label: impl Into<LabelRef>,
-        location: M::Location,
-        rule: PatternRule,
-    ) -> Self {
-        let label = label.into();
-        Self::new(
-            source,
-            confidence,
-            Pattern {
-                label,
-                location,
-                rule,
-            },
-        )
-    }
-
-    /// A recognition event from a model or NER recognizer's match.
-    ///
-    /// The `source` recognizer matched `label` at `location` with `model`.
-    pub fn model(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        label: impl Into<LabelRef>,
-        location: M::Location,
-        model: ModelId,
-    ) -> Self {
-        let label = label.into();
-        Self::new(
-            source,
-            confidence,
-            Model {
-                label,
-                location,
-                model,
-            },
-        )
-    }
-
-    /// A flagged item: the `source` format labels an item of hidden content of
-    /// kind `content` at `location`, flagged as a redaction subject. Unlike
-    /// [`pattern`](Self::pattern) / [`model`](Self::model), the item is present
-    /// rather than matched, so it carries its own event kind.
-    pub fn flagged(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        label: impl Into<LabelRef>,
-        location: M::Location,
-        content: HiddenContentKind,
-    ) -> Self {
-        let label = label.into();
-        Self::new(
-            source,
-            confidence,
-            Flagged {
-                label,
-                location,
-                content,
-            },
-        )
     }
 
     /// A fusion event combining several detections of one finding into one at

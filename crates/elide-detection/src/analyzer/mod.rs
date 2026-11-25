@@ -338,8 +338,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::entity::audit::PatternRule;
-    use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
     use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -407,16 +407,18 @@ mod tests {
         let label = LabelRef::new(label.to_owned());
         let location = TextLocation::inline(loc.0..loc.1);
         let confidence = Confidence::new(0.9).unwrap();
-        Entity::pattern(
+        Entity::new(Birth::new(
             "mock",
             confidence,
-            label.clone(),
-            location,
-            PatternRule {
-                name: label.as_str().into(),
-                ..PatternRule::default()
-            },
-        )
+            Pattern::new(
+                label.clone(),
+                location,
+                PatternRule {
+                    name: label.as_str().into(),
+                    ..PatternRule::default()
+                },
+            ),
+        ))
     }
 
     fn scope_for(ids: &[&str]) -> Scope {

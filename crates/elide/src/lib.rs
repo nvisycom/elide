@@ -40,9 +40,8 @@ pub use elide_core::{Component, Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_engine::{
     AnalyzedDocument, And, ArtifactSet, AsDocuments, Change, Document, Edit, Narrowed,
-    Orchestrator, Part, PartId, ProposedEdit, Protect, RegistryDocumentExt, Report, RequireActor,
-    RequireReason, Restorer, Review, ReviewPart, ReviewPolicy, Seal, SealKey, Sealable,
-    StrippedItem,
+    Orchestrator, Part, PartId, ProposedEdit, Protect, RegistryDocumentExt, Report, RequireReason,
+    Restorable, Restorer, Review, ReviewPart, ReviewPolicy, StrippedItem,
 };
 
 pub mod prelude;

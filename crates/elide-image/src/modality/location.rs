@@ -159,7 +159,8 @@ mod tests {
     use super::*;
     use crate::primitive::{Dimensions, Point};
 
-    fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
+    /// A location over the box at `(x, y)` sized `w` by `h`.
+    fn loc([x, y, w, h]: [f64; 4]) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin(
             Point::new(x, y),
             Dimensions::new(w, h),
@@ -168,8 +169,8 @@ mod tests {
 
     #[test]
     fn overlaps_requires_same_page() {
-        let a = loc(0.0, 0.0, 10.0, 10.0);
-        let b = loc(5.0, 5.0, 10.0, 10.0);
+        let a = loc([0.0, 0.0, 10.0, 10.0]);
+        let b = loc([5.0, 5.0, 10.0, 10.0]);
         assert!(a.overlaps(&b));
         let b_page2 = b.with_page(2);
         assert!(!a.overlaps(&b_page2));
@@ -177,34 +178,34 @@ mod tests {
 
     #[test]
     fn a_polygon_covers_by_its_shape_not_its_box() {
-        let triangle = loc(0.0, 0.0, 10.0, 10.0).with_polygon(Polygon::new(vec![
+        let triangle = loc([0.0, 0.0, 10.0, 10.0]).with_polygon(Polygon::new(vec![
             Point::new(0.0, 0.0),
             Point::new(10.0, 0.0),
             Point::new(0.0, 10.0),
         ]));
-        assert!(triangle.covers(&loc(1.0, 1.0, 2.0, 2.0)));
-        assert!(!triangle.covers(&loc(7.0, 1.0, 2.0, 3.0)));
-        assert!(loc(0.0, 0.0, 10.0, 10.0).covers(&loc(7.0, 1.0, 2.0, 3.0)));
+        assert!(triangle.covers(&loc([1.0, 1.0, 2.0, 2.0])));
+        assert!(!triangle.covers(&loc([7.0, 1.0, 2.0, 3.0])));
+        assert!(loc([0.0, 0.0, 10.0, 10.0]).covers(&loc([7.0, 1.0, 2.0, 3.0])));
         assert!(triangle.covers(&triangle));
         assert!(
             !triangle
                 .clone()
                 .with_page(2)
-                .covers(&loc(1.0, 1.0, 2.0, 2.0))
+                .covers(&loc([1.0, 1.0, 2.0, 2.0]))
         );
     }
 
     #[test]
     fn span_cmp_orders_by_area() {
-        let small = loc(0.0, 0.0, 2.0, 2.0);
-        let large = loc(0.0, 0.0, 10.0, 10.0);
+        let small = loc([0.0, 0.0, 2.0, 2.0]);
+        let large = loc([0.0, 0.0, 10.0, 10.0]);
         assert_eq!(small.span_cmp(&large), Ordering::Less);
     }
 
     #[test]
     fn position_cmp_is_reading_order() {
-        let top = loc(50.0, 0.0, 5.0, 5.0);
-        let bottom_left = loc(0.0, 100.0, 5.0, 5.0);
+        let top = loc([50.0, 0.0, 5.0, 5.0]);
+        let bottom_left = loc([0.0, 100.0, 5.0, 5.0]);
         // Top row sorts before a lower row regardless of x.
         assert_eq!(top.position_cmp(&bottom_left), Ordering::Less);
     }

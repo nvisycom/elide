@@ -1,6 +1,7 @@
 //! [`Languages`]: a borrowed view over a call's asserted + detected languages.
 
 use crate::entity::Entity;
+use crate::entity::audit::Annotation;
 use crate::modality::Modality;
 use crate::primitive::{LanguageClaim, LanguageTag};
 
@@ -133,14 +134,19 @@ impl<'a> Languages<'a> {
         // monolingual fallback.
         let coverage_only = self.asserted.len() >= 2;
         for entity in entities.iter_mut() {
-            let Some(range) = entity.recognized_range.clone() else {
+            let Some(range) = entity.recognized_range().cloned() else {
                 continue;
             };
             let resolved = ranked.iter().find(|claim| match claim.span.as_ref() {
                 Some(span) => range.start >= span.start && range.end <= span.end,
                 None => !coverage_only,
             });
-            entity.language = resolved.map(|claim| claim.language.clone());
+            if let Some(claim) = resolved
+                && entity.language() != Some(&claim.language)
+            {
+                let annotation = Annotation::new().with_language(claim.language.clone());
+                entity.annotate("languages", annotation);
+            }
         }
     }
 }
@@ -150,7 +156,9 @@ mod tests {
     use std::ops::Range;
 
     use super::*;
-    use crate::modality::text::Text;
+    use crate::entity::audit::{Pattern, PatternRule};
+    use crate::entity::{Birth, LabelRef};
+    use crate::modality::text::{Text, TextLocation};
     use crate::primitive::{Confidence, LanguageClaim, LanguageTag};
 
     fn tag(s: &str) -> LanguageTag {
@@ -158,13 +166,18 @@ mod tests {
     }
 
     fn entity(label: &str, range: Range<usize>) -> Entity<Text> {
-        let mut e = Entity::<Text>::fixture(label, (range.start, range.end));
-        e.recognized_range = Some(range);
-        e
+        let location = TextLocation::inline(range.clone());
+        let label = LabelRef::new(label.to_owned());
+        let found =
+            Pattern::new(label, location, PatternRule::default()).with_recognized_range(range);
+        Entity::new(Birth::new("t", Confidence::MAX, found))
     }
 
     fn lang_of(e: &Entity<Text>) -> Option<String> {
-        e.language.as_ref().map(|l| l.primary_subtag().to_owned())
+        e.state
+            .language
+            .as_ref()
+            .map(|l| l.primary_subtag().to_owned())
     }
 
     #[test]

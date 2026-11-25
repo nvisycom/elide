@@ -29,12 +29,13 @@ pub use self::analysis::{AnalyzedDocument, ArtifactSet, Part, Report, StrippedIt
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
 use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
+use self::review::Reviewer;
 pub use self::review::{
-    And, Change, Edit, Narrowed, ProposedEdit, Protect, RequireActor, RequireReason, Review,
-    ReviewPart, ReviewPolicy,
+    And, Change, Edit, Narrowed, ProposedEdit, Protect, RequireReason, Review, ReviewPart,
+    ReviewPolicy,
 };
 use self::traversal::{Analyze, PartVisitor, Read, Redact, Walk};
-pub use self::wire::{Restorer, Seal, SealKey, Sealable};
+pub use self::wire::{Restorable, Restorer};
 
 /// Drives detection and redaction across a set of documents, part by part.
 ///
@@ -144,7 +145,7 @@ impl Orchestrator {
     }
 
     /// Set the [`ReviewPolicy`] that decides which edits [`review`] accepts:
-    /// the standard [`Protect`], [`RequireActor`], and [`RequireReason`],
+    /// the standard [`Protect`] and [`RequireReason`],
     /// combined with [`and`](ReviewPolicy::and), or a policy of the
     /// deployment's own.
     ///
@@ -154,15 +155,6 @@ impl Orchestrator {
     #[must_use]
     pub fn with_review_policy(mut self, policy: impl ReviewPolicy + 'static) -> Self {
         self.review_policy = Arc::new(policy);
-        self
-    }
-
-    /// Seal with `key`, and accept only seals keyed with it, when the
-    /// [`restorer`](Self::restorer) [seals](Restorer::seal) a report, review, or
-    /// artifact set and reads it back.
-    #[must_use]
-    pub fn with_seal_key(mut self, key: SealKey) -> Self {
-        self.restorer.set_seal_key(key);
         self
     }
 
@@ -271,10 +263,10 @@ impl Orchestrator {
         self.restorer.register::<M>();
     }
 
-    /// The registered pipelines, keyed by modality [`TypeId`], for the part-walk
-    /// phases to classify and drive streams.
-    pub(crate) fn pipelines(&self) -> impl Iterator<Item = (&TypeId, &Box<dyn ErasedPipeline>)> {
-        self.pipelines.iter()
+    /// The registered pipelines, for the part-walk phases to classify and
+    /// drive streams.
+    pub(crate) fn pipelines(&self) -> impl Iterator<Item = &dyn ErasedPipeline> {
+        self.pipelines.values().map(Box::as_ref)
     }
 
     /// The pipeline for `modality`, or `None` when none is registered for it.
@@ -473,16 +465,18 @@ impl Orchestrator {
         Ok(report)
     }
 
-    /// Apply a reviewer's `review` to `report`, under the orchestrator's
+    /// Apply `review`, made by `by`, to `report`, under the orchestrator's
     /// [`ReviewPolicy`].
     ///
-    /// Each edit is recorded on the entities it touches as a `Manual` audit
-    /// event naming who made it and why, and sets what it changes: an include
-    /// adds an entity, a relabel or relocation changes the entity's label or
-    /// location, and a suppression leaves the entity unredacted. Edits apply in
-    /// order, each checked against the policy as the edits before it left the
-    /// part. The review applies whole or not at all: a refused edit leaves the
-    /// report as it was.
+    /// `by` is the reviewer as the deployment authenticated them: a review
+    /// carries what was decided and why, never who decided it, so it cannot
+    /// speak for anyone else. Each edit is recorded on the entities it touches
+    /// as a `Manual` audit event naming `by` and the edit's reason, and sets
+    /// what it changes: an include adds an entity, a relabel or relocation
+    /// changes the entity's label or location, and a suppression leaves the
+    /// entity unredacted. Edits apply in order, each checked against the
+    /// policy as the edits before it left the part. The review applies whole
+    /// or not at all: a refused edit leaves the report as it was.
     ///
     /// # Errors
     ///
@@ -491,11 +485,15 @@ impl Orchestrator {
     /// [`NotFound`](elide_core::ErrorKind::NotFound) when an edit names an
     /// entity its part does not hold, or a part the report holds as another
     /// modality; [`MalformedInput`](elide_core::ErrorKind::MalformedInput) when
-    /// an include reuses an entity id or the review changes nothing;
+    /// `by` is blank or an include reuses an entity id;
     /// [`Refused`](elide_core::ErrorKind::Refused) when the policy refuses an
     /// edit.
-    pub fn review(&self, report: &mut Report, review: &Review) -> Result<()> {
-        review.apply(report, self.review_policy.as_ref())
+    pub fn review(&self, report: &mut Report, review: &Review, by: &str) -> Result<()> {
+        let reviewer = Reviewer {
+            policy: self.review_policy.as_ref(),
+            by,
+        };
+        review.apply(report, reviewer)
     }
 
     /// Record on every entity of `report` the operator [`anonymize_with`] will
@@ -594,9 +592,9 @@ impl Orchestrator {
     /// rebuild a serialized [`Report`], [`Review`], or [`ArtifactSet`] against
     /// exactly the modalities it registers pipelines for.
     ///
-    /// The round trip for a review layer: [`analyze`], store the report with
-    /// its seal, ship it out to show, read the reviewer's [`Review`] back
-    /// against its own seal, then [`review`] and [`anonymize_with`] the report.
+    /// The round trip for a review layer: [`analyze`], store the report and
+    /// keep its [digest](Report::digest), read it back against that digest,
+    /// [`review`] it with the reviewer's [`Review`], and [`anonymize_with`] it.
     /// Persist the [`artifacts`] the same way to hand to [`re_analyze`].
     ///
     /// [`analyze`]: Self::analyze

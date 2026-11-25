@@ -1,14 +1,12 @@
 //! [`FakeGenerator`]: a [`Generator`] that mints believable, label-aware values.
 
-use std::str::FromStr;
-
 use elide_core::entity::Entity;
 use elide_core::modality::text::TextReplacement;
 use elide_core::modality::{Modality, TextRedactable};
 use elide_core::primitive::LanguageTag;
 use elide_core::redaction::Generator;
 
-use crate::synth::{fake_value, fallback_token};
+use crate::synth::Draw;
 
 /// A [`Generator`] of believable surrogates, aware of locale and label.
 ///
@@ -37,8 +35,7 @@ use crate::synth::{fake_value, fallback_token};
 /// [`Generator`]: elide_core::redaction::Generator
 #[derive(Debug, Clone)]
 pub struct FakeGenerator {
-    default_language: LanguageTag,
-    seed: u64,
+    draw: Draw,
 }
 
 impl FakeGenerator {
@@ -46,8 +43,7 @@ impl FakeGenerator {
     /// tag, with an unsalted RNG.
     pub fn new() -> Self {
         Self {
-            default_language: LanguageTag::from_str("en").expect("en is BCP-47"),
-            seed: 0,
+            draw: Draw::default(),
         }
     }
 
@@ -55,7 +51,7 @@ impl FakeGenerator {
     /// Initial value is `"en"`.
     #[must_use]
     pub fn with_default_language(mut self, language: LanguageTag) -> Self {
-        self.default_language = language;
+        self.draw.default_language = language;
         self
     }
 
@@ -63,7 +59,7 @@ impl FakeGenerator {
     /// produce the same fake value for the same entity.
     #[must_use]
     pub fn with_seed(mut self, seed: u64) -> Self {
-        self.seed = seed;
+        self.draw.seed = seed;
         self
     }
 
@@ -71,8 +67,9 @@ impl FakeGenerator {
     /// opaque token when the label is outside the fake-data catalogue (still
     /// consistent per entity, so coreferent mentions match).
     fn value(&self, entity: &Entity<impl Modality>, original: &str) -> String {
-        fake_value(entity, original, self.seed, &self.default_language)
-            .unwrap_or_else(|| fallback_token(entity, self.seed))
+        self.draw
+            .value(entity, original)
+            .unwrap_or_else(|| self.draw.fallback_token(entity))
     }
 }
 
@@ -90,14 +87,21 @@ impl<M: TextRedactable> Generator<M> for FakeGenerator {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::{EntityCoRef, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, EntityCoRef, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
+    use elide_core::primitive::Confidence;
     use uuid::Uuid;
 
     use super::*;
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
-        let e = Entity::new(LabelRef::new(label), TextLocation::inline(0..5));
+        let location = TextLocation::inline(0..5);
+        let e = Entity::new(Birth::new(
+            "test",
+            Confidence::MAX,
+            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        ));
         match coref {
             Some(c) => e.with_coref(EntityCoRef::new(c.to_owned())),
             None => e,

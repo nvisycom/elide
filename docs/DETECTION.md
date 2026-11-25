@@ -256,8 +256,9 @@ A correction that can leave content unredacted (a suppression, a relabel, a
 relocation) narrows the redaction, and a caller's review policy decides who
 may make one: it can protect labels no correction may narrow, and require a
 reason. An inclusion only adds to what is hidden, though the policy still
-sees it, and can require it be attributed. The policy reads the names a review carries;
-authenticating the reviewer who sent it is the caller's.
+sees it. A review carries what was decided and why, not who decided it: the
+caller applies it as the reviewer it authenticated, and that actor is what
+the policy reads and the trail records.
 
 ## 8. Reconciliation and Conflict Resolution
 
@@ -347,7 +348,14 @@ pipeline. Each entity carries:
 - a confidence value derived from the contributing recognizers;
 - a provenance trail naming every recognizer that contributed evidence, what
   evidence it contributed, the calibration and fusion that reshaped the score,
-  and the before-and-after confidence at each step.
+  where it was placed and what was learned about it (its language, its
+  coreference cluster), and the before-and-after confidence at each step.
+
+The trail is not a log kept beside the entity: it is the entity. Its label,
+location, confidence, and everything else it says are read from the trail,
+along the line from its birth to its tip, so nothing about an entity can
+change without an event saying so, and an entity whose stated fields disagree
+with its trail is refused when it is read back.
 
 The provenance trail is what makes detection an _evidentiary_ operation rather
 than an opaque transformation. The set is serializable, inspectable, and

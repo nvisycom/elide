@@ -132,7 +132,7 @@ mod tests {
     use super::*;
 
     fn render(template: &str, value: &str) -> TextReplacement {
-        let entity = Entity::<Text>::fixture("EMAIL", (0, value.len()))
+        let entity = Entity::<Text>::fixture("EMAIL", 0..value.len())
             .with_coref(EntityCoRef::new("c1".to_owned()));
         Replace::new(template).render(&entity, value)
     }

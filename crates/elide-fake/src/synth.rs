@@ -12,6 +12,7 @@
 //! [`Generator`]: elide_core::redaction::Generator
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::str::FromStr;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
@@ -40,31 +41,45 @@ fn rng_for(seed: u64, identity: Identity<'_>) -> SmallRng {
     SmallRng::seed_from_u64(hasher.finish())
 }
 
-/// Mint a fake value for `entity`, reading `original` (the source text, for
-/// pattern-preserving structured labels). `None` when the label is outside the
-/// fake-data catalogue, so the caller falls back. `seed` salts the RNG,
-/// `default_language` is the locale used when the entity carries no tag.
-pub(crate) fn fake_value<M: Modality>(
-    entity: &Entity<M>,
-    original: &str,
-    seed: u64,
-    default_language: &LanguageTag,
-) -> Option<String> {
-    let locale = locale_for(entity.language(), default_language);
-    let mut rng = rng_for(seed, Identity::from(entity));
-    Context::new(locale, entity.label().as_str(), original).generate(&mut rng)
+/// What every fake value is drawn under: a seed that salts the per-entity RNG,
+/// and the locale for an entity that carries no language tag.
+#[derive(Debug, Clone)]
+pub(crate) struct Draw {
+    pub(crate) seed: u64,
+    pub(crate) default_language: LanguageTag,
 }
 
-/// A deterministic opaque UUIDv4 token for `entity`, the fallback when a label
-/// has no believable fake. Seeded from the same `(seed, identity)`, so repeated
-/// calls, and coreferent mentions, mint the *same* token, upholding the
-/// consistency guarantee for unsupported labels too.
-pub(crate) fn fallback_token<M: Modality>(entity: &Entity<M>, seed: u64) -> String {
-    let mut rng = rng_for(seed, Identity::from(entity));
-    let mut bytes = [0u8; 16];
-    for b in &mut bytes {
-        let n: u32 = (0..256u32).fake_with_rng(&mut rng);
-        *b = n as u8;
+impl Default for Draw {
+    /// An unsalted RNG, defaulting to English.
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            default_language: LanguageTag::from_str("en").expect("en is BCP-47"),
+        }
     }
-    Builder::from_random_bytes(bytes).into_uuid().to_string()
+}
+
+impl Draw {
+    /// Mint a fake value for `entity`, reading `original` (the source text,
+    /// for pattern-preserving structured labels). `None` when the label is
+    /// outside the fake-data catalogue, so the caller falls back.
+    pub(crate) fn value<M: Modality>(&self, entity: &Entity<M>, original: &str) -> Option<String> {
+        let locale = locale_for(entity.language(), &self.default_language);
+        let mut rng = rng_for(self.seed, Identity::from(entity));
+        Context::new(locale, entity.label().as_str(), original).generate(&mut rng)
+    }
+
+    /// A deterministic opaque UUIDv4 token for `entity`, the fallback when a
+    /// label has no believable fake. Seeded from the same `(seed, identity)`,
+    /// so repeated calls, and coreferent mentions, mint the *same* token,
+    /// upholding the consistency guarantee for unsupported labels too.
+    pub(crate) fn fallback_token<M: Modality>(&self, entity: &Entity<M>) -> String {
+        let mut rng = rng_for(self.seed, Identity::from(entity));
+        let mut bytes = [0u8; 16];
+        for b in &mut bytes {
+            let n: u32 = (0..256u32).fake_with_rng(&mut rng);
+            *b = n as u8;
+        }
+        Builder::from_random_bytes(bytes).into_uuid().to_string()
+    }
 }

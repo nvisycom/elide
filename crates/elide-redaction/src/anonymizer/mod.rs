@@ -63,7 +63,7 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send +
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> elide_core::Result<()> {
 /// let mut document = TextDoc::new("write to alice@example.com");
-/// let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (9, 26))];
+/// let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", 9..26)];
 ///
 /// Anonymizer::<Text>::new()
 ///     .with_catalog(LabelCatalog::with_builtins())
@@ -474,7 +474,7 @@ mod tests {
 
     use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{
-        Attribution, AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch,
+        Attribution, AuditEvent, AuditKind, Flagged, Manual, ManualIntent, RuleMatch,
     };
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
@@ -484,7 +484,7 @@ mod tests {
     use crate::operators::{Keep, Mask, Remove, Replace};
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
-        Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())
+        Entity::fixture_conf(label, start..end, Confidence::new(0.9).unwrap())
     }
 
     /// `pick` records one [`Selection`] event per entity, naming the winning
@@ -679,7 +679,7 @@ mod tests {
         let mut suppressed = entity("NAME", 0, 5);
         suppressed.record_manual(
             Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
-            None,
+            "reviewer",
         );
         let wrote = anonymizer
             .anonymize(&mut target, &mut [suppressed], &scope)
@@ -728,7 +728,7 @@ mod tests {
         suppressed.record_manual(
             Manual::new(ManualIntent::Suppress, suppressed.location().clone())
                 .with_attribution(Attribution::freeform("false positive")),
-            None,
+            "reviewer",
         );
         let mut entities = vec![live, suppressed];
 
@@ -804,7 +804,7 @@ mod tests {
         let suppressed_id = suppressed.id();
         suppressed.record_manual(
             Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
-            None,
+            "reviewer",
         );
         let mut entities = vec![live, suppressed];
 
@@ -846,7 +846,7 @@ mod tests {
         let (a_id, b_id, bridge_id) = (live_a.id(), live_b.id(), bridge.id());
         bridge.record_manual(
             Manual::new(ManualIntent::Suppress, bridge.location().clone()),
-            None,
+            "reviewer",
         );
         let mut entities = vec![live_a, bridge, live_b];
 
@@ -875,12 +875,14 @@ mod tests {
     async fn a_finding_inside_a_kept_flagged_entity_takes_all_of_it() {
         let mut target = TextDoc::new("ask bob by Friday");
         let mut comment = entity("COMMENT", 0, 17);
-        comment.record(AuditEvent::flagged(
+        comment.record(AuditEvent::new(
             "test",
             comment.confidence(),
-            "COMMENT",
-            comment.location().clone(),
-            HiddenContentKind::Collaboration,
+            Flagged::new(
+                "COMMENT",
+                comment.location().clone(),
+                HiddenContentKind::Collaboration,
+            ),
         ));
         let mut entities = vec![comment, entity("NAME", 4, 7)];
         let anonymizer = Anonymizer::new()

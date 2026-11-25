@@ -19,7 +19,7 @@ use hipstr::HipStr;
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
 use crate::backend::{LlmBackend, LlmRequest};
-use crate::modality::LlmModality;
+use crate::modality::{Lifter, LlmModality};
 use crate::prompt::{DefaultPrompt, Prompt};
 
 const TARGET: &str = "elide_llm::recognition";
@@ -125,12 +125,8 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
         let prompt = self.prompt.build(subject, ctx)?;
         let response = self.backend.call(request(&prompt, subject, ctx)).await?;
         let candidates = response.candidates.entities.len();
-        let entities = B::Modality::lift(
-            response.candidates,
-            subject.data(),
-            &self.name,
-            &response.model,
-        );
+        let lifter = Lifter::new(&self.name, &response.model);
+        let entities = B::Modality::lift(response.candidates, subject.data(), &lifter);
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
@@ -164,12 +160,8 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
             .into_iter()
             .zip(subjects)
             .map(|(response, subject)| {
-                B::Modality::lift(
-                    response.candidates,
-                    subject.data(),
-                    &self.name,
-                    &response.model,
-                )
+                let lifter = Lifter::new(&self.name, &response.model);
+                B::Modality::lift(response.candidates, subject.data(), &lifter)
             })
             .collect();
         tracing::debug!(

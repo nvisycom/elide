@@ -83,20 +83,20 @@ and this project adheres to
   (`entities`, `entity`, `suppressed`, `unsuppressed`)
 - A reviewer's decisions are a `Review`, made against one version of a
   report and applied by `Orchestrator::review`: `include`, `relabel`,
-  `relocate`, `suppress`, and `suppress_within`, each attributed to its `by`
-  and `because` and recorded as a `Manual` audit event naming what it set.
-  The review applies whole or not at all, only to the report version it was
-  made against, so it cannot be applied twice or replace a newer one; a
-  review that would change nothing is refused. A region suppression spares
-  what the region covers, by span, by raw bytes, or by rendered boxes, so a
+  `relocate`, `suppress`, and `suppress_within`, each with its `because`.
+  `review` takes the actor, the reviewer as the deployment authenticated
+  them, and records each edit as a `Manual` audit event naming them and what
+  it set. The review applies whole or not at all, only to the report version
+  it was made against, so a review that changes the report cannot be applied
+  twice or replace a newer one. A region suppression spares what the region
+  covers, by span, by raw bytes, or by rendered boxes, so a
   reviewer's mark can clear what it encloses
 - A `ReviewPolicy` decides which edits a review may make, shown each as a
   `ProposedEdit`: the decision it records, the entities whose redaction it
   narrows, and its actor and reason. The standard policies each check one
-  thing, `Protect` (labels no edit may suppress, relabel, or relocate),
-  `RequireActor`, and `RequireReason` (to
-  narrow), and combine with `and`; a closure is a policy too. A refused review
-  fails with `ErrorKind::Refused`
+  thing, `Protect` (labels no edit may suppress, relabel, or relocate) and
+  `RequireReason` (to narrow), and combine with `and`; a closure is a policy
+  too. A refused review fails with `ErrorKind::Refused`
 - `Orchestrator::read` reads the data at locations in any part of a document,
   embedded ones included, such as what each entity covers before
   `anonymize_with` changes it
@@ -110,23 +110,30 @@ and this project adheres to
   a `Report` is `#[must_use]`, so dropping that record is a warning
 - Audit events record what each decision set: a recognition its label and
   location, a fusion the merged location, a redaction the location it wrote
-- An `Entity` is born from its first event (`Entity::pattern`, `model`,
-  `flagged`, `included`), so its label and location are the event's; it is
-  read through accessors (`label()`, `location()`, `confidence()`, `audit()`,
-  …) and changes only through what records it (`record`, `record_manual`,
-  `fuse`), where every recorded decision takes effect, or through `lift`,
-  which moves it to another coordinate space for the same content
-- A report, review, or artifact set reads back only against a `Seal`, plain
-  data made when it is written by `Restorer::seal`. The restorer's
-  configuration chooses the scheme, for sealing and checking alike: with a
-  `SealKey` set by `with_seal_key`, a MAC the carrier cannot compute, and only
-  a MAC is accepted; without one, an unkeyed digest kept where the carrier
-  cannot write, and only a digest is accepted. A seal names
-  the kind of value it covers; a report's covers its id and every entity's
-  fields and audit trail, by part and entity id; a review's the report version
-  it was made against and every edit; an artifact set's every artifact as
-  serialized. `Restorer::restore` checks it, and `restore_unsealed` skips the
-  check by name
+- An `Entity` is its audit trail: everything it says (label, location,
+  confidence, recognized range, language, coreference, suppression, the
+  operator picked and applied) is read along the trail's `line`, from its
+  birth to its tip, through its own history and not the ones a fusion
+  absorbed. It is born from a `Birth`: who found it, how sure they are, and
+  what they found, a recognition (`Pattern`, `Model`, `Flagged`) or a
+  reviewer's `Include` (`Entity::new(Birth::new(source, confidence, kind))`),
+  read
+  through accessors, and changes only by recording an event (`record`,
+  `record_manual`, `fuse`, `annotate`). A recognition records where it
+  matched in the text it read (`recognized_range` on `Pattern` and `Model`).
+  What becomes known about an entity after its birth is an `Annotation`
+  event: a chunk's finding placed in its document (`lift`), a window's range
+  shifted into the full text, its language, or its coreference cluster.
+  `Entity::from_trail` rebuilds an entity from its trail, and one read back
+  whose fields disagree with its trail is refused. `Entity::digest` is its id
+  and trail tip
+- A report, review, or artifact set reads back only against the `digest` it
+  had when it was written, kept where its carrier cannot change it.
+  A digest names the kind of value it covers; a report's covers its id and
+  every entity's fields and audit trail, by part and entity id; a review's
+  the report version it was made against and every edit; an artifact set's
+  every artifact as serialized. `Restorer::restore` checks it, and
+  `restore_unchecked` skips the check by name
 - Every `Report` has an id, a UUIDv7 minted when it is created and kept across
   reviews and round trips, so two reports with the same findings never share
   a digest

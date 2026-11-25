@@ -6,11 +6,12 @@
 use std::any::{Any, TypeId};
 
 use elide_codec::{FlaggedItem, TypedStream};
-use elide_core::entity::Entity;
-use elide_core::entity::audit::Attribution;
+use elide_core::entity::audit::{Attribution, Flagged};
+use elide_core::entity::{Birth, Entity};
 use elide_core::modality::Modality;
 use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::Text;
+use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
 use elide_core::redaction::{Disposition, HiddenContentPolicy, Operator};
 use elide_core::{Error, Result};
@@ -102,12 +103,11 @@ fn selects<M: Modality>(policy: HiddenContentPolicy, scope: &Scope, item: &Flagg
 /// A flagged item is present or it is not, nothing probabilistic to weigh, so
 /// the entity carries [`Confidence::MAX`].
 fn entity<M: Modality>(source: &str, item: FlaggedItem<M>) -> Entity<M> {
-    Entity::flagged(
+    Entity::new(Birth::new(
         source.to_owned(),
-        item.label.clone(),
-        item.location.clone(),
-        item.kind,
-    )
+        Confidence::MAX,
+        Flagged::new(item.label.clone(), item.location.clone(), item.kind),
+    ))
 }
 
 #[cfg(test)]

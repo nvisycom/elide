@@ -1,6 +1,7 @@
 //! [`FuseLayer`]: fuse each cluster of the same finding into one entity.
 
 use elide_core::entity::Entity;
+use elide_core::entity::audit::Fusion;
 use elide_core::modality::{Modality, ModalityLocation};
 
 use super::group::{GroupPredicate, SameLabel};
@@ -136,7 +137,11 @@ impl<G, S: Scoring> FuseLayer<G, S> {
         let confidence = absorbed.iter().fold(base.confidence(), |pooled, other| {
             self.scoring.score(pooled, other.confidence())
         });
-        base.fuse(&mut absorbed, self.scoring.name(), confidence, location);
+        base.fuse(
+            &mut absorbed,
+            Fusion::new(self.scoring.name(), location),
+            confidence,
+        );
         slots[base_index] = Some(base);
         (absorbed, rest)
     }
@@ -144,30 +149,30 @@ impl<G, S: Scoring> FuseLayer<G, S> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditKind, PatternRule};
-    use elide_core::entity::{Entity, LabelRef};
+    use std::ops::Range;
+
+    use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::{Confidence, UnitBoundingBox};
 
     use super::*;
 
-    fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
-        let loc = TextLocation::inline(start..end);
+    fn entity(label: &str, span: Range<usize>, conf: f32) -> Entity<Text> {
+        let loc = TextLocation::inline(span);
         let confidence = Confidence::new(conf).unwrap();
-        Entity::pattern(
+        Entity::new(Birth::new(
             "t",
             confidence,
-            LabelRef::new(label),
-            loc,
-            PatternRule::default(),
-        )
+            Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+        ))
     }
 
     /// Same-label overlapping findings fuse into one entity spanning their
     /// union, with the pooled confidence.
     #[test]
     fn fuses_same_label_into_the_union() {
-        let entities = vec![entity("EMAIL", 0, 10, 0.9), entity("EMAIL", 6, 25, 0.6)];
+        let entities = vec![entity("EMAIL", 0..10, 0.9), entity("EMAIL", 6..25, 0.6)];
         let out = FuseLayer::max().apply(entities);
         assert_eq!(out.kept.len(), 1);
         let fused = &out.kept[0];
@@ -181,7 +186,7 @@ mod tests {
     /// `NoisyOrConfidence` accumulates: two agreeing 0.6 witnesses → 0.84.
     #[test]
     fn noisy_or_accumulates() {
-        let entities = vec![entity("EMAIL", 0, 10, 0.6), entity("EMAIL", 0, 10, 0.6)];
+        let entities = vec![entity("EMAIL", 0..10, 0.6), entity("EMAIL", 0..10, 0.6)];
         let out = FuseLayer::noisy_or().apply(entities);
         assert_eq!(out.kept.len(), 1);
         assert!((out.kept[0].confidence().get() - 0.84).abs() < 1e-5);
@@ -192,9 +197,9 @@ mod tests {
     #[test]
     fn noisy_or_pools_a_cluster_of_three() {
         let entities = vec![
-            entity("EMAIL", 0, 10, 0.6),
-            entity("EMAIL", 0, 10, 0.6),
-            entity("EMAIL", 0, 10, 0.6),
+            entity("EMAIL", 0..10, 0.6),
+            entity("EMAIL", 0..10, 0.6),
+            entity("EMAIL", 0..10, 0.6),
         ];
         let out = FuseLayer::noisy_or().apply(entities);
         assert_eq!(out.kept.len(), 1);
@@ -210,9 +215,9 @@ mod tests {
     #[test]
     fn a_chained_cluster_fuses_into_one() {
         let entities = vec![
-            entity("EMAIL", 0, 10, 0.9),
-            entity("EMAIL", 8, 18, 0.8),
-            entity("EMAIL", 16, 26, 0.7),
+            entity("EMAIL", 0..10, 0.9),
+            entity("EMAIL", 8..18, 0.8),
+            entity("EMAIL", 16..26, 0.7),
         ];
         let out = FuseLayer::max().apply(entities);
         assert_eq!(out.kept.len(), 1);
@@ -225,9 +230,9 @@ mod tests {
     #[test]
     fn a_fusion_joins_every_member_trail_in_one_event() {
         let entities = vec![
-            entity("EMAIL", 0, 10, 0.9),
-            entity("EMAIL", 0, 10, 0.8),
-            entity("EMAIL", 0, 10, 0.7),
+            entity("EMAIL", 0..10, 0.9),
+            entity("EMAIL", 0..10, 0.8),
+            entity("EMAIL", 0..10, 0.7),
         ];
         let out = FuseLayer::max().apply(entities);
         let audit = out.kept[0].audit();
@@ -239,19 +244,6 @@ mod tests {
         assert_eq!(fusions.len(), 1);
         assert_eq!(fusions[0].parents().len(), 3);
         assert!(audit.verify().is_ok());
-    }
-
-    /// Members built without provenance (empty trails) fuse into a trail that
-    /// still verifies: the fusion event names no parent it does not have.
-    #[test]
-    fn fusing_entities_with_no_trail_verifies() {
-        let entities: Vec<Entity<Text>> = vec![
-            Entity::new(LabelRef::new("EMAIL"), TextLocation::inline(0..10)),
-            Entity::new(LabelRef::new("EMAIL"), TextLocation::inline(5..15)),
-        ];
-        let out = FuseLayer::max().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        assert!(out.kept[0].audit().verify().is_ok());
     }
 
     /// Groups every finding of a label, wherever it is.
@@ -278,13 +270,11 @@ mod tests {
             let location =
                 TextLocation::rendered(0..5, page, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]);
             let confidence = Confidence::new(conf).unwrap();
-            Entity::pattern(
+            Entity::new(Birth::new(
                 "t",
                 confidence,
-                LabelRef::new("EMAIL"),
-                location,
-                PatternRule::default(),
-            )
+                Pattern::new(LabelRef::new("EMAIL"), location, PatternRule::default()),
+            ))
         };
         let out = FuseLayer::noisy_or().with_grouping(AnyWhere).apply(vec![
             on_page(1, 0.9),
@@ -305,7 +295,7 @@ mod tests {
     /// cross-label overlap alone.
     #[test]
     fn fusion_ignores_different_labels() {
-        let entities = vec![entity("EMAIL", 0, 10, 0.9), entity("PHONE", 0, 10, 0.8)];
+        let entities = vec![entity("EMAIL", 0..10, 0.9), entity("PHONE", 0..10, 0.8)];
         let out = FuseLayer::max().apply(entities);
         assert_eq!(out.kept.len(), 2);
         assert!(out.dropped.is_empty());

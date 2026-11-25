@@ -85,9 +85,9 @@ async fn a_suppressed_mark_is_not_resolved() -> Result<()> {
     let mut report = included(&part, builtins::PHONE_NUMBER.to_ref(), mark);
     let id = report.part::<Text>(&part)?.entities()[0].id();
     let mut review = Review::new(&report);
-    review.part::<Text>(&part)?.by("reviewer").suppress(id);
+    review.part::<Text>(&part)?.suppress(id);
     let orchestrator = orchestrator(&registry)?;
-    orchestrator.review(&mut report, &review)?;
+    orchestrator.review(&mut report, &review, "reviewer")?;
     let _applied = orchestrator.anonymize_with(&mut document, report).await?;
     assert_eq!(document.document.encode()?.decode()?, SOURCE);
     Ok(())

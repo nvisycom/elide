@@ -6,8 +6,8 @@ use elide_core::modality::{Modality, ModalityLocation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// One reviewer decision about one part of a report: what it changes, who
-/// made it, and why.
+/// One reviewer decision about one part of a report: what it changes, and
+/// why. Who made it is named when the review is applied.
 ///
 /// Built through a [`ReviewPart`](super::ReviewPart), and applied by
 /// [`Orchestrator::review`](crate::Orchestrator::review), which records it on
@@ -26,10 +26,6 @@ pub struct Edit<M: Modality> {
     /// What the edit changes.
     #[serde(flatten)]
     pub change: Change<M>,
-    /// Who made the edit, the audit event's source; `None` records it as
-    /// `"manual"`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub by: Option<String>,
     /// Why the edit was made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub because: Option<Attribution>,
@@ -144,14 +140,9 @@ impl<M: Modality> Change<M> {
 }
 
 impl<M: Modality> Edit<M> {
-    /// The edit's fields, for the review's digest: its change, who made it,
-    /// and why.
+    /// The edit's fields, for the review's digest: its change, and why.
     pub(crate) fn fields(&self, out: &mut Vec<Vec<u8>>) {
         self.change.fields(out);
-        out.push(match &self.by {
-            Some(by) => [&[1], by.as_bytes()].concat(),
-            None => vec![0],
-        });
         out.push(match &self.because {
             Some(because) => [&[1], because.digest().as_bytes().as_slice()].concat(),
             None => vec![0],

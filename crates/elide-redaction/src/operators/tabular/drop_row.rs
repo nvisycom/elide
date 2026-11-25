@@ -41,8 +41,8 @@ impl Operator<Tabular> for DropRow {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::PatternRule;
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::tabular::TabularLocation;
     use elide_core::primitive::Confidence;
 
@@ -51,13 +51,11 @@ mod tests {
 
     fn entity() -> Entity<Tabular> {
         let location = TabularLocation::new(1, 0);
-        Entity::pattern(
+        Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new("PERSON"),
-            location,
-            PatternRule::default(),
-        )
+            Pattern::new(LabelRef::new("PERSON"), location, PatternRule::default()),
+        ))
     }
 
     #[tokio::test]

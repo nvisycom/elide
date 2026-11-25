@@ -184,7 +184,8 @@ impl<M: TextRedactable<Data = TextData>> ReversibleOperator<M> for AesEncrypt {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use elide_core::entity::audit::PatternRule;
+    use elide_core::entity::Birth;
+    use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -193,13 +194,15 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::inline(0..5);
-        Entity::pattern(
+        Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new("email_address"),
-            location,
-            PatternRule::default(),
-        )
+            Pattern::new(
+                LabelRef::new("email_address"),
+                location,
+                PatternRule::default(),
+            ),
+        ))
     }
 
     fn encryptor() -> AesEncrypt {
@@ -274,23 +277,19 @@ mod tests {
 
         let card = {
             let loc = TextLocation::inline(0..5);
-            Entity::<Text>::pattern(
+            Entity::<Text>::new(Birth::new(
                 "t",
                 Confidence::MAX,
-                LabelRef::new("payment_card"),
-                loc,
-                PatternRule::default(),
-            )
+                Pattern::new(LabelRef::new("payment_card"), loc, PatternRule::default()),
+            ))
         };
         let ssn = {
             let loc = TextLocation::inline(0..5);
-            Entity::<Text>::pattern(
+            Entity::<Text>::new(Birth::new(
                 "t",
                 Confidence::MAX,
-                LabelRef::new("ssn"),
-                loc,
-                PatternRule::default(),
-            )
+                Pattern::new(LabelRef::new("ssn"), loc, PatternRule::default()),
+            ))
         };
 
         let replacement = encrypt(&op, &card, "secret").await;

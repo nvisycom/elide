@@ -54,8 +54,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Rebuild it from the wire through the same orchestrator.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let seal = orchestrator.restorer().seal(&report);
-    let rebuilt: elide::Report = orchestrator.restorer().restore(&seal, &mut de)?;
+    let rebuilt: elide::Report = orchestrator.restorer().restore(&report.digest(), &mut de)?;
 
     // Same entities, same modality, audit trail intact.
     let body = rebuilt
@@ -105,7 +104,7 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
     let mut de = serde_json::Deserializer::from_str(json);
     let err = match orchestrator
         .restorer()
-        .restore_unsealed::<elide::Report, _>(&mut de)
+        .restore_unchecked::<elide::Report, _>(&mut de)
     {
         Ok(_) => panic!("no text pipeline registered — should have failed"),
         Err(e) => e,
@@ -140,7 +139,7 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let restorer = elide::Report::restorer()
         .with_modality::<Text>()
         .with_modality::<Image>();
-    let rebuilt: elide::Report = restorer.restore(&restorer.seal(&report), &mut de)?;
+    let rebuilt: elide::Report = restorer.restore(&report.digest(), &mut de)?;
 
     assert_eq!(
         rebuilt

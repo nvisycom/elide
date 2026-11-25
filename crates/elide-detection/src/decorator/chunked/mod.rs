@@ -248,8 +248,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elide_core::Component;
-    use elide_core::entity::audit::ModelId;
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Model, ModelId};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::{Confidence, LanguageClaim, LanguageTag};
@@ -293,14 +293,9 @@ mod tests {
         fn entity_at(&self, label: &str, span: Range<usize>) -> Entity<Text> {
             let location = TextLocation::inline(span.clone());
             let confidence = Confidence::new(self.confidence).unwrap();
-            Entity::model(
-                "finds-substring",
-                confidence,
-                LabelRef::new(label),
-                location,
-                ModelId::new("model"),
-            )
-            .with_recognized_range(span)
+            let found = Model::new(LabelRef::new(label), location, ModelId::new("model"))
+                .with_recognized_range(span);
+            Entity::new(Birth::new("finds-substring", confidence, found))
         }
     }
 
@@ -494,7 +489,7 @@ mod tests {
         let needle_at = text.find("NEEDLE").unwrap();
         assert_eq!(out.len(), 1, "exact duplicates from overlap are collapsed");
         assert_eq!(out[0].location().range(), Some(&(needle_at..needle_at + 6)));
-        assert_eq!(out[0].recognized_range(), Some(needle_at..needle_at + 6));
+        assert_eq!(out[0].recognized_range(), Some(&(needle_at..needle_at + 6)));
         // It really was windowed (more than one scan).
         assert!(recognizer.inner().seen.lock().unwrap().len() > 1);
     }

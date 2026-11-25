@@ -205,7 +205,7 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
     let mut data = Vec::with_capacity(layout.pixel_bytes().unwrap_or_default());
     for row in samples.chunks_exact(row_bytes) {
         let values = unpack(row, layout.bits, count);
-        pixels(&layout.space, layout.bits, &values, &mut data);
+        pixels(&layout, &values, &mut data);
     }
     Ok(Pixels {
         width: layout.width,
@@ -447,12 +447,13 @@ fn unpack(row: &[u8], bits: usize, count: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Append the pixels of one row of sample `values` in `space` to `out`; an
-/// index past the palette's last colour is that colour (8.9.5.2).
-fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) {
-    let max = (1u16 << bits) - 1;
+/// Append the pixels of one row of sample `values`, laid out as `layout`
+/// says, to `out`; an index past the palette's last colour is that colour
+/// (8.9.5.2).
+fn pixels(layout: &Layout, values: &[u8], out: &mut Vec<u8>) {
+    let max = (1u16 << layout.bits) - 1;
     let scale = |v: u8| u8::try_from(u16::from(v) * 255 / max).unwrap_or(u8::MAX);
-    match space {
+    match &layout.space {
         Space::Gray { inverted } => out.extend(values.iter().map(|&v| {
             let gray = scale(v);
             if *inverted { 255 - gray } else { gray }
@@ -469,7 +470,7 @@ fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) {
         }
         Space::Indexed { rgb, palette } => {
             let width = if *rgb { 3 } else { 1 };
-            let last = usize::from(space.last_index().unwrap_or(0));
+            let last = usize::from(layout.space.last_index().unwrap_or(0));
             for &index in values {
                 let at = usize::from(index).min(last) * width;
                 out.extend_from_slice(&palette[at..at + width]);

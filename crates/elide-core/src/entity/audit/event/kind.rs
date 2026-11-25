@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
 use super::{
-    Calibration, Conflict, Contested, Flagged, Fusion, Manual, Model, Pattern, Redaction,
-    Refinement, Selection,
+    Annotation, Calibration, Conflict, Contested, Flagged, Fusion, Manual, Model, Pattern,
+    Redaction, Refinement, Selection,
 };
 use crate::modality::Modality;
 
@@ -89,6 +89,10 @@ pub enum AuditKind<M: Modality> {
     /// A human override, outside automatic detection: an entity a reviewer
     /// added by hand, or a detected one they marked to ignore.
     Manual(Manual<M>),
+    /// Something became known about the entity besides a decision: where it
+    /// sits in another coordinate space, where it matched in the text it was
+    /// recognized in, its language, or its coreference cluster.
+    Annotation(Annotation<M>),
 }
 
 impl<M: Modality> AuditKind<M> {
@@ -149,6 +153,10 @@ impl<M: Modality> AuditKind<M> {
             Self::Manual(m) => {
                 out.byte(Manual::<M>::TAG);
                 m.hash_into(out);
+            }
+            Self::Annotation(a) => {
+                out.byte(Annotation::<M>::TAG);
+                a.hash_into(out);
             }
         }
     }
@@ -221,5 +229,11 @@ impl<M: Modality> From<Selection> for AuditKind<M> {
 impl<M: Modality> From<Manual<M>> for AuditKind<M> {
     fn from(payload: Manual<M>) -> Self {
         Self::Manual(payload)
+    }
+}
+
+impl<M: Modality> From<Annotation<M>> for AuditKind<M> {
+    fn from(payload: Annotation<M>) -> Self {
+        Self::Annotation(payload)
     }
 }

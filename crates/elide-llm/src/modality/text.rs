@@ -2,9 +2,7 @@
 //! range and build the entity.
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::ModelId;
 use elide_core::modality::text::{Text, TextData, TextLocation};
-use hipstr::HipStr;
 
 use super::localize::localize_all;
 use super::{Lifter, LlmModality};
@@ -16,20 +14,13 @@ impl LlmModality for Text {
     fn lift(
         batch: Candidates<TextCandidate>,
         data: &TextData,
-        source: &HipStr<'static>,
-        model: &ModelId,
+        lifter: &Lifter<'_>,
     ) -> Vec<Entity<Text>> {
-        let lifter = Lifter::new(source, model);
         localize_all(data.text.as_str(), batch.entities)
             .into_iter()
             .filter_map(|localized| {
-                let candidate = localized.candidate;
-                lifter.entity(
-                    candidate.label,
-                    candidate.confidence,
-                    TextLocation::inline(localized.range),
-                    candidate.coreference.as_deref(),
-                )
+                let location = TextLocation::inline(localized.range);
+                lifter.entity(localized.candidate.into(), location)
             })
             .collect()
     }
@@ -37,6 +28,9 @@ impl LlmModality for Text {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::entity::audit::ModelId;
+    use hipstr::HipStr;
+
     use super::*;
 
     fn candidate(value: &str, coreference: &str) -> TextCandidate {
@@ -51,14 +45,12 @@ mod tests {
     }
 
     fn lift(text: &str, candidates: Vec<TextCandidate>) -> Vec<Entity<Text>> {
-        Text::lift(
-            Candidates {
-                entities: candidates,
-            },
-            &TextData::new(text),
-            &HipStr::borrowed("llm"),
-            &ModelId::new("model"),
-        )
+        let source = HipStr::borrowed("llm");
+        let model = ModelId::new("model");
+        let batch = Candidates {
+            entities: candidates,
+        };
+        Text::lift(batch, &TextData::new(text), &Lifter::new(&source, &model))
     }
 
     /// One call's mentions of a cluster share an id; the same handle in

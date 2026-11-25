@@ -20,7 +20,7 @@ use elide_core::modality::Modality;
 use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
-pub(crate) use self::erased::{BoxFuture, ErasedPipeline, PartAnalysis};
+pub(crate) use self::erased::{BoxFuture, ErasedPipeline, PartAnalysis, Seeded};
 
 /// The concrete analyze + redact pipeline for one modality `M`: the
 /// [`Analyzer`] and [`Anonymizer`] the erased layer drives against a matched

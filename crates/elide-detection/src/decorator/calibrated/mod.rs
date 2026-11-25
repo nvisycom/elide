@@ -85,8 +85,8 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for Calibrated<R> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditKind, PatternRule};
-    use elide_core::entity::builtins;
+    use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
+    use elide_core::entity::{Birth, builtins};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::recognition::Scope;
@@ -112,13 +112,11 @@ mod tests {
             .into_iter()
             .map(|label| {
                 let at = TextLocation::inline(0..4);
-                Entity::pattern(
+                Entity::new(Birth::new(
                     "two-finds",
                     Confidence::MAX,
-                    label,
-                    at,
-                    PatternRule::default(),
-                )
+                    Pattern::new(label, at, PatternRule::default()),
+                ))
             })
             .collect())
         }

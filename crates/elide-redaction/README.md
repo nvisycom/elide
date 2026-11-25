@@ -40,7 +40,7 @@ use elide_redaction::{Anonymizer, Rule};
 # #[tokio::main(flavor = "current_thread")]
 # async fn main() -> elide_core::Result<()> {
 let mut document = TextDoc::new("write to alice@example.com");
-let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (9, 26))];
+let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", 9..26)];
 
 Anonymizer::<Text>::new()
     .with_catalog(LabelCatalog::with_builtins())

@@ -3,10 +3,13 @@
 //! low-confidence stray.
 
 use std::assert_matches;
+use std::ops::Range;
 
 use elide::detection::Analyzer;
 use elide::detection::filter::ThresholdLayer;
 use elide::detection::overlap::{FuseLayer, ReconcileLayer};
+use elide::entity::Birth;
+use elide::entity::audit::Pattern;
 use elide::recognition::decorator::calibrated::{Calibrated, Calibration, Multiplier};
 use elide_core::entity::audit::{AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
@@ -16,34 +19,33 @@ use elide_core::recognition::Scope;
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
 
-/// Builds an entity carrying one recognition event, the way a recognizer
-/// would.
-fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> Entity<Text> {
+/// What a recognizer reports: a label over a span, with a confidence.
+struct Found(&'static str, Range<usize>, f32);
+
+/// Builds an entity carrying one recognition event, the way the `recognizer`
+/// would on finding `found`.
+fn detected(recognizer: &str, Found(label, span, conf): Found) -> Entity<Text> {
     let label = LabelRef::new(label.to_owned());
-    let location = TextLocation::inline(loc.0..loc.1);
+    let location = TextLocation::inline(span);
     let confidence = Confidence::new(conf).unwrap();
-    Entity::pattern(
+    Entity::new(Birth::new(
         recognizer.to_owned(),
         confidence,
-        label.clone(),
-        location,
-        PatternRule {
-            name: label.as_str().into(),
-            ..PatternRule::default()
-        },
-    )
+        Pattern::new(
+            label.clone(),
+            location,
+            PatternRule {
+                name: label.as_str().into(),
+                ..PatternRule::default()
+            },
+        ),
+    ))
 }
 
 /// Like [`detected`], but the location also carries a raw source reference, the
 /// pointer a source-mapping codec (markup, DOCX) attaches on lift.
-fn detected_with_source(
-    recognizer: &str,
-    label: &str,
-    loc: (usize, usize),
-    conf: f32,
-    source: SourceRef,
-) -> Entity<Text> {
-    let mut entity = detected(recognizer, label, loc, conf);
+fn detected_with_source(recognizer: &str, found: Found, source: SourceRef) -> Entity<Text> {
+    let mut entity = detected(recognizer, found);
     entity.lift(entity.location().clone().with_source([source]));
     entity
 }
@@ -60,11 +62,11 @@ fn scope_for(ids: &[&str]) -> Scope {
 async fn analyze_fuses_resolves_filters() {
     // Recognizer A: a phone at 10..22 and a weak stray at 40..44.
     let a = MockRecognizer::new(vec![
-        detected("pattern", "PHONE_NUMBER", (10, 22), 0.8),
-        detected("pattern", "WEAK", (40, 44), 0.1),
+        detected("pattern", Found("PHONE_NUMBER", 10..22, 0.8)),
+        detected("pattern", Found("WEAK", 40..44, 0.1)),
     ]);
     // Recognizer B: the same phone, slightly wider, higher confidence.
-    let b = MockRecognizer::new(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
+    let b = MockRecognizer::new(vec![detected("ner", Found("PHONE_NUMBER", 10..23, 0.95))]);
 
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(a)
@@ -106,16 +108,12 @@ async fn fusion_keeps_both_operands_source_refs() {
     //, so a client can still point at every source run behind the fused span.
     let a = MockRecognizer::new(vec![detected_with_source(
         "pattern",
-        "PHONE_NUMBER",
-        (10, 22),
-        0.8,
+        Found("PHONE_NUMBER", 10..22, 0.8),
         SourceRef::in_part(200..212, "word/document.xml"),
     )]);
     let b = MockRecognizer::new(vec![detected_with_source(
         "ner",
-        "PHONE_NUMBER",
-        (10, 23),
-        0.95,
+        Found("PHONE_NUMBER", 10..23, 0.95),
         SourceRef::in_part(300..313, "word/header1.xml"),
     )]);
 
@@ -147,7 +145,9 @@ async fn analyze_stamps_language_from_recognized_range() {
     use elide_core::primitive::LanguageTag;
 
     // An entity carrying a recognized_range (where it was found in the text).
-    let e = detected("pattern", "PERSON", (0, 5), 0.9).with_recognized_range(0..5);
+    let found = Pattern::new("PERSON", TextLocation::inline(0..5), PatternRule::default())
+        .with_recognized_range(0..5);
+    let e = Entity::new(Birth::new("pattern", Confidence::new(0.9).unwrap(), found));
 
     let analyzer = Analyzer::<Text>::new().with_recognizer(MockRecognizer::new(vec![e]));
 
@@ -172,10 +172,10 @@ async fn analyze_stamps_language_from_recognized_range() {
 /// its findings: two recognizers finding one label scale apart.
 #[tokio::test]
 async fn each_recognizer_is_calibrated_on_its_own() {
-    let patterns = MockRecognizer::new(vec![detected("pattern", "PHONE_NUMBER", (0, 4), 1.0)]);
+    let patterns = MockRecognizer::new(vec![detected("pattern", Found("PHONE_NUMBER", 0..4, 1.0))]);
     let ner = MockRecognizer::new(vec![
-        detected("ner", "PERSON", (5, 9), 1.0),
-        detected("ner", "PHONE_NUMBER", (10, 14), 0.9),
+        detected("ner", Found("PERSON", 5..9, 1.0)),
+        detected("ner", Found("PHONE_NUMBER", 10..14, 0.9)),
     ]);
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(Calibrated::new(
@@ -219,9 +219,9 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
     // A validated IBAN (0.85) fully containing a loose driver's-license
     // prefix (0.4), plus an in-catalog SSN elsewhere.
     let recognizer = MockRecognizer::new(vec![
-        detected("pattern", "IBAN", (0, 27), 0.85),
-        detected("pattern", "DRIVERS_LICENSE", (0, 4), 0.4),
-        detected("pattern", "GOVERNMENT_ID", (40, 51), 0.85),
+        detected("pattern", Found("IBAN", 0..27, 0.85)),
+        detected("pattern", Found("DRIVERS_LICENSE", 0..4, 0.4)),
+        detected("pattern", Found("GOVERNMENT_ID", 40..51, 0.85)),
     ]);
 
     // Catalog declares the two in-catalog labels, not IBAN.

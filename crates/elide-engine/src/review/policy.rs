@@ -1,7 +1,6 @@
 //! [`ReviewPolicy`]: which reviewer edits an orchestrator accepts, the
-//! [`ProposedEdit`] it judges, and the standard policies: [`Protect`],
-//! [`RequireActor`], and [`RequireReason`], combined with
-//! [`and`](ReviewPolicy::and).
+//! [`ProposedEdit`] it judges, and the standard policies, [`Protect`] and
+//! [`RequireReason`], combined with [`and`](ReviewPolicy::and).
 
 use std::collections::HashSet;
 
@@ -20,14 +19,14 @@ use crate::PartId;
 /// was. Return one of kind [`Refused`](elide_core::ErrorKind::Refused).
 ///
 /// Each standard policy checks one thing: [`Protect`] keeps labels from being
-/// narrowed, [`RequireActor`] wants every edit attributed, and
-/// [`RequireReason`] wants every narrowing edit explained. Combine them, and
-/// policies of the deployment's own, with [`and`](Self::and); a closure taking
-/// a `&ProposedEdit` is a policy too.
+/// narrowed, and [`RequireReason`] wants every narrowing edit explained.
+/// Combine them, and policies of the deployment's own, with
+/// [`and`](Self::and); a closure taking a `&ProposedEdit` is a policy too,
+/// such as one letting only some actors narrow.
 ///
-/// A policy judges what an edit claims, not who sent it: the actor it reads
-/// is a name the review carries, so a deployment authenticates its reviewers
-/// before their reviews reach the orchestrator.
+/// The actor a policy reads is the one the deployment named when it applied
+/// the review, from however it authenticated the reviewer, never a name the
+/// review carries.
 ///
 /// [`Orchestrator::review`]: crate::Orchestrator::review
 pub trait ReviewPolicy: Send + Sync {
@@ -77,12 +76,15 @@ pub struct ProposedEdit<'a> {
     /// The decision the edit records, with the label it sets: an include's or
     /// a relabel's.
     pub decision: &'a ManualIntent,
-    /// The entities whose redaction the edit narrows: what it could leave
-    /// unredacted that would have been hidden, leaving out any already
-    /// suppressed. Empty for an include, which only adds to what is hidden.
+    /// The entities whose redaction the edit narrows: each it touches, and
+    /// each overlapping one it touches, as overlapping entities share one
+    /// redaction under the safest operator among them. Any already
+    /// suppressed is left out. Empty for an include, which only adds to what
+    /// is hidden.
     pub narrowed: &'a [Narrowed],
-    /// Who the review says made the edit.
-    pub by: Option<&'a str>,
+    /// Who made the edit, as the deployment named them when it applied the
+    /// review.
+    pub by: &'a str,
     /// Why the review says it was made.
     pub because: Option<&'a Attribution>,
 }
@@ -107,8 +109,8 @@ pub struct Narrowed {
 }
 
 /// Refuses every edit that narrows the redaction of an entity of a protected
-/// label: no suppression, relabel, or relocation of one. A region suppression
-/// containing one is refused too.
+/// label: no suppression, relabel, or relocation of one, or of an entity
+/// overlapping one. A region suppression containing one is refused too.
 #[derive(Debug, Clone, Default)]
 pub struct Protect(HashSet<LabelRef>);
 
@@ -134,22 +136,6 @@ impl ReviewPolicy for Protect {
                 entity.label.as_str()
             ))),
             None => Ok(()),
-        }
-    }
-}
-
-/// Refuses every edit that does not name who made it, a blank name included.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RequireActor;
-
-impl ReviewPolicy for RequireActor {
-    fn check(&self, edit: &ProposedEdit<'_>) -> Result<()> {
-        match edit.by {
-            Some(actor) if !actor.trim().is_empty() => Ok(()),
-            _ => Err(Error::refused(format!(
-                "an edit of part `{}` names no actor",
-                edit.part
-            ))),
         }
     }
 }

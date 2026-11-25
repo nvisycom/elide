@@ -153,8 +153,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::PatternRule;
-    use elide_core::entity::{EntityCoRef, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, EntityCoRef, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
 
@@ -164,13 +164,11 @@ mod tests {
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
         let location = TextLocation::inline(0..1);
-        let entity = Entity::pattern(
+        let entity = Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new(label),
-            location,
-            PatternRule::default(),
-        );
+            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        ));
         match coref {
             Some(c) => entity.with_coref(EntityCoRef::new(c.to_owned())),
             None => entity,

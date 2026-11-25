@@ -138,14 +138,14 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let analyzed = first.analyze(&mut document).await?;
     assert_eq!(image_entities(&analyzed).len(), 1);
     let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
-    let seal = first.restorer().seal(&analyzed.artifacts);
+    let digest = analyzed.artifacts.digest();
 
     // Rebuild the ArtifactSet from the wire through the orchestrator, then re-run
     // against an EMPTY OCR backend: detection survives only because the restored
     // Layout carried the text through deserialize.
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
     let mut de = serde_json::Deserializer::from_str(&json);
-    let restored: elide::ArtifactSet = second.restorer().restore(&seal, &mut de)?;
+    let restored: elide::ArtifactSet = second.restorer().restore(&digest, &mut de)?;
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;

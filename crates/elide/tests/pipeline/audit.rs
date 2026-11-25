@@ -4,9 +4,9 @@
 use std::assert_matches;
 
 use elide::entity::audit::{
-    AuditEvent, AuditKind, AuditLog, PatternRule, Redaction, RuleMatch, Selection,
+    AuditEvent, AuditKind, AuditLog, Pattern, PatternRule, Redaction, RuleMatch, Selection,
 };
-use elide::entity::{Entity, LabelRef};
+use elide::entity::{Birth, Entity, LabelRef};
 use elide::modality::text::{Text, TextLocation};
 use elide::primitive::{ComponentId, Confidence};
 use elide::redaction::LeakProfile;
@@ -21,21 +21,19 @@ fn redacted_entity(label: &str) -> Entity<Text> {
         LeakProfile::Irrecoverable,
         RuleMatch::Fallback,
     );
-    let entity = Entity::new(LabelRef::new(label), location.clone())
-        .with_event(AuditEvent::pattern(
-            "t",
-            conf,
-            LabelRef::new(label),
-            location,
-            PatternRule::default(),
-        ))
-        .with_event(AuditEvent::selection(selection, conf));
+    let mut entity = Entity::new(Birth::new(
+        "t",
+        conf,
+        Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+    ));
+    entity.record(AuditEvent::selection(selection, conf));
     let picked = entity.audit().selection_event().unwrap().hash();
-    entity.with_event(AuditEvent::redaction(
+    entity.record(AuditEvent::redaction(
         "remove",
         Redaction::new(picked, TextLocation::inline(0..5)),
         conf,
-    ))
+    ));
+    entity
 }
 
 #[test]

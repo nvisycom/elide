@@ -60,8 +60,8 @@ impl<R: Component> RecognizerExt for R {}
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::PatternRule;
-    use elide_core::entity::{Entity, builtins};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, builtins};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::recognition::{Context, Recognizer, Scope, Subject};
@@ -88,13 +88,11 @@ mod tests {
                 return Err(Error::recognition("boom"));
             }
             let at = TextLocation::inline(0..4);
-            Ok(vec![Entity::pattern(
+            Ok(vec![Entity::new(Birth::new(
                 "one-find",
                 Confidence::MAX,
-                builtins::PERSON_NAME.to_ref(),
-                at,
-                PatternRule::default(),
-            )])
+                Pattern::new(builtins::PERSON_NAME.to_ref(), at, PatternRule::default()),
+            ))])
         }
     }
 

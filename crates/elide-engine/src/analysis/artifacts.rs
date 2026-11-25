@@ -20,12 +20,13 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
+use elide_core::entity::audit::AuditHash;
 use elide_core::modality::Modality;
 use serde_value::Value;
 
-use super::group::ArtifactGroup;
+use super::group::{ArtifactGroup, ErasedGroup};
 use crate::PartId;
-use crate::wire::{Erased, part_fields};
+use crate::wire::{Erased, digest, part_fields};
 
 /// One group's enrichment artifact plus its modality routing, the artifact-side
 /// mirror of a report entry.
@@ -35,9 +36,34 @@ use crate::wire::{Erased, part_fields};
 /// `Tabular` share `Tokens`, so the name cannot be recovered from the artifact
 /// itself and is captured from `M::NAME` at insert time).
 pub(crate) struct ArtifactEntry {
-    pub(crate) modality: TypeId,
-    pub(crate) modality_name: &'static str,
+    pub(crate) modality: ModalityTag,
     pub(crate) artifact: Box<dyn ArtifactGroup>,
+}
+
+/// Which modality an artifact was produced for: its [`TypeId`], to downcast
+/// the artifact, and its name, to tag it on the wire.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ModalityTag {
+    pub(crate) id: TypeId,
+    pub(crate) name: &'static str,
+}
+
+impl ModalityTag {
+    /// The tag of modality `M`.
+    pub(crate) fn of<M: Modality>() -> Self {
+        Self {
+            id: TypeId::of::<M>(),
+            name: M::NAME,
+        }
+    }
+
+    /// The tag of the modality `group` holds.
+    pub(crate) fn of_group(group: &dyn ErasedGroup) -> Self {
+        Self {
+            id: group.modality(),
+            name: group.modality_name(),
+        }
+    }
 }
 
 /// The enrichment an analysis produced: every part's artifact, by [`PartId`].
@@ -70,7 +96,7 @@ impl ArtifactSet {
     /// Read-only. `None` for an unknown part or a modality mismatch.
     pub fn part<P: Modality>(&self, id: &PartId) -> Option<&P::Artifact> {
         let entry = self.parts.get(id)?;
-        if entry.modality != TypeId::of::<P>() {
+        if entry.modality.id != TypeId::of::<P>() {
             return None;
         }
         entry.artifact.as_any().downcast_ref::<P::Artifact>()
@@ -83,7 +109,7 @@ impl ArtifactSet {
     where
         P::Artifact: serde::Serialize,
     {
-        self.set_part(id, TypeId::of::<P>(), P::NAME, Box::new(artifact));
+        self.set_part(id, ModalityTag::of::<P>(), Box::new(artifact));
         self
     }
 
@@ -91,31 +117,31 @@ impl ArtifactSet {
     pub(crate) fn set_part(
         &mut self,
         id: PartId,
-        modality: TypeId,
-        modality_name: &'static str,
+        modality: ModalityTag,
         artifact: Box<dyn ArtifactGroup>,
     ) {
-        self.parts.insert(
-            id,
-            ArtifactEntry {
-                modality,
-                modality_name,
-                artifact,
-            },
-        );
+        self.parts.insert(id, ArtifactEntry { modality, artifact });
     }
 
-    /// The fields the set's seal covers: each part by path, with its modality
-    /// and its artifact.
+    /// A digest of the set, what a [`Restorer`](crate::Restorer) checks it
+    /// against when it is read back: an altered layout would change what
+    /// re-analysis reads.
+    #[must_use]
+    pub fn digest(&self) -> AuditHash {
+        digest(self)
+    }
+
+    /// The fields the set's digest covers: each part by path, with its
+    /// modality and its artifact.
     ///
-    /// An artifact is covered by its serialized form, so the seal holds every
+    /// An artifact is covered by its serialized form, so the digest holds every
     /// field the set carries across a review gap, whatever its type. One that
     /// serializes to nothing (a modality with no enrichment) is left out, as
     /// it is never read back.
-    pub(crate) fn seal_fields(&self) -> Vec<Vec<u8>> {
+    pub(crate) fn digest_fields(&self) -> Vec<Vec<u8>> {
         part_fields(self.parts.iter().filter_map(|(id, entry)| {
             // An artifact that cannot serialize cannot be written either; it is
-            // still covered, by its error, so the seal never skips it.
+            // still covered, by its error, so the digest never skips it.
             let bytes = match serde_value::to_value(Erased(entry.artifact.as_ref())) {
                 Ok(Value::Unit) => return None,
                 Ok(value) => {
@@ -125,7 +151,7 @@ impl ArtifactSet {
                 }
                 Err(error) => [&[u8::MAX], error.to_string().as_bytes()].concat(),
             };
-            Some((id, entry.modality_name, vec![bytes]))
+            Some((id, entry.modality.name, vec![bytes]))
         }))
     }
 }

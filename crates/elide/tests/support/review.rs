@@ -12,10 +12,9 @@ pub fn included(part: &PartId, label: LabelRef, location: TextLocation) -> Repor
     review
         .part::<Text>(part)
         .expect("a text part")
-        .by("reviewer")
         .include(label, location);
     Orchestrator::new()
-        .review(&mut report, &review)
+        .review(&mut report, &review, "reviewer")
         .expect("an include is accepted");
     report
 }

@@ -13,13 +13,14 @@ use std::any::TypeId;
 use std::collections::HashMap;
 
 use elide_core::entity::Entity;
+use elide_core::entity::audit::AuditHash;
 use elide_core::modality::Modality;
 use elide_core::{Error, Result};
 use serde::Serialize;
 use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer};
 
-use super::seal::private::Sealed;
-use super::seal::{Seal, SealKey, Sealable};
+use super::digest::private::Sealed;
+use super::digest::{Restorable, digest};
 use super::serde::{ArtifactSetSeed, ReportSeed, ReviewSeed};
 use crate::analysis::{ArtifactGroup, ArtifactSet, EntityGroup, Report};
 use crate::review::{Edit, EditGroup, Review};
@@ -46,8 +47,9 @@ pub(super) struct ModalityEntry {
 /// A report's wire form tags each group with its modality name but not the
 /// concrete type, and deserialization is not object-safe, so a bare
 /// `Report: Deserialize` is impossible. Register the modalities the report may
-/// contain with [`with_modality`], [`seal`](Self::seal) a value when it is
-/// written, then [`restore`] it against that [`Seal`]. The modalities registered
+/// contain with [`with_modality`], keep the report's [digest](Report::digest)
+/// when it is written, then [`restore`] it against that digest. The modalities
+/// registered
 /// here need only be *deserializable*; they need no pipeline, so a review layer
 /// can rebuild a report to show without the engine that produced it. Build one
 /// with [`Report::restorer`], or use the one an [`Orchestrator`] keeps for
@@ -63,10 +65,10 @@ pub(super) struct ModalityEntry {
 ///     .with_modality::<Metadata>();
 ///
 /// let written = Report::new();
-/// let seal = restorer.seal(&written);
+/// let digest = written.digest();
 /// let json = serde_json::to_string(&written)?;
 ///
-/// let report: Report = restorer.restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
+/// let report: Report = restorer.restore(&digest, &mut serde_json::Deserializer::from_str(&json))?;
 /// assert_eq!(report.digest(), written.digest());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -79,7 +81,6 @@ pub(super) struct ModalityEntry {
 #[derive(Default)]
 pub struct Restorer {
     entries: HashMap<&'static str, ModalityEntry>,
-    key: Option<SealKey>,
 }
 
 impl Restorer {
@@ -87,21 +88,6 @@ impl Restorer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Check seals with `key`, the [`SealKey`] they were made with: with a key
-    /// set, only a keyed seal is accepted, so a carrier cannot replace one
-    /// with an unkeyed digest of a value it changed. Without a key, only an
-    /// unkeyed seal is accepted.
-    #[must_use]
-    pub fn with_seal_key(mut self, key: SealKey) -> Self {
-        self.key = Some(key);
-        self
-    }
-
-    /// Set the key keyed seals are checked with, in place.
-    pub(crate) fn set_seal_key(&mut self, key: SealKey) {
-        self.key = Some(key);
     }
 
     /// Register modality `M`, so a group tagged with its name deserializes as
@@ -152,71 +138,66 @@ impl Restorer {
             .map(|(&name, &entry)| (name, entry))
     }
 
-    /// The [`Seal`] to store beside `value` and [`restore`](Self::restore) it
-    /// against later: keyed with the key set by
-    /// [`with_seal_key`](Self::with_seal_key), unkeyed without one.
-    ///
-    /// Seal a value when it is written, after any [`pick`] or [`review`] that
-    /// changes it.
-    ///
-    /// [`pick`]: crate::Orchestrator::pick
-    /// [`review`]: crate::Orchestrator::review
-    #[must_use]
-    pub fn seal<T: Sealable>(&self, value: &T) -> Seal {
-        Seal::new(value, self.key.as_ref())
-    }
-
     /// Read a [`Report`], [`Review`], or [`ArtifactSet`] back and check it
-    /// against `seal`, routing each part to its registered modality.
+    /// against `expected`, the digest it had when it was written, routing each
+    /// part to its registered modality.
     ///
-    /// For a report, every entity's audit trail must verify as well. With a
-    /// key set by [`with_seal_key`](Self::with_seal_key), only a keyed seal
-    /// is accepted; without one, only an unkeyed seal.
+    /// Each entity's trail verifies on its own, but whoever carries a report
+    /// can still rewrite an entity whole, cut a trail back to an earlier event,
+    /// change a label or location beside its trail, or drop an entity; a
+    /// review can lose an edit on the way, and an artifact set can change what
+    /// re-analysis reads. The digest catches each of these, as long as it is
+    /// kept where the carrier cannot change it: on the side that wrote the
+    /// value, in a write-once store, or signed with a key the deployment holds.
+    /// For a report, every entity's audit trail must verify as well.
     ///
     /// A part naming an unregistered modality is handled by what dropping it
     /// would cost. An empty one is skipped, since nothing is lost (as
     /// [`analyze`] ignores a part whose modality has no pipeline). A report or
     /// review part that is not empty is an error, since its entities would go
     /// unredacted, or its edits unapplied. An artifact is skipped, which the
-    /// seal then reports, so register every modality the writer had.
+    /// digest then reports, so register every modality the writer had.
     ///
     /// # Errors
     ///
     /// [`MalformedInput`] if the payload is malformed, or if a part carries
-    /// entities or edits under an unregistered modality; [`Integrity`] if a
-    /// trail does not verify, the value does not match `seal`, or `seal` is
-    /// unkeyed where a key is set; [`Configuration`] for a keyed seal with no
-    /// key set.
+    /// entities or edits under an unregistered modality, or an entity says what
+    /// its trail does not; [`Integrity`] if a trail does not verify, or the
+    /// value's digest is not `expected`.
     ///
     /// [`analyze`]: crate::Orchestrator::analyze
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
     /// [`Integrity`]: elide_core::ErrorKind::Integrity
-    /// [`Configuration`]: elide_core::ErrorKind::Configuration
-    pub fn restore<'de, T, D>(&self, seal: &Seal, deserializer: D) -> Result<T>
+    pub fn restore<'de, T, D>(&self, expected: &AuditHash, deserializer: D) -> Result<T>
     where
-        T: Sealable,
+        T: Restorable,
         D: Deserializer<'de>,
     {
         let value = T::parse(self, deserializer)?;
-        seal.check(&value, self.key.as_ref())?;
+        if digest(&value) != *expected {
+            return Err(Error::integrity(format!(
+                "the {} does not match its digest: it was changed after it was written",
+                T::NAME
+            )));
+        }
         Ok(value)
     }
 
     /// Read a [`Report`], [`Review`], or [`ArtifactSet`] back without checking
-    /// it against a seal.
+    /// its digest.
     ///
-    /// A report's trails still verify, but nothing catches a trail cut back to
-    /// an earlier event, an entity changed beside its trail, an entity or edit
-    /// dropped, or an artifact altered. For a value only shown, or one that
+    /// A report's trails still verify, and each entity must still agree with
+    /// its trail, but nothing catches a trail cut back to an earlier event, an
+    /// entity or edit dropped, or an artifact altered. For a value only shown, or one that
     /// never left the side that reads it; read one that crossed to where its
     /// carrier could change it with [`restore`](Self::restore).
     ///
     /// # Errors
     ///
-    /// As [`restore`](Self::restore), less the seal.
-    pub fn restore_unsealed<'de, T, D>(&self, deserializer: D) -> Result<T>
+    /// As [`restore`](Self::restore), less the digest.
+    pub fn restore_unchecked<'de, T, D>(&self, deserializer: D) -> Result<T>
     where
-        T: Sealable,
+        T: Restorable,
         D: Deserializer<'de>,
     {
         T::parse(self, deserializer)
@@ -237,8 +218,8 @@ where
 impl Sealed for Report {
     const NAME: &'static str = "report";
 
-    fn seal_fields(&self) -> Vec<Vec<u8>> {
-        Report::seal_fields(self)
+    fn digest_fields(&self) -> Vec<Vec<u8>> {
+        Report::digest_fields(self)
     }
 
     fn parse<'de, D: Deserializer<'de>>(registry: &Restorer, de: D) -> Result<Self> {
@@ -249,8 +230,8 @@ impl Sealed for Report {
 impl Sealed for Review {
     const NAME: &'static str = "review";
 
-    fn seal_fields(&self) -> Vec<Vec<u8>> {
-        Review::seal_fields(self)
+    fn digest_fields(&self) -> Vec<Vec<u8>> {
+        Review::digest_fields(self)
     }
 
     fn parse<'de, D: Deserializer<'de>>(registry: &Restorer, de: D) -> Result<Self> {
@@ -261,8 +242,8 @@ impl Sealed for Review {
 impl Sealed for ArtifactSet {
     const NAME: &'static str = "artifact set";
 
-    fn seal_fields(&self) -> Vec<Vec<u8>> {
-        ArtifactSet::seal_fields(self)
+    fn digest_fields(&self) -> Vec<Vec<u8>> {
+        ArtifactSet::digest_fields(self)
     }
 
     fn parse<'de, D: Deserializer<'de>>(registry: &Restorer, de: D) -> Result<Self> {

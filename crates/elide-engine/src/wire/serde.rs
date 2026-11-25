@@ -46,7 +46,7 @@ use uuid::Uuid;
 
 use super::restorer::{ModalityEntry, Parser, Restorer};
 use crate::PartId;
-use crate::analysis::{ArtifactGroup, ArtifactSet, EntityGroup, Report};
+use crate::analysis::{ArtifactGroup, ArtifactSet, EntityGroup, ModalityTag, Report};
 use crate::review::{EditGroup, Review};
 
 /// A part's [`PartId`] path serialized as a segment array, the wire key. A
@@ -200,7 +200,7 @@ impl Serialize for ArtifactSet {
             .iter()
             .map(|(id, entry)| ArtifactEntry {
                 id: PathField(id),
-                modality: entry.modality_name,
+                modality: entry.modality.name,
                 artifact: Erased(entry.artifact.as_ref()),
             })
             .collect();
@@ -284,12 +284,8 @@ impl Leaf for EntityLeaf {
         name: &str,
         value: Value,
     ) -> Result<Option<Box<dyn EntityGroup>>, E> {
-        parse_required(
-            Self::FIELD,
-            entry.map(|(_, entry)| entry.parse_entities),
-            name,
-            value,
-        )
+        let parser = entry.map(|(_, entry)| entry.parse_entities);
+        Required::new(Self::FIELD, parser).parse(name, value)
     }
 
     fn set_part(report: &mut Report, id: PartId, entities: Box<dyn EntityGroup>) {
@@ -301,34 +297,42 @@ impl Leaf for EntityLeaf {
     }
 }
 
-/// Parse the buffered `value` of a required `field` (`entities` or `edits`)
-/// with `parser`, the registered modality `name`'s.
-///
-/// The field must be an array: an absent or null one is malformed, not empty,
-/// since it could be a reviewer's work silently dropped. An unregistered
-/// modality is skipped only when its array is empty (nothing to lose, as in
-/// `analyze`), and rejected otherwise.
-fn parse_required<T, E: DeError>(
+/// A required array field of a part entry (`entities` or `edits`), and the
+/// parser of the modality the entry names, when one is registered.
+struct Required<T> {
     field: &'static str,
     parser: Option<Parser<T>>,
-    name: &str,
-    value: Value,
-) -> Result<Option<T>, E> {
-    let count = match &value {
-        Value::Unit => return Err(E::missing_field(field)),
-        Value::Seq(items) => items.len(),
-        _ => return Err(E::custom(format!("`{field}` must be an array"))),
-    };
-    let Some(parser) = parser else {
-        if count == 0 {
-            return Ok(None);
-        }
-        return Err(E::custom(format!(
-            "no registered modality for `{name}` (its {count} {field} would be dropped)"
-        )));
-    };
-    let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(value.into_deserializer());
-    parser(&mut erased).map(Some).map_err(E::custom)
+}
+
+impl<T> Required<T> {
+    fn new(field: &'static str, parser: Option<Parser<T>>) -> Self {
+        Self { field, parser }
+    }
+
+    /// Parse the field's buffered `value`, for the entry's modality `name`.
+    ///
+    /// The field must be an array: an absent or null one is malformed, not
+    /// empty, since it could be a reviewer's work silently dropped. An
+    /// unregistered modality is skipped only when its array is empty (nothing
+    /// to lose, as in `analyze`), and rejected otherwise.
+    fn parse<E: DeError>(self, name: &str, value: Value) -> Result<Option<T>, E> {
+        let field = self.field;
+        let count = match &value {
+            Value::Unit => return Err(E::missing_field(field)),
+            Value::Seq(items) => items.len(),
+            _ => return Err(E::custom(format!("`{field}` must be an array"))),
+        };
+        let Some(parser) = self.parser else {
+            if count == 0 {
+                return Ok(None);
+            }
+            return Err(E::custom(format!(
+                "no registered modality for `{name}` (its {count} {field} would be dropped)"
+            )));
+        };
+        let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(value.into_deserializer());
+        parser(&mut erased).map(Some).map_err(E::custom)
+    }
 }
 
 /// The artifact leaf: a group's `artifact` reconstructs as a boxed
@@ -380,7 +384,11 @@ impl Leaf for ArtifactLeaf {
     }
 
     fn set_part(set: &mut ArtifactSet, id: PartId, parsed: ParsedArtifact) {
-        set.set_part(id, parsed.entry.type_id, parsed.name, parsed.artifact);
+        let modality = ModalityTag {
+            id: parsed.entry.type_id,
+            name: parsed.name,
+        };
+        set.set_part(id, modality, parsed.artifact);
     }
 }
 
@@ -409,12 +417,8 @@ impl Leaf for EditLeaf {
         name: &str,
         value: Value,
     ) -> Result<Option<Box<dyn EditGroup>>, E> {
-        parse_required(
-            Self::FIELD,
-            entry.map(|(_, entry)| entry.parse_edits),
-            name,
-            value,
-        )
+        let parser = entry.map(|(_, entry)| entry.parse_edits);
+        Required::new(Self::FIELD, parser).parse(name, value)
     }
 
     fn set_part(parts: &mut ReviewParts, id: PartId, edits: Box<dyn EditGroup>) {
@@ -848,7 +852,6 @@ mod tests {
         let mut part = review
             .part::<Text>(&doc())
             .unwrap()
-            .by("reviewer-7")
             .because(Attribution::freeform("why"));
         let included = part.include("PERSON_NAME", TextLocation::inline(8..12));
         part.relabel(included, "ORGANIZATION")
@@ -924,7 +927,7 @@ mod tests {
         let mut de = serde_json::Deserializer::from_str(&json);
         let restorer = Report::restorer().with_modality::<Text>();
         let back: Report = restorer
-            .restore(&restorer.seal(&report), &mut de)
+            .restore(&report.digest(), &mut de)
             .expect("rebuilt");
         let entities = back
             .part::<Text>(&doc())
@@ -1045,7 +1048,7 @@ mod tests {
     }
 
     /// A report's id is required: without it, nothing ties the report to the
-    /// version a review or a seal names.
+    /// version a review or a digest names.
     #[test]
     fn a_report_without_an_id_is_rejected() {
         let json = r#"{"parts":[]}"#;
@@ -1164,8 +1167,7 @@ mod tests {
         let registry = Restorer::new().with_modality::<Image>();
         let json = serde_json::to_string(&set).unwrap();
         let mut de = serde_json::Deserializer::from_str(&json);
-        let seal = registry.seal(&set);
-        let back: ArtifactSet = registry.restore(&seal, &mut de).expect("artifacts");
+        let back: ArtifactSet = registry.restore(&set.digest(), &mut de).expect("artifacts");
         let restored = back.part::<Image>(&doc()).expect("layout reconstructed");
         assert_eq!(restored, &layout);
         assert_eq!(restored.text(), "hi Alice");
@@ -1175,10 +1177,10 @@ mod tests {
         assert!(part.is_empty(), "it round-trips as the empty Layout it was");
 
         // A layout changed on the way, its text hidden from detection, does
-        // not read back against the seal.
+        // not read back against the set's digest.
         let altered = json.replace("Alice", "Alfie");
         let mut de = serde_json::Deserializer::from_str(&altered);
-        let Err(err) = registry.restore::<ArtifactSet, _>(&seal, &mut de) else {
+        let Err(err) = registry.restore::<ArtifactSet, _>(&set.digest(), &mut de) else {
             panic!("an altered layout must not read back");
         };
         assert_eq!(err.kind(), elide_core::ErrorKind::Integrity);
@@ -1201,7 +1203,7 @@ mod tests {
         ] {
             let mut de = serde_json::Deserializer::from_str(json);
             let set = registry
-                .restore_unsealed::<ArtifactSet, _>(&mut de)
+                .restore_unchecked::<ArtifactSet, _>(&mut de)
                 .expect("a null/absent artifact deserializes without error");
             assert!(
                 set.part::<Image>(&doc()).is_none(),

@@ -1,9 +1,10 @@
 //! [`EditGroup`]: one part's edits, a `Vec<Edit<M>>` behind one type, each
 //! checked against a policy and applied in turn.
 
-use elide_core::entity::Entity;
 use elide_core::entity::audit::Manual;
+use elide_core::entity::{Birth, Entity, Include};
 use elide_core::modality::{Modality, ModalityLocation};
+use elide_core::primitive::Confidence;
 use elide_core::{Error, Result};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -24,16 +25,25 @@ pub(crate) trait EditGroup: ErasedGroup {
     /// An empty entity group of this modality, for a part the report does not
     /// hold yet, which an include creates.
     fn empty_entities(&self) -> Box<dyn EntityGroup>;
-    /// The part's `entities` with every edit applied in order, each checked
-    /// against `policy` as the edits before it left them, and whether any edit
-    /// changed an entity. `entities` is left as it is, so a refused edit
-    /// changes nothing.
+    /// The part's `entities` with every edit applied in order, each made by
+    /// the `reviewer` and checked against their policy as the edits before it
+    /// left them. `entities` is left as it is, so a refused edit changes
+    /// nothing.
     fn apply(
         &self,
         part: &PartId,
         entities: &dyn EntityGroup,
-        policy: &dyn ReviewPolicy,
-    ) -> Result<(Box<dyn EntityGroup>, bool)>;
+        reviewer: Reviewer<'_>,
+    ) -> Result<Box<dyn EntityGroup>>;
+}
+
+/// Who applies a review, and the policy their edits are checked against.
+#[derive(Clone, Copy)]
+pub(crate) struct Reviewer<'a> {
+    /// The policy each edit is checked against.
+    pub(crate) policy: &'a dyn ReviewPolicy,
+    /// Who made the edits.
+    pub(crate) by: &'a str,
 }
 
 impl<M: Modality> GroupItem for Edit<M> {
@@ -67,8 +77,8 @@ where
         &self,
         part: &PartId,
         entities: &dyn EntityGroup,
-        policy: &dyn ReviewPolicy,
-    ) -> Result<(Box<dyn EntityGroup>, bool)> {
+        reviewer: Reviewer<'_>,
+    ) -> Result<Box<dyn EntityGroup>> {
         let mut entities = entities
             .as_any()
             .downcast_ref::<Vec<Entity<M>>>()
@@ -79,79 +89,101 @@ where
                 ))
             })?
             .clone();
-        let mut changed = false;
+        let review = PartReview { part, reviewer };
         for edit in self {
-            changed |= step(part, &mut entities, edit, policy)?;
+            review.step(&mut entities, edit)?;
         }
-        Ok((Box::new(entities), changed))
+        Ok(Box::new(entities))
     }
 }
 
-/// Check one `edit` of `part` against `policy`, apply it to the part's
-/// `entities` once accepted, and return whether it changed an entity.
-fn step<M: Modality>(
-    part: &PartId,
-    entities: &mut Vec<Entity<M>>,
-    edit: &Edit<M>,
-    policy: &dyn ReviewPolicy,
-) -> Result<bool> {
-    let targets = targets(part, entities, &edit.change)?;
-    // Only an include adds to what is hidden. A relocation can narrow even
-    // into a region containing the old one, as a rule may choose its operator
-    // by where an entity sits; and an entity already suppressed is not
-    // redacted, so no edit narrows it.
-    let narrowed: Vec<Narrowed> = targets
+/// One part of a review being applied, by its reviewer.
+struct PartReview<'a> {
+    part: &'a PartId,
+    reviewer: Reviewer<'a>,
+}
+
+impl PartReview<'_> {
+    /// Check `edit` against the reviewer's policy, and apply it to the part's
+    /// `entities` once accepted.
+    fn step<M: Modality>(&self, entities: &mut Vec<Entity<M>>, edit: &Edit<M>) -> Result<()> {
+        let by = self.reviewer.by;
+        let targets = targets(self.part, entities, &edit.change)?;
+        let narrowed = narrowed(entities, &targets, &edit.change);
+        let decision = edit.change.intent();
+        self.reviewer.policy.check(&ProposedEdit {
+            part: self.part,
+            decision: &decision,
+            narrowed: &narrowed,
+            by,
+            because: edit.because.as_ref(),
+        })?;
+
+        let manual = |location: M::Location| Manual {
+            intent: decision.clone(),
+            location,
+            attribution: edit.because.clone(),
+        };
+        match &edit.change {
+            Change::Include {
+                entity: id,
+                label,
+                location,
+            } => {
+                let included = Include {
+                    label: label.clone(),
+                    location: location.clone(),
+                    attribution: edit.because.clone(),
+                };
+                let birth = Birth::new(by.to_owned(), Confidence::MAX, included).with_id(*id);
+                entities.push(Entity::new(birth));
+            }
+            change => {
+                for i in targets {
+                    let at = match change {
+                        Change::SuppressWithin { region } => region.clone(),
+                        Change::Relocate { location, .. } => location.clone(),
+                        _ => entities[i].location().clone(),
+                    };
+                    entities[i].record_manual(manual(at), by);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The entities an edit narrows: every one it touches, and every one
+/// overlapping what it touches, before the edit or after.
+///
+/// Only an include adds to what is hidden. A relocation can narrow even into
+/// a region containing the old one, as a rule may choose its operator by
+/// where an entity sits. Overlapping entities are redacted as one span under
+/// the safest operator among them, so an edit to one can leave its
+/// neighbours under a leakier operator: they are narrowed too. An entity
+/// already suppressed is not redacted, so no edit narrows it.
+fn narrowed<M: Modality>(
+    entities: &[Entity<M>],
+    targets: &[usize],
+    change: &Change<M>,
+) -> Vec<Narrowed> {
+    let mut spans: Vec<&M::Location> = targets.iter().map(|&i| entities[i].location()).collect();
+    if let Change::Relocate { location, .. } = change {
+        spans.push(location);
+    }
+    entities
         .iter()
-        .map(|&i| &entities[i])
-        .filter(|entity| !entity.is_suppressed())
-        .map(|entity| Narrowed {
+        .enumerate()
+        .filter(|(i, entity)| {
+            !entity.is_suppressed()
+                && (targets.contains(i)
+                    || spans.iter().any(|span| span.overlaps(entity.location())))
+        })
+        .map(|(_, entity)| Narrowed {
             id: entity.id(),
             label: entity.label().clone(),
         })
-        .collect();
-    let decision = edit.change.intent();
-    policy.check(&ProposedEdit {
-        part,
-        decision: &decision,
-        narrowed: &narrowed,
-        by: edit.by.as_deref(),
-        because: edit.because.as_ref(),
-    })?;
-
-    let manual = |location: M::Location| Manual {
-        intent: decision.clone(),
-        location,
-        attribution: edit.because.clone(),
-    };
-    let by = edit.by.as_deref();
-    match &edit.change {
-        Change::Include {
-            entity: id,
-            label,
-            location,
-        } => {
-            entities.push(Entity::included(
-                *id,
-                label.clone(),
-                location.clone(),
-                edit.because.clone(),
-                by,
-            ));
-            Ok(true)
-        }
-        change => {
-            let mut changed = false;
-            for i in targets {
-                let at = match change {
-                    Change::SuppressWithin { region } => region.clone(),
-                    Change::Relocate { location, .. } => location.clone(),
-                    _ => entities[i].location().clone(),
-                };
-                changed |= entities[i].record_manual(manual(at), by);
-            }
-            Ok(changed)
-        }
-    }
+        .collect()
 }
 
 /// The indices of the entities of `part` that `change` touches: none for an

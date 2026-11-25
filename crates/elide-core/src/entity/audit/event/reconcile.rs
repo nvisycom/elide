@@ -44,6 +44,15 @@ impl<M: Modality> Fusion<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 2;
 
+    /// The `strategy` fused detections into one at `location`, the union of
+    /// theirs.
+    pub fn new(strategy: impl Into<HipStr<'static>>, location: M::Location) -> Self {
+        Self {
+            strategy: strategy.into(),
+            location,
+        }
+    }
+
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         out.bytes(self.strategy.as_bytes());
         out.bytes(&self.location.hash());

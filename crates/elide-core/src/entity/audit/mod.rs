@@ -7,6 +7,8 @@ mod event;
 mod hash;
 mod rule_match;
 
+use std::iter;
+
 #[cfg(feature = "serde")]
 use serde::de::Error as _;
 #[cfg(feature = "serde")]
@@ -14,8 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Manual, ManualIntent,
-    Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
+    Annotation, AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Manual,
+    ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
 };
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
@@ -146,15 +148,40 @@ impl<M: Modality> AuditLog<M> {
         self.events.extend(events);
     }
 
+    /// The entity's own line through the trail: its events from its tip back
+    /// to its birth, following each event's first parent.
+    ///
+    /// A [fusion](crate::entity::Entity::fuse) names the fused entity's own
+    /// tip as its first parent and the absorbed trails' tips after it, so the
+    /// line passes through the entity's own history and none of theirs. What
+    /// the entity is (its label, location, suppression, operator, redaction)
+    /// is read along this line; the absorbed events stay on the trail as
+    /// provenance. The line is fixed by the hashes, not by the order events
+    /// are stored in.
+    pub fn line(&self) -> impl Iterator<Item = &AuditEvent<M>> {
+        let mut next = self.events.len().checked_sub(1);
+        iter::from_fn(move || {
+            let index = next?;
+            let event = &self.events[index];
+            // A parent is always recorded before its child.
+            next = event.parents.first().and_then(|parent| {
+                self.events[..index]
+                    .iter()
+                    .rposition(|earlier| earlier.hash == *parent)
+            });
+            Some(event)
+        })
+    }
+
     /// Recognition events (pattern / model) that found this entity.
     pub fn recognizers(&self) -> impl Iterator<Item = &AuditEvent<M>> {
         self.events.iter().filter(|e| e.is_recognition())
     }
 
     /// The entity's current operator *pick*, if one was recorded: the
-    /// [`Selection`] payload from its most recent selection event. `None` when
-    /// no operator was picked (e.g. a suppressed entity, or before the
-    /// anonymizer's pick ran).
+    /// [`Selection`] payload from the latest selection event on its
+    /// [line](Self::line). `None` when no operator was picked (e.g. a
+    /// suppressed entity, or before the anonymizer's pick ran).
     ///
     /// This is the plan, which a later pick can change after a redaction; what
     /// a redaction applied is [`applied_selection`](Self::applied_selection).
@@ -173,19 +200,17 @@ impl<M: Modality> AuditLog<M> {
     /// [`Selection`]: crate::entity::audit::Selection
     /// [`Redaction`]: crate::entity::audit::Redaction
     pub fn selection_event(&self) -> Option<&AuditEvent<M>> {
-        self.events
-            .iter()
-            .rev()
+        self.line()
             .find(|e| matches!(e.kind, AuditKind::Selection(_)))
     }
 
     /// The entity's redaction, if one was recorded: the [`Redaction`] payload
-    /// from its most recent redaction event. `None` when the entity was not
-    /// redacted (e.g. suppressed, or not yet applied).
+    /// from the latest redaction event on its [line](Self::line). `None` when
+    /// the entity was not redacted (e.g. suppressed, or not yet applied).
     ///
     /// [`Redaction`]: crate::entity::audit::Redaction
     pub fn redaction(&self) -> Option<&Redaction<M>> {
-        self.events.iter().rev().find_map(|e| match &e.kind {
+        self.line().find_map(|e| match &e.kind {
             AuditKind::Redaction(r) => Some(r),
             _ => None,
         })
@@ -210,38 +235,33 @@ impl<M: Modality> AuditLog<M> {
     }
 
     /// Whether an operator hid this entity, i.e. a [`Redaction`] event is on
-    /// the trail.
+    /// its [line](Self::line).
     ///
     /// [`Redaction`]: crate::entity::audit::Redaction
     pub fn is_redacted(&self) -> bool {
-        self.events
-            .iter()
-            .any(|e| matches!(e.kind, AuditKind::Redaction(_)))
+        self.redaction().is_some()
     }
 
     /// Whether this entity is hidden content its format flagged, i.e. a
-    /// [`Flagged`] event is on the trail.
+    /// [`Flagged`] event is on its [line](Self::line).
     pub fn is_flagged(&self) -> bool {
-        self.events
-            .iter()
-            .any(|e| matches!(e.kind, AuditKind::Flagged(_)))
+        self.line().any(|e| matches!(e.kind, AuditKind::Flagged(_)))
     }
 
     /// Whether a reviewer has suppressed this entity with a [`Manual`] event.
     ///
-    /// That is, of its [`Manual`] events that decide redaction (an include or a
-    /// suppression), the most recent is [`ManualIntent::Suppress`]. A relabel
-    /// or relocation decides nothing about it and is skipped. The audit trail
-    /// is the single source of truth: there is no separate flag to keep in
-    /// sync. An included or amended entity is not suppressed, and is redacted
+    /// That is, of the [`Manual`] events on its [line](Self::line) that decide
+    /// redaction (an include or a suppression), the latest is
+    /// [`ManualIntent::Suppress`]. A relabel or relocation decides nothing
+    /// about it and is skipped. The audit trail is the single source of
+    /// truth: there is no separate flag to keep in sync. An included or
+    /// amended entity is not suppressed, and is redacted
     /// like any detection.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
     pub fn is_suppressed(&self) -> bool {
-        self.events
-            .iter()
-            .rev()
+        self.line()
             .find_map(|e| match &e.kind {
                 // A relabel or relocation amends the entity without deciding
                 // suppression, so one after a `Suppress` must not clear it. Skip
@@ -416,7 +436,7 @@ mod tests {
     use jiff::Timestamp;
 
     use super::*;
-    use crate::entity::LabelRef;
+    use crate::entity::{EntityCoRef, LabelRef};
     use crate::modality::Hint;
     use crate::modality::text::{Text, TextLocation};
     use crate::primitive::ComponentId;
@@ -436,33 +456,37 @@ mod tests {
         let operator = ComponentId::new("mask", "1");
         let why = Attribution::cited("GDPR", "Art. 17").with_rationale("erasure");
         let events = [
-            AuditEvent::pattern(
+            AuditEvent::new(
                 "pattern",
                 conf,
-                "ssn",
-                at.clone(),
-                PatternRule {
-                    name: "ssn".into(),
-                    regex: Some(r"\d{3}".into()),
-                    validator: Some("luhn".into()),
-                },
+                Pattern::new(
+                    "ssn",
+                    at.clone(),
+                    PatternRule {
+                        name: "ssn".into(),
+                        regex: Some(r"\d{3}".into()),
+                        validator: Some("luhn".into()),
+                    },
+                )
+                .with_recognized_range(3..9),
             ),
-            AuditEvent::model(
+            AuditEvent::new(
                 "model",
                 conf,
-                "ssn",
-                at.clone(),
-                ModelId {
-                    name: "ner".into(),
-                    version: Some("2".into()),
-                },
+                Model::new(
+                    "ssn",
+                    at.clone(),
+                    ModelId {
+                        name: "ner".into(),
+                        version: Some("2".into()),
+                    },
+                )
+                .with_recognized_range(3..9),
             ),
-            AuditEvent::flagged(
+            AuditEvent::new(
                 "codec",
                 conf,
-                "author",
-                at.clone(),
-                HiddenContentKind::Collaboration,
+                Flagged::new("author", at.clone(), HiddenContentKind::Collaboration),
             ),
             AuditEvent::fusion("union", conf, at.clone()),
             AuditEvent::conflict(Conflict::new(LabelRef::new("iban"), conf, "longest"), conf),
@@ -512,6 +536,15 @@ mod tests {
                 Manual::new(intent, at.clone()).with_attribution(why.clone()),
             )));
         }
+        log.record(fixed(AuditEvent::new(
+            "lift",
+            conf,
+            Annotation::new()
+                .with_location(TextLocation::inline(13..19))
+                .with_recognized_range(3..9)
+                .with_language("en".parse().unwrap())
+                .with_coref(EntityCoRef::new("c1")),
+        )));
         log
     }
 
@@ -527,22 +560,23 @@ mod tests {
     }
 
     /// The digests of [`every_kind`]'s events, in order.
-    const PINNED: [&str; 14] = [
+    const PINNED: [&str; 15] = [
         // pattern
-        "b7477bb6abdc47b2c6dac8fbb51c3cef8172b290890b914911c2a388bdbe5ac6", // model
-        "7b70bef40e3e4238b01306089e0316f61fcd523aff3dd4e96ff27de2638483a0", // flagged
-        "e9cc009ab815ebbbfad9bf9206cd37ea5e05c6bdcfb77028d518cbde5804f6f2", // fusion
-        "0e445e2bafb49966a3ecd7bcc49ede674fc3f001d6df0c4a74676f7fd85330a4", // conflict
-        "56fbc7f604ac1ac22a9a0a1dbdaaa8745d9a6d5428f05201eafe80cd67e25810", // contested
-        "e21c5d890694ab7f70379171a67805d5047e1711ef6e2011c64b4cdd02a139e9", // calibration
-        "dd00f9fcd32529be12054e84393ff63c2c18ba2d79da336c1af789e62ddbd184", // refinement
-        "380b1bb0094e616af52b8a6677b068822b531a89f38473b3d2d637482cfaa9ab", // selection
-        "93b3341d6c97c725d335793628c8499fb6791b4ff2cb60fbea8bc5a2a595d1c2", // redaction
-        "178a9ac0cb639b05ac771f88605acfb7b95e17cf074b028cb8c4064023600631", // include
-        "90d2b992fcce7bded6d393902f586c727dadf0ba673450c9695e1cc4b92d5885", // relabel
-        "2133fc33dc6de9f8a4c93b0755491901ec6b7d7797d09667eb9fd5206a4d1e10", // relocate
-        "a0cc529f42e94062aa1f9f8d54b462f9b5b1d33e4df56d23dcd1fa5fe322629e", // suppress
-        "27fac92b47c427323fe39f4aa00bf6b7573653e79659d23a7ffc566527fddcc9",
+        "4bdcf255f11836161b03d87ca7b0e4aa752819c1db0d685f31af34a53f9fd72b", // model
+        "12b57ac561ebb7dafa19f1a6fbd46f844a03f941bf7c68eabcb4456e6343c6c8", // flagged
+        "17d5f2ef91525e3b9ecf952034e719bb7d80e08e66ac1024f8b55c43e7a12787", // fusion
+        "8eb6ada2663418d5df28fdbbba64896918186d2a7978996202a0bb61a3939864", // conflict
+        "32670d83b16832696e7cb2fc9434d678914be0dc131f5c4b46029068fb920781", // contested
+        "be8fce5b547ba26d6d00708065531804cf6d532704bcb9e574f9aacecfb0edff", // calibration
+        "0e6863731c263b2c3055aaa397d92a411c0a9bf50b00cefc289fb25b86b598c7", // refinement
+        "c6c28ab2a4c3ab9a9f5aa14e6b564f5038b3d537d77ad8444593c1f5b812caae", // selection
+        "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // redaction
+        "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // include
+        "b057db8cd53a6ee9847d91cd320f1f5889ce05e201286a436a97aba412f7ed45", // relabel
+        "ec50db224d5207b2100d0e86d27988a13672af22a869d09c9b10207726e52af3", // relocate
+        "14b912e2098b07533247c8cad6607132988ac4f050efe0a4b9d4a874347a221d", // suppress
+        "99d30495883350f35a8549d305725e5c32a91e5bea86ad25a7ee24f571c0e1cd", // annotation
+        "d23d41422f3d48fd2886e345c4f036ea17ce4430fca71c8c484cfb95b65427f3",
     ];
 
     /// Editing any recorded payload field breaks verification.
@@ -601,12 +635,10 @@ mod tests {
         let conf = Confidence::new(0.5).unwrap();
         let at = TextLocation::inline(0..2);
         let mut log = AuditLog::<Text>::default();
-        log.record(AuditEvent::pattern(
+        log.record(AuditEvent::new(
             "pattern",
             conf,
-            "ssn",
-            at.clone(),
-            PatternRule::default(),
+            Pattern::new("ssn", at.clone(), PatternRule::default()),
         ));
         let detection = log.events()[0].hash();
         log.record(AuditEvent::redaction(

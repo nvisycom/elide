@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::hash::Hash;
+use std::ops::Range;
 
 #[cfg(feature = "serde")]
 use serde::de::Error as _;
@@ -38,27 +39,10 @@ impl AuditHash {
         &self.0.0
     }
 
-    /// Whether `self` and `other` are the same digest, compared in constant
-    /// time, so checking a keyed digest leaks nothing about it through
-    /// timing.
-    pub fn matches(&self, other: &Self) -> bool {
-        blake3::Hash::from_bytes(self.0.0) == blake3::Hash::from_bytes(other.0.0)
-    }
-
     /// The digest of `fields` in order, each length-prefixed so no two lists
     /// of fields share one (`["ab", "c"]` differs from `["a", "bc"]`).
     pub fn of_fields<F: AsRef<[u8]>>(fields: impl IntoIterator<Item = F>) -> Self {
         AuditHasher::new().fields(fields)
-    }
-
-    /// The keyed digest of `fields` under `key`: BLAKE3 in keyed mode over the
-    /// same encoding as [`of_fields`](Self::of_fields), a message
-    /// authentication code that only a holder of `key` can compute.
-    pub fn of_fields_keyed<F: AsRef<[u8]>>(
-        key: &[u8; 32],
-        fields: impl IntoIterator<Item = F>,
-    ) -> Self {
-        AuditHasher(blake3::Hasher::new_keyed(key)).fields(fields)
     }
 }
 
@@ -109,6 +93,18 @@ impl AuditHasher {
                 self.byte(1);
                 self.bytes(bytes)
             }
+            None => self.byte(0),
+        }
+    }
+
+    /// Fold in an optional byte range: a presence byte, then its bounds if
+    /// present.
+    pub(crate) fn range(&mut self, range: Option<&Range<usize>>) -> &mut Self {
+        match range {
+            Some(range) => self
+                .byte(1)
+                .raw(&(range.start as u64).to_le_bytes())
+                .raw(&(range.end as u64).to_le_bytes()),
             None => self.byte(0),
         }
     }

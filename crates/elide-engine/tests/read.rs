@@ -5,9 +5,9 @@
 //! nest.
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, encode_mock, mock_format};
-use elide_core::entity::audit::PatternRule;
+use elide_core::entity::audit::{Pattern, PatternRule};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
-use elide_core::entity::{Entity, LabelCatalog};
+use elide_core::entity::{Birth, Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
@@ -39,13 +39,11 @@ impl Recognizer<Text> for PiiRecognizer {
             .match_indices(PII)
             .map(|(start, _)| {
                 let location = TextLocation::inline(start..start + PII.len());
-                Entity::pattern(
+                Entity::new(Birth::new(
                     "mock-pii",
                     Confidence::MAX,
-                    EMAIL_ADDRESS.to_ref(),
-                    location,
-                    PatternRule::default(),
-                )
+                    Pattern::new(EMAIL_ADDRESS.to_ref(), location, PatternRule::default()),
+                ))
             })
             .collect())
     }

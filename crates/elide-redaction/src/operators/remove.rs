@@ -68,7 +68,7 @@ mod tests {
 
     #[tokio::test]
     async fn text_is_removed() {
-        let entity = Entity::<Text>::fixture("PERSON", (0, 8));
+        let entity = Entity::<Text>::fixture("PERSON", 0..8);
         let out = Remove
             .anonymize(&entity, &TextData::new("Jane Roe"))
             .await

@@ -122,8 +122,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elide_core::Component;
-    use elide_core::entity::audit::PatternRule;
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
@@ -137,16 +137,18 @@ mod tests {
         let label = LabelRef::new(label.to_owned());
         let location = TextLocation::inline(0..1);
         let confidence = Confidence::new(confidence).unwrap();
-        Entity::pattern(
+        Entity::new(Birth::new(
             "baseline",
             confidence,
-            label.clone(),
-            location,
-            PatternRule {
-                name: label.as_str().into(),
-                ..PatternRule::default()
-            },
-        )
+            Pattern::new(
+                label.clone(),
+                location,
+                PatternRule {
+                    name: label.as_str().into(),
+                    ..PatternRule::default()
+                },
+            ),
+        ))
     }
 
     /// A recognizer that replays canned entities and counts how often it ran, so

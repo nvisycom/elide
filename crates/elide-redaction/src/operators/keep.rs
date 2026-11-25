@@ -43,8 +43,8 @@ impl<M: Modality> Operator<M> for Keep {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::PatternRule;
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::redaction::Operator;
@@ -54,13 +54,15 @@ mod tests {
     #[tokio::test]
     async fn keep_writes_nothing() {
         let location = TextLocation::inline(0..6);
-        let entity: Entity<Text> = Entity::pattern(
+        let entity: Entity<Text> = Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new("AMOUNT"),
-            location.clone(),
-            PatternRule::default(),
-        );
+            Pattern::new(
+                LabelRef::new("AMOUNT"),
+                location.clone(),
+                PatternRule::default(),
+            ),
+        ));
         let out = Keep
             .anonymize(&entity, &TextData::new("$1,000"))
             .await

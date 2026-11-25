@@ -21,6 +21,7 @@ pub use self::tokens::{Token, Tokens};
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
 use crate::entity::Entity;
+use crate::entity::audit::Annotation;
 
 /// The text modality: located by byte range, redacted by replacement text.
 ///
@@ -47,15 +48,16 @@ impl Entity<Text> {
     /// This is unlike a chunk-to-source lift, which moves only `location`: there
     /// the recognized text (an OCR layout, a transcript) is a genuinely different
     /// coordinate space from the source document, so `recognized_range` stays put
-    /// as the artifact key. The [`audit`](Entity::audit) trail is likewise left
-    /// untouched — it records the recognizer's own window-local view, which is
-    /// genuinely where the match was reported.
+    /// as the artifact key. The birth event keeps the recognizer's own
+    /// window-local view, which is genuinely where the match was reported, and
+    /// the shift is recorded after it as an [`Annotation`], by `"offset"`.
     #[must_use]
     pub fn offset(mut self, delta: usize) -> Option<Self> {
-        self.location = self.location.offset(delta)?;
-        if let Some(range) = &mut self.recognized_range {
-            *range = range.start + delta..range.end + delta;
+        let mut annotation = Annotation::new().with_location(self.location().offset(delta)?);
+        if let Some(range) = self.recognized_range() {
+            annotation = annotation.with_recognized_range(range.start + delta..range.end + delta);
         }
+        self.annotate("offset", annotation);
         Some(self)
     }
 }
@@ -90,20 +92,27 @@ impl TextRecognizable for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::LabelRef;
+    use crate::entity::Birth;
+    use crate::entity::audit::{Pattern, PatternRule};
+    use crate::primitive::Confidence;
     use crate::redaction::Redactions;
 
     fn text_entity(location: TextLocation) -> Entity<Text> {
-        Entity::new(LabelRef::new("US_SSN"), location)
+        Entity::new(Birth::new(
+            "t",
+            Confidence::MAX,
+            Pattern::new("US_SSN", location, PatternRule::default()),
+        ))
     }
 
     #[test]
     fn entity_offset_shifts_location_and_recognized_range_together() {
-        let entity = Entity::new(LabelRef::new("US_SSN"), TextLocation::inline(2..5))
+        let found = Pattern::new("US_SSN", TextLocation::inline(2..5), PatternRule::default())
             .with_recognized_range(2..5);
+        let entity = Entity::new(Birth::new("t", Confidence::MAX, found));
         let moved = entity.offset(100).expect("inline location has a span");
-        assert_eq!(moved.location.range(), Some(&(102..105)));
-        assert_eq!(moved.recognized_range, Some(102..105));
+        assert_eq!(moved.state.location.range(), Some(&(102..105)));
+        assert_eq!(moved.state.recognized_range, Some(102..105));
     }
 
     #[test]

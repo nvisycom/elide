@@ -31,7 +31,7 @@ pub use self::mock_backend::MockBackend;
 #[cfg(feature = "rig")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rig")))]
 pub use self::rig::{RigBackend, RigConfig};
-pub use crate::modality::LlmModality;
+pub use crate::modality::{Finding, Lifter, LlmModality};
 
 /// An LLM [`Backend`], with the modality it serves recovered as an associated
 /// type.

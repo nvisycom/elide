@@ -40,7 +40,7 @@ use uuid::Uuid;
 use super::group::EntityGroup;
 use super::part::Part;
 use crate::PartId;
-use crate::wire::{Restorer, fields, part_fields};
+use crate::wire::{Restorer, digest, part_fields};
 
 /// The detected entities of a document set, reviewed before apply.
 ///
@@ -60,7 +60,7 @@ use crate::wire::{Restorer, fields, part_fields};
 /// A report is **pure entity data**: it carries no live document state, so
 /// it can be built from scratch ([`new`] + [`insert_part`]), serialized to a
 /// part-list `{ parts: [..] }` view, stored, and read back against its
-/// [`Seal`](crate::Seal) with a [`Restorer`]. [`anonymize_with`]
+/// [digest](Self::digest) with a [`Restorer`]. [`anonymize_with`]
 /// re-decodes each part from the container it is applied to, so a rebuilt
 /// report redacts just as a freshly-analyzed one does.
 ///
@@ -152,8 +152,8 @@ impl Report {
     ///
     /// It needs none of the analyzers, anonymizers, or codec registry an
     /// [`Orchestrator`] needs to *run* one. Register the modalities the report
-    /// may contain, [`seal`](Restorer::seal) it when it is written, then
-    /// [`restore`] it against that seal:
+    /// may contain, keep its [digest](Self::digest) when it is written, then
+    /// [`restore`] it against that digest:
     ///
     /// ```
     /// use elide_core::modality::text::Text;
@@ -161,9 +161,9 @@ impl Report {
     ///
     /// let restorer = Report::restorer().with_modality::<Text>();
     /// let written = Report::new();
-    /// let seal = restorer.seal(&written);
+    /// let digest = written.digest();
     /// let json = serde_json::to_string(&written)?;
-    /// let report: Report = restorer.restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
+    /// let report: Report = restorer.restore(&digest, &mut serde_json::Deserializer::from_str(&json))?;
     /// assert_eq!(report.part_ids().count(), 0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -207,20 +207,21 @@ impl Report {
         self.stripped = record;
     }
 
-    /// A digest of every entity the report carries: the version a
-    /// [`Review`](crate::Review) is made against, and what an unkeyed [`Seal`] of the report
-    /// records.
+    /// A digest of the report: the version a [`Review`](crate::Review) is made
+    /// against, and what a [`Restorer`] checks it against when it is read
+    /// back.
     ///
     /// Each entity's trail [verifies](elide_core::entity::audit::AuditLog::verify)
-    /// on its own, but that cannot catch a report rewritten whole: the trail
-    /// hashes are unkeyed, so whoever rewrites an entity can recompute its
-    /// trail; a trail cut back to an earlier event is intact in its own right;
-    /// a label or location changed beside its trail leaves the trail as it
-    /// was; and a dropped entity, which would then go unredacted, leaves every
-    /// remaining trail intact. The digest covers every part and every
-    /// [entity](Entity::digest), its fields and trail alike, so a report read
-    /// back against its seal catches any of these. A [review](crate::Review)
-    /// changes it.
+    /// on its own, and an entity is refused when it says what its trail does
+    /// not, but that cannot catch a report rewritten whole: the trail hashes
+    /// are unkeyed, so whoever rewrites an entity can recompute its trail; a
+    /// trail cut back to an earlier event is intact in its own right; and a
+    /// dropped entity, which would then go unredacted, leaves every remaining
+    /// trail intact. The digest covers the report's id and every part and
+    /// every [entity](Entity::digest), so a report read back against it
+    /// catches any of these, as long as the digest is kept where the carrier
+    /// cannot change it. A
+    /// [review](crate::Review) that changes the report changes it.
     ///
     /// Parts are ordered by path and entities by id, so the digest does not
     /// depend on the order the report was built or serialized in. A part with
@@ -231,10 +232,9 @@ impl Report {
     ///
     /// [`analyze`]: crate::Orchestrator::analyze
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
-    /// [`Seal`]: crate::Seal
     #[must_use]
     pub fn digest(&self) -> AuditHash {
-        AuditHash::of_fields(fields(self))
+        digest(self)
     }
 
     /// The report's identity, a time-ordered UUIDv7 minted when it was
@@ -246,7 +246,7 @@ impl Report {
 
     /// The fields the report's digest covers: its id, then each part with
     /// entities, by path, with its modality and its entities' digests by id.
-    pub(crate) fn seal_fields(&self) -> Vec<Vec<u8>> {
+    pub(crate) fn digest_fields(&self) -> Vec<Vec<u8>> {
         let mut fields = vec![self.id.as_bytes().to_vec()];
         fields.extend(part_fields(
             self.parts
@@ -337,11 +337,11 @@ mod tests {
     use super::super::test_support::{doc, text_entity, text_entity_at as at};
     use super::*;
 
-    /// The digest moves with anything an entity says, on its trail or beside
-    /// it, and with an entity dropped; it does not move with the order the
-    /// entities were built in, or with a part holding none.
+    /// The digest moves with an entity dropped, and does not move with the
+    /// order the entities were built in, or with a part holding none; an
+    /// entity changed beside its trail does not read back at all.
     #[test]
-    fn the_digest_covers_every_entity_and_field() {
+    fn the_digest_covers_every_entity() {
         let kept = at("EMAIL_ADDRESS", 0..5);
         let other = at("PERSON_NAME", 6..9);
         let id = Uuid::now_v7();
@@ -356,7 +356,8 @@ mod tests {
         let digest = written.digest();
         assert_eq!(report(vec![other.clone(), kept.clone()]).digest(), digest);
 
-        // A label or location changed beside the trail, on the wire.
+        // A label or location changed beside the trail, on the wire, is
+        // refused even by an unchecked read: the entity is its trail.
         let registry = Restorer::new().with_modality::<Text>();
         let wire = serde_json::to_value(&written).unwrap();
         let moved_to = serde_json::to_value(TextLocation::inline(0..2)).unwrap();
@@ -370,9 +371,11 @@ mod tests {
                     entity[field] = value.clone();
                 }
             }
-            let read: Report = registry.restore_unsealed(tampered).unwrap();
-            assert!(read.entity_anywhere::<Text>(kept.id()).is_some());
-            assert_ne!(read.digest(), digest, "a changed {field} moves the digest");
+            let err = registry
+                .restore_unchecked::<Report, _>(tampered)
+                .map(drop)
+                .unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::MalformedInput, "a changed {field}");
         }
 
         assert_ne!(report(vec![kept.clone()]).digest(), digest);

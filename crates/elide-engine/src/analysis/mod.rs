@@ -25,10 +25,10 @@ mod report;
 pub(crate) mod test_support {
     use std::ops::Range;
 
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
     #[cfg(feature = "schema")]
-    use elide_core::entity::audit::{Manual, ManualIntent};
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::Include;
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     #[cfg(feature = "schema")]
     use elide_core::modality::text::SourceRef;
     use elide_core::modality::text::{Text, TextLocation};
@@ -44,13 +44,11 @@ pub(crate) mod test_support {
     /// A [`Text`] entity carrying `label`, detected at `range`.
     pub(crate) fn text_entity_at(label: &str, range: Range<usize>) -> Entity<Text> {
         let loc = TextLocation::inline(range);
-        Entity::pattern(
+        Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new(label),
-            loc,
-            PatternRule::default(),
-        )
+            Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+        ))
     }
 
     /// A custom [`Text`] entity located only by source, the reviewer-add shape:
@@ -59,12 +57,8 @@ pub(crate) mod test_support {
     #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         let location = TextLocation::marked_source(SourceRef::new(0..4));
-        let intent = ManualIntent::Include {
-            label: LabelRef::new(label),
-        };
-        let manual = Manual::new(intent, location.clone());
-        let event = AuditEvent::manual("manual", Confidence::MAX, manual);
-        Entity::new(LabelRef::new(label), location).with_event(event)
+        let included = Include::new(LabelRef::new(label), location);
+        Entity::new(Birth::new("manual", Confidence::MAX, included))
     }
 
     /// A one-segment [`PartId`] naming the sole document under test.
@@ -74,6 +68,7 @@ pub(crate) mod test_support {
 }
 
 pub use self::artifacts::ArtifactSet;
+pub(crate) use self::artifacts::ModalityTag;
 pub(crate) use self::group::{ArtifactGroup, EntityGroup, ErasedGroup, GroupItem};
 pub use self::part::Part;
 pub(crate) use self::report::StrippedRecord;

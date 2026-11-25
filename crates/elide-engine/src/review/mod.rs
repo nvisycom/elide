@@ -27,11 +27,9 @@ use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 pub use self::edit::{Change, Edit};
-pub(crate) use self::group::EditGroup;
-pub use self::policy::{
-    And, Narrowed, ProposedEdit, Protect, RequireActor, RequireReason, ReviewPolicy,
-};
-use crate::wire::part_fields;
+pub(crate) use self::group::{EditGroup, Reviewer};
+pub use self::policy::{And, Narrowed, ProposedEdit, Protect, RequireReason, ReviewPolicy};
+use crate::wire::{digest, part_fields};
 use crate::{PartId, Report};
 
 /// A reviewer's edits to a [`Report`], made against one version of it.
@@ -39,22 +37,23 @@ use crate::{PartId, Report};
 /// Start one from the report a reviewer is shown with [`new`](Self::new), add
 /// edits part by part through [`part`](Self::part), and apply it with
 /// [`Orchestrator::review`]. It serializes, so it can travel from a review
-/// layer to the side that holds the report; read it back against its
-/// [`Seal`](crate::Seal) with [`Restorer::restore`].
+/// layer to the side that holds the report, and is read back with a
+/// [`Restorer`].
 ///
 /// A review is bound to the [digest](Report::digest) of the report it was made
 /// against, and applies only to that report: one made against another
-/// report, or an earlier version of this one (applying a review changes the
-/// digest), is refused. A review applied once cannot be applied again.
+/// report, or an earlier version of this one, is refused. A review that
+/// changes the report changes its digest, so it applies once.
 ///
-/// What a review cannot protect itself against is its carrier: an edit
-/// dropped on the way leaves the entity as the analysis found it, and an
-/// [include](ReviewPart::include) dropped leaves content unredacted. Carry a
-/// review over a channel the deployment authenticates, or seal it on a
-/// reviewer's side that holds the [`SealKey`](crate::SealKey), with
-/// [`Restorer::seal`](crate::Restorer::seal) under
-/// [`with_seal_key`](crate::Restorer::with_seal_key).
+/// A review carries what was decided and why, not who decided it: the side
+/// that applies it names the actor, from however it authenticated the
+/// reviewer, so a review cannot claim to be someone else's. What a review
+/// cannot protect itself against is its carrier: an edit dropped on the way
+/// leaves the entity as the analysis found it, and an
+/// [include](ReviewPart::include) dropped leaves content unredacted. Carry it
+/// over a channel the deployment authenticates.
 ///
+/// [`Restorer`]: crate::Restorer
 /// [`Orchestrator::review`]: crate::Orchestrator::review
 /// [`Restorer::restore`]: crate::Restorer::restore
 pub struct Review {
@@ -78,6 +77,13 @@ impl Review {
     #[must_use]
     pub fn against(&self) -> AuditHash {
         self.against
+    }
+
+    /// A digest of the review: what a [`Restorer`](crate::Restorer) checks it
+    /// against when it is read back.
+    #[must_use]
+    pub fn digest(&self) -> AuditHash {
+        digest(self)
     }
 
     /// Whether the review holds no edits.
@@ -116,7 +122,6 @@ impl Review {
             })?;
         Ok(ReviewPart {
             edits,
-            by: None,
             because: None,
         })
     }
@@ -132,15 +137,18 @@ impl Review {
             .map(Vec::as_slice)
     }
 
-    /// Apply the review to `report` under `policy`: every edit or none.
+    /// Apply the review to `report` as made by the `reviewer`: every edit or
+    /// none.
     ///
-    /// The review must have been made against `report` as it is now, and must
-    /// change it: one that changes nothing would leave the digest as it was,
-    /// and so could be applied again. Each part's edits are checked and
-    /// applied in turn on a copy, and the copies replace the parts only once
-    /// every edit passed, so a refused edit leaves the report as it was.
-    pub(crate) fn apply(&self, report: &mut Report, policy: &dyn ReviewPolicy) -> Result<()> {
-        if !self.against.matches(&report.digest()) {
+    /// The review must have been made against `report` as it is now. Each
+    /// part's edits are checked and applied in turn on a copy, and the copies
+    /// replace the parts only once every edit passed, so a refused edit leaves
+    /// the report as it was.
+    pub(crate) fn apply(&self, report: &mut Report, reviewer: Reviewer<'_>) -> Result<()> {
+        if reviewer.by.trim().is_empty() {
+            return Err(Error::malformed("a review is applied by a named actor"));
+        }
+        if self.against != report.digest() {
             return Err(Error::integrity(
                 "the review was made against another report, or an earlier version of this one",
             ));
@@ -160,11 +168,10 @@ impl Review {
             }
         }
         let mut reviewed = Vec::with_capacity(self.parts.len());
-        let mut changed = false;
-        // A group with no edits is one the seal leaves out, and so is skipped
+        // A group with no edits is one the digest leaves out, and so is skipped
         // before its modality is matched against the part's.
         for (id, edits) in self.parts.iter().filter(|(_, edits)| !edits.is_empty()) {
-            // A part with no entities is one the seal leaves out, so it is
+            // A part with no entities is one the digest leaves out, so it is
             // edited as if absent, whatever modality it was held as.
             let empty;
             let entities = match report.parts.get(id) {
@@ -174,23 +181,16 @@ impl Review {
                     empty.as_ref()
                 }
             };
-            let (entities, edited) = edits.apply(id, entities, policy)?;
-            changed |= edited;
-            reviewed.push((id.clone(), entities));
-        }
-        // A review that changes nothing would leave the report's digest as it
-        // was, so it could be applied again and again; refuse it instead.
-        if !changed {
-            return Err(Error::malformed("the review changes nothing in the report"));
+            reviewed.push((id.clone(), edits.apply(id, entities, reviewer)?));
         }
         report.parts.extend(reviewed);
         Ok(())
     }
 
-    /// The fields the review's seal covers: the report's digest, then each
+    /// The fields the review's digest covers: the report's digest, then each
     /// part by path with its modality and its edits in order. Parts are
     /// ordered by path, as they apply independently.
-    pub(crate) fn seal_fields(&self) -> Vec<Vec<u8>> {
+    pub(crate) fn digest_fields(&self) -> Vec<Vec<u8>> {
         // An empty group is left out, as a restorer drops one whose modality
         // it does not know.
         let parts = self
@@ -224,25 +224,16 @@ impl fmt::Debug for Review {
 
 /// One part of a [`Review`], typed to its modality, to add edits to.
 ///
-/// Returned by [`Review::part`]. Each edit is attributed to
-/// [`by`](Self::by) and [`because`](Self::because) when set, which the
-/// [`ReviewPolicy`] may require, and which the applied report records on the
-/// entities the edit touches.
+/// Returned by [`Review::part`]. Each edit carries the reason set with
+/// [`because`](Self::because), which the [`ReviewPolicy`] may require, and
+/// which the applied report records on the entities the edit touches.
 #[derive(Debug)]
 pub struct ReviewPart<'r, M: Modality> {
     edits: &'r mut Vec<Edit<M>>,
-    by: Option<String>,
     because: Option<Attribution>,
 }
 
 impl<M: Modality> ReviewPart<'_, M> {
-    /// Attribute the edits added through this view to `actor`.
-    #[must_use]
-    pub fn by(mut self, actor: impl Into<String>) -> Self {
-        self.by = Some(actor.into());
-        self
-    }
-
     /// Record `attribution` as the reason for the edits added through this
     /// view.
     #[must_use]
@@ -292,11 +283,10 @@ impl<M: Modality> ReviewPart<'_, M> {
         self.push(Change::Relocate { entity, location })
     }
 
-    /// Add `change`, attributed as this view says.
+    /// Add `change`, with the reason this view gives.
     fn push(&mut self, change: Change<M>) -> &mut Self {
         self.edits.push(Edit {
             change,
-            by: self.by.clone(),
             because: self.because.clone(),
         });
         self
@@ -313,8 +303,8 @@ mod tests {
     use elide_core::primitive::Confidence;
 
     use super::*;
+    use crate::Restorer;
     use crate::analysis::test_support::{doc, text_entity, text_entity_at as at};
-    use crate::{Restorer, Seal, SealKey};
 
     /// The `Manual` decisions on `entity`'s trail, with who made them.
     fn decisions(entity: &Entity<Text>) -> Vec<(String, ManualIntent, TextLocation)> {
@@ -333,8 +323,16 @@ mod tests {
             .collect()
     }
 
+    /// Apply `review` to `report` as `reviewer-7`, under a policy that
+    /// accepts every edit.
     fn apply(report: &mut Report, review: &Review) -> Result<()> {
-        review.apply(report, &|_: &ProposedEdit<'_>| Ok(()))
+        review.apply(
+            report,
+            Reviewer {
+                policy: &|_: &ProposedEdit<'_>| Ok(()),
+                by: "reviewer-7",
+            },
+        )
     }
 
     #[test]
@@ -344,7 +342,6 @@ mod tests {
         let id = review
             .part::<Text>(&doc())
             .unwrap()
-            .by("reviewer-7")
             .because(Attribution::freeform("missed by detection"))
             .include("PERSON_NAME", TextLocation::inline(4..12));
         apply(&mut report, &review).unwrap();
@@ -397,7 +394,6 @@ mod tests {
                         label: LabelRef::new("X"),
                         location: TextLocation::inline(0..1),
                     },
-                    by: None,
                     because: None,
                 }]),
             ));
@@ -415,7 +411,6 @@ mod tests {
         review
             .part::<Text>(&doc())
             .unwrap()
-            .by("reviewer-7")
             .relabel(id, "PHONE_NUMBER")
             .relocate(id, TextLocation::inline(1..3));
         apply(&mut report, &review).unwrap();
@@ -517,7 +512,15 @@ mod tests {
             let mut report = Report::new().insert_part::<Text>(doc(), vec![ssn.clone()]);
             let mut review = Review::new(&report);
             edit(&mut review.part::<Text>(&doc()).unwrap());
-            review.apply(&mut report, &policy).map_err(|err| err.kind())
+            review
+                .apply(
+                    &mut report,
+                    Reviewer {
+                        policy: &policy,
+                        by: "reviewer-7",
+                    },
+                )
+                .map_err(|err| err.kind())
         };
 
         let refused = Err(ErrorKind::Refused);
@@ -561,6 +564,33 @@ mod tests {
         );
     }
 
+    /// An edit narrows the entities overlapping what it touches, as they share
+    /// one redaction: suppressing a neighbour of a protected entity is
+    /// refused, and one clear of it is not.
+    #[test]
+    fn an_edit_narrows_the_entities_it_overlaps() {
+        let outcome = |at_: std::ops::Range<usize>| {
+            let email = at("EMAIL_ADDRESS", at_);
+            let id = email.id();
+            let mut report =
+                Report::new().insert_part::<Text>(doc(), vec![email, at("SSN", 10..16)]);
+            let mut review = Review::new(&report);
+            review.part::<Text>(&doc()).unwrap().suppress(id);
+            review
+                .apply(
+                    &mut report,
+                    Reviewer {
+                        policy: &Protect::labels(["SSN"]),
+                        by: "reviewer-7",
+                    },
+                )
+                .map_err(|err| err.kind())
+        };
+
+        assert_eq!(outcome(0..20), Err(ErrorKind::Refused));
+        assert_eq!(outcome(30..40), Ok(()));
+    }
+
     /// Each edit is checked as the edits before it left the part: an entity
     /// moved into a region is protected there.
     #[test]
@@ -584,7 +614,15 @@ mod tests {
             ManualIntent::Relocate => Ok(()),
             _ => protect.check(edit),
         };
-        let err = review.apply(&mut report, &policy).unwrap_err();
+        let err = review
+            .apply(
+                &mut report,
+                Reviewer {
+                    policy: &policy,
+                    by: "reviewer-7",
+                },
+            )
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Refused);
 
         let mut unmoved = Review::new(&report);
@@ -592,12 +630,15 @@ mod tests {
             .part::<Text>(&doc())
             .unwrap()
             .suppress_within(TextLocation::inline(0..20));
-        let err = unmoved.apply(&mut report, &policy).unwrap_err();
-        assert_eq!(
-            err.kind(),
-            ErrorKind::MalformedInput,
-            "unmoved, the SSN lies outside the region, so nothing is suppressed",
-        );
+        unmoved
+            .apply(
+                &mut report,
+                Reviewer {
+                    policy: &policy,
+                    by: "reviewer-7",
+                },
+            )
+            .expect("unmoved, the SSN lies outside the region, so nothing narrows it");
     }
 
     /// A group with no edits is skipped, so it cannot clash with the part's
@@ -620,34 +661,70 @@ mod tests {
         assert_eq!(report.part::<Text>(&a).unwrap().entities().len(), 2);
     }
 
+    /// The actor is the one the review is applied by, and must be named.
     #[test]
-    fn a_policy_can_require_an_actor_and_a_reason_to_narrow() {
+    fn a_review_is_applied_by_a_named_actor() {
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id();
-        let policy = RequireActor.and(RequireReason);
-        let outcome = |by: Option<&str>, because: Option<&str>| {
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().suppress(id);
+        let accept = |_: &ProposedEdit<'_>| Ok(());
+
+        let err = review
+            .apply(
+                &mut report,
+                Reviewer {
+                    policy: &accept,
+                    by: " ",
+                },
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        review
+            .apply(
+                &mut report,
+                Reviewer {
+                    policy: &accept,
+                    by: "lead-2",
+                },
+            )
+            .unwrap();
+        let entity = report.entity_anywhere::<Text>(id).unwrap();
+        assert_eq!(decisions(entity)[0].0, "lead-2");
+    }
+
+    #[test]
+    fn a_policy_can_require_a_reason_to_narrow() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id();
+        let outcome = |because: Option<&str>| {
             let mut report = Report::new().insert_part::<Text>(doc(), vec![entity.clone()]);
             let mut review = Review::new(&report);
             let mut part = review.part::<Text>(&doc()).unwrap();
-            if let Some(by) = by {
-                part = part.by(by);
-            }
             if let Some(because) = because {
                 part = part.because(Attribution::freeform(because));
             }
             part.suppress(id);
-            review.apply(&mut report, &policy).map_err(|err| err.kind())
+            review
+                .apply(
+                    &mut report,
+                    Reviewer {
+                        policy: &RequireReason,
+                        by: "reviewer-7",
+                    },
+                )
+                .map_err(|err| err.kind())
         };
 
-        assert_eq!(outcome(None, Some("public")), Err(ErrorKind::Refused));
-        assert_eq!(outcome(Some("reviewer-7"), None), Err(ErrorKind::Refused));
-        assert_eq!(outcome(Some("reviewer-7"), Some("public")), Ok(()));
+        assert_eq!(outcome(None), Err(ErrorKind::Refused));
+        assert_eq!(outcome(Some("public")), Ok(()));
     }
 
-    /// A review that changes nothing is refused: it would leave the digest as
-    /// it was, and so could be applied again and again.
+    /// A review that changes nothing applies, and changes nothing: applying it
+    /// again is as harmless as the first time.
     #[test]
-    fn a_review_that_changes_nothing_is_refused() {
+    fn a_review_that_changes_nothing_is_harmless() {
         let entity = at("EMAIL_ADDRESS", 30..40);
         let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
         let mut review = Review::new(&report);
@@ -657,8 +734,8 @@ mod tests {
             .suppress_within(TextLocation::inline(0..10));
 
         let before = report.digest();
-        let err = apply(&mut report, &review).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        apply(&mut report, &review).unwrap();
+        apply(&mut report, &review).unwrap();
         assert_eq!(report.digest(), before);
     }
 
@@ -669,7 +746,7 @@ mod tests {
         let mut ssn = at("SSN", 4..10);
         let id = ssn.id();
         let location = ssn.location().clone();
-        ssn.record_manual(Manual::new(ManualIntent::Suppress, location), None);
+        ssn.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer");
         let mut report = Report::new().insert_part::<Text>(doc(), vec![ssn]);
         let mut review = Review::new(&report);
         review
@@ -678,7 +755,13 @@ mod tests {
             .relabel(id, "PUBLIC_ID");
 
         review
-            .apply(&mut report, &Protect::labels(["SSN"]))
+            .apply(
+                &mut report,
+                Reviewer {
+                    policy: &Protect::labels(["SSN"]),
+                    by: "reviewer-7",
+                },
+            )
             .unwrap();
         assert_eq!(
             *report.entity_anywhere::<Text>(id).unwrap().label(),
@@ -687,7 +770,7 @@ mod tests {
     }
 
     /// A part with no entities is edited as if absent, whatever modality it
-    /// was held as, as the seal leaves it out.
+    /// was held as, as the digest leaves it out.
     #[test]
     fn an_empty_part_is_edited_as_absent() {
         let mut report = Report::new().insert_part::<Metadata>(doc(), Vec::new());
@@ -708,7 +791,7 @@ mod tests {
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id();
         let only_leads_narrow = |edit: &ProposedEdit<'_>| {
-            if edit.narrows() && edit.by != Some("lead") {
+            if edit.narrows() && edit.by != "lead" {
                 return Err(Error::refused("only a lead may narrow"));
             }
             assert!(edit.narrowed.iter().all(|narrowed| narrowed.id == id));
@@ -717,11 +800,17 @@ mod tests {
         let outcome = |by: &str| {
             let mut report = Report::new().insert_part::<Text>(doc(), vec![entity.clone()]);
             let mut review = Review::new(&report);
-            let mut part = review.part::<Text>(&doc()).unwrap().by(by);
+            let mut part = review.part::<Text>(&doc()).unwrap();
             part.include("PERSON_NAME", TextLocation::inline(8..12));
             part.suppress(id);
             review
-                .apply(&mut report, &only_leads_narrow)
+                .apply(
+                    &mut report,
+                    Reviewer {
+                        policy: &only_leads_narrow,
+                        by,
+                    },
+                )
                 .map_err(|err| err.kind())
         };
 
@@ -729,68 +818,42 @@ mod tests {
         assert_eq!(outcome("lead"), Ok(()));
     }
 
-    /// A review reads back against the seal it was written with; one with an
-    /// edit dropped on the way does not.
+    /// A review reads back against its digest; one with an edit dropped on
+    /// the way does not.
     #[test]
-    fn a_review_reads_back_only_against_its_seal() {
+    fn a_review_reads_back_only_against_its_digest() {
         let entity = text_entity("EMAIL_ADDRESS");
         let id = entity.id();
         let report = Report::new().insert_part::<Text>(doc(), vec![entity]);
         let mut review = Review::new(&report);
-        let mut part = review.part::<Text>(&doc()).unwrap().by("reviewer-7");
+        let mut part = review.part::<Text>(&doc()).unwrap();
         part.suppress(id);
         part.include("PERSON_NAME", TextLocation::inline(8..12));
-        let key = SealKey::new([7; 32]);
-        let unkeyed = Restorer::new().with_modality::<Text>();
-        let keyed = Restorer::new()
-            .with_modality::<Text>()
-            .with_seal_key(key.clone());
-        let cases = [
-            (&unkeyed, unkeyed.seal(&review)),
-            (&keyed, keyed.seal(&review)),
-        ];
+        let restorer = Restorer::new().with_modality::<Text>();
         let json = serde_json::to_value(&review).unwrap();
 
-        for (restorer, seal) in &cases {
-            let read: Review = restorer
-                .restore(seal, json.clone())
-                .expect("reads back intact");
-            assert_eq!(restorer.seal(&read), restorer.seal(&review));
-            assert_eq!(read.edits::<Text>(&doc()).unwrap().len(), 2);
-        }
+        let read: Review = restorer
+            .restore(&review.digest(), json.clone())
+            .expect("reads back intact");
+        assert_eq!(read.digest(), review.digest());
+        assert_eq!(read.edits::<Text>(&doc()).unwrap().len(), 2);
 
-        let mut dropped = json.clone();
+        let mut dropped = json;
         dropped["parts"][0]["edits"]
             .as_array_mut()
             .unwrap()
             .remove(1);
-        for (restorer, seal) in &cases {
-            let err = restorer
-                .restore::<Review, _>(seal, dropped.clone())
-                .unwrap_err();
-            assert_eq!(err.kind(), ErrorKind::Integrity);
-        }
-
-        // The reader chooses the scheme: a keyed reader refuses an unkeyed
-        // digest, even one that matches, so a carrier cannot swap a MAC for a
-        // digest it computed itself; a keyless reader cannot check a MAC.
-        let swapped = keyed
-            .restore::<Review, _>(&unkeyed.seal(&review), json.clone())
+        let err = restorer
+            .restore::<Review, _>(&review.digest(), dropped)
             .unwrap_err();
-        assert_eq!(swapped.kind(), ErrorKind::Integrity);
-        let keyless = unkeyed
-            .restore::<Review, _>(&keyed.seal(&review), json)
-            .unwrap_err();
-        assert_eq!(keyless.kind(), ErrorKind::Configuration);
+        assert_eq!(err.kind(), ErrorKind::Integrity);
     }
 
-    /// A report and a review never seal alike, whatever their fields, and a
-    /// report's digest is what its unkeyed seal records.
+    /// A report and a review never digest alike, whatever their fields.
     #[test]
-    fn a_seal_names_the_kind_of_value() {
+    fn a_digest_names_the_kind_of_value() {
         let report = Report::new();
         let review = Review::new(&report);
-        assert_ne!(Seal::new(&report, None), Seal::new(&review, None));
-        assert_eq!(Seal::new(&report, None), Seal::Digest(report.digest()));
+        assert_ne!(report.digest(), review.digest());
     }
 }

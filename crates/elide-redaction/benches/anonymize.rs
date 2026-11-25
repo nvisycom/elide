@@ -25,7 +25,7 @@ fn runtime() -> Runtime {
 fn entity(start: usize, end: usize) -> Entity<Text> {
     Entity::fixture_conf(
         "NAME",
-        (start, end),
+        start..end,
         Confidence::new(0.9).expect("confidence"),
     )
 }

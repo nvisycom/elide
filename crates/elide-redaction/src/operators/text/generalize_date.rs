@@ -357,19 +357,21 @@ mod tests {
     async fn bare_operator_erases_a_declined_value() {
         // The Operator impl (not just `render`): a declined value takes the
         // safe default of erasure when the operator is used on its own.
-        use elide_core::entity::LabelRef;
-        use elide_core::entity::audit::PatternRule;
+        use elide_core::entity::audit::{Pattern, PatternRule};
+        use elide_core::entity::{Birth, LabelRef};
         use elide_core::modality::text::TextLocation;
         use elide_core::primitive::Confidence;
 
         let location = TextLocation::inline(0..8);
-        let e: Entity<Text> = Entity::pattern(
+        let e: Entity<Text> = Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new("date_of_birth"),
-            location.clone(),
-            PatternRule::default(),
-        );
+            Pattern::new(
+                LabelRef::new("date_of_birth"),
+                location.clone(),
+                PatternRule::default(),
+            ),
+        ));
         let out = Operator::<Text>::anonymize(
             &GeneralizeDate::new(DateGranularity::Year),
             &e,

@@ -18,8 +18,8 @@
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
 use elide_core::backend::{Backend, BackendBatchExt};
-use elide_core::entity::audit::ModelId;
-use elide_core::entity::{Entity, Label};
+use elide_core::entity::audit::Model;
+use elide_core::entity::{Birth, Entity, Label};
 use elide_core::modality::TextRecognizable;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Component, Result};
@@ -27,7 +27,7 @@ use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
-use crate::backend::{NerRequest, NerResponse, NerSpan};
+use crate::backend::{NerRequest, NerResponse};
 
 const TARGET: &str = "elide_ner::recognition";
 
@@ -106,7 +106,7 @@ where
         };
         let response = self.backend.call(request).await?;
         let spans = response.spans.len();
-        let entities = entities(response.spans, subject, &self.name, &response.model);
+        let entities = entities(&response, subject, &self.name);
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
@@ -144,8 +144,7 @@ where
         let responses = self.backend.call_aligned(requests).await?;
         let spans: usize = responses.iter().map(|response| response.spans.len()).sum();
         for (&index, response) in targets.iter().zip(responses) {
-            per_subject[index] =
-                entities(response.spans, subjects[index], &self.name, &response.model);
+            per_subject[index] = entities(&response, subjects[index], &self.name);
         }
         let placed: usize = per_subject.iter().map(Vec::len).sum();
         tracing::debug!(
@@ -162,29 +161,27 @@ where
     }
 }
 
-/// The entities for `spans`, located in `subject` and attributed to the
-/// recognizer named `source` running `model`. A span whose range can't be placed in the medium (an
-/// OCR/transcript range no enrichment covers) is dropped.
+/// The entities for the spans of `response`, located in `subject` and
+/// attributed to the recognizer named `source` running the response's model. A
+/// span whose range can't be placed in the medium (an OCR/transcript range no
+/// enrichment covers) is dropped.
 fn entities<M: TextRecognizable>(
-    spans: Vec<NerSpan>,
+    response: &NerResponse,
     subject: &Subject<M>,
     source: &HipStr<'static>,
-    model: &ModelId,
 ) -> Vec<Entity<M>> {
-    spans
-        .into_iter()
+    response
+        .spans
+        .iter()
         .filter_map(|span| {
             let location = M::locate(span.offset.clone(), subject.data(), subject.artifact())?;
-            Some(
-                Entity::model(
-                    source.clone(),
-                    span.confidence,
-                    span.label.clone(),
-                    location,
-                    model.clone(),
-                )
-                .with_recognized_range(span.offset),
-            )
+            let found = Model::new(span.label.clone(), location, response.model.clone())
+                .with_recognized_range(span.offset.clone());
+            Some(Entity::new(Birth::new(
+                source.clone(),
+                span.confidence,
+                found,
+            )))
         })
         .collect()
 }
@@ -212,11 +209,12 @@ mod tests {
 
     use elide_core::ErrorKind;
     use elide_core::entity::LabelCatalog;
-    use elide_core::entity::audit::AuditKind;
+    use elide_core::entity::audit::{AuditKind, ModelId};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::recognition::Scope;
 
     use super::*;
+    use crate::backend::NerSpan;
 
     #[tokio::test]
     async fn mock_backend_yields_no_entities() {

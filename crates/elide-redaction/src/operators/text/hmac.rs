@@ -120,7 +120,8 @@ impl<M: TextRedactable> Operator<M> for HmacHash {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::PatternRule;
+    use elide_core::entity::Birth;
+    use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -129,13 +130,11 @@ mod tests {
 
     fn entity(label: &str) -> Entity<Text> {
         let location = TextLocation::inline(0..5);
-        Entity::pattern(
+        Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            LabelRef::new(label),
-            location,
-            PatternRule::default(),
-        )
+            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        ))
     }
 
     #[tokio::test]

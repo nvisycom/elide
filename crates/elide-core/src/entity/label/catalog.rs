@@ -82,7 +82,7 @@ impl LabelCatalog {
     {
         entities
             .into_iter()
-            .filter(|entity| self.contains(&entity.label))
+            .filter(|entity| self.contains(entity.label()))
             .collect()
     }
 
@@ -154,20 +154,25 @@ mod tests {
 
     #[test]
     fn retain_declared_keeps_only_in_catalog_labels() {
-        use crate::entity::audit::PatternRule;
+        use crate::entity::Birth;
+        use crate::entity::audit::{Pattern, PatternRule};
         use crate::modality::text::{Text, TextLocation};
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
             let loc = TextLocation::inline(0..1);
             let conf = Confidence::new(0.9).unwrap();
-            Entity::pattern("t", conf, LabelRef::new(label), loc, PatternRule::default())
+            Entity::new(Birth::new(
+                "t",
+                conf,
+                Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+            ))
         }
 
         let catalog: LabelCatalog = [Label::new("email_address", "email")].into_iter().collect();
         let kept = catalog.retain_declared(vec![entity("email_address"), entity("iban")]);
         assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].label, LabelRef::new("email_address"));
+        assert_eq!(*kept[0].label(), LabelRef::new("email_address"));
 
         // An empty catalog declares no type, so it keeps nothing.
         let none =

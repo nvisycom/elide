@@ -35,7 +35,8 @@ fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
         .expect("recognizer builds")
 }
 
-fn img_loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
+/// A location over the box at `(x, y)` sized `w` by `h`.
+fn img_loc([x, y, w, h]: [f64; 4]) -> ImageLocation {
     ImageLocation::new(BoundingBox::from_origin(
         Point::new(x, y),
         Dimensions::new(w, h),
@@ -46,8 +47,8 @@ fn img_loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
 async fn image_context_boosts_and_keeps_the_native_region() {
     // OCR text: "ssn 123-45-6789", as two boxed regions.
     let regions = vec![
-        LayoutRegion::new(img_loc(0.0, 0.0, 40.0, 20.0), "ssn"),
-        LayoutRegion::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
+        LayoutRegion::new(img_loc([0.0, 0.0, 40.0, 20.0]), "ssn"),
+        LayoutRegion::new(img_loc([45.0, 0.0, 155.0, 20.0]), "123-45-6789"),
     ];
     let scope = Scope::new();
     let ctx = Context::new(&scope);

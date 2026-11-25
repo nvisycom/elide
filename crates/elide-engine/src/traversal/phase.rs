@@ -13,9 +13,9 @@ use elide_core::{Error, Result};
 
 use super::{Child, Fold, PartVisitor};
 use crate::Orchestrator;
-use crate::analysis::{ArtifactGroup, ArtifactSet, Report, StrippedRecord};
+use crate::analysis::{ArtifactGroup, ArtifactSet, ModalityTag, Report, StrippedRecord};
 use crate::part_id::PartId;
-use crate::pipeline::{BoxFuture, PartAnalysis};
+use crate::pipeline::{BoxFuture, PartAnalysis, Seeded};
 
 /// The analysis phase: batch each level's streams through the pipeline for
 /// their modality and scatter the findings and enrichment artifact into the
@@ -47,7 +47,7 @@ impl PartVisitor for Analyze<'_> {
             // Same-modality parts analyze together, so an OCR/STT enricher issues
             // one batched provider round-trip across them. Each pipeline claims the
             // handles it covers; leftovers have no covering pipeline (pass-through).
-            for (modality, pipeline) in orchestrator.pipelines() {
+            for pipeline in orchestrator.pipelines() {
                 let (mine, rest): (Vec<_>, Vec<_>) = streams
                     .into_iter()
                     .partition(|(_, handle)| pipeline.matches(handle));
@@ -55,25 +55,27 @@ impl PartVisitor for Analyze<'_> {
                 if mine.is_empty() {
                     continue;
                 }
-                let (ids, mut handles): (Vec<PartId>, Vec<StreamMut<'_>>) =
-                    mine.into_iter().unzip();
-                let seeds: Vec<&dyn ArtifactGroup> = ids
+                let (ids, handles): (Vec<PartId>, Vec<StreamMut<'_>>) = mine.into_iter().unzip();
+                let mut parts: Vec<Seeded<'_, '_>> = ids
                     .iter()
-                    .map(|id| {
-                        self.prior
+                    .zip(handles)
+                    .map(|(id, stream)| Seeded {
+                        stream,
+                        seed: self
+                            .prior
                             .parts
                             .get(id)
-                            .map_or(no_artifact.as_ref(), |e| e.artifact.as_ref())
+                            .map_or(no_artifact.as_ref(), |e| e.artifact.as_ref()),
                     })
                     .collect();
                 let analyses = pipeline
-                    .analyze_streams(&mut handles, self.scope, policy, &seeds)
+                    .analyze_streams(&mut parts, self.scope, policy)
                     .await?;
                 for (id, PartAnalysis { entities, artifact }) in ids.into_iter().zip(analyses) {
-                    let name = entities.modality_name();
+                    let tag = ModalityTag::of_group(entities.as_ref());
                     self.report.parts.insert(id.clone(), entities);
                     if let Some(artifact) = artifact {
-                        self.artifacts.set_part(id, *modality, name, artifact);
+                        self.artifacts.set_part(id, tag, artifact);
                     }
                 }
             }

@@ -1,5 +1,5 @@
 //! How a [`Report`], a [`Review`], and an [`ArtifactSet`] cross a process
-//! boundary: their serde wire forms, the [`Seal`] each is read back against,
+//! boundary: their serde wire forms, the digest each is read back against,
 //! and the [`Restorer`] that reads them, routing each part to its registered
 //! modality.
 //!
@@ -13,13 +13,13 @@
 //! [`Review`]: crate::Review
 //! [`ArtifactSet`]: crate::ArtifactSet
 
+mod digest;
 mod restorer;
 #[cfg(feature = "schema")]
 mod schema;
-mod seal;
 mod serde;
 
+pub use self::digest::Restorable;
+pub(crate) use self::digest::{digest, part_fields};
 pub use self::restorer::Restorer;
-pub use self::seal::{Seal, SealKey, Sealable};
-pub(crate) use self::seal::{fields, part_fields};
 pub(crate) use self::serde::Erased;
