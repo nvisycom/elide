@@ -744,6 +744,78 @@ mod tests {
     }
 
     #[test]
+    fn checked_restore_rejects_a_valid_but_shortened_entity_trail() {
+        use elide_core::ErrorKind;
+        use elide_core::entity::audit::{Manual, ManualIntent};
+
+        let original = text_entity("EMAIL_ADDRESS");
+        let mut reviewed = original.clone();
+        reviewed.record_manual(
+            Manual::new(ManualIntent::Suppress, original.location().clone()),
+            "reviewer-7",
+        );
+        let report = Report::new().insert_part::<Text>(doc(), vec![reviewed]);
+        let registry = text_registry();
+        let expected = report.digest();
+        let mut wire = serde_json::to_value(&report).unwrap();
+
+        let intact: Report = registry.restore(&expected, wire.clone()).unwrap();
+        assert!(intact.part::<Text>(&doc()).unwrap().entities()[0].is_suppressed());
+
+        // Replace the reviewed entity with its intact pre-review version,
+        // retaining both the report ID and entity ID.
+        wire["parts"][0]["entities"][0] = serde_json::to_value(&original).unwrap();
+        let unchecked: Report = registry.restore_unchecked(wire.clone()).unwrap();
+        let part = unchecked.part::<Text>(&doc()).unwrap();
+        assert!(!part.entities()[0].is_suppressed());
+        assert!(part.entities()[0].audit().verify().is_ok());
+
+        let Err(err) = registry.restore::<Report, _>(&expected, wire) else {
+            panic!("a valid but shortened trail must not match the stored digest");
+        };
+        assert_eq!(err.kind(), ErrorKind::Integrity);
+    }
+
+    #[test]
+    fn a_review_requires_a_registered_modality_only_for_nonempty_edits() {
+        use elide_core::ErrorKind;
+        use elide_core::modality::text::TextLocation;
+
+        let report = Report::new();
+        let mut review = Review::new(&report);
+        let registry = Restorer::new();
+        let mut empty = serde_json::json!({
+            "against": review.against(),
+            "parts": [{ "id": ["document"], "modality": "text", "edits": [] }],
+        });
+        let restored: Review = registry.restore(&review.digest(), empty.clone()).unwrap();
+        assert!(restored.is_empty());
+
+        // A missing or null edits field is not an empty, skippable group.
+        for edits in [None, Some(serde_json::Value::Null)] {
+            let entry = empty["parts"][0].as_object_mut().unwrap();
+            entry.remove("edits");
+            if let Some(edits) = edits {
+                entry.insert("edits".into(), edits);
+            }
+            let err = registry
+                .restore::<Review, _>(&review.digest(), empty.clone())
+                .unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        }
+
+        let mut part = review.part::<Text>(&doc()).unwrap();
+        part.include("EMAIL_ADDRESS", TextLocation::inline(0..5));
+        let wire = serde_json::to_value(&review).unwrap();
+        let err = registry
+            .restore::<Review, _>(&review.digest(), wire.clone())
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        let restored: Review = text_registry().restore(&review.digest(), wire).unwrap();
+        assert_eq!(restored.edits::<Text>(&doc()).unwrap().len(), 1);
+    }
+
+    #[test]
     fn serializes_to_part_list_view() {
         // The `{ parts: [..] }` shape is exercised end to end (with a real
         // container) in the docx integration test; here we check the entry shape

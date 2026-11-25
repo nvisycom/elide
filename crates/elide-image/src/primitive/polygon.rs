@@ -221,6 +221,25 @@ mod tests {
     }
 
     #[test]
+    fn containment_includes_boundary_but_rejects_empty_and_zero_area_regions() {
+        let outer = square(0.0, 0.0, 10.0);
+        let touching = square(8.0, 8.0, 2.0);
+        let outside = square(8.0, 8.0, 2.5);
+        let empty = Polygon::new(Vec::new());
+        let collinear = Polygon::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 2.0),
+            Point::new(4.0, 4.0),
+        ]);
+
+        assert!(outer.contains(&touching));
+        assert!(!outer.contains(&outside));
+        assert!(!outer.contains(&empty));
+        assert!(!empty.contains(&touching));
+        assert!(!collinear.contains(&collinear));
+    }
+
+    #[test]
     fn degenerate_polygon_never_overlaps() {
         let line = Polygon::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         assert!(!line.overlaps(&square(0.0, 0.0, 10.0)));

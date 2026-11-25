@@ -492,6 +492,25 @@ mod tests {
         assert_eq!(read.digest(), entity.digest());
     }
 
+    #[test]
+    fn a_valid_trail_without_a_birth_cannot_rebuild_an_entity() {
+        let id = Uuid::now_v7();
+        let mut trail = AuditLog::<Text>::default();
+        let err = Entity::from_trail(id, trail.clone()).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::Integrity);
+
+        // A standalone suppression is a valid audit event but cannot supply
+        // the initial label and location needed to rebuild an entity.
+        trail.record(AuditEvent::manual(
+            "reviewer-7",
+            Confidence::MAX,
+            Manual::new(ManualIntent::Suppress, TextLocation::inline(0..5)),
+        ));
+        assert!(trail.verify().is_ok());
+        let err = Entity::from_trail(id, trail).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::Integrity);
+    }
+
     /// An entity read back whose fields disagree with its trail is refused.
     #[cfg(feature = "serde")]
     #[test]

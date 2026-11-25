@@ -508,6 +508,91 @@ mod tests {
         assert_eq!(report.digest(), before);
     }
 
+    #[test]
+    fn a_refusal_in_a_later_part_rolls_back_an_earlier_part() {
+        let nested = doc().child("nested.txt");
+        let first = text_entity("EMAIL_ADDRESS");
+        let protected = text_entity("SSN");
+        let (first_id, protected_id) = (first.id(), protected.id());
+        let mut report = Report::new()
+            .insert_part::<Text>(doc(), vec![first])
+            .insert_part::<Text>(nested.clone(), vec![protected]);
+        let before = report.digest();
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().suppress(first_id);
+        review.part::<Text>(&nested).unwrap().suppress(protected_id);
+
+        let err = review
+            .apply(
+                &mut report,
+                Reviewer {
+                    policy: &Protect::labels(["SSN"]),
+                    by: "reviewer-7",
+                },
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Refused);
+        assert_eq!(report.digest(), before);
+        assert!(!report.part::<Text>(&doc()).unwrap().entities()[0].is_suppressed());
+
+        // The same review can still be applied when both edits are accepted.
+        apply(&mut report, &review).unwrap();
+        for part in [doc(), nested] {
+            assert!(report.part::<Text>(&part).unwrap().entities()[0].is_suppressed());
+        }
+    }
+
+    #[test]
+    fn a_review_cannot_be_applied_to_a_different_report_with_identical_findings() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id();
+        let original = Report::new().insert_part::<Text>(doc(), vec![entity.clone()]);
+        let mut other = Report::new().insert_part::<Text>(doc(), vec![entity]);
+        let mut review = Review::new(&original);
+        review.part::<Text>(&doc()).unwrap().suppress(id);
+
+        let err = apply(&mut other, &review).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Integrity);
+        assert!(!other.part::<Text>(&doc()).unwrap().entities()[0].is_suppressed());
+    }
+
+    #[test]
+    fn include_ids_cannot_be_reused_across_parts() {
+        let existing = text_entity("EMAIL_ADDRESS");
+        let existing_id = existing.id();
+        let nested = doc().child("nested.txt");
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![existing]);
+        let before = report.digest();
+        let mut review = Review::new(&report);
+        let new_id = review
+            .part::<Text>(&doc())
+            .unwrap()
+            .include("PHONE_NUMBER", TextLocation::inline(10..20));
+        review
+            .part::<Text>(&nested)
+            .unwrap()
+            .include("SSN", TextLocation::inline(0..5));
+        let json = serde_json::to_value(&review).unwrap();
+        let restorer = Restorer::new().with_modality::<Text>();
+        let nested_path = serde_json::json!(nested.segments().collect::<Vec<_>>());
+
+        for duplicate in [existing_id, new_id] {
+            let mut wire = json.clone();
+            let parts = wire["parts"].as_array_mut().unwrap();
+            let nested_edits = parts
+                .iter_mut()
+                .find(|part| part["id"] == nested_path)
+                .unwrap();
+            nested_edits["edits"][0]["entity"] = serde_json::json!(duplicate);
+            let loaded: Review = restorer.restore_unchecked(wire).unwrap();
+
+            let err = apply(&mut report, &loaded).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::MalformedInput);
+            assert_eq!(report.digest(), before);
+            assert!(report.part::<Text>(&nested).is_err());
+        }
+    }
+
     /// A protected label refuses every edit that narrows it, a relocation
     /// into a region containing the old one included, and only those.
     #[test]
@@ -616,6 +701,50 @@ mod tests {
         };
         let err = review.apply(&mut report, reviewer).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Refused);
+    }
+
+    #[test]
+    fn relocation_checks_the_destination_cluster_without_crossing_suppressed_entities() {
+        let moving = at("EMAIL_ADDRESS", 0..5);
+        let moving_id = moving.id();
+        let bridge = at("PERSON_NAME", 12..18);
+        let bridge_id = bridge.id();
+        let protected = at("SSN", 17..22);
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![moving, bridge, protected]);
+        let destination = TextLocation::inline(8..14);
+        let reviewer = Reviewer {
+            policy: &Protect::labels(["SSN"]),
+            by: "reviewer-7",
+        };
+        let relocation = |report: &Report| {
+            let mut review = Review::new(report);
+            review
+                .part::<Text>(&doc())
+                .unwrap()
+                .relocate(moving_id, destination.clone());
+            review
+        };
+
+        let err = relocation(&report)
+            .apply(&mut report, reviewer)
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Refused);
+
+        let mut suppress_bridge = Review::new(&report);
+        suppress_bridge
+            .part::<Text>(&doc())
+            .unwrap()
+            .suppress(bridge_id);
+        apply(&mut report, &suppress_bridge).unwrap();
+
+        relocation(&report).apply(&mut report, reviewer).unwrap();
+        let part = report.part::<Text>(&doc()).unwrap();
+        let moved = part
+            .entities()
+            .iter()
+            .find(|e| e.id() == moving_id)
+            .unwrap();
+        assert_eq!(moved.location(), &destination);
     }
 
     /// Each edit is checked as the edits before it left the part: an entity
