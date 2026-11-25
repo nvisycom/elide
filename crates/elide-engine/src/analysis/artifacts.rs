@@ -143,7 +143,7 @@ impl ArtifactSet {
             // An artifact that cannot serialize cannot be written either; it is
             // still covered, by its error, so the digest never skips it.
             let bytes = match serde_value::to_value(Erased(entry.artifact.as_ref())) {
-                Ok(Value::Unit) => return None,
+                Ok(Value::Unit | Value::Option(None)) => return None,
                 Ok(value) => {
                     let mut bytes = Vec::new();
                     encode(&value, &mut bytes);

@@ -138,7 +138,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
             self.scoring.score(pooled, other.confidence())
         });
         base.fuse(
-            &mut absorbed,
+            &absorbed,
             Fusion::new(self.scoring.name(), location),
             confidence,
         );

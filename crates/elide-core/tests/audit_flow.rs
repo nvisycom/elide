@@ -25,7 +25,7 @@ fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
     entities.sort_by(|a, b| b.confidence().partial_cmp(&a.confidence()).unwrap());
     let mut base = entities.remove(0);
     let (confidence, location) = (base.confidence(), base.location().clone());
-    base.fuse(&mut entities, Fusion::new("max", location), confidence);
+    base.fuse(&entities, Fusion::new("max", location), confidence);
     base
 }
 

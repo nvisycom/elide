@@ -160,10 +160,10 @@ impl Restorer {
     ///
     /// # Errors
     ///
-    /// [`MalformedInput`] if the payload is malformed, or if a part carries
-    /// entities or edits under an unregistered modality, or an entity says what
-    /// its trail does not; [`Integrity`] if a trail does not verify, or the
-    /// value's digest is not `expected`.
+    /// [`MalformedInput`] if the payload is malformed: a part carries entities
+    /// or edits under an unregistered modality, a trail does not verify, or an
+    /// entity says what its trail does not; [`Integrity`] if the value's
+    /// digest is not `expected`.
     ///
     /// [`analyze`]: crate::Orchestrator::analyze
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput

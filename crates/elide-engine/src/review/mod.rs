@@ -97,12 +97,17 @@ impl Review {
     /// # Errors
     ///
     /// [`MalformedInput`](elide_core::ErrorKind::MalformedInput) when the
-    /// review already edits part `id` as another modality.
+    /// review already holds edits of part `id` as another modality. A part
+    /// opened as another modality but left without edits is reopened as `M`.
     pub fn part<M: Modality>(&mut self, id: &PartId) -> Result<ReviewPart<'_, M>>
     where
         M::Location: Serialize + DeserializeOwned,
     {
         let index = match self.parts.iter().position(|(part, _)| part == id) {
+            Some(index) if self.parts[index].1.is_empty() => {
+                self.parts[index].1 = Box::new(Vec::<Edit<M>>::new());
+                index
+            }
             Some(index) => index,
             None => {
                 self.parts
@@ -295,6 +300,8 @@ impl<M: Modality> ReviewPart<'_, M> {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use elide_core::ErrorKind;
     use elide_core::entity::Entity;
     use elide_core::entity::audit::{AuditKind, Manual, ManualIntent};
@@ -569,7 +576,7 @@ mod tests {
     /// refused, and one clear of it is not.
     #[test]
     fn an_edit_narrows_the_entities_it_overlaps() {
-        let outcome = |at_: std::ops::Range<usize>| {
+        let outcome = |at_: Range<usize>| {
             let email = at("EMAIL_ADDRESS", at_);
             let id = email.id();
             let mut report =
@@ -767,6 +774,21 @@ mod tests {
             *report.entity_anywhere::<Text>(id).unwrap().label(),
             LabelRef::new("PUBLIC_ID")
         );
+    }
+
+    /// A part opened as another modality but left without edits is reopened
+    /// as the one asked for; one holding edits is not.
+    #[test]
+    fn an_empty_part_is_reopened_as_another_modality() {
+        let report = Report::new();
+        let mut review = Review::new(&report);
+        review.part::<Metadata>(&doc()).unwrap();
+        review
+            .part::<Text>(&doc())
+            .unwrap()
+            .include("SSN", TextLocation::inline(0..4));
+        let err = review.part::<Metadata>(&doc()).map(drop).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
 
     /// A part with no entities is edited as if absent, whatever modality it

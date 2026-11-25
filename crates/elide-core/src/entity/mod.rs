@@ -13,7 +13,6 @@ mod label;
 mod state;
 
 use std::collections::HashSet;
-use std::mem;
 use std::ops::Range;
 
 use hipstr::HipStr;
@@ -247,12 +246,12 @@ impl<M: Modality> Entity<M> {
     /// Fuse `absorbed`, detections of the same finding, into this entity as
     /// `fusion` decided, at the pooled `confidence`.
     ///
-    /// Every absorbed trail moves into this one, leaving each absorbed entity
-    /// with an empty trail, and the fusion event, recording the span covering
-    /// them all, joins the trails' tips. An event the trails share is kept
-    /// once, a tip they share is joined once, and a trail with no events
-    /// contributes no tip.
-    pub fn fuse(&mut self, absorbed: &mut [Entity<M>], fusion: Fusion<M>, confidence: Confidence) {
+    /// Every absorbed trail is copied into this one, and the fusion event,
+    /// recording the span covering them all, joins the trails' tips. The
+    /// absorbed entities keep their own trails, so each stays a whole entity.
+    /// An event the trails share is kept once, and a tip they share is joined
+    /// once.
+    pub fn fuse(&mut self, absorbed: &[Entity<M>], fusion: Fusion<M>, confidence: Confidence) {
         // Trails that share events (two findings of one recognition) merge
         // each shared event once, and join each shared tip once.
         let mut seen: HashSet<AuditHash> =
@@ -262,12 +261,12 @@ impl<M: Modality> Entity<M> {
         let mut heads = Vec::with_capacity(absorbed.len() + 1);
         heads.push(self.audit.tip());
         for other in absorbed {
-            if !other.audit.is_empty() && !heads.contains(&other.audit.tip()) {
+            if !heads.contains(&other.audit.tip()) {
                 heads.push(other.audit.tip());
             }
-            let events = mem::take(&mut other.audit).into_events();
+            let events = other.audit.events().iter().cloned();
             self.audit
-                .absorb(events.into_iter().filter(|event| seen.insert(event.hash())));
+                .absorb(events.filter(|event| seen.insert(event.hash())));
         }
         let event = AuditEvent::new(fusion.strategy.clone(), confidence, fusion);
         self.state.apply(&event);
@@ -405,9 +404,13 @@ impl Entity<Text> {
 
 #[cfg(test)]
 mod tests {
-    use super::audit::{Attribution, Pattern, PatternRule};
+    use std::slice;
+
+    use super::audit::{Attribution, Pattern, PatternRule, Redaction, RuleMatch, Selection};
     use super::*;
     use crate::modality::text::{Text, TextLocation};
+    use crate::primitive::ComponentId;
+    use crate::redaction::LeakProfile;
 
     fn text_entity() -> Entity<Text> {
         let loc = TextLocation::inline(0..5);
@@ -437,7 +440,11 @@ mod tests {
             Pattern::new("PHONE", loc.clone(), PatternRule::default()),
         ));
         let mut fused = survivor.clone();
-        fused.fuse(&mut [other.clone()], Fusion::new("max", loc.clone()), conf);
+        fused.fuse(
+            slice::from_ref(&other),
+            Fusion::new("max", loc.clone()),
+            conf,
+        );
 
         let mut events = fused.audit.events().to_vec();
         events.swap(0, 1);
@@ -610,13 +617,61 @@ mod tests {
     #[test]
     fn fusing_shared_trails_keeps_each_event_once() {
         let mut base = text_entity();
-        let mut absorbed = [base.clone(), base.clone()];
+        let absorbed = [base.clone(), base.clone()];
         let conf = base.state.confidence;
         let location = base.state.location.clone();
-        base.fuse(&mut absorbed, Fusion::new("max", location), conf);
+        base.fuse(&absorbed, Fusion::new("max", location), conf);
 
         assert_eq!(base.audit.events().len(), 2, "one birth, one fusion");
         assert!(base.audit.verify().is_ok());
+    }
+
+    /// The entities a fusion absorbs keep their trails, so each still reads
+    /// back as itself.
+    #[test]
+    fn fusing_leaves_the_absorbed_whole() {
+        let mut base = text_entity();
+        let other = text_entity();
+        let conf = base.state.confidence;
+        let location = base.state.location.clone();
+        base.fuse(slice::from_ref(&other), Fusion::new("max", location), conf);
+
+        assert_eq!(other.audit.events().len(), 1);
+        let read = Entity::from_trail(other.id, other.audit.clone()).unwrap();
+        assert_eq!(read.digest(), other.digest());
+        assert!(base.audit.verify().is_ok());
+    }
+
+    /// A redaction applies a selection on its own line: one naming a selection
+    /// on an absorbed trail does not verify.
+    #[test]
+    fn a_redaction_applies_a_selection_on_its_own_line() {
+        let pick = |entity: &mut Entity<Text>| {
+            let selection = Selection::new(
+                ComponentId::new("mask", "1"),
+                LeakProfile::Partial,
+                RuleMatch::Fallback,
+            );
+            entity.record(AuditEvent::selection(selection, Confidence::MAX));
+            entity.audit.selection_event().unwrap().hash()
+        };
+        let mut absorbed = text_entity();
+        let theirs = pick(&mut absorbed);
+        let mut base = text_entity();
+        let location = base.state.location.clone();
+        base.fuse(
+            &[absorbed],
+            Fusion::new("max", location.clone()),
+            Confidence::MAX,
+        );
+        base.record(AuditEvent::redaction(
+            "mask",
+            Redaction::new(theirs, location),
+            Confidence::MAX,
+        ));
+
+        assert!(base.audit.verify().is_err());
+        assert!(base.audit.applied_selection().is_none());
     }
 
     /// A decision recorded through [`Entity::record`] still takes effect: no

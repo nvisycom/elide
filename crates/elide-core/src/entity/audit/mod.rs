@@ -119,15 +119,6 @@ impl<M: Modality> AuditLog<M> {
             .map_or(AuditHash::GENESIS, AuditEvent::hash)
     }
 
-    /// Consume the log, yielding its events in order.
-    ///
-    /// For a fusion step that folds one entity's trail into another's:
-    /// take the events by value and [`absorb`](Self::absorb) them, so their
-    /// hashes carry over without cloning.
-    pub(crate) fn into_events(self) -> Vec<AuditEvent<M>> {
-        self.events
-    }
-
     /// The number of events.
     pub fn len(&self) -> usize {
         self.events.len()
@@ -159,7 +150,13 @@ impl<M: Modality> AuditLog<M> {
     /// provenance. The line is fixed by the hashes, not by the order events
     /// are stored in.
     pub fn line(&self) -> impl Iterator<Item = &AuditEvent<M>> {
-        let mut next = self.events.len().checked_sub(1);
+        self.ancestry(self.events.len().checked_sub(1))
+    }
+
+    /// The event at `index` and its first-parent ancestors, back to the
+    /// birth it descends from.
+    fn ancestry(&self, index: Option<usize>) -> impl Iterator<Item = &AuditEvent<M>> {
+        let mut next = index;
         iter::from_fn(move || {
             let index = next?;
             let event = &self.events[index];
@@ -218,17 +215,17 @@ impl<M: Modality> AuditLog<M> {
 
     /// The [`Selection`] that the entity's most recent [`Redaction`] applied.
     ///
-    /// It is found through the hash the redaction names: which operator ran,
-    /// why, and how much its output leaks. `None` when the entity was not
-    /// redacted, or when the named selection is not on this trail (which
-    /// [`verify`] reports).
+    /// It is found on the entity's [line](Self::line) through the hash the
+    /// redaction names: which operator ran, why, and how much its output
+    /// leaks. `None` when the entity was not redacted, or when the named
+    /// selection is not on the line (which [`verify`] reports).
     ///
     /// [`Selection`]: crate::entity::audit::Selection
     /// [`Redaction`]: crate::entity::audit::Redaction
     /// [`verify`]: Self::verify
     pub fn applied_selection(&self) -> Option<&Selection> {
         let redaction = self.redaction()?;
-        self.events.iter().find_map(|e| match &e.kind {
+        self.line().find_map(|e| match &e.kind {
             AuditKind::Selection(s) if e.hash == redaction.selection => Some(s),
             _ => None,
         })
@@ -253,10 +250,9 @@ impl<M: Modality> AuditLog<M> {
     /// That is, of the [`Manual`] events on its [line](Self::line) that decide
     /// redaction (an include or a suppression), the latest is
     /// [`ManualIntent::Suppress`]. A relabel or relocation decides nothing
-    /// about it and is skipped. The audit trail is the single source of
-    /// truth: there is no separate flag to keep in sync. An included or
-    /// amended entity is not suppressed, and is redacted
-    /// like any detection.
+    /// about it and is skipped, so it leaves the latest include or
+    /// suppression in effect. The audit trail is the single source of truth:
+    /// there is no separate flag to keep in sync.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
@@ -338,8 +334,9 @@ impl<M: Modality> AuditLog<M> {
     /// - every parent an event names is the hash of an *earlier* event (no
     ///   dangling link, no forward reference, no reorder that moves a parent
     ///   after its child);
-    /// - every [`Redaction`] names an *earlier* [`Selection`] event, the
-    ///   decision it applied; and
+    /// - every [`Redaction`] names a [`Selection`] event among its own
+    ///   first-parent ancestors, the decision it applied, so a redaction never
+    ///   applies a selection from a trail a fusion absorbed; and
     /// - the DAG has exactly **one sink** and it is the last event, while every
     ///   other event is some later event's parent: an appended tail event, an
     ///   inserted orphan (birth) event, or a deleted leaf below the tip leaves
@@ -384,12 +381,12 @@ impl<M: Modality> AuditLog<M> {
                 )));
             }
             if let AuditKind::Redaction(redaction) = &event.kind {
-                let applied = self.events[..index].iter().any(|e| {
+                let applied = self.ancestry(Some(index)).skip(1).any(|e| {
                     e.hash == redaction.selection && matches!(e.kind, AuditKind::Selection(_))
                 });
                 if !applied {
                     return Err(Error::integrity(format!(
-                        "audit event at index {index} is a redaction naming no earlier selection"
+                        "audit event at index {index} is a redaction naming no selection on its line"
                     )));
                 }
             }
