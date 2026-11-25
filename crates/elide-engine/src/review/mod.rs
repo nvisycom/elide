@@ -598,6 +598,26 @@ mod tests {
         assert_eq!(outcome(30..40), Ok(()));
     }
 
+    /// An edit narrows its whole overlap cluster: suppressing an entity that
+    /// reaches a protected one only through a neighbour is refused too.
+    #[test]
+    fn an_edit_narrows_its_whole_overlap_cluster() {
+        let first = at("EMAIL_ADDRESS", 0..5);
+        let id = first.id();
+        let between = at("PERSON_NAME", 4..9);
+        let protected = at("SSN", 8..13);
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![first, between, protected]);
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().suppress(id);
+
+        let reviewer = Reviewer {
+            policy: &Protect::labels(["SSN"]),
+            by: "reviewer-7",
+        };
+        let err = review.apply(&mut report, reviewer).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Refused);
+    }
+
     /// Each edit is checked as the edits before it left the part: an entity
     /// moved into a region is protected there.
     #[test]

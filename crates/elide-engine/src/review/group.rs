@@ -153,32 +153,53 @@ impl PartReview<'_> {
     }
 }
 
-/// The entities an edit narrows: every one it touches, and every one
-/// overlapping what it touches, before the edit or after.
+/// The entities an edit narrows: every one it touches, and every one in an
+/// overlap cluster with what it touches, before the edit or after.
 ///
 /// Only an include adds to what is hidden. A relocation can narrow even into
 /// a region containing the old one, as a rule may choose its operator by
-/// where an entity sits. Overlapping entities are redacted as one span under
-/// the safest operator among them, so an edit to one can leave its
-/// neighbours under a leakier operator: they are narrowed too. An entity
-/// already suppressed is not redacted, so no edit narrows it.
+/// where an entity sits. Entities that overlap, directly or through others,
+/// are redacted as one span under the safest operator among them, so an edit
+/// to one can leave the rest of its cluster under a leakier operator, or
+/// none: they are narrowed too. An entity already suppressed is not
+/// redacted, so no edit narrows it, nor links a cluster.
 fn narrowed<M: Modality>(
     entities: &[Entity<M>],
     targets: &[usize],
     change: &Change<M>,
 ) -> Vec<Narrowed> {
-    let mut spans: Vec<&M::Location> = targets.iter().map(|&i| entities[i].location()).collect();
+    let live: Vec<bool> = entities
+        .iter()
+        .map(|entity| !entity.is_suppressed())
+        .collect();
+    let mut cluster = vec![false; entities.len()];
+    let mut seeds: Vec<usize> = targets.iter().copied().filter(|&i| live[i]).collect();
     if let Change::Relocate { location, .. } = change {
-        spans.push(location);
+        seeds.extend(
+            (0..entities.len()).filter(|&i| live[i] && location.overlaps(entities[i].location())),
+        );
+    }
+    // Grow the cluster through overlaps: each member, once in, brings in the
+    // live entities it overlaps.
+    let mut pending = Vec::new();
+    for i in seeds {
+        if !cluster[i] {
+            cluster[i] = true;
+            pending.push(i);
+        }
+    }
+    while let Some(j) = pending.pop() {
+        for i in 0..entities.len() {
+            if !cluster[i] && live[i] && entities[j].location().overlaps(entities[i].location()) {
+                cluster[i] = true;
+                pending.push(i);
+            }
+        }
     }
     entities
         .iter()
         .enumerate()
-        .filter(|(i, entity)| {
-            !entity.is_suppressed()
-                && (targets.contains(i)
-                    || spans.iter().any(|span| span.overlaps(entity.location())))
-        })
+        .filter(|&(i, _)| cluster[i])
         .map(|(_, entity)| Narrowed {
             id: entity.id(),
             label: entity.label().clone(),

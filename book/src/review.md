@@ -120,10 +120,11 @@ let policy = Protect::labels(["SSN"]).and(move |edit: &ProposedEdit<'_>| {
 });
 ```
 
-Overlapping entities are redacted as one span under the safest operator
-among them, so an edit to one can leave its neighbours under a leakier one.
-An edit therefore narrows every entity overlapping what it touches as well:
-`Protect` refuses suppressing an entity that overlaps a protected one.
+Entities that overlap, directly or through others, are redacted as one span
+under the safest operator among them, so an edit to one can leave the rest of
+its cluster under a leakier operator, or none. An edit therefore narrows every
+entity in an overlap cluster with what it touches: `Protect` refuses
+suppressing an entity whose cluster holds a protected one.
 
 Each edit is checked as the edits before it left the part, so an entity
 moved into a region is protected there. A review the policy refuses is

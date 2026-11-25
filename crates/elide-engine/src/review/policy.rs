@@ -77,10 +77,10 @@ pub struct ProposedEdit<'a> {
     /// a relabel's.
     pub decision: &'a ManualIntent,
     /// The entities whose redaction the edit narrows: each it touches, and
-    /// each overlapping one it touches, as overlapping entities share one
-    /// redaction under the safest operator among them. Any already
-    /// suppressed is left out. Empty for an include, which only adds to what
-    /// is hidden.
+    /// each in an overlap cluster with one it touches, as entities that
+    /// overlap, directly or through others, share one redaction under the
+    /// safest operator among them. Any already suppressed is left out. Empty
+    /// for an include, which only adds to what is hidden.
     pub narrowed: &'a [Narrowed],
     /// Who made the edit, as the deployment named them when it applied the
     /// review.
@@ -109,8 +109,9 @@ pub struct Narrowed {
 }
 
 /// Refuses every edit that narrows the redaction of an entity of a protected
-/// label: no suppression, relabel, or relocation of one, or of an entity
-/// overlapping one. A region suppression containing one is refused too.
+/// label: no suppression, relabel, or relocation of one, or of an entity in
+/// an overlap cluster with one. A region suppression containing one is
+/// refused too.
 #[derive(Debug, Clone, Default)]
 pub struct Protect(HashSet<LabelRef>);
 
