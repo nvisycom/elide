@@ -152,19 +152,18 @@ impl Report {
     ///
     /// It needs none of the analyzers, anonymizers, or codec registry an
     /// [`Orchestrator`] needs to *run* one. Register the modalities the report
-    /// may contain, then [`restore`] it against the seal it was written
-    /// with:
+    /// may contain, [`seal`](Restorer::seal) it when it is written, then
+    /// [`restore`] it against that seal:
     ///
     /// ```
     /// use elide_core::modality::text::Text;
-    /// use elide_engine::{Report, Seal};
+    /// use elide_engine::Report;
     ///
+    /// let restorer = Report::restorer().with_modality::<Text>();
     /// let written = Report::new();
-    /// let seal = Seal::of(&written);
+    /// let seal = restorer.seal(&written);
     /// let json = serde_json::to_string(&written)?;
-    /// let report: Report = Report::restorer()
-    ///     .with_modality::<Text>()
-    ///     .restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
+    /// let report: Report = restorer.restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
     /// assert_eq!(report.part_ids().count(), 0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

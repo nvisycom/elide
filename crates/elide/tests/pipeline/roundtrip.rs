@@ -54,7 +54,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Rebuild it from the wire through the same orchestrator.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let seal = elide::Seal::of(&report);
+    let seal = orchestrator.restorer().seal(&report);
     let rebuilt: elide::Report = orchestrator.restorer().restore(&seal, &mut de)?;
 
     // Same entities, same modality, audit trail intact.
@@ -137,10 +137,10 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
 
     // No orchestrator here, just the modalities the report may contain.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let rebuilt = elide::Report::restorer()
+    let restorer = elide::Report::restorer()
         .with_modality::<Text>()
-        .with_modality::<Image>()
-        .restore::<elide::Report, _>(&elide::Seal::of(&report), &mut de)?;
+        .with_modality::<Image>();
+    let rebuilt: elide::Report = restorer.restore(&restorer.seal(&report), &mut de)?;
 
     assert_eq!(
         rebuilt

@@ -46,8 +46,8 @@ pub(super) struct ModalityEntry {
 /// A report's wire form tags each group with its modality name but not the
 /// concrete type, and deserialization is not object-safe, so a bare
 /// `Report: Deserialize` is impossible. Register the modalities the report may
-/// contain with [`with_modality`], then [`restore`] it against the [`Seal`]
-/// it was written with. The modalities registered
+/// contain with [`with_modality`], [`seal`](Self::seal) a value when it is
+/// written, then [`restore`] it against that [`Seal`]. The modalities registered
 /// here need only be *deserializable*; they need no pipeline, so a review layer
 /// can rebuild a report to show without the engine that produced it. Build one
 /// with [`Report::restorer`], or use the one an [`Orchestrator`] keeps for
@@ -56,16 +56,17 @@ pub(super) struct ModalityEntry {
 /// ```
 /// use elide_core::modality::metadata::Metadata;
 /// use elide_core::modality::text::Text;
-/// use elide_engine::{Report, Seal};
+/// use elide_engine::Report;
+///
+/// let restorer = Report::restorer()
+///     .with_modality::<Text>()
+///     .with_modality::<Metadata>();
 ///
 /// let written = Report::new();
-/// let seal = Seal::of(&written);
+/// let seal = restorer.seal(&written);
 /// let json = serde_json::to_string(&written)?;
 ///
-/// let report: Report = Report::restorer()
-///     .with_modality::<Text>()
-///     .with_modality::<Metadata>()
-///     .restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
+/// let report: Report = restorer.restore(&seal, &mut serde_json::Deserializer::from_str(&json))?;
 /// assert_eq!(report.digest(), written.digest());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -149,6 +150,20 @@ impl Restorer {
         self.entries
             .get_key_value(modality)
             .map(|(&name, &entry)| (name, entry))
+    }
+
+    /// The [`Seal`] to store beside `value` and [`restore`](Self::restore) it
+    /// against later: keyed with the key set by
+    /// [`with_seal_key`](Self::with_seal_key), unkeyed without one.
+    ///
+    /// Seal a value when it is written, after any [`pick`] or [`review`] that
+    /// changes it.
+    ///
+    /// [`pick`]: crate::Orchestrator::pick
+    /// [`review`]: crate::Orchestrator::review
+    #[must_use]
+    pub fn seal<T: Sealable>(&self, value: &T) -> Seal {
+        Seal::new(value, self.key.as_ref())
     }
 
     /// Read a [`Report`], [`Review`], or [`ArtifactSet`] back and check it

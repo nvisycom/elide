@@ -922,9 +922,9 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
 
         let mut de = serde_json::Deserializer::from_str(&json);
-        let back: Report = Report::restorer()
-            .with_modality::<Text>()
-            .restore(&crate::Seal::of(&report), &mut de)
+        let restorer = Report::restorer().with_modality::<Text>();
+        let back: Report = restorer
+            .restore(&restorer.seal(&report), &mut de)
             .expect("rebuilt");
         let entities = back
             .part::<Text>(&doc())
@@ -1164,7 +1164,7 @@ mod tests {
         let registry = Restorer::new().with_modality::<Image>();
         let json = serde_json::to_string(&set).unwrap();
         let mut de = serde_json::Deserializer::from_str(&json);
-        let seal = crate::Seal::of(&set);
+        let seal = registry.seal(&set);
         let back: ArtifactSet = registry.restore(&seal, &mut de).expect("artifacts");
         let restored = back.part::<Image>(&doc()).expect("layout reconstructed");
         assert_eq!(restored, &layout);

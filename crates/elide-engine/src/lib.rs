@@ -157,11 +157,9 @@ impl Orchestrator {
         self
     }
 
-    /// Check keyed seals with `key` when reading a report, review, or artifact
-    /// set back through [`restorer`](Self::restorer).
-    ///
-    /// The key the deployment seals with [`Seal::keyed`]; without it, a keyed
-    /// seal cannot be checked.
+    /// Seal with `key`, and accept only seals keyed with it, when the
+    /// [`restorer`](Self::restorer) [seals](Restorer::seal) a report, review, or
+    /// artifact set and reads it back.
     #[must_use]
     pub fn with_seal_key(mut self, key: SealKey) -> Self {
         self.restorer.set_seal_key(key);

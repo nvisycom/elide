@@ -110,8 +110,19 @@ every edit, and decides on those. It is shown each edit as a
 narrows, and who made it and why. Each standard policy checks one thing:
 `Protect` keeps labels from being narrowed, `RequireActor` wants every edit
 attributed, and `RequireReason` wants every narrowing edit explained. `and`
-combines them, and a deployment's own rules (only some reviewers may narrow,
-say) are a `ReviewPolicy` too, or a closure. The default accepts every edit.
+combines them, and a deployment's own rules are a `ReviewPolicy` too, or a
+closure. The default accepts every edit. Letting only some reviewers narrow,
+say:
+
+```rust,ignore
+let narrowers = ["reviewer-7", "lead-2"];
+let policy = Protect::labels(["SSN"]).and(move |edit: &ProposedEdit<'_>| {
+    match edit.by {
+        Some(actor) if !edit.narrows() || narrowers.contains(&actor) => Ok(()),
+        _ => Err(Error::refused("only a lead reviewer may narrow a redaction")),
+    }
+});
+```
 
 Each edit is checked as the edits before it left the part, so an entity
 moved into a region is protected there. A review the policy refuses is
@@ -167,21 +178,22 @@ the trail as it was, and dropping an entity or an edit leaves everything else
 intact.
 
 So each is sealed when it is written and reads back only against its seal.
-A `Seal` is plain data, made with one of:
+The same restorer does both, `Report::restorer()` or
+`orchestrator.restorer()`: `seal(&report)` makes a `Seal`, plain data to
+store, and `restore(&seal, ..)` reads the report back and refuses it if it
+does not match. Seal a report after the `pick` or `review` that last changed
+it. The restorer's configuration chooses the scheme, for both:
 
-- `Seal::of(&report)`, an unkeyed digest. Anyone can compute one, so keep it
-  where the carrier cannot write: a signed log, a write-once bucket, a
-  timestamping service.
-- `Seal::keyed(&report, &key)`, a digest keyed with a `SealKey` the carrier
-  does not hold. Only a holder of the key can compute one, so it can be stored
-  beside what it covers.
+- Without a key, an unkeyed digest. Anyone can compute one, so keep it where
+  the carrier cannot write: a signed log, a write-once bucket, a timestamping
+  service.
+- With a `SealKey` set by `with_seal_key` on the restorer or the
+  orchestrator, a digest keyed with it. Only a holder of the key can compute
+  one, so it can be stored beside what it covers, as long as the carrier
+  does not hold the key.
 
-`Report::restorer()` (or `orchestrator.restorer()`) reads either back
-with `restore(&seal, ..)`, and refuses it if it does not match. The reader,
-not the seal, chooses the scheme: with a key set by `with_seal_key` on the
-restorer or the orchestrator, only a keyed seal is accepted, so a carrier
-cannot swap one for a digest of a value it changed; without a key, only an
-unkeyed seal is.
+The seal never chooses its own scheme: a restorer with a key accepts only a
+keyed seal, so a carrier cannot swap one for a digest of a value it changed.
 
 A report's seal covers its id, minted when the report is created, and every
 entity's fields and trail, by part and entity id, so the order a report was

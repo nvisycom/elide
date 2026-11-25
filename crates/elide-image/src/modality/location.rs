@@ -88,6 +88,12 @@ impl ModalityLocation for ImageLocation {
         self.bounding_box.overlap(&other.bounding_box)
     }
 
+    fn covers(&self, other: &Self) -> bool {
+        // Exact shapes, not bounding boxes: a triangle's box contains
+        // regions that reach outside the triangle.
+        self == other || (self.page == other.page && self.shape().contains(&other.shape()))
+    }
+
     fn union(&self, other: &Self) -> Option<Self> {
         // A single region can't span two pages; require agreement.
         if self.page != other.page {
@@ -167,6 +173,25 @@ mod tests {
         assert!(a.overlaps(&b));
         let b_page2 = b.with_page(2);
         assert!(!a.overlaps(&b_page2));
+    }
+
+    #[test]
+    fn a_polygon_covers_by_its_shape_not_its_box() {
+        let triangle = loc(0.0, 0.0, 10.0, 10.0).with_polygon(Polygon::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(0.0, 10.0),
+        ]));
+        assert!(triangle.covers(&loc(1.0, 1.0, 2.0, 2.0)));
+        assert!(!triangle.covers(&loc(7.0, 1.0, 2.0, 3.0)));
+        assert!(loc(0.0, 0.0, 10.0, 10.0).covers(&loc(7.0, 1.0, 2.0, 3.0)));
+        assert!(triangle.covers(&triangle));
+        assert!(
+            !triangle
+                .clone()
+                .with_page(2)
+                .covers(&loc(1.0, 1.0, 2.0, 2.0))
+        );
     }
 
     #[test]

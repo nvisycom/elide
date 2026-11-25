@@ -71,6 +71,38 @@ impl Polygon<f64> {
         !self.separates(other) && !other.separates(self)
     }
 
+    /// Whether this polygon contains all of `other`, boundary included.
+    ///
+    /// Every vertex of `other` must lie on the inner side of every edge of
+    /// `self`. For a **convex** polygon that is exact, as `other` lies within
+    /// the hull of its vertices. For a concave one the test admits only what
+    /// lies within every edge, a subset of the polygon, so it can deny a
+    /// containment but never claim a false one. A polygon enclosing no area
+    /// contains nothing, and nothing contains an empty polygon.
+    #[must_use]
+    pub fn contains(&self, other: &Self) -> bool {
+        let n = self.0.len();
+        if n < 3 || other.0.is_empty() {
+            return false;
+        }
+        // Twice the signed area: its sign gives the winding, and so which
+        // side of each edge is inside.
+        let winding: f64 = (0..n)
+            .map(|i| self.0[i].perp().dot(self.0[(i + 1) % n]))
+            .sum();
+        if winding == 0.0 {
+            return false;
+        }
+        (0..n).all(|i| {
+            let start = self.0[i];
+            let normal = (self.0[(i + 1) % n] - start).perp();
+            other
+                .0
+                .iter()
+                .all(|&p| normal.dot(p - start) * winding.signum() >= 0.0)
+        })
+    }
+
     /// Whether any edge of `self` yields an axis that separates it from
     /// `other` (their projections onto that edge normal don't overlap).
     fn separates(&self, other: &Self) -> bool {
@@ -148,6 +180,44 @@ mod tests {
             Point::new(0.0, 5.0),
         ]);
         assert!(diamond.overlaps(&square(0.0, 0.0, 3.0)));
+    }
+
+    #[test]
+    fn a_triangle_contains_only_what_lies_within_it() {
+        let triangle = Polygon::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(0.0, 10.0),
+        ]);
+        let inside = Polygon::new(vec![
+            Point::new(1.0, 1.0),
+            Point::new(3.0, 1.0),
+            Point::new(3.0, 3.0),
+            Point::new(1.0, 3.0),
+        ]);
+        let corner = Polygon::new(vec![
+            Point::new(7.0, 1.0),
+            Point::new(9.0, 1.0),
+            Point::new(9.0, 4.0),
+            Point::new(7.0, 4.0),
+        ]);
+        assert!(triangle.contains(&inside));
+        assert!(!triangle.contains(&corner));
+        assert!(triangle.contains(&triangle));
+    }
+
+    #[test]
+    fn containment_holds_for_either_winding() {
+        let clockwise = Polygon::new(
+            square(0.0, 0.0, 10.0)
+                .vertices()
+                .iter()
+                .rev()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        assert!(clockwise.contains(&square(2.0, 2.0, 3.0)));
+        assert!(!clockwise.contains(&square(8.0, 8.0, 3.0)));
     }
 
     #[test]

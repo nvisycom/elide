@@ -117,10 +117,11 @@ and this project adheres to
   `fuse`), where every recorded decision takes effect, or through `lift`,
   which moves it to another coordinate space for the same content
 - A report, review, or artifact set reads back only against a `Seal`, plain
-  data made when it is written: `Seal::of`, an unkeyed digest kept where the
-  carrier cannot write, or `Seal::keyed`, a MAC under a `SealKey` the carrier
-  does not hold. The reader chooses the scheme: a `Restorer` with a key set by
-  `with_seal_key` accepts only a MAC, one without only a digest. A seal names
+  data made when it is written by `Restorer::seal`. The restorer's
+  configuration chooses the scheme, for sealing and checking alike: with a
+  `SealKey` set by `with_seal_key`, a MAC the carrier cannot compute, and only
+  a MAC is accepted; without one, an unkeyed digest kept where the carrier
+  cannot write, and only a digest is accepted. A seal names
   the kind of value it covers; a report's covers its id and every entity's
   fields and audit trail, by part and entity id; a review's the report version
   it was made against and every edit; an artifact set's every artifact as

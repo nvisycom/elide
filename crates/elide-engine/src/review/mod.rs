@@ -50,9 +50,10 @@ use crate::{PartId, Report};
 /// What a review cannot protect itself against is its carrier: an edit
 /// dropped on the way leaves the entity as the analysis found it, and an
 /// [include](ReviewPart::include) dropped leaves content unredacted. Carry a
-/// review over a channel the deployment authenticates, or seal it with
-/// [`Seal::keyed`](crate::Seal::keyed) on a reviewer's side that holds the
-/// key.
+/// review over a channel the deployment authenticates, or seal it on a
+/// reviewer's side that holds the [`SealKey`](crate::SealKey), with
+/// [`Restorer::seal`](crate::Restorer::seal) under
+/// [`with_seal_key`](crate::Restorer::with_seal_key).
 ///
 /// [`Orchestrator::review`]: crate::Orchestrator::review
 /// [`Restorer::restore`]: crate::Restorer::restore
@@ -160,7 +161,9 @@ impl Review {
         }
         let mut reviewed = Vec::with_capacity(self.parts.len());
         let mut changed = false;
-        for (id, edits) in &self.parts {
+        // A group with no edits is one the seal leaves out, and so is skipped
+        // before its modality is matched against the part's.
+        for (id, edits) in self.parts.iter().filter(|(_, edits)| !edits.is_empty()) {
             // A part with no entities is one the seal leaves out, so it is
             // edited as if absent, whatever modality it was held as.
             let empty;
@@ -573,9 +576,48 @@ mod tests {
             .relocate(id, TextLocation::inline(4..10))
             .suppress_within(TextLocation::inline(0..20));
 
-        let policy = Protect::labels(["SSN"]).and(RequireReason);
+        // Relocations pass; only a suppression narrowing an SSN is refused.
+        // The SSN starts at 30..36, outside 0..20, so the suppression is
+        // refused only if it resolves against the relocated entity.
+        let protect = Protect::labels(["SSN"]);
+        let policy = |edit: &ProposedEdit<'_>| match edit.decision {
+            ManualIntent::Relocate => Ok(()),
+            _ => protect.check(edit),
+        };
         let err = review.apply(&mut report, &policy).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Refused);
+
+        let mut unmoved = Review::new(&report);
+        unmoved
+            .part::<Text>(&doc())
+            .unwrap()
+            .suppress_within(TextLocation::inline(0..20));
+        let err = unmoved.apply(&mut report, &policy).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            ErrorKind::MalformedInput,
+            "unmoved, the SSN lies outside the region, so nothing is suppressed",
+        );
+    }
+
+    /// A group with no edits is skipped, so it cannot clash with the part's
+    /// modality.
+    #[test]
+    fn an_empty_group_is_skipped() {
+        let a = PartId::leaf("a.txt");
+        let b = PartId::leaf("b.txt");
+        let mut report = Report::new()
+            .insert_part::<Text>(a.clone(), vec![at("EMAIL_ADDRESS", 0..10)])
+            .insert_part::<Text>(b.clone(), vec![at("EMAIL_ADDRESS", 0..10)]);
+        let mut review = Review::new(&report);
+        review.part::<Metadata>(&b).unwrap();
+        review
+            .part::<Text>(&a)
+            .unwrap()
+            .include("SSN", TextLocation::inline(20..30));
+
+        apply(&mut report, &review).unwrap();
+        assert_eq!(report.part::<Text>(&a).unwrap().entities().len(), 2);
     }
 
     #[test]
@@ -704,8 +746,8 @@ mod tests {
             .with_modality::<Text>()
             .with_seal_key(key.clone());
         let cases = [
-            (&unkeyed, Seal::of(&review)),
-            (&keyed, Seal::keyed(&review, &key)),
+            (&unkeyed, unkeyed.seal(&review)),
+            (&keyed, keyed.seal(&review)),
         ];
         let json = serde_json::to_value(&review).unwrap();
 
@@ -713,7 +755,7 @@ mod tests {
             let read: Review = restorer
                 .restore(seal, json.clone())
                 .expect("reads back intact");
-            assert_eq!(Seal::of(&read), Seal::of(&review));
+            assert_eq!(restorer.seal(&read), restorer.seal(&review));
             assert_eq!(read.edits::<Text>(&doc()).unwrap().len(), 2);
         }
 
@@ -733,11 +775,11 @@ mod tests {
         // digest, even one that matches, so a carrier cannot swap a MAC for a
         // digest it computed itself; a keyless reader cannot check a MAC.
         let swapped = keyed
-            .restore::<Review, _>(&Seal::of(&review), json.clone())
+            .restore::<Review, _>(&unkeyed.seal(&review), json.clone())
             .unwrap_err();
         assert_eq!(swapped.kind(), ErrorKind::Integrity);
         let keyless = unkeyed
-            .restore::<Review, _>(&Seal::keyed(&review, &key), json)
+            .restore::<Review, _>(&keyed.seal(&review), json)
             .unwrap_err();
         assert_eq!(keyless.kind(), ErrorKind::Configuration);
     }
@@ -748,7 +790,7 @@ mod tests {
     fn a_seal_names_the_kind_of_value() {
         let report = Report::new();
         let review = Review::new(&report);
-        assert_ne!(Seal::of(&report), Seal::of(&review));
-        assert_eq!(Seal::of(&report), Seal::Digest(report.digest()));
+        assert_ne!(Seal::new(&report, None), Seal::new(&review, None));
+        assert_eq!(Seal::new(&report, None), Seal::Digest(report.digest()));
     }
 }

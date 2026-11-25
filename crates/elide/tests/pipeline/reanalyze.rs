@@ -138,7 +138,7 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let analyzed = first.analyze(&mut document).await?;
     assert_eq!(image_entities(&analyzed).len(), 1);
     let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
-    let seal = elide::Seal::of(&analyzed.artifacts);
+    let seal = first.restorer().seal(&analyzed.artifacts);
 
     // Rebuild the ArtifactSet from the wire through the orchestrator, then re-run
     // against an EMPTY OCR backend: detection survives only because the restored

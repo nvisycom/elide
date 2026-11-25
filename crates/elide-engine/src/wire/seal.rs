@@ -11,11 +11,11 @@ use crate::PartId;
 
 /// A secret key for keyed seals.
 ///
-/// With it, [`Seal::keyed`] computes a message authentication code: a seal
-/// that only a holder of the key can produce, so it can be stored beside what
-/// it covers. The side that reads a keyed seal back holds the key too, set with
-/// [`Restorer::with_seal_key`](crate::Restorer::with_seal_key) or
-/// [`Orchestrator::with_seal_key`](crate::Orchestrator::with_seal_key). Keep it
+/// Set on a [`Restorer`](crate::Restorer) with
+/// [`with_seal_key`](crate::Restorer::with_seal_key), or on an orchestrator
+/// with [`with_seal_key`](crate::Orchestrator::with_seal_key), it makes every
+/// seal the restorer makes a message authentication code: a seal only a holder
+/// of the key can produce, so it can be stored beside what it covers. Keep it
 /// where the carrier cannot read it. Its `Debug` output does not show it.
 #[derive(Clone)]
 pub struct SealKey([u8; 32]);
@@ -45,21 +45,22 @@ impl fmt::Debug for SealKey {
 /// these: it is the digest of the whole value when it was written.
 ///
 /// A seal is plain data, and serializes as `{ "digest": hex }` or
-/// `{ "mac": hex }`:
+/// `{ "mac": hex }`. Make one with [`Restorer::seal`] and read the value back
+/// against it with [`Restorer::restore`]; the restorer's configuration picks
+/// the scheme for both, so the two always agree:
 ///
-/// - A [`Digest`](Self::Digest), from [`Seal::of`], is unkeyed: anyone can
-///   compute one, so it protects only if it is stored where the carrier cannot
+/// - Without a [`SealKey`], a [`Digest`](Self::Digest): unkeyed, so anyone can
+///   compute one, and it protects only if it is stored where the carrier cannot
 ///   write: a signed log, a write-once bucket, a timestamping service.
-/// - A [`Mac`](Self::Mac), from [`Seal::keyed`], needs the [`SealKey`] to
-///   compute, so it can be stored beside what it covers, as long as the carrier
-///   does not hold the key.
+/// - With one, a [`Mac`](Self::Mac): only a holder of the key can compute it,
+///   so it can be stored beside what it covers, as long as the carrier does
+///   not hold the key.
 ///
-/// Which of the two a reader accepts is the reader's to choose, never the
-/// seal's: a [`Restorer`](crate::Restorer) with a key accepts only a `Mac`,
-/// and one without only a `Digest`, so a carrier cannot swap a `Mac` for a
-/// `Digest` it computed itself.
+/// The seal never chooses its own scheme: a restorer with a key accepts only a
+/// `Mac`, so a carrier cannot swap one for a `Digest` it computed itself.
 ///
-/// Read a value back against its seal with [`Restorer::restore`](crate::Restorer::restore).
+/// [`Restorer::seal`]: crate::Restorer::seal
+/// [`Restorer::restore`]: crate::Restorer::restore
 ///
 /// [`Report`]: crate::Report
 /// [`Review`]: crate::Review
@@ -75,16 +76,13 @@ pub enum Seal {
 }
 
 impl Seal {
-    /// The unkeyed seal of `value`.
-    #[must_use]
-    pub fn of<T: Sealable>(value: &T) -> Self {
-        Self::Digest(AuditHash::of_fields(fields(value)))
-    }
-
-    /// The seal of `value` keyed with `key`.
-    #[must_use]
-    pub fn keyed<T: Sealable>(value: &T, key: &SealKey) -> Self {
-        Self::Mac(AuditHash::of_fields_keyed(&key.0, fields(value)))
+    /// The seal of `value`: keyed with `key` when there is one, unkeyed
+    /// otherwise.
+    pub(crate) fn new<T: Sealable>(value: &T, key: Option<&SealKey>) -> Self {
+        match key {
+            Some(key) => Self::Mac(AuditHash::of_fields_keyed(&key.0, fields(value))),
+            None => Self::Digest(AuditHash::of_fields(fields(value))),
+        }
     }
 
     /// Check `value` against the seal, under the scheme the reading side
@@ -95,18 +93,16 @@ impl Seal {
     /// beside what it covers, so its carrier could swap it for an unkeyed
     /// digest of a value it changed; a reader holding a key refuses one.
     pub(crate) fn check<T: Sealable>(&self, value: &T, key: Option<&SealKey>) -> Result<()> {
-        let matches = match (self, key) {
-            (Self::Mac(mac), Some(key)) => {
-                AuditHash::of_fields_keyed(&key.0, fields(value)).matches(mac)
-            }
-            (Self::Digest(digest), None) => AuditHash::of_fields(fields(value)).matches(digest),
-            (Self::Digest(_), Some(_)) => {
+        let matches = match (self, Self::new(value, key)) {
+            (Self::Mac(found), Self::Mac(expected))
+            | (Self::Digest(found), Self::Digest(expected)) => expected.matches(found),
+            (Self::Digest(_), Self::Mac(_)) => {
                 return Err(Error::integrity(format!(
                     "the {} has an unkeyed seal, and a keyed one is required",
                     T::NAME
                 )));
             }
-            (Self::Mac(_), None) => {
+            (Self::Mac(_), Self::Digest(_)) => {
                 return Err(Error::configuration(format!(
                     "the {} has a keyed seal, and no seal key is set to check it",
                     T::NAME
