@@ -689,12 +689,12 @@ impl<'de> Visitor<'de> for ReviewSeed<'_> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::entity::LabelRef;
     #[cfg(feature = "schema")]
     use elide_core::entity::audit::Attribution;
-    use elide_core::modality::text::Text;
-    #[cfg(feature = "schema")]
-    use elide_core::modality::text::TextLocation;
+    use elide_core::entity::audit::{Manual, ManualIntent};
+    use elide_core::modality::text::{Text, TextLocation};
     #[cfg(feature = "image")]
     use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
     #[cfg(feature = "image")]
@@ -745,9 +745,6 @@ mod tests {
 
     #[test]
     fn checked_restore_rejects_a_valid_but_shortened_entity_trail() {
-        use elide_core::ErrorKind;
-        use elide_core::entity::audit::{Manual, ManualIntent};
-
         let original = text_entity("EMAIL_ADDRESS");
         let mut reviewed = original.clone();
         reviewed.record_manual(
@@ -778,9 +775,6 @@ mod tests {
 
     #[test]
     fn a_review_requires_a_registered_modality_only_for_nonempty_edits() {
-        use elide_core::ErrorKind;
-        use elide_core::modality::text::TextLocation;
-
         let report = Report::new();
         let mut review = Review::new(&report);
         let registry = Restorer::new();
@@ -1255,7 +1249,7 @@ mod tests {
         let Err(err) = registry.restore::<ArtifactSet, _>(&set.digest(), &mut de) else {
             panic!("an altered layout must not read back");
         };
-        assert_eq!(err.kind(), elide_core::ErrorKind::Integrity);
+        assert_eq!(err.kind(), ErrorKind::Integrity);
     }
 
     /// An entry whose `artifact` field is `null`, or absent entirely, is

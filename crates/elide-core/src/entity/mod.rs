@@ -408,6 +408,7 @@ mod tests {
 
     use super::audit::{Attribution, Pattern, PatternRule, Redaction, RuleMatch, Selection};
     use super::*;
+    use crate::ErrorKind;
     use crate::modality::text::{Text, TextLocation};
     use crate::primitive::ComponentId;
     use crate::redaction::LeakProfile;
@@ -497,7 +498,7 @@ mod tests {
         let id = Uuid::now_v7();
         let mut trail = AuditLog::<Text>::default();
         let err = Entity::from_trail(id, trail.clone()).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::Integrity);
+        assert_eq!(err.kind(), ErrorKind::Integrity);
 
         // A standalone suppression is a valid audit event but cannot supply
         // the initial label and location needed to rebuild an entity.
@@ -508,7 +509,7 @@ mod tests {
         ));
         assert!(trail.verify().is_ok());
         let err = Entity::from_trail(id, trail).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::Integrity);
+        assert_eq!(err.kind(), ErrorKind::Integrity);
     }
 
     /// An entity read back whose fields disagree with its trail is refused.

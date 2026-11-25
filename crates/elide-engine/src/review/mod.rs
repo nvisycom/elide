@@ -747,6 +747,28 @@ mod tests {
         assert_eq!(moved.location(), &destination);
     }
 
+    /// Moving a suppressed entity changes no redaction, so it narrows nothing,
+    /// even onto a protected one.
+    #[test]
+    fn moving_a_suppressed_entity_narrows_nothing() {
+        let mut spared = at("EMAIL_ADDRESS", 0..5);
+        let id = spared.id();
+        let location = spared.location().clone();
+        spared.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer-7");
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![spared, at("SSN", 20..26)]);
+        let mut review = Review::new(&report);
+        review
+            .part::<Text>(&doc())
+            .unwrap()
+            .relocate(id, TextLocation::inline(18..28));
+
+        let reviewer = Reviewer {
+            policy: &Protect::labels(["SSN"]),
+            by: "reviewer-7",
+        };
+        review.apply(&mut report, reviewer).unwrap();
+    }
+
     /// Each edit is checked as the edits before it left the part: an entity
     /// moved into a region is protected there.
     #[test]

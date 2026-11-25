@@ -174,7 +174,11 @@ fn narrowed<M: Modality>(
         .collect();
     let mut cluster = vec![false; entities.len()];
     let mut seeds: Vec<usize> = targets.iter().copied().filter(|&i| live[i]).collect();
-    if let Change::Relocate { location, .. } = change {
+    // A relocation joins the cluster at its destination only when what moves
+    // is redacted: a suppressed entity moved anywhere changes no redaction.
+    if let Change::Relocate { location, .. } = change
+        && !seeds.is_empty()
+    {
         seeds.extend(
             (0..entities.len()).filter(|&i| live[i] && location.overlaps(entities[i].location())),
         );
