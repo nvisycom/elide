@@ -77,6 +77,10 @@ a review takes the edits for one part, which can:
 - **Suppress a region**: `suppress_within` suppresses every entity the region
   contains. A finding reaching outside the region is left alone, so nothing
   outside it is spared.
+- **Confirm** an entity: `confirm` marks it a true finding, so it is
+  redacted. A suppression and a confirmation are opposite verdicts, and the
+  latest on the entity's trail wins, so a confirmation takes back an earlier
+  suppression. A verdict that is already the latest records nothing.
 - **Amend** an entity: `relabel` gives it another label and `relocate` moves
   it.
 
@@ -98,10 +102,10 @@ content unredacted.
 
 ## What a review may do
 
-An include only adds to what is redacted. Every other edit can leave content
-unredacted that would have been hidden: a suppression, a relabel (another
-label may get a weaker operator), a relocation (a rule may choose its
-operator by where an entity sits). The orchestrator's `ReviewPolicy` sees
+An include or a confirmation only adds to what is redacted. Every other edit
+can leave content unredacted that would have been hidden: a suppression, a
+relabel (another label may get a weaker operator), a relocation (a rule may
+choose its operator by where an entity sits). The orchestrator's `ReviewPolicy` sees
 every edit, and decides on those. It is shown each edit as a
 `ProposedEdit`: the decision it records, the entities whose redaction it
 narrows, and who made it and why. Each standard policy checks one thing:

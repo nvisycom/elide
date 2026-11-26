@@ -207,8 +207,9 @@ impl<M: Modality> Manual<M> {
 /// Which reviewer decision a [`Manual`] event records, with what it set.
 ///
 /// [`Include`](ManualIntent::Include) a miss, [`Suppress`](ManualIntent::Suppress)
-/// a false positive, or amend a finding: [`Relabel`](ManualIntent::Relabel) it
-/// or [`Relocate`](ManualIntent::Relocate) it to the event's location.
+/// a false positive, [`Confirm`](ManualIntent::Confirm) a finding, or amend
+/// one: [`Relabel`](ManualIntent::Relabel) it or
+/// [`Relocate`](ManualIntent::Relocate) it to the event's location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "intent", rename_all = "snake_case"))]
@@ -220,7 +221,8 @@ impl<M: Modality> Manual<M> {
 pub enum ManualIntent {
     /// A reviewer included an entity of `label` that detection missed (a false
     /// negative), at the event's location. It is redacted like any detected
-    /// one.
+    /// one. An inclusion starts an entity's trail, and never follows its
+    /// birth.
     Include {
         /// The label the reviewer gave the entity.
         label: LabelRef,
@@ -237,6 +239,9 @@ pub enum ManualIntent {
     },
     /// A reviewer moved the entity to the event's location.
     Relocate,
+    /// A reviewer confirmed a finding (a true positive): it is redacted, even
+    /// after an earlier [`Suppress`](Self::Suppress).
+    Confirm,
 }
 
 impl ManualIntent {
@@ -249,6 +254,7 @@ impl ManualIntent {
             Self::Suppress => 1,
             Self::Relabel { .. } => 2,
             Self::Relocate => 3,
+            Self::Confirm => 4,
         }
     }
 
@@ -258,7 +264,7 @@ impl ManualIntent {
             Self::Include { label } | Self::Relabel { label } => {
                 out.bytes(label.as_str().as_bytes());
             }
-            Self::Suppress | Self::Relocate => {}
+            Self::Suppress | Self::Relocate | Self::Confirm => {}
         }
     }
 }

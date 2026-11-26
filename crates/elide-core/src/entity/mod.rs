@@ -290,11 +290,11 @@ impl<M: Modality> Entity<M> {
     /// Record `event` on the audit trail, and apply what it decided.
     ///
     /// The entity's confidence becomes the event's, and what the event
-    /// records takes effect: a reviewer's [`Manual`] decision sets the label
-    /// or location it names, a [`Fusion`] the fused location, and an
+    /// records takes effect: a reviewer's [`Manual`] relabel or relocation
+    /// sets the field it names, a [`Fusion`] the fused location, and an
     /// [`Annotation`] each field it sets. Every other event records what
-    /// happened to the entity without changing what it says; a recognition
-    /// after the birth is provenance, and changes nothing.
+    /// happened to the entity without changing what it says; a recognition or
+    /// an inclusion after the birth is provenance, and changes nothing.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`Fusion`]: crate::entity::audit::Fusion
@@ -333,30 +333,42 @@ impl<M: Modality> Entity<M> {
     /// this entity's confidence, through [`record`](Self::record).
     ///
     /// The decision and its record are one step, so a field a reviewer changed
-    /// is always on the trail with what it was set to: an [`Include`] or a
-    /// [`Relabel`] sets the label, an [`Include`] or a [`Relocate`] moves the
-    /// entity to the decision's location, and a [`Suppress`] leaves the fields
-    /// as they are, its location naming the region the decision covered. The
-    /// event's confidence is this entity's own, so a caller cannot record a
-    /// stale score. `actor` names who made the decision and becomes the event's
-    /// source.
+    /// is always on the trail with what it was set to: a [`Relabel`] sets the
+    /// label, a [`Relocate`] moves the entity to the decision's location, and
+    /// a [`Suppress`] or a [`Confirm`] leaves the fields as they are, its
+    /// location naming the region the decision covered. The event's confidence is this entity's own, so a
+    /// caller cannot record a stale score. `actor` names who made the decision
+    /// and becomes the event's source.
     ///
-    /// A [`Suppress`] is idempotent: if the entity is already
-    /// [suppressed](Self::is_suppressed), nothing is recorded, so re-applying
-    /// one does not grow the trail. Returns whether an event was recorded.
+    /// A verdict is idempotent: a [`Suppress`] or a [`Confirm`] that is
+    /// already the entity's latest [verdict](AuditLog::verdict) records
+    /// nothing, so re-applying one does not grow the trail. Returns whether an
+    /// event was recorded.
+    ///
+    /// # Errors
+    ///
+    /// [`Integrity`](crate::ErrorKind::Integrity) for an [`Include`]: an
+    /// inclusion starts an entity, through a [`Birth`], and never follows one.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     /// [`Include`]: ManualIntent::Include
     /// [`Suppress`]: ManualIntent::Suppress
+    /// [`Confirm`]: ManualIntent::Confirm
     /// [`Relabel`]: ManualIntent::Relabel
     /// [`Relocate`]: ManualIntent::Relocate
-    pub fn record_manual(&mut self, manual: Manual<M>, actor: &str) -> bool {
-        if manual.intent == ManualIntent::Suppress && self.is_suppressed() {
-            return false;
+    pub fn record_manual(&mut self, manual: Manual<M>, actor: &str) -> Result<bool> {
+        if matches!(manual.intent, ManualIntent::Include { .. }) {
+            return Err(Error::integrity(format!(
+                "entity `{}` exists: an inclusion starts an entity, and never follows one",
+                self.id
+            )));
+        }
+        if self.audit.verdict() == Some(&manual.intent) {
+            return Ok(false);
         }
         let event = AuditEvent::manual(actor.to_owned(), self.state.confidence, manual);
         self.record(event);
-        true
+        Ok(true)
     }
 
     /// Whether a reviewer has suppressed this entity, as its audit trail
@@ -473,15 +485,17 @@ mod tests {
             .with_coref(EntityCoRef::new("c1"))
             .with_language("en".parse().unwrap());
         entity.lift(TextLocation::inline(10..15));
-        entity.record_manual(
-            Manual::new(
-                ManualIntent::Relabel {
-                    label: "PERSON".into(),
-                },
-                TextLocation::inline(10..15),
-            ),
-            "reviewer-7",
-        );
+        entity
+            .record_manual(
+                Manual::new(
+                    ManualIntent::Relabel {
+                        label: "PERSON".into(),
+                    },
+                    TextLocation::inline(10..15),
+                ),
+                "reviewer-7",
+            )
+            .unwrap();
 
         let read = Entity::from_trail(entity.id, entity.audit.clone()).unwrap();
         assert_eq!(read.state.label, entity.state.label);
@@ -565,11 +579,13 @@ mod tests {
         let mut entity = text_entity();
         let loc = entity.state.location.clone();
         assert!(
-            entity.record_manual(
-                Manual::new(ManualIntent::Suppress, loc)
-                    .with_attribution(Attribution::freeform("false positive")),
-                "reviewer"
-            )
+            entity
+                .record_manual(
+                    Manual::new(ManualIntent::Suppress, loc)
+                        .with_attribution(Attribution::freeform("false positive")),
+                    "reviewer"
+                )
+                .unwrap()
         );
         assert!(entity.is_suppressed());
     }
@@ -581,26 +597,48 @@ mod tests {
         let mut entity = text_entity();
         let moved = TextLocation::inline(1..4);
         assert!(
-            entity.record_manual(
-                Manual::new(
-                    ManualIntent::Relabel {
-                        label: LabelRef::new("ORG"),
-                    },
-                    entity.state.location.clone(),
+            entity
+                .record_manual(
+                    Manual::new(
+                        ManualIntent::Relabel {
+                            label: LabelRef::new("ORG"),
+                        },
+                        entity.state.location.clone(),
+                    )
+                    .with_attribution(Attribution::freeform("retagged")),
+                    "reviewer-7"
                 )
-                .with_attribution(Attribution::freeform("retagged")),
-                "reviewer-7"
-            )
+                .unwrap()
         );
-        assert!(entity.record_manual(
-            Manual::new(ManualIntent::Relocate, moved.clone()),
-            "reviewer-7"
-        ));
+        assert!(
+            entity
+                .record_manual(
+                    Manual::new(ManualIntent::Relocate, moved.clone()),
+                    "reviewer-7"
+                )
+                .unwrap()
+        );
 
         assert_eq!(entity.state.label, LabelRef::new("ORG"));
         assert_eq!(entity.state.location, moved);
         assert!(!entity.is_suppressed(), "an amendment does not suppress");
         assert!(entity.audit.verify().is_ok());
+    }
+
+    /// An inclusion starts an entity, so recording one on an entity that
+    /// exists is refused, and records nothing.
+    #[test]
+    fn an_inclusion_cannot_follow_a_birth() {
+        let mut entity = text_entity();
+        let include = Manual::new(
+            ManualIntent::Include {
+                label: LabelRef::new("ORG"),
+            },
+            TextLocation::inline(0..3),
+        );
+        let err = entity.record_manual(include, "reviewer-7").unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Integrity);
+        assert_eq!(entity.audit.events().len(), 1);
     }
 
     /// `record_manual(Suppress)` is idempotent: a second call records nothing
@@ -609,19 +647,23 @@ mod tests {
     fn record_manual_suppress_is_idempotent() {
         let mut entity = text_entity();
         assert!(
-            entity.record_manual(
-                Manual::new(ManualIntent::Suppress, entity.state.location.clone()),
-                "reviewer-7"
-            ),
+            entity
+                .record_manual(
+                    Manual::new(ManualIntent::Suppress, entity.state.location.clone()),
+                    "reviewer-7"
+                )
+                .unwrap(),
             "first suppress records",
         );
         let after_first = entity.audit.events().len();
         assert!(entity.is_suppressed());
         assert!(
-            !entity.record_manual(
-                Manual::new(ManualIntent::Suppress, entity.state.location.clone()),
-                "reviewer"
-            ),
+            !entity
+                .record_manual(
+                    Manual::new(ManualIntent::Suppress, entity.state.location.clone()),
+                    "reviewer"
+                )
+                .unwrap(),
             "second suppress records nothing",
         );
         assert_eq!(
@@ -727,20 +769,24 @@ mod tests {
     fn an_amendment_after_a_suppression_stays_suppressed() {
         let mut entity = text_entity();
         let loc = entity.state.location.clone();
-        entity.record_manual(
-            Manual::new(ManualIntent::Suppress, loc.clone()),
-            "reviewer-7",
-        );
+        entity
+            .record_manual(
+                Manual::new(ManualIntent::Suppress, loc.clone()),
+                "reviewer-7",
+            )
+            .unwrap();
         assert!(entity.is_suppressed(), "suppressed by the reviewer");
-        entity.record_manual(
-            Manual::new(
-                ManualIntent::Relabel {
-                    label: LabelRef::new("ORG"),
-                },
-                loc,
-            ),
-            "reviewer-7",
-        );
+        entity
+            .record_manual(
+                Manual::new(
+                    ManualIntent::Relabel {
+                        label: LabelRef::new("ORG"),
+                    },
+                    loc,
+                ),
+                "reviewer-7",
+            )
+            .unwrap();
         assert!(
             entity.is_suppressed(),
             "an amendment after a suppression keeps it",

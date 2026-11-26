@@ -33,13 +33,13 @@ pub struct Edit<M: Modality> {
 
 /// What an [`Edit`] changes.
 ///
-/// An [`Include`](Self::Include) only adds to what redaction hides: it narrows
-/// nothing. The rest can leave content unredacted that would have been hidden:
-/// a suppression, a relabel (another label may get a weaker operator), and a
-/// relocation (a rule may choose its operator by where an entity sits). The
-/// [`ReviewPolicy`](super::ReviewPolicy) sees every edit, an include too, and
-/// can refuse any of them: one that wants every edit attributed refuses an
-/// unattributed include.
+/// An [`Include`](Self::Include) and a [`Confirm`](Self::Confirm) only add to
+/// what redaction hides: they narrow nothing. The rest can leave content
+/// unredacted that would have been hidden: a suppression, a relabel (another
+/// label may get a weaker operator), and a relocation (a rule may choose its
+/// operator by where an entity sits). The [`ReviewPolicy`](super::ReviewPolicy)
+/// sees every edit, an include too, and can refuse any of them: one that wants
+/// every edit attributed refuses an unattributed include or confirmation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "op",
@@ -70,6 +70,12 @@ pub enum Change<M: Modality> {
     },
     /// Leave the entity `entity` unredacted.
     Suppress {
+        /// The entity's id.
+        entity: Uuid,
+    },
+    /// Redact the entity `entity`, a finding the reviewer confirms: it is
+    /// redacted even after an earlier suppression.
+    Confirm {
         /// The entity's id.
         entity: Uuid,
     },
@@ -107,7 +113,14 @@ impl<M: Modality> Change<M> {
                 label: label.clone(),
             },
             Self::Relocate { .. } => ManualIntent::Relocate,
+            Self::Confirm { .. } => ManualIntent::Confirm,
         }
+    }
+
+    /// Whether the change can leave content unredacted that would have been
+    /// hidden: every change but an include and a confirmation.
+    pub(crate) fn can_narrow(&self) -> bool {
+        !matches!(self, Self::Include { .. } | Self::Confirm { .. })
     }
 
     /// The change's fields, for the review's digest: a tag, then each field.
@@ -135,6 +148,7 @@ impl<M: Modality> Change<M> {
             Self::Relocate { entity, location } => {
                 out.extend([vec![4], entity.as_bytes().to_vec(), location.hash()]);
             }
+            Self::Confirm { entity } => out.extend([vec![5], entity.as_bytes().to_vec()]),
         }
     }
 }

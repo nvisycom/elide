@@ -747,10 +747,12 @@ mod tests {
     fn checked_restore_rejects_a_valid_but_shortened_entity_trail() {
         let original = text_entity("EMAIL_ADDRESS");
         let mut reviewed = original.clone();
-        reviewed.record_manual(
-            Manual::new(ManualIntent::Suppress, original.location().clone()),
-            "reviewer-7",
-        );
+        reviewed
+            .record_manual(
+                Manual::new(ManualIntent::Suppress, original.location().clone()),
+                "reviewer-7",
+            )
+            .unwrap();
         let report = Report::new().insert_part::<Text>(doc(), vec![reviewed]);
         let registry = text_registry();
         let expected = report.digest();

@@ -93,19 +93,16 @@ impl<M: Modality> State<M> {
     }
 
     /// Take the effect of `event`, which follows the entity's birth on its
-    /// line: a reviewer's decision sets the label or location it names, a
+    /// line: a reviewer's relabel or relocation sets the field it names, a
     /// fusion the fused location, an annotation each field it sets, and every
-    /// event the confidence.
+    /// event the confidence. An event that starts an entity, a recognition or
+    /// an inclusion, changes nothing else past the birth.
     pub(crate) fn apply(&mut self, event: &AuditEvent<M>) {
         match &event.kind {
             AuditKind::Manual(manual) => match &manual.intent {
-                ManualIntent::Include { label } => {
-                    self.label = label.clone();
-                    self.location = manual.location.clone();
-                }
                 ManualIntent::Relabel { label } => self.label = label.clone(),
                 ManualIntent::Relocate => self.location = manual.location.clone(),
-                ManualIntent::Suppress => {}
+                ManualIntent::Include { .. } | ManualIntent::Suppress | ManualIntent::Confirm => {}
             },
             AuditKind::Fusion(fusion) => self.location = fusion.location.clone(),
             AuditKind::Annotation(annotation) => {

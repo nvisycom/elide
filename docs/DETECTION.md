@@ -240,9 +240,10 @@ A caller corrects detection on its result, not by steering it. Detection
 returns a report of the reconciled entities, keyed by the document part each
 lies in, and redaction applies that report. Between the two, a reviewer's
 decisions arrive as a review: suppress a false positive, suppress every
-entity a region contains, include an entity detection missed, or amend one's
-label or span. The review names the version of the report it was made
-against, and applies whole or not at all.
+entity a region contains, confirm a finding (taking back an earlier
+suppression), include an entity detection missed, or amend one's label or
+span. The review names the version of the report it was made against, and
+applies whole or not at all.
 
 A correction is addressed to one part, in that part's own coordinates: a
 region of a page header never touches the body. A region spares only what it
@@ -255,10 +256,10 @@ record of what was found and what a person chose to keep is never lost.
 A correction that can leave content unredacted (a suppression, a relabel, a
 relocation) narrows the redaction, and a caller's review policy decides who
 may make one: it can protect labels no correction may narrow, and require a
-reason. An inclusion only adds to what is hidden, though the policy still
-sees it. A review carries what was decided and why, not who decided it: the
-caller applies it as the reviewer it authenticated, and that actor is what
-the policy reads and the trail records.
+reason. An inclusion or a confirmation only adds to what is hidden, though
+the policy still sees it. A review carries what was decided and why, not who
+decided it: the caller applies it as the reviewer it authenticated, and that
+actor is what the policy reads and the trail records.
 
 ## 8. Reconciliation and Conflict Resolution
 

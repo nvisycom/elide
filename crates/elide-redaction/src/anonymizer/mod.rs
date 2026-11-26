@@ -677,10 +677,12 @@ mod tests {
         assert!(!wrote.unwrap(), "no entity, no write");
 
         let mut suppressed = entity("NAME", 0, 5);
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
-            "reviewer",
-        );
+        suppressed
+            .record_manual(
+                Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+                "reviewer",
+            )
+            .unwrap();
         let wrote = anonymizer
             .anonymize(&mut target, &mut [suppressed], &scope)
             .await;
@@ -725,11 +727,13 @@ mod tests {
         let suppressed_id = suppressed.id();
         let live_id = live.id();
         // The reviewer marks the second detection as a false positive.
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone())
-                .with_attribution(Attribution::freeform("false positive")),
-            "reviewer",
-        );
+        suppressed
+            .record_manual(
+                Manual::new(ManualIntent::Suppress, suppressed.location().clone())
+                    .with_attribution(Attribution::freeform("false positive")),
+                "reviewer",
+            )
+            .unwrap();
         let mut entities = vec![live, suppressed];
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
@@ -802,10 +806,12 @@ mod tests {
         let mut suppressed = entity("NAME", 0, 5); // overlaps the live span
         let live_id = live.id();
         let suppressed_id = suppressed.id();
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
-            "reviewer",
-        );
+        suppressed
+            .record_manual(
+                Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+                "reviewer",
+            )
+            .unwrap();
         let mut entities = vec![live, suppressed];
 
         // The suppressed NAME would win the tiebreak on span if it counted; if it
@@ -844,10 +850,12 @@ mod tests {
         let live_b = entity("B", 10, 15);
         let mut bridge = entity("BRIDGE", 4, 11);
         let (a_id, b_id, bridge_id) = (live_a.id(), live_b.id(), bridge.id());
-        bridge.record_manual(
-            Manual::new(ManualIntent::Suppress, bridge.location().clone()),
-            "reviewer",
-        );
+        bridge
+            .record_manual(
+                Manual::new(ManualIntent::Suppress, bridge.location().clone()),
+                "reviewer",
+            )
+            .unwrap();
         let mut entities = vec![live_a, bridge, live_b];
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));

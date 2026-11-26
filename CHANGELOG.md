@@ -83,7 +83,10 @@ and this project adheres to
   (`entities`, `entity`, `suppressed`, `unsuppressed`)
 - A reviewer's decisions are a `Review`, made against one version of a
   report and applied by `Orchestrator::review`: `include`, `relabel`,
-  `relocate`, `suppress`, and `suppress_within`, each with its `because`.
+  `relocate`, `suppress`, `suppress_within`, and `confirm`, each with its
+  `because`. A suppression and a confirmation are opposite verdicts on an
+  entity, and the latest on its trail decides whether it is redacted, so a
+  confirmation takes back an earlier suppression.
   `review` takes the actor, the reviewer as the deployment authenticated
   them, and records each edit as a `Manual` audit event naming them and what
   it set. The review applies whole or not at all, only to the report version
@@ -117,9 +120,9 @@ and this project adheres to
   absorbed. It is born from a `Birth`: who found it, how sure they are, and
   what they found, a recognition (`Pattern`, `Model`, `Flagged`) or a
   reviewer's `Include` (`Entity::new(Birth::new(source, confidence, kind))`),
-  read
-  through accessors, and changes only by recording an event (`record`,
-  `record_manual`, `fuse`, `annotate`). A recognition records where it
+  read through accessors, and changes only by recording an event (`record`,
+  `record_manual`, `fuse`, `annotate`). An inclusion only starts an entity:
+  `record_manual` refuses one on an entity that exists. A recognition records where it
   matched in the text it read (`recognized_range` on `Pattern` and `Model`).
   What becomes known about an entity after its birth is an `Annotation`
   event: a chunk's finding placed in its document (`lift`), a window's range
