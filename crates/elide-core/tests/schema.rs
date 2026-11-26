@@ -8,10 +8,14 @@
 #![cfg(feature = "schema")]
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::AuditEvent;
-use elide_core::modality::text::{Text, TextLocation};
+use elide_core::entity::audit::{
+    Annotated, AuditEvent, AuditLog, Calibrated, Contested, Flagged, Fused, Included, Manual,
+    Model, Pattern, Redacted, Refined, Resolved, Selected,
+};
+use elide_core::modality::text::{SourceRef, Text, TextLocation};
+use elide_core::primitive::UnitBoundingBox;
 use elide_core::recognition::Scope;
-use schemars::schema_for;
+use schemars::{JsonSchema, schema_for};
 
 /// The generic `Entity<Text>` generates a schema covering its fields, with the
 /// `LanguageTag` field rendered as a string (via `with = "Option<String>"`).
@@ -102,9 +106,6 @@ fn text_location_schema() {
 #[cfg(feature = "serde")]
 #[test]
 fn text_location_rejects_empty_and_round_trips() {
-    use elide_core::modality::text::SourceRef;
-    use elide_core::primitive::UnitBoundingBox;
-
     // A location naming nothing is unrepresentable on the wire.
     for bad in [
         "{}",
@@ -161,9 +162,6 @@ fn scope_schema() {
 /// modality crate's own tests, e.g. `elide-image`.)
 #[test]
 fn generic_schema_name_carries_modality_prefix() {
-    use elide_core::entity::audit::AuditLog;
-    use schemars::JsonSchema;
-
     assert_eq!(Entity::<Text>::schema_name(), "TextEntity");
     assert_eq!(AuditLog::<Text>::schema_name(), "TextAuditLog");
 }
@@ -173,12 +171,6 @@ fn generic_schema_name_carries_modality_prefix() {
 /// own type of a common name (`TextRedaction`, `Selection`, `Calibration`).
 #[test]
 fn audit_payload_schemas_are_named_for_their_event() {
-    use elide_core::entity::audit::{
-        Annotated, Calibrated, Contested, Flagged, Fused, Included, Manual, Model, Pattern,
-        Redacted, Refined, Resolved, Selected,
-    };
-    use schemars::JsonSchema;
-
     let names = [
         Pattern::<Text>::schema_name(),
         Model::<Text>::schema_name(),
