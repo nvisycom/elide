@@ -117,7 +117,7 @@ fn build_anonymizer() -> Anonymizer<Text> {
         // before any label rule can fire. Order matters: the first
         // matching rule wins.
         .with(Rule::predicate(
-            |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
+            |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence()),
             Keep,
         ))
         .with(Rule::label(

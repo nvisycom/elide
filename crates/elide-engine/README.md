@@ -26,9 +26,9 @@ between: suppress a false positive, include a missed one, relabel or relocate
 an entity, each recorded on the entity's audit trail.
 
 ```rust
-# use elide_core::entity::audit::{AuditEvent, PatternRule};
+# use elide_core::entity::audit::{Pattern, PatternRule};
 # use elide_core::entity::builtins::EMAIL_ADDRESS;
-# use elide_core::entity::Entity;
+# use elide_core::entity::{Birth, Entity};
 # use elide_core::modality::text::{Text, TextLocation};
 # use elide_core::primitive::Confidence;
 # use elide_core::recognition::{Context, Recognizer, Subject};
@@ -48,8 +48,8 @@ an entity, each recorded on the entity's audit trail.
 #         let text = subject.data().as_str();
 #         Ok(text.find("jane@example.com").map(|start| {
 #             let location = TextLocation::inline(start..start + 16);
-#             let event = AuditEvent::pattern("email", Confidence::MAX, location.clone(), PatternRule::default());
-#             Entity::new(EMAIL_ADDRESS.to_ref(), location).with_event(event)
+#             let found = Pattern::new(EMAIL_ADDRESS.to_ref(), location, PatternRule::default());
+#             Entity::new(Birth::new("email", Confidence::MAX, found))
 #         }).into_iter().collect())
 #     }
 # }

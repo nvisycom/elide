@@ -95,7 +95,7 @@ mod tests {
 
     #[tokio::test]
     async fn text_is_covered_in_black_by_default() {
-        let entity = Entity::<Text>::fixture("PERSON", (0, 8));
+        let entity = Entity::<Text>::fixture("PERSON", 0..8);
         let out = Cover::default()
             .anonymize(&entity, &TextData::new("Jane Roe"))
             .await
@@ -106,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn a_cover_carries_its_color() {
         let red = Color::rgb(200, 0, 0);
-        let entity = Entity::<Text>::fixture("PERSON", (0, 8));
+        let entity = Entity::<Text>::fixture("PERSON", 0..8);
         let out = Cover::new(red)
             .anonymize(&entity, &TextData::new("Jane Roe"))
             .await

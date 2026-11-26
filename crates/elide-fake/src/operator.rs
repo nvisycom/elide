@@ -3,14 +3,14 @@
 //!
 //! [`Operator`]: elide_core::redaction::Operator
 
-use std::str::FromStr;
-
 use elide_core::entity::Entity;
 use elide_core::modality::text::TextReplacement;
 use elide_core::modality::{Modality, TextRedactable};
 use elide_core::primitive::LanguageTag;
 use elide_core::redaction::{LeakProfile, Operator};
 use elide_core::{Component, Result};
+
+use crate::synth::Draw;
 
 /// An operator that replaces an entity with locale-aware fake data.
 ///
@@ -41,8 +41,7 @@ use elide_core::{Component, Result};
 #[component(name = "fake", version = "1.0.0")]
 pub struct Fake<F> {
     fallback: F,
-    default_language: LanguageTag,
-    seed: u64,
+    draw: Draw,
 }
 
 impl<F> Fake<F> {
@@ -51,8 +50,7 @@ impl<F> Fake<F> {
     pub fn new(fallback: F) -> Self {
         Self {
             fallback,
-            default_language: LanguageTag::from_str("en").expect("en is BCP-47"),
-            seed: 0,
+            draw: Draw::default(),
         }
     }
 
@@ -60,7 +58,7 @@ impl<F> Fake<F> {
     /// no `language` tag. Initial value is `"en"`.
     #[must_use]
     pub fn with_default_language(mut self, language: LanguageTag) -> Self {
-        self.default_language = language;
+        self.draw.default_language = language;
         self
     }
 
@@ -68,7 +66,7 @@ impl<F> Fake<F> {
     /// same seed produce the same fake value for the same entity.
     #[must_use]
     pub fn with_seed(mut self, seed: u64) -> Self {
-        self.seed = seed;
+        self.draw.seed = seed;
         self
     }
 
@@ -76,7 +74,7 @@ impl<F> Fake<F> {
     /// structured labels; `None` when the label is outside the catalogue, so the
     /// caller delegates to its fallback.
     fn try_generate(&self, entity: &Entity<impl Modality>, source: &str) -> Option<String> {
-        crate::synth::fake_value(entity, source, self.seed, &self.default_language)
+        self.draw.value(entity, source)
     }
 }
 
@@ -110,9 +108,12 @@ mod tests {
     use std::collections::HashSet;
 
     use elide::redaction::operators::{Mask, Replace};
-    use elide_core::entity::{EntityCoRef, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, EntityCoRef, LabelRef};
+    use elide_core::modality::Modality;
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
     use elide_core::modality::text::{Text, TextData, TextLocation};
+    use elide_core::primitive::Confidence;
 
     use super::*;
 
@@ -131,15 +132,23 @@ mod tests {
         Fake::new(Mask::stars())
     }
 
+    /// An entity a test pattern found as `label` at `location`.
+    fn born<M: Modality>(label: LabelRef, location: M::Location) -> Entity<M> {
+        Entity::new(Birth::new(
+            "test",
+            Confidence::MAX,
+            Pattern::new(label, location, PatternRule::default()),
+        ))
+    }
+
     /// Build a Text entity over the full span of `source` so
     /// offsets are self-documenting.
     fn entity_over(label: LabelRef, source: &str) -> Entity<Text> {
-        Entity::<Text>::new(label, TextLocation::inline(0..source.len()))
+        born(label, TextLocation::inline(0..source.len()))
     }
 
     fn coref_entity(label: LabelRef, source: &str, coref_id: &str) -> Entity<Text> {
-        Entity::<Text>::new(label, TextLocation::inline(0..source.len()))
-            .with_coref(EntityCoRef::new(coref_id))
+        born(label, TextLocation::inline(0..source.len())).with_coref(EntityCoRef::new(coref_id))
     }
 
     #[tokio::test]
@@ -193,7 +202,7 @@ mod tests {
     async fn entity_language_overrides_default() {
         let op = fake();
         let source = TextData::new("名前");
-        let entity = Entity::<Text>::new(
+        let entity = born::<Text>(
             person_name(),
             TextLocation::inline(0..source.as_str().len()),
         )
@@ -257,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn tabular_impl_emits_cell_replaced() {
         let op = fake();
-        let entity = Entity::<Tabular>::new(
+        let entity = born::<Tabular>(
             person_name(),
             TabularLocation {
                 row_index: 0u32,

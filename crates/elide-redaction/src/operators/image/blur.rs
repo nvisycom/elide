@@ -92,8 +92,8 @@ impl Operator<Image> for Blur {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::primitive::Confidence;
     use elide_core::redaction::Operator;
     use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
@@ -105,13 +105,11 @@ mod tests {
     fn image_entity() -> (Entity<Image>, ImageData) {
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(2.0, 2.0));
         let location = ImageLocation::new(bbox);
-        let event = AuditEvent::pattern(
+        let entity = Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            location.clone(),
-            PatternRule::default(),
-        );
-        let entity = Entity::new(LabelRef::new("FACE"), location).with_event(event);
+            Pattern::new(LabelRef::new("FACE"), location, PatternRule::default()),
+        ));
         let data = elide_image::fixtures::blank_image_data();
         (entity, data)
     }

@@ -25,13 +25,20 @@ impl<M: TextRedactable> Generator<M> for RandomToken {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::LabelRef;
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
+    use elide_core::primitive::Confidence;
 
     use super::*;
 
     fn entity(label: &str) -> Entity<Text> {
-        Entity::new(LabelRef::new(label), TextLocation::inline(0..5))
+        let location = TextLocation::inline(0..5);
+        Entity::new(Birth::new(
+            "test",
+            Confidence::MAX,
+            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        ))
     }
 
     fn surrogate(label: &str) -> TextReplacement {

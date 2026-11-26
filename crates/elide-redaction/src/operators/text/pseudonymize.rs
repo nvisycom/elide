@@ -105,7 +105,7 @@ pub enum PseudonymizeSeed {
 impl PseudonymizeSeed {
     /// The seed of `entity`, whose original value is `value`.
     fn of<M: Modality>(entity: &Entity<M>, value: &str) -> Self {
-        match &entity.coref {
+        match entity.coref() {
             Some(coref) => Self::CoRef(coref.as_str().to_owned()),
             None => Self::Value(value.to_owned()),
         }
@@ -131,7 +131,7 @@ where
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
         let key = PseudonymizeKey {
-            label: entity.label.clone(),
+            label: entity.label().clone(),
             seed: PseudonymizeSeed::of(entity, data.as_ref()),
         };
         // The vault stores the text surrogate, so one vault serves every
@@ -153,8 +153,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
-    use elide_core::entity::{EntityCoRef, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, EntityCoRef, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
 
@@ -164,13 +164,11 @@ mod tests {
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
         let location = TextLocation::inline(0..1);
-        let event = AuditEvent::pattern(
+        let entity = Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            location.clone(),
-            PatternRule::default(),
-        );
-        let entity = Entity::new(LabelRef::new(label), location).with_event(event);
+            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        ));
         match coref {
             Some(c) => entity.with_coref(EntityCoRef::new(c.to_owned())),
             None => entity,

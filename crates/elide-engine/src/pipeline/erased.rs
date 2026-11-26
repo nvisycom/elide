@@ -21,6 +21,13 @@ use crate::analysis::{ArtifactGroup, EntityGroup};
 /// A boxed, pinned, `Send` future, the erased async return shape.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// A stream to analyze, with the enrichment artifact a prior run left it:
+/// `NoArtifact` on a first pass, a restored artifact on a re-run.
+pub(crate) struct Seeded<'s, 'a> {
+    pub(crate) stream: StreamMut<'s>,
+    pub(crate) seed: &'a dyn ArtifactGroup,
+}
+
 /// What analyzing one stream produced: its entities, and its enrichment
 /// artifact when it was enriched.
 pub(crate) struct PartAnalysis {
@@ -50,17 +57,16 @@ pub(crate) trait ErasedPipeline: Send + Sync {
 
     /// Analyze several streams of this pipeline's modality together,
     /// coalescing enrichment into one batched provider round-trip, and return one
-    /// [`PartAnalysis`] per handle in order. Each handle is paired with its prior
-    /// enrichment `seed` (`NoArtifact` on a first pass), and its flagged hidden
-    /// content is detected under `policy`. Every handle must already
-    /// match this pipeline's modality (the orchestrator groups them with
-    /// [`matches`](Self::matches) first); a non-matching handle is a caller error.
+    /// [`PartAnalysis`] per part in order. Each part's stream is seeded with its
+    /// prior enrichment, and its flagged hidden content is detected under
+    /// `policy`. Every stream must already match this pipeline's modality (the
+    /// orchestrator groups them with [`matches`](Self::matches) first); a
+    /// non-matching one is a caller error.
     fn analyze_streams<'a>(
         &'a self,
-        handles: &'a mut [StreamMut<'_>],
+        parts: &'a mut [Seeded<'_, '_>],
         scope: &'a Scope,
         policy: HiddenContentPolicy,
-        seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>>;
 
     /// Redact a matched stream in place with its (possibly edited) boxed
@@ -98,17 +104,23 @@ where
 
     fn analyze_streams<'a>(
         &'a self,
-        handles: &'a mut [StreamMut<'_>],
+        parts: &'a mut [Seeded<'_, '_>],
         scope: &'a Scope,
         policy: HiddenContentPolicy,
-        seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>> {
+        // A matching prior artifact restores; anything else (first-pass
+        // `NoArtifact`, another modality) is `None`, so the group enriches from
+        // scratch.
+        let seeds: Vec<Option<M::Artifact>> = parts
+            .iter()
+            .map(|part| part.seed.as_any().downcast_ref::<M::Artifact>().cloned())
+            .collect();
         Box::pin(async move {
-            // The orchestrator grouped these handles by `matches`, so every one
+            // The orchestrator grouped these streams by `matches`, so every one
             // downcasts; a `None` here would mean a caller mixed modalities.
-            let mut typed = Vec::with_capacity(handles.len());
-            for handle in handles.iter_mut() {
-                let stream = handle.downcast_mut::<M>().ok_or_else(|| {
+            let mut typed = Vec::with_capacity(parts.len());
+            for part in parts.iter_mut() {
+                let stream = part.stream.downcast_mut::<M>().ok_or_else(|| {
                     Error::malformed(format!("batched part is not {} despite matching", M::NAME))
                 })?;
                 typed.push(stream);
@@ -118,13 +130,6 @@ where
                 .iter()
                 .map(|stream| flagged::entities(stream, scope, policy))
                 .collect::<Result<Vec<_>>>()?;
-            // A matching prior artifact restores; anything else (first-pass
-            // `NoArtifact`, another modality) is `None`, so the group enriches
-            // from scratch.
-            let seeds = seeds
-                .iter()
-                .map(|seed| seed.as_any().downcast_ref::<M::Artifact>().cloned())
-                .collect();
             let mut analyses = self
                 .analyzer
                 .analyze_streams(&mut streams, scope, seeds)
@@ -169,7 +174,8 @@ where
             // is left as it is.
             let entities = typed::<M>(entities)?;
             for entity in entities.iter_mut().filter(|entity| !entity.is_suppressed()) {
-                entity.location = stream.resolve(entity.location.clone())?;
+                let resolved = stream.resolve(entity.location().clone())?;
+                entity.lift(resolved);
             }
             self.anonymizer
                 .anonymize(&mut stream, entities, scope)

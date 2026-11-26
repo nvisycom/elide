@@ -1,6 +1,6 @@
-//! Hand-written [`JsonSchema`] for [`Report`] and [`ArtifactSet`], kept in
-//! lockstep with their [`Serialize`](super::serde) impls so a generated schema
-//! never drifts from the wire form.
+//! Hand-written [`JsonSchema`] for [`Report`], [`Review`], and [`ArtifactSet`],
+//! kept in lockstep with their [`Serialize`](super::serde) impls so a generated
+//! schema never drifts from the wire form.
 //!
 //! `Report` serializes through a hand-written `Serialize` (its groups are
 //! type-erased), so schemars cannot derive this. The one open piece is a group's
@@ -14,21 +14,23 @@
 //! validates a serialized report against this schema, turning any drift into a
 //! failing test rather than a lying client.
 //!
-//! Both types share the `{ parts: [..] }` shape and the same erasure problem,
-//! so both are expressed the same way, a `oneOf` over per-modality arms. They
-//! differ only in what an arm carries: a `Report` arm holds `entities`, an
-//! `ArtifactSet` arm holds the single `artifact` for that modality. Every arm
-//! also carries the part's `id` (a segment array), so a part is addressed by its
-//! full path.
+//! All three share the `{ parts: [..] }` shape and the same erasure problem,
+//! so all are expressed the same way, a `oneOf` over per-modality arms. They
+//! differ only in what an arm carries: a `Report` arm holds `entities`, a
+//! `Review` arm its `edits`, and an `ArtifactSet` arm the single `artifact` for
+//! that modality. Every arm also carries the part's `id` (a segment array), so
+//! a part is addressed by its full path.
 //!
-//! [`Report`]: super::report::Report
-//! [`ArtifactSet`]: super::artifacts::ArtifactSet
+//! [`Report`]: crate::Report
+//! [`Review`]: crate::Review
+//! [`ArtifactSet`]: crate::ArtifactSet
 
 use std::borrow::Cow;
 
 #[cfg(feature = "audio")]
 use elide_audio::modality::Audio;
 use elide_core::entity::Entity;
+use elide_core::entity::audit::AuditHash;
 use elide_core::modality::Modality;
 use elide_core::modality::metadata::Metadata;
 #[cfg(feature = "tabular")]
@@ -39,8 +41,8 @@ use elide_core::redaction::{HiddenContent, HiddenContentKind};
 use elide_image::modality::Image;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
-use super::artifacts::ArtifactSet;
-use super::report::Report;
+use crate::analysis::{ArtifactSet, Report};
+use crate::review::{Edit, Review};
 
 /// The `{ id: [string..], modality: "<name>", entities: [Entity<M>] }` arm for
 /// one modality, with `modality` pinned to a `const` so it discriminates the
@@ -104,13 +106,15 @@ impl JsonSchema for Report {
         // `parts` is an array of part entries, each a discriminated group;
         // `stripped` (output only, ignored on input) lists the hidden content
         // stripped from each part.
+        // `id` is the report's identity, a UUID the digest covers.
         json_schema!({
             "type": "object",
             "properties": {
+                "id": { "type": "string", "format": "uuid" },
                 "parts": { "type": "array", "items": group },
                 "stripped": { "type": "array", "items": stripped },
             },
-            "required": ["parts"],
+            "required": ["id", "parts"],
         })
     }
 }
@@ -172,6 +176,64 @@ impl JsonSchema for ArtifactSet {
                 "parts": { "type": "array", "items": group },
             },
             "required": ["parts"],
+        })
+    }
+}
+
+/// The `{ id: [string..], modality: "<name>", edits: [Edit<M>] }` arm for one
+/// modality, the review-side counterpart to [`group_arm`].
+fn edit_arm<M: Modality>(generator: &mut SchemaGenerator) -> Schema
+where
+    Edit<M>: JsonSchema,
+{
+    let edit = generator.subschema_for::<Edit<M>>();
+    json_schema!({
+        "type": "object",
+        "properties": {
+            "id": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "modality": { "type": "string", "const": M::NAME },
+            "edits": { "type": "array", "items": edit },
+        },
+        "required": ["id", "modality", "edits"],
+    })
+}
+
+impl JsonSchema for Review {
+    fn schema_name() -> Cow<'static, str> {
+        "Review".into()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        concat!(module_path!(), "::Review").into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        // One arm per compiled-in modality, discriminated by `modality`,
+        // mirroring `Report`, so a review layer writes edits the way it reads
+        // entities.
+        let arms = vec![
+            edit_arm::<Text>(generator),
+            edit_arm::<Metadata>(generator),
+            #[cfg(feature = "image")]
+            edit_arm::<Image>(generator),
+            #[cfg(feature = "audio")]
+            edit_arm::<Audio>(generator),
+            #[cfg(feature = "tabular")]
+            edit_arm::<Tabular>(generator),
+        ];
+        let group = json_schema!({
+            "oneOf": arms,
+            "discriminator": { "propertyName": "modality" },
+        });
+
+        // `against` is the digest of the report the review was made against.
+        json_schema!({
+            "type": "object",
+            "properties": {
+                "against": generator.subschema_for::<AuditHash>(),
+                "parts": { "type": "array", "items": group },
+            },
+            "required": ["against", "parts"],
         })
     }
 }

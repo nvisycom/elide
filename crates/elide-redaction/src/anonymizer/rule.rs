@@ -62,9 +62,9 @@ impl<M: Modality> Matcher<M> {
     /// [`Scope`]: elide_core::recognition::Scope
     fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog, scope: &Scope) -> bool {
         match self {
-            Matcher::Label(label) => &entity.label == label,
+            Matcher::Label(label) => entity.label() == label,
             Matcher::Tag(tag) => catalog
-                .get(&entity.label)
+                .get(entity.label())
                 .is_some_and(|label| label.has_tag(tag.as_str())),
             Matcher::Predicate(predicate) => predicate(&MatchContext {
                 entity,

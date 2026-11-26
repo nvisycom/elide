@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::hash::Hash;
+use std::ops::Range;
 
 #[cfg(feature = "serde")]
 use serde::de::Error as _;
@@ -41,14 +42,7 @@ impl AuditHash {
     /// The digest of `fields` in order, each length-prefixed so no two lists
     /// of fields share one (`["ab", "c"]` differs from `["a", "bc"]`).
     pub fn of_fields<F: AsRef<[u8]>>(fields: impl IntoIterator<Item = F>) -> Self {
-        let mut hasher = AuditHasher::new();
-        let mut count = 0u64;
-        for field in fields {
-            hasher.bytes(field.as_ref());
-            count += 1;
-        }
-        hasher.raw(&count.to_le_bytes());
-        hasher.finish()
+        AuditHasher::new().fields(fields)
     }
 }
 
@@ -101,6 +95,30 @@ impl AuditHasher {
             }
             None => self.byte(0),
         }
+    }
+
+    /// Fold in an optional byte range: a presence byte, then its bounds if
+    /// present.
+    pub(crate) fn range(&mut self, range: Option<&Range<usize>>) -> &mut Self {
+        match range {
+            Some(range) => self
+                .byte(1)
+                .raw(&(range.start as u64).to_le_bytes())
+                .raw(&(range.end as u64).to_le_bytes()),
+            None => self.byte(0),
+        }
+    }
+
+    /// Fold in `fields` in order, each length-prefixed, then their count, and
+    /// finish.
+    fn fields<F: AsRef<[u8]>>(mut self, fields: impl IntoIterator<Item = F>) -> AuditHash {
+        let mut count = 0u64;
+        for field in fields {
+            self.bytes(field.as_ref());
+            count += 1;
+        }
+        self.raw(&count.to_le_bytes());
+        self.finish()
     }
 
     /// Finish hashing and return the digest.

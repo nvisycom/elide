@@ -106,20 +106,20 @@ where
             let Some(operator) = self.operators.resolve(entity) else {
                 continue;
             };
-            let data = reader.read_at(&entity.location).await?;
+            let data = reader.read_at(entity.location()).await?;
             // The document holds the replacement text as data; lift it back
             // to the modality's replacement so the operator can reverse it.
             let current = M::Replacement::from(TextReplacement::replaced(data.as_str()));
             let Some(original) = operator.deanonymize(entity, &current).await? else {
                 tracing::debug!(
                     modality = M::NAME,
-                    label = entity.label.as_str(),
+                    label = entity.label().as_str(),
                     "value not recoverable; skipping",
                 );
                 continue;
             };
             redactions.push(
-                entity.location.clone(),
+                entity.location().clone(),
                 M::Replacement::from(TextReplacement::replaced(original.as_str())),
             );
         }

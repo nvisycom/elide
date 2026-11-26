@@ -238,17 +238,27 @@ recognizer accumulates is rebuilt for each payload and discarded with it.
 
 A caller corrects detection on its result, not by steering it. Detection
 returns a report of the reconciled entities, keyed by the document part each
-lies in, and redaction applies that report. Between the two, a reviewer
-suppresses a false positive, suppresses every entity a region contains,
-includes an entity detection missed, or amends one's label or span.
+lies in, and redaction applies that report. Between the two, a reviewer's
+decisions arrive as a review: suppress a false positive, suppress every
+entity a region contains, include an entity detection missed, or amend one's
+label or span. The review names the version of the report it was made
+against, and applies whole or not at all.
 
 A correction is addressed to one part, in that part's own coordinates: a
 region of a page header never touches the body. A region spares only what it
 contains whole, so a finding that reaches past it is still redacted and
 nothing outside the region is spared. Each correction is recorded on the
-entity it touches as a human decision, with who made it and why, and a
-suppressed entity stays in the report rather than vanishing, so the record of
-what was found and what a person chose to keep is never lost.
+entity it touches as a human decision, with who made it, why, and what it
+set, and a suppressed entity stays in the report rather than vanishing, so the
+record of what was found and what a person chose to keep is never lost.
+
+A correction that can leave content unredacted (a suppression, a relabel, a
+relocation) narrows the redaction, and a caller's review policy decides who
+may make one: it can protect labels no correction may narrow, and require a
+reason. An inclusion only adds to what is hidden, though the policy still
+sees it. A review carries what was decided and why, not who decided it: the
+caller applies it as the reviewer it authenticated, and that actor is what
+the policy reads and the trail records.
 
 ## 8. Reconciliation and Conflict Resolution
 
@@ -338,7 +348,14 @@ pipeline. Each entity carries:
 - a confidence value derived from the contributing recognizers;
 - a provenance trail naming every recognizer that contributed evidence, what
   evidence it contributed, the calibration and fusion that reshaped the score,
-  and the before-and-after confidence at each step.
+  where it was placed and what was learned about it (its language, its
+  coreference cluster), and the before-and-after confidence at each step.
+
+The trail is not a log kept beside the entity: it is the entity. Its label,
+location, confidence, and everything else it says are read from the trail,
+along the line from its birth to its tip, so nothing about an entity can
+change without an event saying so, and an entity whose stated fields disagree
+with its trail is refused when it is read back.
 
 The provenance trail is what makes detection an _evidentiary_ operation rather
 than an opaque transformation. The set is serializable, inspectable, and

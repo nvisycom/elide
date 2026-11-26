@@ -126,6 +126,14 @@ impl Error {
         Self::new(ErrorKind::Integrity, source)
     }
 
+    /// A [`Refused`](ErrorKind::Refused) error caused by `source`.
+    pub fn refused<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Refused, source)
+    }
+
     /// An [`Provider`](ErrorKind::Provider) error caused by `source`.
     pub fn provider<E>(source: E) -> Self
     where
@@ -293,6 +301,13 @@ pub enum ErrorKind {
     ///
     /// [`MalformedInput`]: Self::MalformedInput
     NotFound,
+    /// A policy the caller configured refused the request: a review edit that
+    /// narrows a protected label, or lacks the actor or reason the review
+    /// policy requires. Distinct from [`Configuration`]: the setup is valid,
+    /// and it is what it allows that turned the request down.
+    ///
+    /// [`Configuration`]: Self::Configuration
+    Refused,
     /// An external provider (an LLM service, a hosted model) returned an
     /// error response.
     Provider,
@@ -315,6 +330,7 @@ impl ErrorKind {
             Self::Sanitization => "output failed its hidden-content check",
             Self::Integrity => "integrity verification failed",
             Self::NotFound => "not found",
+            Self::Refused => "refused by policy",
             Self::Provider => "provider returned an error",
             Self::Transport => "transport failure",
         }
@@ -341,6 +357,7 @@ impl ErrorKind {
             | Self::Sanitization
             | Self::Integrity
             | Self::NotFound
+            | Self::Refused
             | Self::Provider => false,
         }
     }

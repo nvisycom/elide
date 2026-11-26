@@ -65,8 +65,8 @@ macro_rules! assert_match {
         let label = $label;
         let needle: &str = $needle;
         let hit = entities.iter().any(|e| {
-            e.label == label
-                && e.location
+            e.label() == &label
+                && e.location()
                     .range()
                     .is_some_and(|r| text.get(r.start..r.end) == Some(needle))
         });
@@ -76,8 +76,8 @@ macro_rules! assert_match {
             entities
                 .iter()
                 .map(|e| {
-                    let r = e.location.range().unwrap();
-                    (e.label.clone(), &text[r.start..r.end])
+                    let r = e.location().range().unwrap();
+                    (e.label().clone(), &text[r.start..r.end])
                 })
                 .collect::<Vec<_>>()
         );

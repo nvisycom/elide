@@ -147,7 +147,7 @@ mod tests {
 
         use crate::operators::{Mask, WithFallback};
 
-        let entity = Entity::<Text>::fixture("PAN", (0, 4));
+        let entity = Entity::<Text>::fixture("PAN", 0..4);
         let data = TextData::new("1234");
         let alone = Operator::<Text>::anonymize(&Truncate::suffix(4), &entity, &data)
             .await

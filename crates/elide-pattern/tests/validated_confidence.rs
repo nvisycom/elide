@@ -24,8 +24,8 @@ async fn card_confidences(text: &str) -> Vec<f32> {
         .await
         .expect("recognize")
         .into_iter()
-        .filter(|e| e.label == builtins::PAYMENT_CARD.to_ref())
-        .map(|e| f32::from(e.confidence))
+        .filter(|e| e.label() == &builtins::PAYMENT_CARD.to_ref())
+        .map(|e| f32::from(e.confidence()))
         .collect()
 }
 

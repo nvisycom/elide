@@ -129,16 +129,16 @@ fn dedupe_exact(entities: Vec<Entity<Text>>) -> Vec<Entity<Text>> {
     let mut kept: Vec<Option<Entity<Text>>> = Vec::with_capacity(entities.len());
 
     for entity in entities {
-        let Some(span) = entity.location.range().cloned() else {
+        let Some(span) = entity.location().range().cloned() else {
             kept.push(Some(entity));
             continue;
         };
-        let key = (span, entity.label.clone());
+        let key = (span, entity.label().clone());
         match best.get(&key) {
             Some(&idx)
                 if kept[idx]
                     .as_ref()
-                    .is_some_and(|e| e.confidence >= entity.confidence) =>
+                    .is_some_and(|e| e.confidence() >= entity.confidence()) =>
             {
                 // An equal-or-better duplicate is already kept; drop this one.
             }
@@ -248,8 +248,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elide_core::Component;
-    use elide_core::entity::audit::{AuditEvent, ModelId};
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Model, ModelId};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::{Confidence, LanguageClaim, LanguageTag};
@@ -293,15 +293,9 @@ mod tests {
         fn entity_at(&self, label: &str, span: Range<usize>) -> Entity<Text> {
             let location = TextLocation::inline(span.clone());
             let confidence = Confidence::new(self.confidence).unwrap();
-            let event = AuditEvent::model(
-                "finds-substring",
-                confidence,
-                location.clone(),
-                ModelId::new("model"),
-            );
-            Entity::new(LabelRef::new(label), location)
-                .with_recognized_range(span)
-                .with_event(event)
+            let found = Model::new(LabelRef::new(label), location, ModelId::new("model"))
+                .with_recognized_range(span);
+            Entity::new(Birth::new("finds-substring", confidence, found))
         }
     }
 
@@ -381,7 +375,7 @@ mod tests {
     fn spans(entities: &[Entity<Text>]) -> Vec<(usize, usize)> {
         entities
             .iter()
-            .filter_map(|entity| entity.location.range())
+            .filter_map(|entity| entity.location().range())
             .map(|range| (range.start, range.end))
             .collect()
     }
@@ -494,8 +488,8 @@ mod tests {
         // in the full text, regardless of which window saw it.
         let needle_at = text.find("NEEDLE").unwrap();
         assert_eq!(out.len(), 1, "exact duplicates from overlap are collapsed");
-        assert_eq!(out[0].location.range(), Some(&(needle_at..needle_at + 6)));
-        assert_eq!(out[0].recognized_range, Some(needle_at..needle_at + 6));
+        assert_eq!(out[0].location().range(), Some(&(needle_at..needle_at + 6)));
+        assert_eq!(out[0].recognized_range(), Some(&(needle_at..needle_at + 6)));
         // It really was windowed (more than one scan).
         assert!(recognizer.inner().seen.lock().unwrap().len() > 1);
     }
@@ -513,7 +507,7 @@ mod tests {
         let out = recognizer.recognize(&subject(text), &ctx).await.unwrap();
         let needle_at = text.find("NEEDLE").unwrap();
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].location.range(), Some(&(needle_at..needle_at + 6)));
+        assert_eq!(out[0].location().range(), Some(&(needle_at..needle_at + 6)));
     }
 
     #[tokio::test]
@@ -537,9 +531,9 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!(
             out.iter()
-                .all(|e| e.location.range() == Some(&(needle_at..needle_at + 6)))
+                .all(|e| e.location().range() == Some(&(needle_at..needle_at + 6)))
         );
-        let mut labels: Vec<&str> = out.iter().map(|e| e.label.as_str()).collect();
+        let mut labels: Vec<&str> = out.iter().map(|e| e.label().as_str()).collect();
         labels.sort_unstable();
         assert_eq!(labels, ["ORG", "PERSON"]);
     }

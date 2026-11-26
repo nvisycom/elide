@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn within_clips_a_span_claim_and_keeps_a_whole_text_one() {
         let whole = LanguageClaim::asserted(tag("en"));
-        assert_eq!(whole.within(10..20), Some(whole.clone()));
+        assert_eq!(whole.within(10..20), Some(whole));
 
         let spanned = LanguageClaim::asserted(tag("uk")).with_span(5..15);
         assert_eq!(

@@ -126,6 +126,17 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
         !matches!(self.overlap(other), Overlap::Disjoint)
     }
 
+    /// Whether this location covers all of `other`: every point of `other`
+    /// lies within it.
+    ///
+    /// By default, when it [contains](Overlap::Contains) `other` or is the
+    /// same location. A modality whose locations can also name content by
+    /// another anchor, such as a text mark by its raw bytes or rendered
+    /// boxes, compares those too.
+    fn covers(&self, other: &Self) -> bool {
+        self.overlap(other) == Overlap::Contains || self.hash() == other.hash()
+    }
+
     /// The smallest single location covering both `self` and `other`, or
     /// `None` when the two cannot coalesce into one redactable span.
     ///

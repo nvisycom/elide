@@ -11,7 +11,7 @@ use elide::{ErrorKind, Orchestrator, PartId, RegistryDocumentExt, Report, Result
 
 use super::text::{FIXTURE, extracted_text};
 use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
-use crate::support::review::flagged;
+use crate::support::review::included;
 
 const DOC: &str = "doc.pdf";
 const PHONE: &str = "555-0142";
@@ -26,10 +26,7 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator> {
 /// A report holding one reviewer mark over `rect` on `page`.
 fn marked(page: u32, rect: UnitBoundingBox) -> Report {
     let mark = TextLocation::marked_rendered(page, rect);
-    Report::new().insert_part::<Text>(
-        PartId::from(DOC),
-        vec![flagged(builtins::PHONE_NUMBER.to_ref(), mark)],
-    )
+    included(&PartId::from(DOC), builtins::PHONE_NUMBER.to_ref(), mark)
 }
 
 /// The page and first rectangle a detection of `label` is drawn in.
@@ -42,9 +39,9 @@ async fn drawn(orchestrator: &Orchestrator, label: LabelRef) -> Result<(u32, Uni
     let location = &part
         .entities()
         .iter()
-        .find(|entity| entity.label == label)
+        .find(|entity| *entity.label() == label)
         .expect("the label is detected")
-        .location;
+        .location();
     Ok((location.page().expect("on a page"), location.rects()[0]))
 }
 
@@ -110,10 +107,7 @@ async fn two_regions_with_text_between_fail() -> Result<()> {
         page: number,
         rects: vec![left, right],
     });
-    let report = Report::new().insert_part::<Text>(
-        PartId::from(DOC),
-        vec![flagged(builtins::PHONE_NUMBER.to_ref(), mark)],
-    );
+    let report = included(&PartId::from(DOC), builtins::PHONE_NUMBER.to_ref(), mark);
 
     let mut document = registry
         .document(DOC, FIXTURE.source, HiddenContentPolicy::default())

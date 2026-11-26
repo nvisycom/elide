@@ -44,6 +44,7 @@ AES-256-GCM ciphertext. A `Deanonymizer` with the same key decrypts it in
 place:
 
 ```rust
+use elide::entity::{Birth, Include};
 use elide::modality::text::TextLocation;
 use elide::prelude::operators::*;
 use elide::prelude::*;
@@ -75,8 +76,9 @@ Anonymizer::<Text>::new()
 #     .unwrap();
 
 // Later, by whoever holds the key: an entity for each ciphertext in the
-// redacted document, under the label it was encrypted with.
-let encrypted: Entity<Text> = Entity::new(builtins::EMAIL_ADDRESS.to_ref(), TextLocation::inline(ciphertext));
+// redacted document, under the label it was encrypted with, included by them.
+let located = Include::new(builtins::EMAIL_ADDRESS.to_ref(), TextLocation::inline(ciphertext));
+let encrypted: Entity<Text> = Entity::new(Birth::new("key-holder", Confidence::MAX, located));
 
 Deanonymizer::<Text>::new()
     .with_label(builtins::EMAIL_ADDRESS.to_ref(), AesEncrypt::with_key(key))

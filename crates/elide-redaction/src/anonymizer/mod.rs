@@ -63,14 +63,14 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send +
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> elide_core::Result<()> {
 /// let mut document = TextDoc::new("write to alice@example.com");
-/// let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (9, 26))];
+/// let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", 9..26)];
 ///
 /// Anonymizer::<Text>::new()
 ///     .with_catalog(LabelCatalog::with_builtins())
 ///     // Order matters: a weak detection is kept as-is before any
 ///     // label or tag rule can fire.
 ///     .with(Rule::predicate(
-///         |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
+///         |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence()),
 ///         Keep,
 ///     ))
 ///     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()))
@@ -228,8 +228,10 @@ impl<M: Modality> Anonymizer<M> {
         let mut resolved = Vec::new();
         for members in cluster_overlaps(entities, &live) {
             // Pick the safest operator among the members, the one that leaks
-            // least; ties go to the wider span, then the earlier position.
-            // `None` means no member had an operator.
+            // least; ties go to the wider span, then the earlier position,
+            // then the lower entity id, so the pick never depends on the order
+            // the entities are held in. `None` means no member had an
+            // operator.
             let Some((winner, operator, selection)) = members
                 .iter()
                 .copied()
@@ -238,8 +240,13 @@ impl<M: Modality> Anonymizer<M> {
                     a.operator
                         .leak_profile()
                         .cmp(&b.operator.leak_profile())
-                        .then_with(|| entities[*i].location.span_cmp(&entities[*j].location))
-                        .then_with(|| entities[*j].location.position_cmp(&entities[*i].location))
+                        .then_with(|| entities[*i].location().span_cmp(entities[*j].location()))
+                        .then_with(|| {
+                            entities[*j]
+                                .location()
+                                .position_cmp(entities[*i].location())
+                        })
+                        .then_with(|| entities[*j].id().cmp(&entities[*i].id()))
                 })
                 .map(|(i, r)| {
                     let mut selection =
@@ -322,7 +329,7 @@ impl<M: Modality> Anonymizer<M> {
             let location = cluster
                 .members
                 .iter()
-                .map(|&i| entities[i].location.clone())
+                .map(|&i| entities[i].location().clone())
                 .reduce(|acc, loc| {
                     acc.union(&loc)
                         .expect("cluster members coalesce by construction")
@@ -342,18 +349,18 @@ impl<M: Modality> Anonymizer<M> {
             };
 
             // Stage a redaction event for every member, naming the selection
-            // event it applies, so each entity's provenance reflects that this
-            // operator hid it.
+            // event it applies and the span the operator wrote, so each
+            // entity's provenance reflects that this operator hid it there.
             for &i in &cluster.members {
                 let selection = entities[i]
-                    .audit
+                    .audit()
                     .selection_event()
                     .expect("every member's selection is recorded above")
                     .hash();
                 let event = AuditEvent::redaction(
                     cluster.selection.operator.name.clone(),
-                    Redaction::new(selection),
-                    entities[i].confidence,
+                    Redaction::new(selection, location.clone()),
+                    entities[i].confidence(),
                 );
                 pending.push((i, event));
             }
@@ -397,10 +404,10 @@ impl<M: Modality> ResolvedCluster<M> {
     /// event is the decision [`Anonymizer::anonymize`] applies.
     fn record_selection(&self, entities: &mut [Entity<M>]) {
         for &i in &self.members {
-            if entities[i].audit.selection() == Some(&self.selection) {
+            if entities[i].audit().selection() == Some(&self.selection) {
                 continue;
             }
-            let event = AuditEvent::selection(self.selection.clone(), entities[i].confidence);
+            let event = AuditEvent::selection(self.selection.clone(), entities[i].confidence());
             entities[i].record(event);
         }
     }
@@ -435,14 +442,14 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
     let links = |a: &M::Location, b: &M::Location| a.overlaps(b) && a.union(b).is_some();
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for &i in candidates {
-        let location = &entities[i].location;
+        let location = entities[i].location();
         // Every existing group holding an entity this one links to. With more
         // than one, this entity bridges them, so they all merge.
         let hit: Vec<usize> = (0..groups.len())
             .filter(|&g| {
                 groups[g]
                     .iter()
-                    .any(|&other| links(&entities[other].location, location))
+                    .any(|&other| links(entities[other].location(), location))
             })
             .collect();
         match hit.first().copied() {
@@ -467,7 +474,7 @@ mod tests {
 
     use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{
-        Attribution, AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch,
+        Attribution, AuditEvent, AuditKind, Flagged, Manual, ManualIntent, RuleMatch,
     };
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
@@ -477,7 +484,7 @@ mod tests {
     use crate::operators::{Keep, Mask, Remove, Replace};
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
-        Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())
+        Entity::fixture_conf(label, start..end, Confidence::new(0.9).unwrap())
     }
 
     /// `pick` records one [`Selection`] event per entity, naming the winning
@@ -494,7 +501,7 @@ mod tests {
         // Each disjoint entity carries its own pick, and nothing is redacted.
         let names: Vec<_> = entities
             .iter()
-            .map(|e| match e.audit.selection() {
+            .map(|e| match e.audit().selection() {
                 Some(s) => s.operator.name.to_string(),
                 None => panic!("every entity records a Selection pick"),
             })
@@ -522,7 +529,7 @@ mod tests {
             .unwrap();
 
         let selections = entities[0]
-            .audit
+            .audit()
             .events()
             .iter()
             .filter(|e| matches!(&e.kind, AuditKind::Selection(_)))
@@ -547,7 +554,7 @@ mod tests {
             .await
             .unwrap();
 
-        let audit = &entities[0].audit;
+        let audit = entities[0].audit();
         let selections = audit
             .events()
             .iter()
@@ -586,10 +593,10 @@ mod tests {
         // rule matched the auditor; the support agent fell through to the
         // fallback.
         assert_matches!(
-                for_auditor[0].audit.selection(),
+                for_auditor[0].audit().selection(),
                 Some(s) if matches!(s.matched_by, RuleMatch::Predicate), "auditor matches the scope predicate");
         assert_matches!(
-                for_support[0].audit.selection(),
+                for_support[0].audit().selection(),
                 Some(s) if matches!(s.matched_by, RuleMatch::Fallback), "support falls through to the fallback");
     }
 
@@ -609,7 +616,7 @@ mod tests {
         // Both merged entities record the same winning pick: the safest
         // operator, `erase`.
         for entity in &entities {
-            match entity.audit.selection() {
+            match entity.audit().selection() {
                 Some(s) => assert_eq!(s.operator.name, "remove", "safest operator wins"),
                 None => panic!("every cluster member records the pick"),
             }
@@ -649,10 +656,10 @@ mod tests {
             .unwrap();
 
         for entity in &entities {
-            assert!(entity.audit.selection().is_some(), "records the pick");
+            assert!(entity.audit().selection().is_some(), "records the pick");
             assert!(entity.is_redacted(), "records the redaction");
             assert!(
-                entity.audit.verify().is_ok(),
+                entity.audit().verify().is_ok(),
                 "the audit chain still verifies"
             );
         }
@@ -671,8 +678,8 @@ mod tests {
 
         let mut suppressed = entity("NAME", 0, 5);
         suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location.clone()),
-            None,
+            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+            "reviewer",
         );
         let wrote = anonymizer
             .anonymize(&mut target, &mut [suppressed], &scope)
@@ -702,7 +709,7 @@ mod tests {
 
         assert!(!wrote, "keep writes nothing");
         assert_eq!(target.text(), "alice and bob");
-        let selection = entities[0].audit.selection().expect("keep was picked");
+        let selection = entities[0].audit().selection().expect("keep was picked");
         assert_eq!(selection.operator.name, "keep");
         assert!(!entities[0].is_redacted(), "nothing was hidden");
     }
@@ -715,13 +722,13 @@ mod tests {
         let mut target = TextDoc::new("alice and bob");
         let live = entity("NAME", 0, 5);
         let mut suppressed = entity("NAME", 10, 13);
-        let suppressed_id = suppressed.id;
-        let live_id = live.id;
+        let suppressed_id = suppressed.id();
+        let live_id = live.id();
         // The reviewer marks the second detection as a false positive.
         suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location.clone())
+            Manual::new(ManualIntent::Suppress, suppressed.location().clone())
                 .with_attribution(Attribution::freeform("false positive")),
-            None,
+            "reviewer",
         );
         let mut entities = vec![live, suppressed];
 
@@ -732,14 +739,14 @@ mod tests {
             .await
             .unwrap();
 
-        let of = |id| entities.iter().find(|e| e.id == id).unwrap();
+        let of = |id| entities.iter().find(|e| e.id() == id).unwrap();
         assert!(
-            of(live_id).audit.selection().is_some(),
+            of(live_id).audit().selection().is_some(),
             "the live entity is picked"
         );
         assert!(of(live_id).is_redacted(), "the live entity is redacted");
         assert!(
-            of(suppressed_id).audit.selection().is_none(),
+            of(suppressed_id).audit().selection().is_none(),
             "no pick for the suppressed entity",
         );
         assert!(
@@ -747,7 +754,7 @@ mod tests {
             "the suppressed entity is left alone",
         );
         // The suppression itself is on the trail, with its attribution.
-        let has_manual = of(suppressed_id).audit.events().iter().any(|e| {
+        let has_manual = of(suppressed_id).audit().events().iter().any(|e| {
             matches!(&e.kind, AuditKind::Manual(m)
                 if m.attribution == Some(Attribution::freeform("false positive").into()))
         });
@@ -793,11 +800,11 @@ mod tests {
         let mut target = TextDoc::new("alice@example.com");
         let live = entity("EMAIL", 0, 17);
         let mut suppressed = entity("NAME", 0, 5); // overlaps the live span
-        let live_id = live.id;
-        let suppressed_id = suppressed.id;
+        let live_id = live.id();
+        let suppressed_id = suppressed.id();
         suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location.clone()),
-            None,
+            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+            "reviewer",
         );
         let mut entities = vec![live, suppressed];
 
@@ -809,7 +816,7 @@ mod tests {
             .await
             .unwrap();
 
-        let of = |id| entities.iter().find(|e| e.id == id).unwrap();
+        let of = |id| entities.iter().find(|e| e.id() == id).unwrap();
         assert!(of(live_id).is_redacted(), "the live entity is redacted");
         assert!(
             !of(suppressed_id).is_redacted(),
@@ -836,10 +843,10 @@ mod tests {
         let live_a = entity("A", 0, 5);
         let live_b = entity("B", 10, 15);
         let mut bridge = entity("BRIDGE", 4, 11);
-        let (a_id, b_id, bridge_id) = (live_a.id, live_b.id, bridge.id);
+        let (a_id, b_id, bridge_id) = (live_a.id(), live_b.id(), bridge.id());
         bridge.record_manual(
-            Manual::new(ManualIntent::Suppress, bridge.location.clone()),
-            None,
+            Manual::new(ManualIntent::Suppress, bridge.location().clone()),
+            "reviewer",
         );
         let mut entities = vec![live_a, bridge, live_b];
 
@@ -849,7 +856,7 @@ mod tests {
             .await
             .unwrap();
 
-        let of = |id| entities.iter().find(|e| e.id == id).unwrap();
+        let of = |id| entities.iter().find(|e| e.id() == id).unwrap();
         // Two separate redactions ([0,5) and [10,15)); the bridge is untouched.
         assert!(of(a_id).is_redacted(), "live A redacts on its own");
         assert!(of(b_id).is_redacted(), "live B redacts on its own");
@@ -868,11 +875,14 @@ mod tests {
     async fn a_finding_inside_a_kept_flagged_entity_takes_all_of_it() {
         let mut target = TextDoc::new("ask bob by Friday");
         let mut comment = entity("COMMENT", 0, 17);
-        comment.audit.record(AuditEvent::flagged(
+        comment.record(AuditEvent::new(
             "test",
-            comment.confidence,
-            comment.location.clone(),
-            HiddenContentKind::Collaboration,
+            comment.confidence(),
+            Flagged::new(
+                "COMMENT",
+                comment.location().clone(),
+                HiddenContentKind::Collaboration,
+            ),
         ));
         let mut entities = vec![comment, entity("NAME", 4, 7)];
         let anonymizer = Anonymizer::new()

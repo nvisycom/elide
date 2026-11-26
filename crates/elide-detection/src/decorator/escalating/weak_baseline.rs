@@ -44,6 +44,6 @@ impl<M: Modality> Decider<M> for WeakBaseline {
         // found nothing in still gets the escalated look.
         !baseline
             .iter()
-            .any(|entity| self.threshold.passes(entity.confidence))
+            .any(|entity| self.threshold.passes(entity.confidence()))
     }
 }

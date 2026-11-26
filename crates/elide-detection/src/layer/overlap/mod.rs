@@ -157,23 +157,28 @@ where
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
-    use elide_core::entity::{Entity, LabelRef};
+    use std::ops::Range;
+
+    use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
 
     use super::group::CrossLabel;
     use super::*;
 
-    fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
-        let loc = TextLocation::inline(start..end);
+    fn entity(label: &str, span: Range<usize>, conf: f32) -> Entity<Text> {
+        let loc = TextLocation::inline(span);
         let confidence = Confidence::new(conf).unwrap();
-        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternRule::default());
-        Entity::new(LabelRef::new(label), loc).with_event(event)
+        Entity::new(Birth::new(
+            "t",
+            confidence,
+            Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+        ))
     }
 
     fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {
-        entity.audit.events().iter().any(|e| f(&e.kind))
+        entity.audit().events().iter().any(|e| f(&e.kind))
     }
 
     fn structural() -> ReconcileLayer<CrossLabel, Structural> {
@@ -184,8 +189,8 @@ mod tests {
     #[test]
     fn structural_keeps_nested() {
         let entities = vec![
-            entity("ADDRESS", 0, 30, 0.8),
-            entity("POSTAL_CODE", 20, 28, 0.9),
+            entity("ADDRESS", 0..30, 0.8),
+            entity("POSTAL_CODE", 20..28, 0.9),
         ];
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 2);
@@ -195,12 +200,12 @@ mod tests {
     #[test]
     fn structural_drops_subsumed_weak() {
         let entities = vec![
-            entity("iban", 0, 27, 0.85),
-            entity("drivers_license", 0, 4, 0.4),
+            entity("iban", 0..27, 0.85),
+            entity("drivers_license", 0..4, 0.4),
         ];
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 1);
-        assert_eq!(out.kept[0].label, LabelRef::new("iban"));
+        assert_eq!(*out.kept[0].label(), LabelRef::new("iban"));
         assert_eq!(out.dropped.len(), 1);
     }
 
@@ -210,12 +215,12 @@ mod tests {
     #[test]
     fn structural_drops_contained_at_margin_boundary() {
         let entities = vec![
-            entity("payment_card", 0, 17, 0.65),
-            entity("postal_code", 5, 11, 0.40), // 0.40 + 0.25 == 0.65
+            entity("payment_card", 0..17, 0.65),
+            entity("postal_code", 5..11, 0.40), // 0.40 + 0.25 == 0.65
         ];
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 1);
-        assert_eq!(out.kept[0].label, LabelRef::new("payment_card"));
+        assert_eq!(*out.kept[0].label(), LabelRef::new("payment_card"));
         assert_eq!(out.dropped.len(), 1);
     }
 
@@ -224,13 +229,13 @@ mod tests {
     #[test]
     fn structural_resolves_true_conflict() {
         let entities = vec![
-            entity("PERSON_NAME", 0, 12, 0.9),
-            entity("ORGANIZATION", 2, 14, 0.7),
+            entity("PERSON_NAME", 0..12, 0.9),
+            entity("ORGANIZATION", 2..14, 0.7),
         ];
         let out = structural().apply(entities);
         assert_eq!(out.kept.len(), 1);
         assert_eq!(out.dropped.len(), 1);
-        assert_eq!(out.kept[0].label, LabelRef::new("PERSON_NAME"));
+        assert_eq!(*out.kept[0].label(), LabelRef::new("PERSON_NAME"));
         assert!(has_kind(&out.kept[0], |k| matches!(
             k,
             AuditKind::Conflict(c) if c.competing_label == LabelRef::new("ORGANIZATION")
@@ -242,8 +247,8 @@ mod tests {
     #[test]
     fn structural_contests_when_reviewing() {
         let entities = vec![
-            entity("PERSON_NAME", 0, 12, 0.9),
-            entity("ORGANIZATION", 2, 14, 0.7),
+            entity("PERSON_NAME", 0..12, 0.9),
+            entity("ORGANIZATION", 2..14, 0.7),
         ];
         let layer = ReconcileLayer::new(Structural::standard().reviewing());
         let out = layer.apply(entities);
@@ -260,12 +265,12 @@ mod tests {
     #[test]
     fn structural_resolves_identical_spans_in_either_order() {
         for (weak, strong) in [(0.5, 0.9), (0.8, 0.9)] {
-            let person = || entity("PERSON_NAME", 0, 12, weak);
-            let org = || entity("ORGANIZATION", 0, 12, strong);
+            let person = || entity("PERSON_NAME", 0..12, weak);
+            let org = || entity("ORGANIZATION", 0..12, strong);
             for entities in [vec![person(), org()], vec![org(), person()]] {
                 let out = structural().apply(entities);
                 assert_eq!(out.kept.len(), 1);
-                assert_eq!(out.kept[0].label, LabelRef::new("ORGANIZATION"));
+                assert_eq!(*out.kept[0].label(), LabelRef::new("ORGANIZATION"));
                 assert!(has_kind(&out.kept[0], |k| matches!(
                     k,
                     AuditKind::Conflict(c) if c.competing_label == LabelRef::new("PERSON_NAME")
@@ -279,8 +284,8 @@ mod tests {
     #[test]
     fn structural_contests_identical_spans_when_reviewing() {
         let entities = vec![
-            entity("PERSON_NAME", 0, 12, 0.8),
-            entity("ORGANIZATION", 0, 12, 0.7),
+            entity("PERSON_NAME", 0..12, 0.8),
+            entity("ORGANIZATION", 0..12, 0.7),
         ];
         let layer = ReconcileLayer::new(Structural::standard().reviewing());
         let out = layer.apply(entities);
@@ -294,8 +299,8 @@ mod tests {
     #[test]
     fn permissive_keeps_everything() {
         let entities = vec![
-            entity("PERSON_NAME", 0, 12, 0.9),
-            entity("ORGANIZATION", 2, 14, 0.7),
+            entity("PERSON_NAME", 0..12, 0.9),
+            entity("ORGANIZATION", 2..14, 0.7),
         ];
         let out = ReconcileLayer::permissive().apply(entities);
         assert_eq!(out.kept.len(), 2);

@@ -16,22 +16,46 @@ use crate::entity::LabelRef;
 use crate::modality::{Hint, Modality, ModalityLocation};
 use crate::primitive::Confidence;
 
-/// Several detections of the same finding were fused into this one entity.
+/// Several detections of the same finding were fused into this one entity,
+/// located at the span that covers them all.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Fusion {
+#[cfg_attr(
+    feature = "schema",
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
+        rename = "{M}Fusion"
+    )
+)]
+pub struct Fusion<M: Modality> {
     /// Name of the fusion strategy that combined them.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub strategy: HipStr<'static>,
+    /// Where the fused entity sits: the union of the detections' locations.
+    pub location: M::Location,
 }
 
-impl Fusion {
+impl<M: Modality> Fusion<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 2;
 
+    /// The `strategy` fused detections into one at `location`, the union of
+    /// theirs.
+    pub fn new(strategy: impl Into<HipStr<'static>>, location: M::Location) -> Self {
+        Self {
+            strategy: strategy.into(),
+            location,
+        }
+    }
+
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         out.bytes(self.strategy.as_bytes());
+        out.bytes(&self.location.hash());
     }
 }
 

@@ -270,7 +270,7 @@ impl<M: TextRedactable> TryOperator<M> for Clamp {
         entity: &Entity<M>,
         data: &M::Data,
     ) -> Result<Attempt<M::Replacement>> {
-        Ok(match self.render(data.as_ref(), entity.language.as_ref()) {
+        Ok(match self.render(data.as_ref(), entity.language()) {
             Some(text) => Attempt::Applied(M::Replacement::from(TextReplacement::replaced(text))),
             None => Attempt::Declined,
         })
@@ -383,19 +383,21 @@ mod tests {
     async fn bare_operator_erases_a_declined_value() {
         // The Operator impl (not just `render`): a declined value takes the
         // safe default of erasure when the operator is used on its own.
-        use elide_core::entity::LabelRef;
-        use elide_core::entity::audit::{AuditEvent, PatternRule};
+        use elide_core::entity::audit::{Pattern, PatternRule};
+        use elide_core::entity::{Birth, LabelRef};
         use elide_core::modality::text::TextLocation;
         use elide_core::primitive::Confidence;
 
         let location = TextLocation::inline(0..3);
-        let event = AuditEvent::pattern(
+        let e: Entity<Text> = Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            location.clone(),
-            PatternRule::default(),
-        );
-        let e: Entity<Text> = Entity::new(LabelRef::new("age"), location).with_event(event);
+            Pattern::new(
+                LabelRef::new("age"),
+                location.clone(),
+                PatternRule::default(),
+            ),
+        ));
         let out = Operator::<Text>::anonymize(
             &Clamp::new().with_ceiling(90.0, "x"),
             &e,

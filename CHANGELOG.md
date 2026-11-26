@@ -78,12 +78,25 @@ and this project adheres to
 
 #### Review
 
-- A `Report` is read and edited through typed part views, keyed by `PartId`
-  (a document's own content by `Document::id`): `part` returns a `Part`
-  (`entities`, `entity`, `suppressed`, `unsuppressed`), `part_mut` a `PartMut`
-  whose edits (`include`, `relabel`, `relocate`, `suppress`,
-  `suppress_within`) are recorded as `Manual` audit events attributed to its
-  `by` and `because`
+- A `Report` is read through typed part views, keyed by `PartId` (a
+  document's own content by `Document::id`): `part` returns a `Part`
+  (`entities`, `entity`, `suppressed`, `unsuppressed`)
+- A reviewer's decisions are a `Review`, made against one version of a
+  report and applied by `Orchestrator::review`: `include`, `relabel`,
+  `relocate`, `suppress`, and `suppress_within`, each with its `because`.
+  `review` takes the actor, the reviewer as the deployment authenticated
+  them, and records each edit as a `Manual` audit event naming them and what
+  it set. The review applies whole or not at all, only to the report version
+  it was made against, so a review that changes the report cannot be applied
+  twice or replace a newer one. A region suppression spares what the region
+  covers, by span, by raw bytes, or by rendered boxes, so a
+  reviewer's mark can clear what it encloses
+- A `ReviewPolicy` decides which edits a review may make, shown each as a
+  `ProposedEdit`: the decision it records, the entities whose redaction it
+  narrows, and its actor and reason. The standard policies each check one
+  thing, `Protect` (labels no edit may suppress, relabel, or relocate) and
+  `RequireReason` (to narrow), and combine with `and`; a closure is a policy
+  too. A refused review fails with `ErrorKind::Refused`
 - `Orchestrator::read` reads the data at locations in any part of a document,
   embedded ones included, such as what each entity covers before
   `anonymize_with` changes it
@@ -94,10 +107,36 @@ and this project adheres to
   a part (DOCX, PPTX, HTML, XML, JSON, TXT) or a region of a rendered
   PDF page. Applying the report resolves each mark to the text it covers
 - Applying a report returns it applied, with each entity's redaction record;
-  a `Report` is `#[must_use]`, so dropping that record is a warning. A report
-  reads back only with audit trails that verify, and `Report::digest` covers
-  every entity and its trail, for a deployment to anchor where the report's
-  carrier cannot write
+  a `Report` is `#[must_use]`, so dropping that record is a warning
+- Audit events record what each decision set: a recognition its label and
+  location, a fusion the merged location, a redaction the location it wrote
+- An `Entity` is its audit trail: everything it says (label, location,
+  confidence, recognized range, language, coreference, suppression, the
+  operator picked and applied) is read along the trail's `line`, from its
+  birth to its tip, through its own history and not the ones a fusion
+  absorbed. It is born from a `Birth`: who found it, how sure they are, and
+  what they found, a recognition (`Pattern`, `Model`, `Flagged`) or a
+  reviewer's `Include` (`Entity::new(Birth::new(source, confidence, kind))`),
+  read
+  through accessors, and changes only by recording an event (`record`,
+  `record_manual`, `fuse`, `annotate`). A recognition records where it
+  matched in the text it read (`recognized_range` on `Pattern` and `Model`).
+  What becomes known about an entity after its birth is an `Annotation`
+  event: a chunk's finding placed in its document (`lift`), a window's range
+  shifted into the full text, its language, or its coreference cluster.
+  `Entity::from_trail` rebuilds an entity from its trail, and one read back
+  whose fields disagree with its trail is refused. `Entity::digest` is its id
+  and trail tip
+- A report, review, or artifact set reads back only against the `digest` it
+  had when it was written, kept where its carrier cannot change it.
+  A digest names the kind of value it covers; a report's covers its id and
+  every entity's fields and audit trail, by part and entity id; a review's
+  the report version it was made against and every edit; an artifact set's
+  every artifact as serialized. `Restorer::restore` checks it, and
+  `restore_unchecked` skips the check by name
+- Every `Report` has an id, a UUIDv7 minted when it is created and kept across
+  reviews and round trips, so two reports with the same findings never share
+  a digest
 - Applying a report fails closed: a part with entities that no registered
   pipeline can apply, or that names no part of the documents, a mark the
   document cannot place, and a location a stream cannot read or write are

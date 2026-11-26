@@ -10,8 +10,8 @@
 #![cfg(feature = "image")]
 
 use bytes::Bytes;
-use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, LabelCatalog, builtins};
+use elide_core::entity::audit::{Model, ModelId};
+use elide_core::entity::{Birth, Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
 use elide_core::primitive::Confidence;
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
@@ -167,7 +167,7 @@ async fn a_kept_field_goes_with_its_group() {
         .with_anonymizer::<Metadata>(
             Anonymizer::new()
                 .with(Rule::<Metadata>::predicate(
-                    |cx| cx.entity.location.key.as_str() != "Make",
+                    |cx| cx.entity.location().key.as_str() != "Make",
                     Keep,
                 ))
                 .with(Rule::fallback(Remove)),
@@ -246,13 +246,15 @@ impl Recognizer<Image> for WholeFrame {
             Dimensions::new(f64::from(dims.width), f64::from(dims.height)),
         );
         let location = ImageLocation::new(bbox);
-        let event = AuditEvent::model(
+        let entity = Entity::new(Birth::new(
             "whole-frame",
             Confidence::MAX,
-            location.clone(),
-            ModelId::new("model"),
-        );
-        let entity = Entity::new(builtins::PERSON_NAME.to_ref(), location).with_event(event);
+            Model::new(
+                builtins::PERSON_NAME.to_ref(),
+                location,
+                ModelId::new("model"),
+            ),
+        ));
         Ok(vec![entity])
     }
 }

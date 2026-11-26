@@ -8,48 +8,71 @@ use elide::entity::LabelCatalog;
 use elide::modality::text::{Text, TextLocation};
 use elide::recognition::Scope;
 use elide::redaction::{Disposition, HiddenContentPolicy};
-use elide::{Document, Orchestrator};
+use elide::{Document, Orchestrator, Report, Review};
 
-/// `raw` decoded under `policy`, run under `scope`, with each part of the
-/// report's document the `region` contains suppressed, re-encoded.
-async fn redact_sparing(
-    raw: &str,
-    policy: HiddenContentPolicy,
-    scope: Scope,
-    region: Option<Range<usize>>,
-) -> String {
-    let registry = FormatRegistry::with_builtin();
-    let orchestrator = Orchestrator::new()
-        .with_scope(scope)
-        .with_registry(registry.clone());
-    let bytes = bytes::Bytes::from(raw.as_bytes().to_vec());
-    let handle = registry
-        .decode(bytes, "html", policy)
-        .await
-        .expect("decode html");
-    let mut documents = [Document::new("page.html", handle)];
-    let mut report = orchestrator
-        .analyze(&mut documents)
-        .await
-        .expect("analyze")
-        .report;
-    if let Some(region) = region {
-        report
-            .part_mut::<Text>(&documents[0].id())
-            .expect("the page is text")
-            .suppress_within(&TextLocation::inline(region));
+/// A page analyzed, to be reviewed and redacted.
+struct Run {
+    orchestrator: Orchestrator,
+    documents: [Document; 1],
+    report: Report,
+}
+
+impl Run {
+    /// `raw` decoded under `policy` and analyzed under `scope`.
+    async fn analyze(raw: &str, policy: HiddenContentPolicy, scope: Scope) -> Self {
+        let registry = FormatRegistry::with_builtin();
+        let orchestrator = Orchestrator::new()
+            .with_scope(scope)
+            .with_registry(registry.clone());
+        let bytes = bytes::Bytes::from(raw.as_bytes().to_vec());
+        let handle = registry
+            .decode(bytes, "html", policy)
+            .await
+            .expect("decode html");
+        let mut documents = [Document::new("page.html", handle)];
+        let report = orchestrator
+            .analyze(&mut documents)
+            .await
+            .expect("analyze")
+            .report;
+        Self {
+            orchestrator,
+            documents,
+            report,
+        }
     }
-    let _applied = orchestrator
-        .anonymize_with(&mut documents, report)
-        .await
-        .expect("anonymize");
-    let out = documents[0].document.encode().expect("encode").to_bytes();
-    String::from_utf8(out.to_vec()).unwrap()
+
+    /// Suppress each entity of the page the `region` contains.
+    fn spare(&mut self, region: Range<usize>) {
+        let mut review = Review::new(&self.report);
+        review
+            .part::<Text>(&self.documents[0].id())
+            .expect("the page is text")
+            .suppress_within(TextLocation::inline(region));
+        self.orchestrator
+            .review(&mut self.report, &review, "reviewer")
+            .expect("a region suppression is accepted");
+    }
+
+    /// The page redacted and re-encoded.
+    async fn redact(mut self) -> String {
+        let _applied = self
+            .orchestrator
+            .anonymize_with(&mut self.documents, self.report)
+            .await
+            .expect("anonymize");
+        let out = self.documents[0]
+            .document
+            .encode()
+            .expect("encode")
+            .to_bytes();
+        String::from_utf8(out.to_vec()).unwrap()
+    }
 }
 
 /// `raw` decoded under `policy`, run under `scope`, re-encoded.
 async fn redact(raw: &str, policy: HiddenContentPolicy, scope: Scope) -> String {
-    redact_sparing(raw, policy, scope, None).await
+    Run::analyze(raw, policy, scope).await.redact().await
 }
 
 /// A scanned `<meta>` field is text recognizers read, so a declared catalog does
@@ -112,7 +135,9 @@ async fn every_repeated_content_of_a_field_is_erased() {
 async fn comment_sparing(range: Range<usize>) -> String {
     let raw = "<!-- Acme call Jane --><p>x</p>";
     let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
-    redact_sparing(raw, policy, Scope::new(), Some(range)).await
+    let mut run = Run::analyze(raw, policy, Scope::new()).await;
+    run.spare(range);
+    run.redact().await
 }
 
 #[tokio::test]

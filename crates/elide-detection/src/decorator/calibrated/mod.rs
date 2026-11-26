@@ -53,9 +53,9 @@ impl<R> Calibrated<R> {
     /// Scale each of `entities` by its label's multiplier.
     fn calibrate<M: Modality>(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
         for entity in &mut entities {
-            let factor = self.calibration.factor(&entity.label);
+            let factor = self.calibration.factor(entity.label());
             if factor != Multiplier::IDENTITY {
-                let scaled = entity.confidence.saturating_mul(factor.get());
+                let scaled = entity.confidence().saturating_mul(factor.get());
                 entity.record(AuditEvent::calibration(scaled, factor.get()));
             }
         }
@@ -85,8 +85,8 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for Calibrated<R> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditKind, PatternRule};
-    use elide_core::entity::builtins;
+    use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
+    use elide_core::entity::{Birth, builtins};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::recognition::Scope;
@@ -112,13 +112,11 @@ mod tests {
             .into_iter()
             .map(|label| {
                 let at = TextLocation::inline(0..4);
-                let event = AuditEvent::pattern(
+                Entity::new(Birth::new(
                     "two-finds",
                     Confidence::MAX,
-                    at.clone(),
-                    PatternRule::default(),
-                );
-                Entity::new(label, at).with_event(event)
+                    Pattern::new(label, at, PatternRule::default()),
+                ))
             })
             .collect())
         }
@@ -144,14 +142,14 @@ mod tests {
             let [person, organization] = &found[..] else {
                 panic!("two findings");
             };
-            assert_eq!(person.confidence, Confidence::MAX);
-            assert_eq!(person.audit.events().len(), 1);
-            assert_eq!(organization.confidence, Confidence::new(0.5).unwrap());
+            assert_eq!(person.confidence(), Confidence::MAX);
+            assert_eq!(person.audit().events().len(), 1);
+            assert_eq!(organization.confidence(), Confidence::new(0.5).unwrap());
             assert!(matches!(
-                organization.audit.events().last().unwrap().kind,
+                organization.audit().events().last().unwrap().kind,
                 AuditKind::Calibration(_)
             ));
-            assert!(organization.audit.verify().is_ok());
+            assert!(organization.audit().verify().is_ok());
         }
     }
 

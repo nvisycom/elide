@@ -27,9 +27,9 @@ async fn scan(recognizer: &PatternRecognizer, text: &str, scope: Scope) -> Vec<(
     entities
         .iter()
         .map(|e| {
-            let range = e.location.range().expect("text range");
+            let range = e.location().range().expect("text range");
             (
-                e.label.as_str().to_owned(),
+                e.label().as_str().to_owned(),
                 text[range.start..range.end].to_owned(),
             )
         })

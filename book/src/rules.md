@@ -11,7 +11,7 @@ use elide::prelude::*;
 let anonymizer = Anonymizer::<Text>::new()
     // Leave weak findings untouched, but recorded.
     .with(Rule::predicate(
-        |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
+        |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence()),
         Keep,
     ))
     .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))

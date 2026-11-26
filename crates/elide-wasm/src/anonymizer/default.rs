@@ -35,7 +35,7 @@ where
 {
     anonymizer
         .with(Rule::predicate(
-            |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
+            |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence()),
             Keep,
         ))
         .with(Rule::label(

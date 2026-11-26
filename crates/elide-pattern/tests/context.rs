@@ -48,17 +48,17 @@ async fn keywords_boost_matches_near_them_only() {
     let near = entities
         .iter()
         .find(|e| {
-            e.location
+            e.location()
                 .range()
                 .is_some_and(|r| &text[r.start..r.end] == "123-45-6789")
         })
         .expect("near match present");
     assert!(
-        near.confidence.get() > 0.6,
+        near.confidence().get() > 0.6,
         "near-keyword match should be boosted",
     );
     assert!(
-        near.audit
+        near.audit()
             .events()
             .iter()
             .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
@@ -69,17 +69,17 @@ async fn keywords_boost_matches_near_them_only() {
     let far = entities
         .iter()
         .find(|e| {
-            e.location
+            e.location()
                 .range()
                 .is_some_and(|r| &text[r.start..r.end] == "987-65-4329")
         })
         .expect("far match present");
     assert!(
-        (far.confidence.get() - 0.6).abs() < f32::EPSILON,
+        (far.confidence().get() - 0.6).abs() < f32::EPSILON,
         "far-from-keyword match should not be boosted",
     );
     assert!(
-        !far.audit
+        !far.audit()
             .events()
             .iter()
             .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
@@ -127,9 +127,9 @@ async fn context_boost_override_applies_the_custom_lift() {
     assert_eq!(entities.len(), 1, "one SSN match expected");
     // 0.6 base + 0.1 override = 0.7 (not 0.6 + 0.35 = 0.95).
     assert!(
-        (entities[0].confidence.get() - 0.7).abs() < f32::EPSILON,
+        (entities[0].confidence().get() - 0.7).abs() < f32::EPSILON,
         "custom boost 0.1 should lift 0.6 to 0.7, got {}",
-        entities[0].confidence.get(),
+        entities[0].confidence().get(),
     );
 }
 
@@ -173,12 +173,12 @@ async fn keywords_lift_only_their_own_rules_matches() {
         entities
             .iter()
             .find(|e| {
-                e.location
+                e.location()
                     .range()
                     .is_some_and(|r| &text[r.clone()] == found)
             })
             .expect("match present")
-            .confidence
+            .confidence()
             .get()
     };
     assert!(confidence("123-45-6789") > 0.4);
@@ -228,7 +228,7 @@ async fn catalog_filter_keeps_context_dictionaries() {
         .expect("recognize");
     assert_eq!(entities.len(), 1, "the dropped dictionary emits nothing");
     assert!(
-        entities[0].confidence.get() > 0.6,
+        entities[0].confidence().get() > 0.6,
         "the dictionary's term still boosts the pattern",
     );
 }

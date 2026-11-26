@@ -54,11 +54,11 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
 
     for entity in body.iter() {
         let picked = entity
-            .audit
+            .audit()
             .selection()
             .expect("every redacted entity records its pick");
         let applied = entity
-            .audit
+            .audit()
             .applied_selection()
             .expect("the pick is followed by a redaction");
         let picked = picked.operator.name.as_str();
@@ -69,10 +69,10 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
         // The pick is recorded before it is applied, and the operator actually
         // run is the one that was picked.
         let selection_at = entity
-            .audit
+            .audit()
             .position(|k| matches!(k, AuditKind::Selection(_)));
         let redaction_at = entity
-            .audit
+            .audit()
             .position(|k| matches!(k, AuditKind::Redaction(_)));
         assert!(
             selection_at < redaction_at,
@@ -82,12 +82,12 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
             picked, applied.operator.name,
             "the redaction ran the picked operator"
         );
-        assert!(entity.audit.verify().is_ok(), "the trail still verifies");
+        assert!(entity.audit().verify().is_ok(), "the trail still verifies");
     }
     // The fixture's email addresses route to the replace rule.
     assert!(
         body.iter()
-            .any(|e| e.audit.selection().map(|s| s.operator.name.as_str()) == Some("replace")),
+            .any(|e| e.audit().selection().map(|s| s.operator.name.as_str()) == Some("replace")),
         "the email rule fires on the fixture's addresses",
     );
     Ok(())
@@ -112,9 +112,12 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
         .entities()
         .iter()
         .map(|entity| {
-            let selection = entity.audit.selection().expect("every entity is planned");
-            assert!(entity.audit.redaction().is_none(), "nothing is applied yet");
-            (entity.id, selection.operator.name.to_string())
+            let selection = entity.audit().selection().expect("every entity is planned");
+            assert!(
+                entity.audit().redaction().is_none(),
+                "nothing is applied yet"
+            );
+            (entity.id(), selection.operator.name.to_string())
         })
         .collect();
     assert!(!planned.is_empty(), "the body detected entities to plan");
@@ -123,7 +126,12 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
     let events = |report: &Report| -> usize {
         report
             .part::<Text>(&doc.id())
-            .map(|part| part.entities().iter().map(|e| e.audit.events().len()).sum())
+            .map(|part| {
+                part.entities()
+                    .iter()
+                    .map(|e| e.audit().events().len())
+                    .sum()
+            })
             .unwrap_or_default()
     };
     let before = events(&report);
@@ -135,13 +143,13 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
     for (id, operator) in planned {
         let entity = body.entity(id).expect("the planned entity is still there");
         let selections = entity
-            .audit
+            .audit()
             .events()
             .iter()
             .filter(|event| matches!(event.kind, AuditKind::Selection(_)))
             .count();
         assert_eq!(selections, 1, "applying does not repeat the pick");
-        let applied = entity.audit.applied_selection().expect("applied");
+        let applied = entity.audit().applied_selection().expect("applied");
         assert_eq!(
             applied.operator.name.as_str(),
             operator,

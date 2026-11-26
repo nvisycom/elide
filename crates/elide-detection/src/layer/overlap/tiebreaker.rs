@@ -25,7 +25,7 @@ pub struct HighestConfidence;
 
 impl<M: Modality> Tiebreaker<M> for HighestConfidence {
     fn keeps_first(&self, a: &Entity<M>, b: &Entity<M>) -> bool {
-        a.confidence >= b.confidence
+        a.confidence() >= b.confidence()
     }
 }
 
@@ -37,6 +37,6 @@ pub struct LongestSpan;
 
 impl<M: Modality> Tiebreaker<M> for LongestSpan {
     fn keeps_first(&self, a: &Entity<M>, b: &Entity<M>) -> bool {
-        a.location.span_cmp(&b.location) != Ordering::Less
+        a.location().span_cmp(b.location()) != Ordering::Less
     }
 }

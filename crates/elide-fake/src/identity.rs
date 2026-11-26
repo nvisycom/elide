@@ -30,9 +30,9 @@ where
     M: Modality,
 {
     fn from(entity: &'a Entity<M>) -> Self {
-        match entity.coref.as_ref() {
+        match entity.coref() {
             Some(coref) => Identity::Coref(coref.as_str()),
-            None => Identity::Uuid(*entity.id.as_bytes()),
+            None => Identity::Uuid(*entity.id().as_bytes()),
         }
     }
 }

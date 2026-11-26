@@ -19,8 +19,8 @@ use fixtures::TextDoc;
 async fn disjoint_entities_redact_separately() {
     let mut doc = TextDoc::new("alice and bob");
     let mut entities = vec![
-        Entity::fixture("NAME", (0, 5)),
-        Entity::fixture("NAME", (10, 13)),
+        Entity::fixture("NAME", 0..5),
+        Entity::fixture("NAME", 10..13),
     ];
     Anonymizer::new()
         .with(Rule::fallback(Replace::default()))
@@ -38,10 +38,7 @@ async fn disjoint_entities_redact_separately() {
 async fn overlap_merges_under_safest_operator() {
     let mut doc = TextDoc::new("0123456789abc");
     // NAME [0,5) → Replace (Partial); SSN [3,12) → Remove (Irrecoverable).
-    let mut entities = vec![
-        Entity::fixture("NAME", (0, 5)),
-        Entity::fixture("SSN", (3, 12)),
-    ];
+    let mut entities = vec![Entity::fixture("NAME", 0..5), Entity::fixture("SSN", 3..12)];
     Anonymizer::new()
         .with(Rule::label(LabelRef::new("NAME"), Replace::default()))
         .with(Rule::label(LabelRef::new("SSN"), Remove))
@@ -56,7 +53,7 @@ async fn overlap_merges_under_safest_operator() {
     // Both entities record a redaction by the winning operator.
     for entity in &entities {
         let redacted = entity
-            .audit
+            .audit()
             .applied_selection()
             .is_some_and(|s| s.operator.name == "remove");
         assert!(redacted, "every member records the erase redaction");
@@ -69,9 +66,9 @@ async fn overlap_merges_under_safest_operator() {
 async fn transitive_overlap_chain_merges() {
     let mut doc = TextDoc::new("0123456789abcdef");
     let mut entities = vec![
-        Entity::fixture("A", (0, 5)),
-        Entity::fixture("B", (4, 9)),
-        Entity::fixture("C", (8, 13)),
+        Entity::fixture("A", 0..5),
+        Entity::fixture("B", 4..9),
+        Entity::fixture("C", 8..13),
     ];
     Anonymizer::new()
         .with(Rule::fallback(Remove))
@@ -91,10 +88,10 @@ async fn non_coalescible_overlap_stays_separate() {
     // Same range, different page: overlaps() is true (page is ignored) but
     // union() is None, so clustering must keep them apart.
     let full = elide_core::primitive::UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
-    let mut a = Entity::fixture("A", (0, 5));
-    a.location = a.location.clone().with_rects(1, [full]);
-    let mut b = Entity::fixture("B", (0, 5));
-    b.location = b.location.clone().with_rects(2, [full]);
+    let mut a = Entity::fixture("A", 0..5);
+    a.lift(a.location().clone().with_rects(1, [full]));
+    let mut b = Entity::fixture("B", 0..5);
+    b.lift(b.location().clone().with_rects(2, [full]));
     let mut entities = vec![a, b];
 
     Anonymizer::new()
@@ -130,8 +127,8 @@ async fn boxed_and_arced_trait_objects_are_operators() {
     let arced: Arc<dyn Operator<Text>> = Arc::new(Remove);
 
     let mut entities = vec![
-        Entity::fixture("NAME", (0, 5)),
-        Entity::fixture("SECRET", (6, 9)),
+        Entity::fixture("NAME", 0..5),
+        Entity::fixture("SECRET", 6..9),
     ];
     Anonymizer::new()
         .with(Rule::label(LabelRef::new("NAME"), boxed))

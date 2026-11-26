@@ -69,9 +69,9 @@ impl Replace {
     /// Expand the template for an entity in one pass, so text a placeholder
     /// expands to is never expanded again.
     fn render<M: Modality>(&self, entity: &Entity<M>, value: &str) -> TextReplacement {
-        let coref = entity.coref.as_ref().map_or("", |coref| coref.as_str());
+        let coref = entity.coref().map_or("", |coref| coref.as_str());
         let placeholders = [
-            (LABEL, entity.label.as_str()),
+            (LABEL, entity.label().as_str()),
             (VALUE, value),
             (COREF, coref),
         ];
@@ -132,7 +132,7 @@ mod tests {
     use super::*;
 
     fn render(template: &str, value: &str) -> TextReplacement {
-        let entity = Entity::<Text>::fixture("EMAIL", (0, value.len()))
+        let entity = Entity::<Text>::fixture("EMAIL", 0..value.len())
             .with_coref(EntityCoRef::new("c1".to_owned()));
         Replace::new(template).render(&entity, value)
     }

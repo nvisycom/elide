@@ -107,8 +107,8 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for Resilient<R> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_core::recognition::{Scope, Subject};
@@ -181,11 +181,11 @@ mod tests {
             }
             let location = TextLocation::inline(0..1);
             let confidence = Confidence::new(0.9).unwrap();
-            let event =
-                AuditEvent::pattern("t", confidence, location.clone(), PatternRule::default());
-            Ok(vec![
-                Entity::new(LabelRef::new("THING"), location).with_event(event),
-            ])
+            Ok(vec![Entity::new(Birth::new(
+                "t",
+                confidence,
+                Pattern::new(LabelRef::new("THING"), location, PatternRule::default()),
+            ))])
         }
 
         async fn recognize_batch(

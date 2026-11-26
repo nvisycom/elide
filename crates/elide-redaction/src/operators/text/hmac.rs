@@ -111,7 +111,7 @@ impl<M: TextRedactable> Operator<M> for HmacHash {
         entity: &Entity<M>,
         data: &M::Data,
     ) -> Result<Option<M::Replacement>> {
-        let digest = self.digest(&entity.label, data.as_ref())?;
+        let digest = self.digest(entity.label(), data.as_ref())?;
         Ok(Some(M::Replacement::from(TextReplacement::replaced(
             digest,
         ))))
@@ -120,7 +120,8 @@ impl<M: TextRedactable> Operator<M> for HmacHash {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
+    use elide_core::entity::Birth;
+    use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -129,13 +130,11 @@ mod tests {
 
     fn entity(label: &str) -> Entity<Text> {
         let location = TextLocation::inline(0..5);
-        let event = AuditEvent::pattern(
+        Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            location.clone(),
-            PatternRule::default(),
-        );
-        Entity::new(LabelRef::new(label), location).with_event(event)
+            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        ))
     }
 
     #[tokio::test]

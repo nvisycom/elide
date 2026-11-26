@@ -5,11 +5,11 @@ use elide::codec::FormatRegistry;
 use elide::entity::builtins;
 use elide::modality::text::{Text, TextLocation};
 use elide::redaction::HiddenContentPolicy;
-use elide::{PartId, RegistryDocumentExt, Report, Result};
+use elide::{PartId, RegistryDocumentExt, Result};
 
 use super::{BODY_PART, FIXTURE};
 use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
-use crate::support::review::flagged;
+use crate::support::review::included;
 
 const DOC: &str = "report.docx";
 const EMAIL: &str = "bob.smith@example.com";
@@ -38,8 +38,8 @@ async fn a_mark_on_raw_part_bytes_is_redacted() -> Result<()> {
         .part::<Text>(&document.id())?
         .entities()
         .iter()
-        .filter(|entity| entity.label == builtins::EMAIL_ADDRESS.to_ref())
-        .map(|entity| entity.location.source_refs())
+        .filter(|entity| *entity.label() == builtins::EMAIL_ADDRESS.to_ref())
+        .map(|entity| entity.location().source_refs())
         .find(|refs| {
             refs.iter()
                 .any(|source| source.part.as_deref() == Some(BODY_PART))
@@ -49,10 +49,7 @@ async fn a_mark_on_raw_part_bytes_is_redacted() -> Result<()> {
     let mark = TextLocation::marked_sources(refs).expect("refs are non-empty");
 
     // Apply only the mark, on a fresh document.
-    let report = Report::new().insert_part::<Text>(
-        PartId::from(DOC),
-        vec![flagged(builtins::EMAIL_ADDRESS.to_ref(), mark)],
-    );
+    let report = included(&PartId::from(DOC), builtins::EMAIL_ADDRESS.to_ref(), mark);
     let mut document = registry
         .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
         .await?;

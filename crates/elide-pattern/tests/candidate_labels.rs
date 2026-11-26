@@ -36,7 +36,7 @@ async fn emitted_label(recognizer: &PatternRecognizer, scope: &Scope) -> LabelRe
         .await
         .expect("recognize");
     assert_eq!(entities.len(), 1, "one match, one entity");
-    entities[0].label.clone()
+    entities[0].label().clone()
 }
 
 /// A catalog declaring exactly the given built-in labels.

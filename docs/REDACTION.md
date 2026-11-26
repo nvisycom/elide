@@ -325,11 +325,14 @@ adjacent concerns to the engine that embeds it.
   or by data-release target is the embedding engine's job.
 - **Audit persistence.** Every pick and every applied redaction is recorded
   on its entity's hash-linked audit trail, and the report that carries them
-  serializes. The toolkit does not persist that record; a deployment that needs
-  a durable compliance log keeps the report itself, and can store its digest
-  apart, somewhere the report's carrier cannot write, to protect its entities
-  and their trails. The digest does not cover the report's record of stripped
-  hidden content.
+  serializes. Read back normally, it is checked against its digest, kept where
+  the report's carrier cannot change it: on the side that wrote it, in a
+  write-once store, or signed with a key the deployment holds. An unchecked
+  read, named as such, skips that check, for a report that never left the
+  side reading it. The toolkit does not persist that record or hold any key;
+  a deployment that needs a durable compliance log keeps the report and its
+  digest. The digest covers the report's entities and their trails, not its
+  record of stripped hidden content.
 - **The review interface.** The toolkit records a reviewer's corrections on the
   report between detection and redaction (see the Detection paper), and its
   picks show what redaction will do. Presenting them to a person and

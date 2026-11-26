@@ -58,13 +58,28 @@ pub(super) async fn read_matched(
     document: &mut Document,
     analyzed: &AnalyzedDocument,
 ) -> Values {
-    let mut values = Values::new();
-    read_text(orchestrator, document, &analyzed.report, &mut values).await;
-    read_values::<Tabular>(orchestrator, document, &analyzed.report, &mut values).await;
-    read_values::<Metadata>(orchestrator, document, &analyzed.report, &mut values).await;
+    let mut reader = Reader {
+        orchestrator,
+        document,
+        report: &analyzed.report,
+        values: Values::new(),
+    };
+    reader.text().await;
+    reader.values::<Tabular>().await;
+    reader.values::<Metadata>().await;
+    let mut values = reader.values;
     read_recognized::<Image>(analyzed, Layout::text, &mut values);
     read_recognized::<Audio>(analyzed, Transcription::text, &mut values);
     values
+}
+
+/// Reads what the entities of a report matched in the document they were
+/// found in, collecting each value by entity id.
+struct Reader<'a> {
+    orchestrator: &'a Orchestrator,
+    document: &'a mut Document,
+    report: &'a Report,
+    values: Values,
 }
 
 /// The text entities that share one text to read: a part's stream, or one page
@@ -80,75 +95,108 @@ struct TextGroup<'r> {
     entities: Vec<(&'r RustEntity<Text>, Range<usize>)>,
 }
 
-/// What each text entity with a span matched, and the span in UTF-16 code
-/// units.
-///
-/// Each stream (or page) is read once, from its start to its last entity's end,
-/// and its entities' values are sliced from that text, with one running count
-/// of the UTF-16 units before each.
-async fn read_text(
-    orchestrator: &Orchestrator,
-    document: &mut Document,
-    report: &Report,
-    values: &mut Values,
-) {
-    let mut groups: Vec<TextGroup<'_>> = Vec::new();
-    let mut index: HashMap<(PartId, Option<u32>), usize> = HashMap::new();
-    for (part, entity) in entities_of::<Text>(report) {
-        // A hidden item flagged whole has no span of its own to read.
-        let Some(span) = entity.location.range() else {
-            continue;
-        };
-        let page = entity.location.page();
-        let group = *index.entry((part.clone(), page)).or_insert_with(|| {
-            groups.push(TextGroup {
-                part,
-                page,
-                anchor: &entity.location,
-                entities: Vec::new(),
-            });
-            groups.len() - 1
-        });
-        groups[group].entities.push((entity, span.clone()));
-    }
-    let locations: Vec<(PartId, TextLocation)> = groups
-        .iter_mut()
-        .map(|group| {
-            group.entities.sort_by_key(|(_, span)| span.start);
-            let end = group.entities.iter().map(|(_, span)| span.end).max();
-            (
-                group.part.clone(),
-                prefix(group.anchor, group.page, end.unwrap_or(0)),
-            )
-        })
-        .collect();
-    let Ok(reads) = orchestrator.read::<Text>(&mut *document, &locations).await else {
-        return;
-    };
-    for (group, read) in groups.iter().zip(reads) {
-        let Ok(text) = read else {
-            continue;
-        };
-        let text = text.as_str();
-        let (mut offset, mut units) = (0, 0);
-        for (entity, span) in &group.entities {
-            let (Some(between), Some(value)) =
-                (text.get(offset..span.start), text.get(span.clone()))
-            else {
+impl Reader<'_> {
+    /// What each text entity with a span matched, and the span in UTF-16 code
+    /// units.
+    ///
+    /// Each stream (or page) is read once, from its start to its last entity's end,
+    /// and its entities' values are sliced from that text, with one running count
+    /// of the UTF-16 units before each.
+    async fn text(&mut self) {
+        let mut groups: Vec<TextGroup<'_>> = Vec::new();
+        let mut index: HashMap<(PartId, Option<u32>), usize> = HashMap::new();
+        for (part, entity) in entities_of::<Text>(self.report) {
+            // A hidden item flagged whole has no span of its own to read.
+            let Some(span) = entity.location().range() else {
                 continue;
             };
-            units += between.encode_utf16().count();
-            offset = span.start;
-            values.insert(
-                entity.id.to_string(),
-                Matched {
-                    value: value.to_owned(),
-                    utf16: Some(Span {
-                        start: units,
-                        end: units + value.encode_utf16().count(),
-                    }),
-                },
-            );
+            let page = entity.location().page();
+            let group = *index.entry((part.clone(), page)).or_insert_with(|| {
+                groups.push(TextGroup {
+                    part,
+                    page,
+                    anchor: entity.location(),
+                    entities: Vec::new(),
+                });
+                groups.len() - 1
+            });
+            groups[group].entities.push((entity, span.clone()));
+        }
+        let locations: Vec<(PartId, TextLocation)> = groups
+            .iter_mut()
+            .map(|group| {
+                group.entities.sort_by_key(|(_, span)| span.start);
+                let end = group.entities.iter().map(|(_, span)| span.end).max();
+                (
+                    group.part.clone(),
+                    prefix(group.anchor, group.page, end.unwrap_or(0)),
+                )
+            })
+            .collect();
+        let Ok(reads) = self
+            .orchestrator
+            .read::<Text>(&mut *self.document, &locations)
+            .await
+        else {
+            return;
+        };
+        for (group, read) in groups.iter().zip(reads) {
+            let Ok(text) = read else {
+                continue;
+            };
+            let text = text.as_str();
+            let (mut offset, mut units) = (0, 0);
+            for (entity, span) in &group.entities {
+                let (Some(between), Some(value)) =
+                    (text.get(offset..span.start), text.get(span.clone()))
+                else {
+                    continue;
+                };
+                units += between.encode_utf16().count();
+                offset = span.start;
+                self.values.insert(
+                    entity.id().to_string(),
+                    Matched {
+                        value: value.to_owned(),
+                        utf16: Some(Span {
+                            start: units,
+                            end: units + value.encode_utf16().count(),
+                        }),
+                    },
+                );
+            }
+        }
+    }
+
+    /// What each entity of a text-valued modality `M` (a cell, a metadata field)
+    /// matched: the value read at its location, which spans only the part it
+    /// matched.
+    async fn values<M>(&mut self)
+    where
+        M: Modality<Data: AsRef<str>>,
+    {
+        let entities = entities_of::<M>(self.report);
+        let locations: Vec<(PartId, M::Location)> = entities
+            .iter()
+            .map(|(part, entity)| (part.clone(), entity.location().clone()))
+            .collect();
+        let Ok(reads) = self
+            .orchestrator
+            .read::<M>(&mut *self.document, &locations)
+            .await
+        else {
+            return;
+        };
+        for ((_, entity), read) in entities.iter().zip(reads) {
+            if let Ok(data) = read {
+                self.values.insert(
+                    entity.id().to_string(),
+                    Matched {
+                        value: data.as_ref().to_owned(),
+                        utf16: None,
+                    },
+                );
+            }
         }
     }
 }
@@ -162,38 +210,6 @@ fn prefix(anchor: &TextLocation, page: Option<u32>, end: usize) -> TextLocation 
     match page {
         Some(page) => TextLocation::rendered(0..end, page, anchor.rects().to_vec()),
         None => TextLocation::inline(0..end),
-    }
-}
-
-/// What each entity of a text-valued modality `M` (a cell, a metadata field)
-/// matched: the value read at its location, which spans only the part it
-/// matched.
-async fn read_values<M>(
-    orchestrator: &Orchestrator,
-    document: &mut Document,
-    report: &Report,
-    values: &mut Values,
-) where
-    M: Modality<Data: AsRef<str>>,
-{
-    let entities = entities_of::<M>(report);
-    let locations: Vec<(PartId, M::Location)> = entities
-        .iter()
-        .map(|(part, entity)| (part.clone(), entity.location.clone()))
-        .collect();
-    let Ok(reads) = orchestrator.read::<M>(&mut *document, &locations).await else {
-        return;
-    };
-    for ((_, entity), read) in entities.iter().zip(reads) {
-        if let Ok(data) = read {
-            values.insert(
-                entity.id.to_string(),
-                Matched {
-                    value: data.as_ref().to_owned(),
-                    utf16: None,
-                },
-            );
-        }
     }
 }
 
@@ -211,12 +227,12 @@ fn read_recognized<M: Modality>(
         };
         // An entity found other than by text (a box a vision model drew)
         // matched no text.
-        let Some(range) = entity.recognized_range.as_ref() else {
+        let Some(range) = entity.recognized_range() else {
             continue;
         };
         if let Some(value) = text(artifact).get(range.clone()) {
             values.insert(
-                entity.id.to_string(),
+                entity.id().to_string(),
                 Matched {
                     value: value.to_owned(),
                     utf16: None,
@@ -227,13 +243,17 @@ fn read_recognized<M: Modality>(
 }
 
 /// Every entity of the applied `report`, with what `values` holds of each.
-pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
-    let mut out = Vec::new();
-    push::<Text>(report, &mut values, &mut out, |entity, utf16| {
-        let span = entity.location.range().cloned().unwrap_or_default();
-        let rendered = entity.location.page().map(|page| Rendered {
+pub(super) fn to_entities(report: &Report, values: Values) -> Vec<Entity> {
+    let mut out = Collected {
+        report,
+        values,
+        entities: Vec::new(),
+    };
+    out.push::<Text>(|entity, utf16| {
+        let span = entity.location().range().cloned().unwrap_or_default();
+        let rendered = entity.location().page().map(|page| Rendered {
             page,
-            rects: entity.location.rects().iter().map(Rect::from).collect(),
+            rects: entity.location().rects().iter().map(Rect::from).collect(),
         });
         Location::Text {
             start: span.start,
@@ -242,16 +262,18 @@ pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
             rendered,
         }
     });
-    push::<Tabular>(report, &mut values, &mut out, |entity, _| {
-        Location::Tabular {
-            sheet: entity.location.sheet_name.as_ref().map(ToString::to_string),
-            row: entity.location.row_index,
-            column: entity.location.column_index,
-            span: entity.location.span.clone().map(Span::from),
-        }
+    out.push::<Tabular>(|entity, _| Location::Tabular {
+        sheet: entity
+            .location()
+            .sheet_name
+            .as_ref()
+            .map(ToString::to_string),
+        row: entity.location().row_index,
+        column: entity.location().column_index,
+        span: entity.location().span.clone().map(Span::from),
     });
-    push::<Image>(report, &mut values, &mut out, |entity, _| {
-        let bbox = &entity.location.bounding_box;
+    out.push::<Image>(|entity, _| {
+        let bbox = &entity.location().bounding_box;
         Location::Image {
             x: bbox.min.x,
             y: bbox.min.y,
@@ -259,53 +281,59 @@ pub(super) fn to_entities(report: &Report, mut values: Values) -> Vec<Entity> {
             height: bbox.height(),
         }
     });
-    push::<Audio>(report, &mut values, &mut out, |entity, _| Location::Audio {
-        start_ms: entity.location.span.start_millis(),
-        end_ms: entity.location.span.end_millis(),
-        speaker: entity.location.speaker_id.as_ref().map(ToString::to_string),
+    out.push::<Audio>(|entity, _| Location::Audio {
+        start_ms: entity.location().span.start_millis(),
+        end_ms: entity.location().span.end_millis(),
+        speaker: entity
+            .location()
+            .speaker_id
+            .as_ref()
+            .map(ToString::to_string),
     });
-    push::<Metadata>(report, &mut values, &mut out, |entity, _| {
-        Location::Metadata {
-            key: entity.location.key.to_string(),
-            span: entity.location.span.clone().map(Span::from),
-        }
+    out.push::<Metadata>(|entity, _| Location::Metadata {
+        key: entity.location().key.to_string(),
+        span: entity.location().span.clone().map(Span::from),
     });
-    out
+    out.entities
 }
 
-/// Append modality `M`'s entities, in part order, each located by `locate`
-/// from the entity and its UTF-16 span.
-fn push<M: Modality>(
-    report: &Report,
-    values: &mut Values,
-    out: &mut Vec<Entity>,
-    locate: impl Fn(&RustEntity<M>, Option<Span>) -> Location,
-) {
-    for (part, entity) in entities_of::<M>(report) {
-        let id = entity.id.to_string();
-        let (value, utf16) = match values.remove(&id) {
-            Some(matched) => (Some(matched.value), matched.utf16),
-            None => (None, None),
-        };
-        out.push(Entity {
-            location: locate(entity, utf16),
-            part: part.segments().map(str::to_owned).collect(),
-            label: entity.label.as_str().to_owned(),
-            value,
-            confidence: decimal(entity.confidence),
-            language: entity.language.as_ref().map(ToString::to_string),
-            coref: entity.coref.as_ref().map(|coref| coref.as_str().to_owned()),
-            sources: sources(entity),
-            redaction: redaction(entity),
-            id,
-        });
+/// The entities of a report being converted, with what was read of each.
+struct Collected<'a> {
+    report: &'a Report,
+    values: Values,
+    entities: Vec<Entity>,
+}
+
+impl Collected<'_> {
+    /// Append modality `M`'s entities, in part order, each located by
+    /// `locate` from the entity and its UTF-16 span.
+    fn push<M: Modality>(&mut self, locate: impl Fn(&RustEntity<M>, Option<Span>) -> Location) {
+        for (part, entity) in entities_of::<M>(self.report) {
+            let id = entity.id().to_string();
+            let (value, utf16) = match self.values.remove(&id) {
+                Some(matched) => (Some(matched.value), matched.utf16),
+                None => (None, None),
+            };
+            self.entities.push(Entity {
+                location: locate(entity, utf16),
+                part: part.segments().map(str::to_owned).collect(),
+                label: entity.label().as_str().to_owned(),
+                value,
+                confidence: decimal(entity.confidence()),
+                language: entity.language().map(ToString::to_string),
+                coref: entity.coref().map(|coref| coref.as_str().to_owned()),
+                sources: sources(entity),
+                redaction: redaction(entity),
+                id,
+            });
+        }
     }
 }
 
 /// Every detection in `entity`'s trail that found it.
 fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
     entity
-        .audit
+        .audit()
         .events()
         .iter()
         .filter(|event| event.is_recognition())
@@ -323,7 +351,7 @@ fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
 /// The redaction applied to `entity`: the operator the applied selection
 /// picked. `None` when nothing was applied.
 fn redaction<M: Modality>(entity: &RustEntity<M>) -> Option<Redaction> {
-    let events = entity.audit.events();
+    let events = entity.audit().events();
     let applied = events.iter().rev().find_map(|event| match &event.kind {
         AuditKind::Redaction(redaction) => Some(redaction.selection),
         _ => None,

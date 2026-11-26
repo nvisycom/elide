@@ -23,7 +23,7 @@ enum Matcher {
 impl Matcher {
     fn matches<M: Modality>(&self, entity: &Entity<M>) -> bool {
         match self {
-            Matcher::Label(label) => &entity.label == label,
+            Matcher::Label(label) => entity.label() == label,
             Matcher::Always => true,
         }
     }

@@ -338,8 +338,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
-    use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
     use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -407,16 +407,18 @@ mod tests {
         let label = LabelRef::new(label.to_owned());
         let location = TextLocation::inline(loc.0..loc.1);
         let confidence = Confidence::new(0.9).unwrap();
-        let event = AuditEvent::pattern(
+        Entity::new(Birth::new(
             "mock",
             confidence,
-            location.clone(),
-            PatternRule {
-                name: label.as_str().into(),
-                ..PatternRule::default()
-            },
-        );
-        Entity::new(label, location).with_event(event)
+            Pattern::new(
+                label.clone(),
+                location,
+                PatternRule {
+                    name: label.as_str().into(),
+                    ..PatternRule::default()
+                },
+            ),
+        ))
     }
 
     fn scope_for(ids: &[&str]) -> Scope {
@@ -480,7 +482,7 @@ mod tests {
         let ranges: Vec<_> = analyses[1]
             .entities
             .iter()
-            .filter_map(|e| e.location.range().cloned())
+            .filter_map(|e| e.location().range().cloned())
             .collect();
         assert!(ranges.contains(&(0..3)));
         assert!(ranges.contains(&(3..6)));

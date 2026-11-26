@@ -171,7 +171,7 @@ mod tests {
                 .unwrap()
                 .into_iter()
                 .find(|chunk| chunk.data.key == key)
-                .map(|chunk| chunk.data.label.clone())
+                .map(|chunk| chunk.data.label)
         };
         assert_eq!(
             label("creator"),

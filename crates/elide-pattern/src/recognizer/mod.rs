@@ -10,8 +10,8 @@ mod scan;
 
 use std::sync::Arc;
 
-use elide_core::entity::Entity;
-use elide_core::entity::audit::{AuditEvent, Refinement};
+use elide_core::entity::audit::{AuditEvent, Pattern, Refinement};
+use elide_core::entity::{Birth, Entity};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Context, Languages, Recognizer, Subject};
@@ -76,14 +76,16 @@ impl PatternRecognizer {
         PatternRecognizerBuilder::default()
     }
 
-    /// Run every rule's context over `matches` found in `text`.
+    /// Run every rule's context over `matches` found in `subject`'s text.
     fn boost<M: TextRecognizable>(
         &self,
         matches: &mut [RawMatch],
-        text: &str,
         subject: &Subject<M>,
         languages: &Languages<'_>,
     ) -> Vec<context::Boost> {
+        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
+            return Vec::new();
+        };
         if self.contexts.is_empty() {
             return Vec::new();
         }
@@ -127,12 +129,9 @@ impl PatternRecognizer {
         subject: &Subject<M>,
     ) -> Option<Entity<M>> {
         let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
-        let event = AuditEvent::pattern(self.id().name, raw.score, location.clone(), raw.rule);
-        Some(
-            Entity::new(raw.label, location)
-                .with_recognized_range(raw.range)
-                .with_event(event),
-        )
+        let found =
+            Pattern::new(raw.label.clone(), location, raw.rule).with_recognized_range(raw.range);
+        Some(Entity::new(Birth::new(self.id().name, raw.score, found)))
     }
 }
 
@@ -148,7 +147,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         let mut matches = self.scan_patterns(text, &languages, ctx);
         matches.extend(self.scan_dictionaries(text, &languages, ctx));
 
-        let boosts = self.boost(&mut matches, text, subject, &languages);
+        let boosts = self.boost(&mut matches, subject, &languages);
         let mut entities: Vec<Option<Entity<M>>> = matches
             .into_iter()
             .map(|raw| self.build_entity(raw, subject))

@@ -88,7 +88,7 @@ fn a_redacted_bookmark_is_fitted_and_its_hyperlinks_follow() {
         .rewrite_with_parts(
             &[Replacement {
                 part: block.part.clone(),
-                span: block.span.clone(),
+                span: block.span,
                 text: "[PERSON]".into(),
             }],
             &[],

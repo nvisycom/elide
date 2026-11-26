@@ -9,8 +9,8 @@ mod image;
 mod localize;
 mod text;
 
-use elide_core::entity::audit::{AuditEvent, ModelId};
-use elide_core::entity::{Entity, EntityCoRef, LabelRef};
+use elide_core::entity::audit::{Model, ModelId};
+use elide_core::entity::{Birth, Entity, EntityCoRef, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::candidates::Candidates;
+use crate::candidates::{Candidates, ImageCandidate, TextCandidate};
 
 /// Per-modality binding the LLM recognizer is generic over.
 ///
@@ -31,13 +31,11 @@ pub trait LlmModality: Modality + Sized {
     type Item: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static;
 
     /// Lift an extracted candidate batch into entities, in this modality's
-    /// coordinate space, against the source `data`, each attributed to the
-    /// recognizer named `source` running `model`.
+    /// coordinate space, against the source `data`, each built by `lifter`.
     fn lift(
         batch: Candidates<Self::Item>,
         data: &Self::Data,
-        source: &HipStr<'static>,
-        model: &ModelId,
+        lifter: &Lifter<'_>,
     ) -> Vec<Entity<Self>>;
 }
 
@@ -49,7 +47,7 @@ const DEFAULT_CONFIDENCE: f64 = 0.5;
 
 /// Builds the entities of one recognizer call: each attributed to the call's
 /// model, with the model's coreference handles scoped to the call.
-pub(crate) struct Lifter<'a> {
+pub struct Lifter<'a> {
     source: &'a HipStr<'static>,
     model: &'a ModelId,
     scope: CorefScope,
@@ -57,7 +55,7 @@ pub(crate) struct Lifter<'a> {
 
 impl<'a> Lifter<'a> {
     /// A lifter for one call, its audit events naming `source` and `model`.
-    pub(crate) fn new(source: &'a HipStr<'static>, model: &'a ModelId) -> Self {
+    pub fn new(source: &'a HipStr<'static>, model: &'a ModelId) -> Self {
         Self {
             source,
             model,
@@ -65,39 +63,71 @@ impl<'a> Lifter<'a> {
         }
     }
 
-    /// The entity for one candidate at `location`, or `None` (with a warning)
-    /// when its confidence is NaN. An unscored candidate gets the default
-    /// confidence; one out of `0.0..=1.0` is clamped into it.
-    pub(crate) fn entity<M: Modality>(
+    /// The entity for one candidate's `finding` at `location`, or `None`
+    /// (with a warning) when its confidence is NaN. An unscored candidate
+    /// gets the default confidence; one out of `0.0..=1.0` is clamped into it.
+    pub fn entity<M: Modality>(
         &self,
-        label: String,
-        confidence: Option<f64>,
+        finding: Finding,
         location: M::Location,
-        coreference: Option<&str>,
     ) -> Option<Entity<M>> {
-        let raw = confidence.unwrap_or(DEFAULT_CONFIDENCE).clamp(0.0, 1.0);
+        let raw = finding
+            .confidence
+            .unwrap_or(DEFAULT_CONFIDENCE)
+            .clamp(0.0, 1.0);
         let Some(confidence) = Confidence::new(raw as f32) else {
             tracing::warn!(
                 target: TARGET,
-                label = %label,
+                label = %finding.label,
                 "dropping a candidate whose confidence is not a number",
             );
             return None;
         };
-        let event = AuditEvent::model(
+        let label = LabelRef::new(finding.label);
+        let entity = Entity::new(Birth::new(
             self.source.clone(),
             confidence,
-            location.clone(),
-            self.model.clone(),
-        );
-        let entity = Entity::new(LabelRef::new(label), location).with_event(event);
+            Model::new(label, location, self.model.clone()),
+        ));
         // The model groups mentions of the same real-world entity under a
         // shared handle; scoped to this call, it is the entity's coreference
         // cluster.
-        Some(match coreference {
-            Some(handle) => entity.with_coref(self.scope.coref(handle)),
+        Some(match finding.coreference {
+            Some(handle) => entity.with_coref(self.scope.coref(&handle)),
             None => entity,
         })
+    }
+}
+
+/// What a candidate reports whatever its modality: the label, the model's
+/// score, and its coreference handle.
+#[derive(Debug, Clone)]
+pub struct Finding {
+    /// The label the model gave.
+    pub label: String,
+    /// The model's score, if it gave one.
+    pub confidence: Option<f64>,
+    /// The model's handle for the cluster the candidate is one mention of.
+    pub coreference: Option<String>,
+}
+
+impl From<TextCandidate> for Finding {
+    fn from(candidate: TextCandidate) -> Self {
+        Self {
+            label: candidate.label,
+            confidence: candidate.confidence,
+            coreference: candidate.coreference,
+        }
+    }
+}
+
+impl From<ImageCandidate> for Finding {
+    fn from(candidate: ImageCandidate) -> Self {
+        Self {
+            label: candidate.label,
+            confidence: candidate.confidence,
+            coreference: candidate.coreference,
+        }
     }
 }
 

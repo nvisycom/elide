@@ -137,21 +137,19 @@ impl Operator<Audio> for Beep {
 mod tests {
     use elide_audio::modality::AudioLocation;
     use elide_audio::primitive::TimeSpan;
-    use elide_core::entity::audit::{AuditEvent, PatternRule};
-    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::primitive::Confidence;
 
     use super::*;
 
     fn audio_entity() -> Entity<Audio> {
         let location = AudioLocation::new(TimeSpan::from_millis(0, 100));
-        let event = AuditEvent::pattern(
+        Entity::new(Birth::new(
             "t",
             Confidence::MAX,
-            location.clone(),
-            PatternRule::default(),
-        );
-        Entity::new(LabelRef::new("PERSON"), location).with_event(event)
+            Pattern::new(LabelRef::new("PERSON"), location, PatternRule::default()),
+        ))
     }
 
     #[tokio::test]

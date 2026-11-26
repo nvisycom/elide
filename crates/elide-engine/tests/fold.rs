@@ -9,9 +9,9 @@
 //! container under an extensionless id.
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
-use elide_core::entity::audit::{AuditEvent, PatternRule};
+use elide_core::entity::audit::{Pattern, PatternRule};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
-use elide_core::entity::{Entity, LabelCatalog};
+use elide_core::entity::{Birth, Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
@@ -48,13 +48,11 @@ impl Recognizer<Text> for PiiRecognizer {
             let start = from + rel;
             let end = start + PII.len();
             let loc = TextLocation::inline(start..end);
-            let event = AuditEvent::pattern(
+            entities.push(Entity::new(Birth::new(
                 "mock-pii",
                 Confidence::MAX,
-                loc.clone(),
-                PatternRule::default(),
-            );
-            entities.push(Entity::new(EMAIL_ADDRESS.to_ref(), loc).with_event(event));
+                Pattern::new(EMAIL_ADDRESS.to_ref(), loc.clone(), PatternRule::default()),
+            )));
             from = end;
         }
         Ok(entities)
