@@ -161,7 +161,7 @@ decode on the way fails the whole read.
 To show the reviewer what redaction will do, not only what was found, call
 `orchestrator.pick(&mut report)` before starting the review. Each entity
 records the operator it will get, how much that operator's output leaks, the
-rule that chose it, and the policy's rationale, as a `Selection` event, picked
+rule that chose it, and the policy's rationale, as a `Selected` event, picked
 by the same anonymizers and scope `anonymize_with` applies; show the entities
 `unsuppressed` lists, as a suppressed one keeps its last pick but is not
 redacted. A pick changes the report, so make the `Review` after it: a review
@@ -169,11 +169,12 @@ made before applies to no later version. When no review intervenes, the plan
 shown is the plan that runs; after one, pick again to update it. An unchanged
 pick is not recorded twice.
 
-Applying records a `Redaction` event naming, by its hash, the `Selection` it
-applied, and the location the operator wrote. If an edit changed the decision
-since the pick, the new `Selection` is recorded first and the `Redaction`
-names that one. `audit.applied_selection()` reads what a redaction ran, and
-`verify` rejects a `Redaction` that names no earlier `Selection`.
+Applying records a `Redacted` event naming, by its hash, the `Selected` event
+it applied, and the location the operator wrote. If an edit changed the
+decision since the pick, a new `Selected` event is recorded first and the
+`Redacted` event names that one. `audit.applied_selection()` reads what a
+redaction ran, and `verify` rejects a `Redacted` event that names no earlier
+`Selected` event.
 
 ## Across processes
 

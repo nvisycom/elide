@@ -1,14 +1,14 @@
 //! The operator *pick* recorded into each entity's audit trail.
 //!
 //! Redaction resolves which operator hides each entity (and why) and records
-//! that decision as a [`Selection`] event on the entity's own audit trail,
-//! alongside the [`Redaction`] that applies it, no parallel selection object.
-//! A review layer reads the picks straight off the entities. This exercises
-//! that over a real multi-part container: run [`anonymize`] and read the picks
-//! back from the returned report's body entities.
+//! that decision as a [`Selected`] event on the entity's own audit trail,
+//! alongside the [`Redacted`] event that applies it, no parallel selection
+//! object. A review layer reads the picks straight off the entities. This
+//! exercises that over a real multi-part container: run [`anonymize`] and read
+//! the picks back from the returned report's body entities.
 //!
-//! [`Selection`]: elide::entity::audit::AuditKind::Selection
-//! [`Redaction`]: elide::entity::audit::AuditKind::Redaction
+//! [`Selected`]: elide::entity::audit::AuditKind::Selected
+//! [`Redacted`]: elide::entity::audit::AuditKind::Redacted
 //! [`anonymize`]: elide::Orchestrator::anonymize
 
 use elide::codec::FormatRegistry;
@@ -70,13 +70,13 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
         // run is the one that was picked.
         let selection_at = entity
             .audit()
-            .position(|k| matches!(k, AuditKind::Selection(_)));
+            .position(|k| matches!(k, AuditKind::Selected(_)));
         let redaction_at = entity
             .audit()
-            .position(|k| matches!(k, AuditKind::Redaction(_)));
+            .position(|k| matches!(k, AuditKind::Redacted(_)));
         assert!(
             selection_at < redaction_at,
-            "the Selection precedes the Redaction",
+            "the Selected event precedes the Redacted event",
         );
         assert_eq!(
             picked, applied.operator.name,
@@ -146,7 +146,7 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
             .audit()
             .events()
             .iter()
-            .filter(|event| matches!(event.kind, AuditKind::Selection(_)))
+            .filter(|event| matches!(event.kind, AuditKind::Selected(_)))
             .count();
         assert_eq!(selections, 1, "applying does not repeat the pick");
         let applied = entity.audit().applied_selection().expect("applied");

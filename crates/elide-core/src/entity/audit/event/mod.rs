@@ -23,10 +23,10 @@ use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::apply::{Include, Manual, ManualIntent, Redaction, Selection};
+pub use self::apply::{Included, Manual, ManualIntent, Redacted, Selected};
 pub use self::kind::AuditKind;
-pub use self::recognition::{Annotation, Flagged, Model, ModelId, Pattern, PatternRule};
-pub use self::reconcile::{Calibration, Conflict, Contested, Fusion, Refinement};
+pub use self::recognition::{Annotated, Flagged, Model, ModelId, Pattern, PatternRule};
+pub use self::reconcile::{Calibrated, Contested, Fused, Refined, Resolved};
 use super::AuditHash;
 use super::hash::AuditHasher;
 use crate::modality::Modality;
@@ -112,10 +112,10 @@ pub struct AuditEvent<M: Modality> {
 impl<M: Modality> AuditEvent<M> {
     /// Assemble an event from its `source` (who produced it), the `confidence`
     /// after it, and its `kind`, pass a payload with `.into()` (e.g.
-    /// `Redaction::new(..).into()`). [`parents`] is empty and [`hash`] is
+    /// `Redacted::new(..).into()`). [`parents`] is empty and [`hash`] is
     /// [`GENESIS`] until [`AuditLog`] records it and assigns the links.
     ///
-    /// The kind-specific constructors ([`fusion`], [`redaction`], …) are
+    /// The kind-specific constructors ([`fused`], [`redacted`], …) are
     /// convenience wrappers that derive `source` and build the kind for you;
     /// reach for `new` to set an explicit source (e.g. a reviewer's id on a
     /// [`manual`] override) or to build a kind the wrappers don't cover.
@@ -124,8 +124,8 @@ impl<M: Modality> AuditEvent<M> {
     /// [`hash`]: Self::hash
     /// [`GENESIS`]: AuditHash::GENESIS
     /// [`AuditLog`]: crate::entity::audit::AuditLog
-    /// [`fusion`]: Self::fusion
-    /// [`redaction`]: Self::redaction
+    /// [`fused`]: Self::fused
+    /// [`redacted`]: Self::redacted
     /// [`manual`]: Self::manual
     pub fn new(
         source: impl Into<HipStr<'static>>,
@@ -172,20 +172,20 @@ impl<M: Modality> AuditEvent<M> {
     /// A fusion event combining several detections of one finding into one at
     /// `location`, the union of theirs. Its `confidence` is the pooled score
     /// of the fused entities; the `source` is the fusion strategy's name.
-    pub fn fusion(
+    pub fn fused(
         strategy: impl Into<HipStr<'static>>,
         confidence: Confidence,
         location: M::Location,
     ) -> Self {
         let strategy = strategy.into();
-        Self::new(strategy.clone(), confidence, Fusion { strategy, location })
+        Self::new(strategy.clone(), confidence, Fused { strategy, location })
     }
 
-    /// Conflict-resolution event: a competing detection was arbitrated against
+    /// A resolved event: a competing detection was arbitrated against
     /// this entity, which won. The loser is recorded in `conflict` rather than
     /// dropped silently; `confidence` is the winner's own (unchanged) score. The
     /// `source` is the conflict payload's `resolved_by`.
-    pub fn conflict(conflict: Conflict, confidence: Confidence) -> Self {
+    pub fn resolved(conflict: Resolved, confidence: Confidence) -> Self {
         Self::new(conflict.resolved_by.clone(), confidence, conflict)
     }
 
@@ -197,23 +197,23 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(contested.flagged_by.clone(), confidence, contested)
     }
 
-    /// Calibration event rescaling confidence by `factor`. `confidence` is the
+    /// A calibrated event rescaling confidence by `factor`. `confidence` is the
     /// score after rescaling.
-    pub fn calibration(confidence: Confidence, factor: f64) -> Self {
+    pub fn calibrated(confidence: Confidence, factor: f64) -> Self {
         Self::new(
             HipStr::borrowed("calibration"),
             confidence,
-            Calibration { factor },
+            Calibrated { factor },
         )
     }
 
-    /// Refinement event: a context keyword near the entity lifted its confidence
+    /// A refined event: a context keyword near the entity lifted its confidence
     /// to `confidence`, produced by the `source` recognizer. Build the
     /// `refinement` payload with its keyword and (optionally) hint / location.
-    pub fn refinement(
+    pub fn refined(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
-        refinement: Refinement<M>,
+        refinement: Refined<M>,
     ) -> Self {
         Self::new(source, confidence, refinement)
     }
@@ -222,9 +222,9 @@ impl<M: Modality> AuditEvent<M> {
     ///
     /// The selection `redaction` names is the one applied, at the location it
     /// names; the entity's `confidence` is unchanged.
-    pub fn redaction(
+    pub fn redacted(
         source: impl Into<HipStr<'static>>,
-        redaction: Redaction<M>,
+        redaction: Redacted<M>,
         confidence: Confidence,
     ) -> Self {
         Self::new(source, confidence, redaction)
@@ -232,10 +232,10 @@ impl<M: Modality> AuditEvent<M> {
 
     /// The redaction *decision*: the operator in `selection` was picked to hide
     /// the entity (at its `confidence`), recorded before it is applied so the
-    /// pick can be reviewed. The [`redaction`](Self::redaction) event that
+    /// pick can be reviewed. The [`redacted`](Self::redacted) event that
     /// applies it names this event by its hash. The `source` is the operator's
     /// name.
-    pub fn selection(selection: Selection, confidence: Confidence) -> Self {
+    pub fn selected(selection: Selected, confidence: Confidence) -> Self {
         Self::new(selection.operator.name.clone(), confidence, selection)
     }
 

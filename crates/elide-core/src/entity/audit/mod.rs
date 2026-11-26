@@ -16,8 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    Annotation, AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Include,
-    Manual, ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
+    Annotated, AuditEvent, AuditKind, Calibrated, Contested, Flagged, Fused, Included, Manual,
+    ManualIntent, Model, ModelId, Pattern, PatternRule, Redacted, Refined, Resolved, Selected,
 };
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
@@ -176,65 +176,66 @@ impl<M: Modality> AuditLog<M> {
     }
 
     /// The entity's current operator *pick*, if one was recorded: the
-    /// [`Selection`] payload from the latest selection event on its
+    /// [`Selected`] payload from the latest selection event on its
     /// [line](Self::line). `None` when no operator was picked (e.g. a
     /// suppressed entity, or before the anonymizer's pick ran).
     ///
     /// This is the plan, which a later pick can change after a redaction; what
     /// a redaction applied is [`applied_selection`](Self::applied_selection).
     ///
-    /// [`Selection`]: crate::entity::audit::Selection
-    pub fn selection(&self) -> Option<&Selection> {
+    /// [`Selected`]: crate::entity::audit::Selected
+    pub fn selection(&self) -> Option<&Selected> {
         self.selection_event().and_then(|e| match &e.kind {
-            AuditKind::Selection(s) => Some(s),
+            AuditKind::Selected(s) => Some(s),
             _ => None,
         })
     }
 
-    /// The entity's most recent [`Selection`] event, whose
-    /// [`hash`](AuditEvent::hash) a [`Redaction`] applying it names.
+    /// The entity's most recent [`Selected`] event, whose
+    /// [`hash`](AuditEvent::hash) a [`Redacted`] event applying it names.
     ///
-    /// [`Selection`]: crate::entity::audit::Selection
-    /// [`Redaction`]: crate::entity::audit::Redaction
+    /// [`Selected`]: crate::entity::audit::Selected
+    /// [`Redacted`]: crate::entity::audit::Redacted
     pub fn selection_event(&self) -> Option<&AuditEvent<M>> {
         self.line()
-            .find(|e| matches!(e.kind, AuditKind::Selection(_)))
+            .find(|e| matches!(e.kind, AuditKind::Selected(_)))
     }
 
-    /// The entity's redaction, if one was recorded: the [`Redaction`] payload
+    /// The entity's redaction, if one was recorded: the [`Redacted`] payload
     /// from the latest redaction event on its [line](Self::line). `None` when
     /// the entity was not redacted (e.g. suppressed, or not yet applied).
     ///
-    /// [`Redaction`]: crate::entity::audit::Redaction
-    pub fn redaction(&self) -> Option<&Redaction<M>> {
+    /// [`Redacted`]: crate::entity::audit::Redacted
+    pub fn redaction(&self) -> Option<&Redacted<M>> {
         self.line().find_map(|e| match &e.kind {
-            AuditKind::Redaction(r) => Some(r),
+            AuditKind::Redacted(r) => Some(r),
             _ => None,
         })
     }
 
-    /// The [`Selection`] that the entity's most recent [`Redaction`] applied.
+    /// The [`Selected`] event that the entity's most recent [`Redacted`]
+    /// event applied.
     ///
     /// It is found on the entity's [line](Self::line) through the hash the
     /// redaction names: which operator ran, why, and how much its output
     /// leaks. `None` when the entity was not redacted, or when the named
     /// selection is not on the line (which [`verify`] reports).
     ///
-    /// [`Selection`]: crate::entity::audit::Selection
-    /// [`Redaction`]: crate::entity::audit::Redaction
+    /// [`Selected`]: crate::entity::audit::Selected
+    /// [`Redacted`]: crate::entity::audit::Redacted
     /// [`verify`]: Self::verify
-    pub fn applied_selection(&self) -> Option<&Selection> {
+    pub fn applied_selection(&self) -> Option<&Selected> {
         let redaction = self.redaction()?;
         self.line().find_map(|e| match &e.kind {
-            AuditKind::Selection(s) if e.hash == redaction.selection => Some(s),
+            AuditKind::Selected(s) if e.hash == redaction.selection => Some(s),
             _ => None,
         })
     }
 
-    /// Whether an operator hid this entity, i.e. a [`Redaction`] event is on
+    /// Whether an operator hid this entity, i.e. a [`Redacted`] event is on
     /// its [line](Self::line).
     ///
-    /// [`Redaction`]: crate::entity::audit::Redaction
+    /// [`Redacted`]: crate::entity::audit::Redacted
     pub fn is_redacted(&self) -> bool {
         self.redaction().is_some()
     }
@@ -280,12 +281,12 @@ impl<M: Modality> AuditLog<M> {
     /// [`Iterator::position`].
     ///
     /// Events are in the order they were recorded, so comparing two positions
-    /// tells you which happened first (e.g. that a [`Selection`] pick was
-    /// recorded before the [`Redaction`] that applied it).
+    /// tells you which happened first (e.g. that a [`Selected`] pick was
+    /// recorded before the [`Redacted`] event that applied it).
     ///
     /// [`kind`]: AuditEvent::kind
-    /// [`Selection`]: crate::entity::audit::Selection
-    /// [`Redaction`]: crate::entity::audit::Redaction
+    /// [`Selected`]: crate::entity::audit::Selected
+    /// [`Redacted`]: crate::entity::audit::Redacted
     pub fn position(&self, mut predicate: impl FnMut(&AuditKind<M>) -> bool) -> Option<usize> {
         self.events.iter().position(|e| predicate(&e.kind))
     }
@@ -337,7 +338,7 @@ impl<M: Modality> AuditLog<M> {
     /// - every parent an event names is the hash of an *earlier* event (no
     ///   dangling link, no forward reference, no reorder that moves a parent
     ///   after its child);
-    /// - every [`Redaction`] names a [`Selection`] event among its own
+    /// - every [`Redacted`] event names a [`Selected`] event among its own
     ///   first-parent ancestors, the decision it applied, so a redaction never
     ///   applies a selection from a trail a fusion absorbed; and
     /// - the DAG has exactly **one sink** and it is the last event, while every
@@ -383,9 +384,9 @@ impl<M: Modality> AuditLog<M> {
                     "audit event at index {index} was altered: hash mismatch"
                 )));
             }
-            if let AuditKind::Redaction(redaction) = &event.kind {
+            if let AuditKind::Redacted(redaction) = &event.kind {
                 let applied = self.ancestry(Some(index)).skip(1).any(|e| {
-                    e.hash == redaction.selection && matches!(e.kind, AuditKind::Selection(_))
+                    e.hash == redaction.selection && matches!(e.kind, AuditKind::Selected(_))
                 });
                 if !applied {
                     return Err(Error::integrity(format!(
@@ -488,19 +489,19 @@ mod tests {
                 conf,
                 Flagged::new("author", at.clone(), HiddenContentKind::Collaboration),
             ),
-            AuditEvent::fusion("union", conf, at.clone()),
-            AuditEvent::conflict(Conflict::new(LabelRef::new("iban"), conf, "longest"), conf),
+            AuditEvent::fused("union", conf, at.clone()),
+            AuditEvent::resolved(Resolved::new(LabelRef::new("iban"), conf, "longest"), conf),
             AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
-            AuditEvent::calibration(conf, 0.5),
-            AuditEvent::refinement(
+            AuditEvent::calibrated(conf, 0.5),
+            AuditEvent::refined(
                 "context",
                 conf,
-                Refinement::new("ssn")
+                Refined::new("ssn")
                     .with_hint(Hint::new(TextLocation::inline(0..2)))
                     .with_location(TextLocation::inline(0..2)),
             ),
-            AuditEvent::selection(
-                Selection::new(
+            AuditEvent::selected(
+                Selected::new(
                     operator.clone(),
                     LeakProfile::Partial,
                     RuleMatch::Tag("pii".into()),
@@ -514,15 +515,15 @@ mod tests {
             log.record(fixed(event));
         }
         let selection = log.selection_event().unwrap().hash();
-        log.record(fixed(AuditEvent::redaction(
+        log.record(fixed(AuditEvent::redacted(
             operator.name,
-            Redaction::new(selection, at.clone()),
+            Redacted::new(selection, at.clone()),
             conf,
         )));
         log.record(fixed(AuditEvent::new(
             "reviewer",
             conf,
-            Include::new("ssn", at.clone()).because(why.clone()),
+            Included::new("ssn", at.clone()).because(why.clone()),
         )));
         let decisions = [
             ManualIntent::Relabel {
@@ -542,7 +543,7 @@ mod tests {
         log.record(fixed(AuditEvent::new(
             "lift",
             conf,
-            Annotation::new()
+            Annotated::new()
                 .with_location(TextLocation::inline(13..19))
                 .with_recognized_range(3..9)
                 .with_language("en".parse().unwrap())
@@ -586,7 +587,7 @@ mod tests {
     #[test]
     fn editing_a_payload_field_breaks_verification() {
         let mut log = every_kind();
-        let AuditKind::Selection(selection) = &mut log.events[8].kind else {
+        let AuditKind::Selected(selection) = &mut log.events[8].kind else {
             panic!("the ninth event is the selection");
         };
         selection.leak_profile = LeakProfile::Irrecoverable;
@@ -619,12 +620,12 @@ mod tests {
         let mut log = every_kind();
         let applied = log.applied_selection().cloned().unwrap();
         let conf = Confidence::new(0.5).unwrap();
-        let replan = Selection::new(
+        let replan = Selected::new(
             ComponentId::new("remove", "1"),
             LeakProfile::Irrecoverable,
             RuleMatch::Fallback,
         );
-        log.record(AuditEvent::selection(replan.clone(), conf));
+        log.record(AuditEvent::selected(replan.clone(), conf));
 
         assert_eq!(log.selection(), Some(&replan));
         assert_eq!(log.applied_selection(), Some(&applied));
@@ -644,9 +645,9 @@ mod tests {
             Pattern::new("ssn", at.clone(), PatternRule::default()),
         ));
         let detection = log.events()[0].hash();
-        log.record(AuditEvent::redaction(
+        log.record(AuditEvent::redacted(
             "mask",
-            Redaction::new(detection, at),
+            Redacted::new(detection, at),
             conf,
         ));
 

@@ -2,7 +2,7 @@
 //! entity, each carrying the [`label`](Pattern::label) it found, the match
 //! [`location`](Pattern::location), and what matched ([`PatternRule`] /
 //! [`ModelId`]), or a format [`Flagged`] an item of hidden content; and an
-//! [`Annotation`] of what became known about an entity after.
+//! [`Annotated`] event, what became known about an entity after.
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -233,10 +233,10 @@ impl<M: Modality> Flagged<M> {
     feature = "schema",
     schemars(
         bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
-        rename = "{M}Annotation"
+        rename = "{M}Annotated"
     )
 )]
-pub struct Annotation<M: Modality> {
+pub struct Annotated<M: Modality> {
     /// The entity's location in another coordinate space for the same
     /// content.
     #[cfg_attr(
@@ -267,7 +267,7 @@ pub struct Annotation<M: Modality> {
     pub coref: Option<EntityCoRef>,
 }
 
-impl<M: Modality> Default for Annotation<M> {
+impl<M: Modality> Default for Annotated<M> {
     fn default() -> Self {
         Self {
             location: None,
@@ -278,7 +278,7 @@ impl<M: Modality> Default for Annotation<M> {
     }
 }
 
-impl<M: Modality> Annotation<M> {
+impl<M: Modality> Annotated<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 11;
 

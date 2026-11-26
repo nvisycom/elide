@@ -373,7 +373,7 @@ mod tests {
         let [birth] = entity.audit().events() else {
             panic!("the inclusion is the entity's only event");
         };
-        let AuditKind::Include(included) = &birth.kind else {
+        let AuditKind::Included(included) = &birth.kind else {
             panic!("the entity starts from an inclusion");
         };
         assert_eq!(birth.source, "reviewer-7");

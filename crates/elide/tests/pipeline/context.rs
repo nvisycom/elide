@@ -72,7 +72,7 @@ async fn image_context_boosts_and_keeps_the_native_region() {
         .events()
         .iter()
         .find_map(|e| match &e.kind {
-            AuditKind::Refinement(r) => r.location.clone(),
+            AuditKind::Refined(r) => r.location.clone(),
             _ => None,
         })
         .expect("an in-text refinement with a resolved keyword location");
@@ -108,7 +108,7 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
         .events()
         .iter()
         .find_map(|e| match &e.kind {
-            AuditKind::Refinement(r) => r.location.clone(),
+            AuditKind::Refined(r) => r.location.clone(),
             _ => None,
         })
         .expect("an in-text refinement with a resolved keyword location");

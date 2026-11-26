@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
 use super::{
-    Annotation, Calibration, Conflict, Contested, Flagged, Fusion, Include, Manual, Model, Pattern,
-    Redaction, Refinement, Selection,
+    Annotated, Calibrated, Contested, Flagged, Fused, Included, Manual, Model, Pattern, Redacted,
+    Refined, Resolved, Selected,
 };
 use crate::modality::Modality;
 
@@ -18,7 +18,7 @@ use crate::modality::Modality;
 /// It also carries the rationale for why it happened.
 ///
 /// A thin tagged union: each variant wraps one payload struct (e.g.
-/// [`Redaction`], [`Selection`], [`Manual`]) that owns that kind's fields, its
+/// [`Redacted`], [`Selected`], [`Manual`]) that owns that kind's fields, its
 /// docs, and how it folds into the audit hash. Match on a variant to reach its
 /// payload:
 ///
@@ -26,7 +26,7 @@ use crate::modality::Modality;
 /// # use elide_core::entity::audit::AuditKind;
 /// # use elide_core::modality::text::Text;
 /// # fn show(kind: &AuditKind<Text>) {
-/// if let AuditKind::Redaction(redaction) = kind {
+/// if let AuditKind::Redacted(redaction) = kind {
 ///     let _ = &redaction.selection;
 /// }
 /// # }
@@ -70,31 +70,31 @@ pub enum AuditKind<M: Modality> {
     /// subject.
     Flagged(Flagged<M>),
     /// Several detections were fused into one entity.
-    Fusion(Fusion<M>),
+    Fused(Fused<M>),
     /// A competing detection of a different label over the same span was
     /// resolved against this (winning) entity.
-    Conflict(Conflict),
+    Resolved(Resolved),
     /// A competing detection of a different label over the same span was left
     /// *unresolved*: both entities survive, flagged for a human to settle.
     Contested(Contested),
     /// The entity's confidence was rescaled by a per-recognizer factor.
-    Calibration(Calibration),
+    Calibrated(Calibrated),
     /// A context keyword near the entity lifted its confidence.
-    Refinement(Refinement<M>),
+    Refined(Refined<M>),
     /// An operator hid the entity.
-    Redaction(Redaction<M>),
+    Redacted(Redacted<M>),
     /// An operator was *picked* to hide the entity, the redaction decision,
     /// recorded before it is applied so it can be reviewed first.
-    Selection(Selection),
+    Selected(Selected),
     /// A reviewer included an entity detection missed.
-    Include(Include<M>),
+    Included(Included<M>),
     /// A reviewer's decision about an entity: a verdict on whether it is
     /// redacted, or an amendment of its label or location.
     Manual(Manual<M>),
     /// Something became known about the entity besides a decision: where it
     /// sits in another coordinate space, where it matched in the text it was
     /// recognized in, its language, or its coreference cluster.
-    Annotation(Annotation<M>),
+    Annotated(Annotated<M>),
 }
 
 impl<M: Modality> AuditKind<M> {
@@ -124,44 +124,44 @@ impl<M: Modality> AuditKind<M> {
                 out.byte(Model::<M>::TAG);
                 m.hash_into(out);
             }
-            Self::Fusion(d) => {
-                out.byte(Fusion::<M>::TAG);
+            Self::Fused(d) => {
+                out.byte(Fused::<M>::TAG);
                 d.hash_into(out);
             }
-            Self::Conflict(c) => {
-                out.byte(Conflict::TAG);
+            Self::Resolved(c) => {
+                out.byte(Resolved::TAG);
                 c.hash_into(out);
             }
             Self::Contested(c) => {
                 out.byte(Contested::TAG);
                 c.hash_into(out);
             }
-            Self::Calibration(c) => {
-                out.byte(Calibration::TAG);
+            Self::Calibrated(c) => {
+                out.byte(Calibrated::TAG);
                 c.hash_into(out);
             }
-            Self::Refinement(r) => {
-                out.byte(Refinement::<M>::TAG);
+            Self::Refined(r) => {
+                out.byte(Refined::<M>::TAG);
                 r.hash_into(out);
             }
-            Self::Redaction(r) => {
-                out.byte(Redaction::<M>::TAG);
+            Self::Redacted(r) => {
+                out.byte(Redacted::<M>::TAG);
                 r.hash_into(out);
             }
-            Self::Selection(s) => {
-                out.byte(Selection::TAG);
+            Self::Selected(s) => {
+                out.byte(Selected::TAG);
                 s.hash_into(out);
             }
-            Self::Include(i) => {
-                out.byte(Include::<M>::TAG);
+            Self::Included(i) => {
+                out.byte(Included::<M>::TAG);
                 i.hash_into(out);
             }
             Self::Manual(m) => {
                 out.byte(Manual::<M>::TAG);
                 m.hash_into(out);
             }
-            Self::Annotation(a) => {
-                out.byte(Annotation::<M>::TAG);
+            Self::Annotated(a) => {
+                out.byte(Annotated::<M>::TAG);
                 a.hash_into(out);
             }
         }
@@ -190,15 +190,15 @@ impl<M: Modality> From<Flagged<M>> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Fusion<M>> for AuditKind<M> {
-    fn from(payload: Fusion<M>) -> Self {
-        Self::Fusion(payload)
+impl<M: Modality> From<Fused<M>> for AuditKind<M> {
+    fn from(payload: Fused<M>) -> Self {
+        Self::Fused(payload)
     }
 }
 
-impl<M: Modality> From<Conflict> for AuditKind<M> {
-    fn from(payload: Conflict) -> Self {
-        Self::Conflict(payload)
+impl<M: Modality> From<Resolved> for AuditKind<M> {
+    fn from(payload: Resolved) -> Self {
+        Self::Resolved(payload)
     }
 }
 
@@ -208,33 +208,33 @@ impl<M: Modality> From<Contested> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Calibration> for AuditKind<M> {
-    fn from(payload: Calibration) -> Self {
-        Self::Calibration(payload)
+impl<M: Modality> From<Calibrated> for AuditKind<M> {
+    fn from(payload: Calibrated) -> Self {
+        Self::Calibrated(payload)
     }
 }
 
-impl<M: Modality> From<Refinement<M>> for AuditKind<M> {
-    fn from(payload: Refinement<M>) -> Self {
-        Self::Refinement(payload)
+impl<M: Modality> From<Refined<M>> for AuditKind<M> {
+    fn from(payload: Refined<M>) -> Self {
+        Self::Refined(payload)
     }
 }
 
-impl<M: Modality> From<Redaction<M>> for AuditKind<M> {
-    fn from(payload: Redaction<M>) -> Self {
-        Self::Redaction(payload)
+impl<M: Modality> From<Redacted<M>> for AuditKind<M> {
+    fn from(payload: Redacted<M>) -> Self {
+        Self::Redacted(payload)
     }
 }
 
-impl<M: Modality> From<Selection> for AuditKind<M> {
-    fn from(payload: Selection) -> Self {
-        Self::Selection(payload)
+impl<M: Modality> From<Selected> for AuditKind<M> {
+    fn from(payload: Selected) -> Self {
+        Self::Selected(payload)
     }
 }
 
-impl<M: Modality> From<Include<M>> for AuditKind<M> {
-    fn from(payload: Include<M>) -> Self {
-        Self::Include(payload)
+impl<M: Modality> From<Included<M>> for AuditKind<M> {
+    fn from(payload: Included<M>) -> Self {
+        Self::Included(payload)
     }
 }
 
@@ -244,8 +244,8 @@ impl<M: Modality> From<Manual<M>> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Annotation<M>> for AuditKind<M> {
-    fn from(payload: Annotation<M>) -> Self {
-        Self::Annotation(payload)
+impl<M: Modality> From<Annotated<M>> for AuditKind<M> {
+    fn from(payload: Annotated<M>) -> Self {
+        Self::Annotated(payload)
     }
 }

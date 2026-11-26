@@ -20,7 +20,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::audit::{Annotation, AuditEvent, AuditHash, AuditHasher, AuditLog, Fusion, Manual};
+use self::audit::{Annotated, AuditEvent, AuditHash, AuditHasher, AuditLog, Fused, Manual};
 #[cfg(feature = "fixtures")]
 use self::audit::{Pattern, PatternRule};
 pub use self::birth::{Birth, BirthKind};
@@ -225,19 +225,19 @@ impl<M: Modality> Entity<M> {
     /// For moving a finding between coordinate spaces that name the same
     /// content: from a chunk into its document, or a mark to the span of text
     /// it covers. It changes where the coordinates are measured from, not
-    /// what the entity covers, so it is recorded as an [`Annotation`], by
-    /// `"lift"`; a location it already has records nothing. A change of what
+    /// what the entity covers, so it is recorded as an [`Annotated`] event,
+    /// by `"lift"`; a location it already has records nothing. A change of what
     /// it covers is a decision, recorded by
     /// [`record_manual`](Self::record_manual) or [`fuse`](Self::fuse).
     pub fn lift(&mut self, location: M::Location) {
         if location.hash() != self.state.location.hash() {
-            self.annotate("lift", Annotation::new().with_location(location));
+            self.annotate("lift", Annotated::new().with_location(location));
         }
     }
 
     /// Record what `source` found out about the entity besides a decision, as
-    /// an [`Annotation`] event, and apply it.
-    pub fn annotate(&mut self, source: impl Into<HipStr<'static>>, annotation: Annotation<M>) {
+    /// an [`Annotated`] event, and apply it.
+    pub fn annotate(&mut self, source: impl Into<HipStr<'static>>, annotation: Annotated<M>) {
         self.record(AuditEvent::new(source, self.state.confidence, annotation));
     }
 
@@ -249,7 +249,7 @@ impl<M: Modality> Entity<M> {
     /// absorbed entities keep their own trails, so each stays a whole entity.
     /// An event the trails share is kept once, and a tip they share is joined
     /// once.
-    pub fn fuse(&mut self, absorbed: &[Entity<M>], fusion: Fusion<M>, confidence: Confidence) {
+    pub fn fuse(&mut self, absorbed: &[Entity<M>], fusion: Fused<M>, confidence: Confidence) {
         // Trails that share events (two findings of one recognition) merge
         // each shared event once, and join each shared tip once.
         let mut seen: HashSet<AuditHash> =
@@ -289,34 +289,34 @@ impl<M: Modality> Entity<M> {
     ///
     /// The entity's confidence becomes the event's, and what the event
     /// records takes effect: a reviewer's [`Manual`] relabel or relocation
-    /// sets the field it names, a [`Fusion`] the fused location, and an
-    /// [`Annotation`] each field it sets. Every other event records what
+    /// sets the field it names, a [`Fused`] event the fused location, and an
+    /// [`Annotated`] event each field it sets. Every other event records what
     /// happened to the entity without changing what it says; a recognition or
     /// an inclusion after the birth is provenance, and changes nothing.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
-    /// [`Fusion`]: crate::entity::audit::Fusion
+    /// [`Fused`]: crate::entity::audit::Fused
     pub fn record(&mut self, event: AuditEvent<M>) {
         self.state.apply(&event);
         self.audit.record(event);
     }
 
     /// Record the language of the entity's surrounding text, as an
-    /// [`Annotation`] by whoever recorded the entity's latest event.
+    /// [`Annotated`] event by whoever recorded the entity's latest event.
     #[must_use]
     pub fn with_language(self, language: LanguageTag) -> Self {
-        self.annotated(Annotation::new().with_language(language))
+        self.annotated(Annotated::new().with_language(language))
     }
 
-    /// Record the entity's coreference cluster, as an [`Annotation`] by
+    /// Record the entity's coreference cluster, as an [`Annotated`] event by
     /// whoever recorded the entity's latest event.
     #[must_use]
     pub fn with_coref(self, coref: EntityCoRef) -> Self {
-        self.annotated(Annotation::new().with_coref(coref))
+        self.annotated(Annotated::new().with_coref(coref))
     }
 
     /// Record `annotation` by the source of the entity's latest event.
-    fn annotated(mut self, annotation: Annotation<M>) -> Self {
+    fn annotated(mut self, annotation: Annotated<M>) -> Self {
         let source = self
             .audit
             .events()
@@ -367,11 +367,11 @@ impl<M: Modality> Entity<M> {
         self.audit.is_suppressed()
     }
 
-    /// Whether an operator has hidden this entity, a [`Redaction`] event is on
+    /// Whether an operator has hidden this entity, a [`Redacted`] event is on
     /// its [`audit`](Self::audit) trail. A convenience for
     /// [`audit().is_redacted()`](crate::entity::audit::AuditLog::is_redacted).
     ///
-    /// [`Redaction`]: crate::entity::audit::AuditKind::Redaction
+    /// [`Redacted`]: crate::entity::audit::AuditKind::Redacted
     #[must_use]
     pub fn is_redacted(&self) -> bool {
         self.audit.is_redacted()
@@ -405,7 +405,7 @@ mod tests {
     use std::slice;
 
     use super::audit::{
-        Attribution, Include, ManualIntent, Pattern, PatternRule, Redaction, RuleMatch, Selection,
+        Attribution, Included, ManualIntent, Pattern, PatternRule, Redacted, RuleMatch, Selected,
     };
     use super::*;
     use crate::ErrorKind;
@@ -443,7 +443,7 @@ mod tests {
         let mut fused = survivor.clone();
         fused.fuse(
             slice::from_ref(&other),
-            Fusion::new("max", loc.clone()),
+            Fused::new("max", loc.clone()),
             conf,
         );
 
@@ -613,7 +613,7 @@ mod tests {
         entity.record(AuditEvent::new(
             "reviewer-7",
             Confidence::MAX,
-            Include::new("ORG", TextLocation::inline(0..3)),
+            Included::new("ORG", TextLocation::inline(0..3)),
         ));
         assert_eq!((entity.label(), entity.location()), (&label, &location));
         assert_eq!(entity.confidence(), Confidence::MAX);
@@ -658,7 +658,7 @@ mod tests {
         let absorbed = [base.clone(), base.clone()];
         let conf = base.state.confidence;
         let location = base.state.location.clone();
-        base.fuse(&absorbed, Fusion::new("max", location), conf);
+        base.fuse(&absorbed, Fused::new("max", location), conf);
 
         assert_eq!(base.audit.events().len(), 2, "one birth, one fusion");
         assert!(base.audit.verify().is_ok());
@@ -672,7 +672,7 @@ mod tests {
         let other = text_entity();
         let conf = base.state.confidence;
         let location = base.state.location.clone();
-        base.fuse(slice::from_ref(&other), Fusion::new("max", location), conf);
+        base.fuse(slice::from_ref(&other), Fused::new("max", location), conf);
 
         assert_eq!(other.audit.events().len(), 1);
         let read = Entity::from_trail(other.id, other.audit.clone()).unwrap();
@@ -685,12 +685,12 @@ mod tests {
     #[test]
     fn a_redaction_applies_a_selection_on_its_own_line() {
         let pick = |entity: &mut Entity<Text>| {
-            let selection = Selection::new(
+            let selection = Selected::new(
                 ComponentId::new("mask", "1"),
                 LeakProfile::Partial,
                 RuleMatch::Fallback,
             );
-            entity.record(AuditEvent::selection(selection, Confidence::MAX));
+            entity.record(AuditEvent::selected(selection, Confidence::MAX));
             entity.audit.selection_event().unwrap().hash()
         };
         let mut absorbed = text_entity();
@@ -699,12 +699,12 @@ mod tests {
         let location = base.state.location.clone();
         base.fuse(
             &[absorbed],
-            Fusion::new("max", location.clone()),
+            Fused::new("max", location.clone()),
             Confidence::MAX,
         );
-        base.record(AuditEvent::redaction(
+        base.record(AuditEvent::redacted(
             "mask",
-            Redaction::new(theirs, location),
+            Redacted::new(theirs, location),
             Confidence::MAX,
         ));
 
@@ -728,7 +728,7 @@ mod tests {
                 entity.state.location.clone(),
             ),
         ));
-        entity.record(AuditEvent::fusion(
+        entity.record(AuditEvent::fused(
             "max",
             entity.state.confidence,
             moved.clone(),

@@ -1,7 +1,7 @@
 //! [`FuseLayer`]: fuse each cluster of the same finding into one entity.
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::Fusion;
+use elide_core::entity::audit::Fused;
 use elide_core::modality::{Modality, ModalityLocation};
 
 use super::group::{GroupPredicate, SameLabel};
@@ -139,7 +139,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
         });
         base.fuse(
             &absorbed,
-            Fusion::new(self.scoring.name(), location),
+            Fused::new(self.scoring.name(), location),
             confidence,
         );
         slots[base_index] = Some(base);
@@ -239,7 +239,7 @@ mod tests {
         let fusions: Vec<_> = audit
             .events()
             .iter()
-            .filter(|event| matches!(event.kind, AuditKind::Fusion(_)))
+            .filter(|event| matches!(event.kind, AuditKind::Fused(_)))
             .collect();
         assert_eq!(fusions.len(), 1);
         assert_eq!(fusions[0].parents().len(), 3);

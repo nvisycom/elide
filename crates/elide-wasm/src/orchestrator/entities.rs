@@ -353,11 +353,11 @@ fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
 fn redaction<M: Modality>(entity: &RustEntity<M>) -> Option<Redaction> {
     let events = entity.audit().events();
     let applied = events.iter().rev().find_map(|event| match &event.kind {
-        AuditKind::Redaction(redaction) => Some(redaction.selection),
+        AuditKind::Redacted(redaction) => Some(redaction.selection),
         _ => None,
     })?;
     events.iter().find_map(|event| match &event.kind {
-        AuditKind::Selection(selection) if event.hash() == applied => Some(Redaction {
+        AuditKind::Selected(selection) if event.hash() == applied => Some(Redaction {
             operator: selection.operator.name.to_string(),
             leak_profile: selection.leak_profile.into(),
         }),

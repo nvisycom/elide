@@ -1,7 +1,7 @@
 //! [`Languages`]: a borrowed view over a call's asserted + detected languages.
 
 use crate::entity::Entity;
-use crate::entity::audit::Annotation;
+use crate::entity::audit::Annotated;
 use crate::modality::Modality;
 use crate::primitive::{LanguageClaim, LanguageTag};
 
@@ -144,7 +144,7 @@ impl<'a> Languages<'a> {
             if let Some(claim) = resolved
                 && entity.language() != Some(&claim.language)
             {
-                let annotation = Annotation::new().with_language(claim.language.clone());
+                let annotation = Annotated::new().with_language(claim.language.clone());
                 entity.annotate("languages", annotation);
             }
         }

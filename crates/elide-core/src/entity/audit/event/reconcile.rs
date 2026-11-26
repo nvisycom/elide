@@ -1,7 +1,7 @@
 //! Reconciliation payloads: what happened to an entity as detections were
-//! combined and scored, fusion ([`Fusion`]), cross-label arbitration
-//! ([`Conflict`] / [`Contested`]), confidence rescaling ([`Calibration`]), and
-//! context-keyword boosting ([`Refinement`]).
+//! combined and scored, fusion ([`Fused`]), cross-label arbitration
+//! ([`Resolved`] / [`Contested`]), confidence rescaling ([`Calibrated`]), and
+//! context-keyword boosting ([`Refined`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -29,10 +29,10 @@ use crate::primitive::Confidence;
     feature = "schema",
     schemars(
         bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
-        rename = "{M}Fusion"
+        rename = "{M}Fused"
     )
 )]
-pub struct Fusion<M: Modality> {
+pub struct Fused<M: Modality> {
     /// Name of the fusion strategy that combined them.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub strategy: HipStr<'static>,
@@ -40,7 +40,7 @@ pub struct Fusion<M: Modality> {
     pub location: M::Location,
 }
 
-impl<M: Modality> Fusion<M> {
+impl<M: Modality> Fused<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 2;
 
@@ -66,7 +66,7 @@ impl<M: Modality> Fusion<M> {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Conflict {
+pub struct Resolved {
     /// The label of the detection that lost arbitration.
     pub competing_label: LabelRef,
     /// The loser's confidence at resolution time.
@@ -76,7 +76,7 @@ pub struct Conflict {
     pub resolved_by: HipStr<'static>,
 }
 
-impl Conflict {
+impl Resolved {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 3;
 
@@ -149,12 +149,12 @@ impl Contested {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Calibration {
+pub struct Calibrated {
     /// Multiplier applied.
     pub factor: f64,
 }
 
-impl Calibration {
+impl Calibrated {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 5;
 
@@ -175,10 +175,10 @@ impl Calibration {
     feature = "schema",
     schemars(
         bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
-        rename = "{M}Refinement"
+        rename = "{M}Refined"
     )
 )]
-pub struct Refinement<M: Modality> {
+pub struct Refined<M: Modality> {
     /// Keyword that fired the boost.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub keyword: HipStr<'static>,
@@ -197,7 +197,7 @@ pub struct Refinement<M: Modality> {
     pub location: Option<M::Location>,
 }
 
-impl<M: Modality> Refinement<M> {
+impl<M: Modality> Refined<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 6;
 

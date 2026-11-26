@@ -82,7 +82,7 @@ async fn txt_detects_and_redacts() -> Result<()> {
             .expect("an applied entity has at least one event");
         assert_matches!(
             last.kind,
-            AuditKind::Redaction(_),
+            AuditKind::Redacted(_),
             "the final provenance event of a redacted entity is its redaction, got {:?}",
             last.kind
         );

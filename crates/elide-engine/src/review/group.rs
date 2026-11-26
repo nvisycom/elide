@@ -1,7 +1,7 @@
 //! [`EditGroup`]: one part's edits, a `Vec<Edit<M>>` behind one type, each
 //! checked against a policy and applied in turn.
 
-use elide_core::entity::audit::{Include, Manual, ManualIntent};
+use elide_core::entity::audit::{Included, Manual, ManualIntent};
 use elide_core::entity::{Birth, Entity};
 use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::primitive::Confidence;
@@ -124,7 +124,7 @@ impl PartReview<'_> {
                 label,
                 location,
             } => {
-                let included = Include {
+                let included = Included {
                     label: label.clone(),
                     location: location.clone(),
                     attribution: edit.because.clone(),

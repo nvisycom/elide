@@ -45,7 +45,7 @@ place:
 
 ```rust
 use elide::entity::Birth;
-use elide::entity::audit::Include;
+use elide::entity::audit::Included;
 use elide::modality::text::TextLocation;
 use elide::prelude::operators::*;
 use elide::prelude::*;
@@ -78,7 +78,7 @@ Anonymizer::<Text>::new()
 
 // Later, by whoever holds the key: an entity for each ciphertext in the
 // redacted document, under the label it was encrypted with, included by them.
-let located = Include::new(builtins::EMAIL_ADDRESS.to_ref(), TextLocation::inline(ciphertext));
+let located = Included::new(builtins::EMAIL_ADDRESS.to_ref(), TextLocation::inline(ciphertext));
 let encrypted: Entity<Text> = Entity::new(Birth::new("key-holder", Confidence::MAX, located));
 
 Deanonymizer::<Text>::new()

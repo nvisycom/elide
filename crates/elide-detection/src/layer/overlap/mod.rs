@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(*out.kept[0].label(), LabelRef::new("PERSON_NAME"));
         assert!(has_kind(&out.kept[0], |k| matches!(
             k,
-            AuditKind::Conflict(c) if c.competing_label == LabelRef::new("ORGANIZATION")
+            AuditKind::Resolved(c) if c.competing_label == LabelRef::new("ORGANIZATION")
         )));
     }
 
@@ -273,7 +273,7 @@ mod tests {
                 assert_eq!(*out.kept[0].label(), LabelRef::new("ORGANIZATION"));
                 assert!(has_kind(&out.kept[0], |k| matches!(
                     k,
-                    AuditKind::Conflict(c) if c.competing_label == LabelRef::new("PERSON_NAME")
+                    AuditKind::Resolved(c) if c.competing_label == LabelRef::new("PERSON_NAME")
                 )));
             }
         }

@@ -21,7 +21,7 @@ pub use self::tokens::{Token, Tokens};
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
 use crate::entity::Entity;
-use crate::entity::audit::Annotation;
+use crate::entity::audit::Annotated;
 
 /// The text modality: located by byte range, redacted by replacement text.
 ///
@@ -50,10 +50,11 @@ impl Entity<Text> {
     /// coordinate space from the source document, so `recognized_range` stays put
     /// as the artifact key. The birth event keeps the recognizer's own
     /// window-local view, which is genuinely where the match was reported, and
-    /// the shift is recorded after it as an [`Annotation`], by `"offset"`.
+    /// the shift is recorded after it as an [`Annotated`] event, by
+    /// `"offset"`.
     #[must_use]
     pub fn offset(mut self, delta: usize) -> Option<Self> {
-        let mut annotation = Annotation::new().with_location(self.location().offset(delta)?);
+        let mut annotation = Annotated::new().with_location(self.location().offset(delta)?);
         if let Some(range) = self.recognized_range() {
             annotation = annotation.with_recognized_range(range.start + delta..range.end + delta);
         }

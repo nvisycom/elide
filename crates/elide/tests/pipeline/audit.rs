@@ -4,7 +4,7 @@
 use std::assert_matches;
 
 use elide::entity::audit::{
-    AuditEvent, AuditKind, AuditLog, Pattern, PatternRule, Redaction, RuleMatch, Selection,
+    AuditEvent, AuditKind, AuditLog, Pattern, PatternRule, Redacted, RuleMatch, Selected,
 };
 use elide::entity::{Birth, Entity, LabelRef};
 use elide::modality::text::{Text, TextLocation};
@@ -16,7 +16,7 @@ use elide::redaction::LeakProfile;
 fn redacted_entity(label: &str) -> Entity<Text> {
     let location = TextLocation::inline(0..5);
     let conf = Confidence::new(0.9).unwrap();
-    let selection = Selection::new(
+    let selection = Selected::new(
         ComponentId::new("remove", "1.0.0"),
         LeakProfile::Irrecoverable,
         RuleMatch::Fallback,
@@ -26,11 +26,11 @@ fn redacted_entity(label: &str) -> Entity<Text> {
         conf,
         Pattern::new(LabelRef::new(label), location, PatternRule::default()),
     ));
-    entity.record(AuditEvent::selection(selection, conf));
+    entity.record(AuditEvent::selected(selection, conf));
     let picked = entity.audit().selection_event().unwrap().hash();
-    entity.record(AuditEvent::redaction(
+    entity.record(AuditEvent::redacted(
         "remove",
-        Redaction::new(picked, TextLocation::inline(0..5)),
+        Redacted::new(picked, TextLocation::inline(0..5)),
         conf,
     ));
     entity
@@ -44,8 +44,8 @@ fn entity_audit_trail_is_reachable_and_verifies() {
     let events = entity.audit().events();
     assert_eq!(events.len(), 3);
     assert_matches!(events[0].kind, AuditKind::Pattern(_));
-    assert_matches!(events[1].kind, AuditKind::Selection(_));
-    assert_matches!(events[2].kind, AuditKind::Redaction(_));
+    assert_matches!(events[1].kind, AuditKind::Selected(_));
+    assert_matches!(events[2].kind, AuditKind::Redacted(_));
     // The redaction follows the pick (its single parent) and names it.
     assert_eq!(events[2].parents(), [events[1].hash()]);
     assert_eq!(

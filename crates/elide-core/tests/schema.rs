@@ -167,3 +167,49 @@ fn generic_schema_name_carries_modality_prefix() {
     assert_eq!(Entity::<Text>::schema_name(), "TextEntity");
     assert_eq!(AuditLog::<Text>::schema_name(), "TextAuditLog");
 }
+
+/// An audit payload's schema is named for the event, as a participle where
+/// something happened to the entity, so it does not collide with a caller's
+/// own type of a common name (`TextRedaction`, `Selection`, `Calibration`).
+#[test]
+fn audit_payload_schemas_are_named_for_their_event() {
+    use elide_core::entity::audit::{
+        Annotated, Calibrated, Contested, Flagged, Fused, Included, Manual, Model, Pattern,
+        Redacted, Refined, Resolved, Selected,
+    };
+    use schemars::JsonSchema;
+
+    let names = [
+        Pattern::<Text>::schema_name(),
+        Model::<Text>::schema_name(),
+        Flagged::<Text>::schema_name(),
+        Fused::<Text>::schema_name(),
+        Resolved::schema_name(),
+        Contested::schema_name(),
+        Calibrated::schema_name(),
+        Refined::<Text>::schema_name(),
+        Redacted::<Text>::schema_name(),
+        Selected::schema_name(),
+        Included::<Text>::schema_name(),
+        Manual::<Text>::schema_name(),
+        Annotated::<Text>::schema_name(),
+    ];
+    assert_eq!(
+        names.map(|name| name.into_owned()),
+        [
+            "TextPattern",
+            "TextModel",
+            "TextFlagged",
+            "TextFused",
+            "Resolved",
+            "Contested",
+            "Calibrated",
+            "TextRefined",
+            "TextRedacted",
+            "Selected",
+            "TextIncluded",
+            "TextManual",
+            "TextAnnotated",
+        ]
+    );
+}
