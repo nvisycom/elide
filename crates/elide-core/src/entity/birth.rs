@@ -4,10 +4,7 @@
 use hipstr::HipStr;
 use uuid::Uuid;
 
-use super::LabelRef;
-use super::audit::{
-    Attribution, AuditEvent, AuditKind, Flagged, Manual, ManualIntent, Model, Pattern,
-};
+use super::audit::{AuditEvent, AuditKind, Flagged, Include, Model, Pattern};
 use super::state::State;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
@@ -70,14 +67,7 @@ impl<M: Modality> BirthKind<M> {
             Self::Pattern(p) => p.into(),
             Self::Model(m) => m.into(),
             Self::Flagged(f) => f.into(),
-            Self::Include(include) => Manual {
-                intent: ManualIntent::Include {
-                    label: include.label,
-                },
-                location: include.location,
-                attribution: include.attribution,
-            }
-            .into(),
+            Self::Include(i) => i.into(),
         }
     }
 }
@@ -103,35 +93,5 @@ impl<M: Modality> From<Flagged<M>> for BirthKind<M> {
 impl<M: Modality> From<Include<M>> for BirthKind<M> {
     fn from(include: Include<M>) -> Self {
         Self::Include(include)
-    }
-}
-
-/// A reviewer's inclusion: `label` at `location`, one detection missed,
-/// recorded as an [`Include`](ManualIntent::Include) decision.
-#[derive(Debug, Clone)]
-pub struct Include<M: Modality> {
-    /// The label of what was included.
-    pub label: LabelRef,
-    /// Where it sits.
-    pub location: M::Location,
-    /// Why it was included.
-    pub attribution: Option<Attribution>,
-}
-
-impl<M: Modality> Include<M> {
-    /// An inclusion of `label` at `location`, with no reason given.
-    pub fn new(label: impl Into<LabelRef>, location: M::Location) -> Self {
-        Self {
-            label: label.into(),
-            location,
-            attribution: None,
-        }
-    }
-
-    /// Give the reason for the inclusion.
-    #[must_use]
-    pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {
-        self.attribution = Some(attribution.into());
-        self
     }
 }

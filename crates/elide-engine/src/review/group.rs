@@ -1,8 +1,8 @@
 //! [`EditGroup`]: one part's edits, a `Vec<Edit<M>>` behind one type, each
 //! checked against a policy and applied in turn.
 
-use elide_core::entity::audit::Manual;
-use elide_core::entity::{Birth, Entity, Include};
+use elide_core::entity::audit::{Include, Manual, ManualIntent};
+use elide_core::entity::{Birth, Entity};
 use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::primitive::Confidence;
 use elide_core::{Error, Result};
@@ -110,21 +110,15 @@ impl PartReview<'_> {
         let by = self.reviewer.by;
         let targets = targets(self.part, entities, &edit.change)?;
         let narrowed = narrowed(entities, &targets, &edit.change);
-        let decision = edit.change.intent();
         self.reviewer.policy.check(&ProposedEdit {
             part: self.part,
-            decision: &decision,
+            decision: edit.change.decision(),
             narrowed: &narrowed,
             by,
             because: edit.because.as_ref(),
         })?;
 
-        let manual = |location: M::Location| Manual {
-            intent: decision.clone(),
-            location,
-            attribution: edit.because.clone(),
-        };
-        match &edit.change {
+        let intent = match &edit.change {
             Change::Include {
                 entity: id,
                 label,
@@ -137,17 +131,27 @@ impl PartReview<'_> {
                 };
                 let birth = Birth::new(by.to_owned(), Confidence::MAX, included).with_id(*id);
                 entities.push(Entity::new(birth));
+                return Ok(());
             }
-            change => {
-                for i in targets {
-                    let at = match change {
-                        Change::SuppressWithin { region } => region.clone(),
-                        Change::Relocate { location, .. } => location.clone(),
-                        _ => entities[i].location().clone(),
-                    };
-                    entities[i].record_manual(manual(at), by)?;
-                }
-            }
+            Change::Suppress { .. } | Change::SuppressWithin { .. } => ManualIntent::Suppress,
+            Change::Confirm { .. } => ManualIntent::Confirm,
+            Change::Relabel { label, .. } => ManualIntent::Relabel {
+                label: label.clone(),
+            },
+            Change::Relocate { .. } => ManualIntent::Relocate,
+        };
+        for i in targets {
+            let location = match &edit.change {
+                Change::SuppressWithin { region } => region.clone(),
+                Change::Relocate { location, .. } => location.clone(),
+                _ => entities[i].location().clone(),
+            };
+            let manual = Manual {
+                intent: intent.clone(),
+                location,
+                attribution: edit.because.clone(),
+            };
+            entities[i].record_manual(manual, by);
         }
         Ok(())
     }

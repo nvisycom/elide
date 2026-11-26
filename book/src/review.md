@@ -85,9 +85,10 @@ a review takes the edits for one part, which can:
   it.
 
 `review` applies the edits in order. Each is recorded on the entity it
-touches as a manual audit event, with who made it (`by`), why (`because`),
-and what it set: the label an include or relabel gave, the location an
-include or relocation moved the entity to, the region a suppression covered.
+touches, with who made it (`by`) and why (`because`): an include as the event
+that starts its entity, with the label and location it gave, and every other
+edit as a manual audit event with what it set, the label a relabel gave, the
+location a relocation moved the entity to, the region a verdict covered.
 A human decision is never mistaken for an automatic one, and the trail says
 what the entity became. Afterwards, `suppressed` and `unsuppressed` on a part
 list which entities redaction leaves alone and which it considers.
@@ -102,17 +103,17 @@ content unredacted.
 
 ## What a review may do
 
-An include or a confirmation only adds to what is redacted. Every other edit
-can leave content unredacted that would have been hidden: a suppression, a
-relabel (another label may get a weaker operator), a relocation (a rule may
-choose its operator by where an entity sits). The orchestrator's `ReviewPolicy` sees
-every edit, and decides on those. It is shown each edit as a
-`ProposedEdit`: the decision it records, the entities whose redaction it
-narrows, and who made it and why. Each standard policy checks one thing:
-`Protect` keeps labels from being narrowed, and `RequireReason` wants every
-narrowing edit explained. `and` combines them, and a deployment's own rules
-are a `ReviewPolicy` too, or a closure. The default accepts every edit.
-Letting only some reviewers narrow, say:
+An include or a confirmation only adds to what is redacted. Every other edit can
+leave content unredacted that would have been hidden: a suppression, a relabel
+(another label may get a weaker operator), a relocation (a rule may choose its
+operator by where an entity sits). The orchestrator's `ReviewPolicy` sees every
+edit, and decides on those. It is shown each edit as a `ProposedEdit`: what it
+does (a `Decision`), the entities whose redaction it narrows, and who made it
+and why. Each standard policy checks one thing: `Protect` keeps labels from
+being narrowed, and `RequireReason` wants every narrowing edit explained. `and`
+combines them, and a deployment's own rules are a `ReviewPolicy` too, or a
+closure. The default accepts every edit. Letting only some reviewers narrow,
+say:
 
 ```rust,ignore
 let narrowers = ["reviewer-7", "lead-2"];

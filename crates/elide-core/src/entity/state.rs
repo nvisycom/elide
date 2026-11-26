@@ -81,10 +81,7 @@ impl<M: Modality> State<M> {
             AuditKind::Pattern(p) => (&p.label, &p.location, &p.recognized_range),
             AuditKind::Model(m) => (&m.label, &m.location, &m.recognized_range),
             AuditKind::Flagged(f) => (&f.label, &f.location, &None),
-            AuditKind::Manual(manual) => match &manual.intent {
-                ManualIntent::Include { label } => (label, &manual.location, &None),
-                _ => return None,
-            },
+            AuditKind::Include(i) => (&i.label, &i.location, &None),
             _ => return None,
         };
         let mut state = Self::new(label.clone(), location.clone(), event.confidence);
@@ -102,7 +99,7 @@ impl<M: Modality> State<M> {
             AuditKind::Manual(manual) => match &manual.intent {
                 ManualIntent::Relabel { label } => self.label = label.clone(),
                 ManualIntent::Relocate => self.location = manual.location.clone(),
-                ManualIntent::Include { .. } | ManualIntent::Suppress | ManualIntent::Confirm => {}
+                ManualIntent::Suppress | ManualIntent::Confirm => {}
             },
             AuditKind::Fusion(fusion) => self.location = fusion.location.clone(),
             AuditKind::Annotation(annotation) => {

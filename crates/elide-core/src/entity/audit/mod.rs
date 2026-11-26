@@ -16,8 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    Annotation, AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Manual,
-    ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
+    Annotation, AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Include,
+    Manual, ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
 };
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
@@ -519,10 +519,12 @@ mod tests {
             Redaction::new(selection, at.clone()),
             conf,
         )));
+        log.record(fixed(AuditEvent::new(
+            "reviewer",
+            conf,
+            Include::new("ssn", at.clone()).because(why.clone()),
+        )));
         let decisions = [
-            ManualIntent::Include {
-                label: LabelRef::new("ssn"),
-            },
             ManualIntent::Relabel {
                 label: LabelRef::new("iban"),
             },
@@ -572,12 +574,12 @@ mod tests {
         "c6c28ab2a4c3ab9a9f5aa14e6b564f5038b3d537d77ad8444593c1f5b812caae", // refinement
         "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // selection
         "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // redaction
-        "b057db8cd53a6ee9847d91cd320f1f5889ce05e201286a436a97aba412f7ed45", // include
-        "ec50db224d5207b2100d0e86d27988a13672af22a869d09c9b10207726e52af3", // relabel
-        "14b912e2098b07533247c8cad6607132988ac4f050efe0a4b9d4a874347a221d", // relocate
-        "99d30495883350f35a8549d305725e5c32a91e5bea86ad25a7ee24f571c0e1cd", // suppress
-        "8bd68609252e09d12352d79ca8c76568bee9aa9e3bd56746e2541ff3d4140773", // confirm
-        "54d40f6dc389d8f75df31d0772cca9e2420c13227c883f85d383899ab9fb5b6b", // annotation
+        "526b28ea57a81cd85890ce2aee071d84d302cd530c2164289ddc0044f2681eb1", // include
+        "e6b532659e85596add3c31ea43fa44143695fc4d647b650d3bd7de78ed046cbb", // relabel
+        "e6862a908b9631804d3e7f5ef8c3a0baab971ed1eb5269b3ee3f74db7ad20d3b", // relocate
+        "4557866b6640890495e35d31579c3fe7b036db68532cde8a89183d865ff02612", // suppress
+        "db893bbe18a1a0393885b992db47001107bf6f60bdaa9f381cd5d7837c38059d", // confirm
+        "91f2510110ac32be5f6689a0a7e3644beda54b2298c9c97a7aad9dd6cd777753", // annotation
     ];
 
     /// Editing any recorded payload field breaks verification.

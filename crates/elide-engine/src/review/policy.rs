@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::{Attribution, ManualIntent};
+use elide_core::entity::audit::Attribution;
 use elide_core::{Error, Result};
 use uuid::Uuid;
 
@@ -73,14 +73,14 @@ impl<A: ReviewPolicy, B: ReviewPolicy> ReviewPolicy for And<A, B> {
 pub struct ProposedEdit<'a> {
     /// The part the edit changes.
     pub part: &'a PartId,
-    /// The decision the edit records, with the label it sets: an include's or
-    /// a relabel's.
-    pub decision: &'a ManualIntent,
+    /// What the edit does, with the label it sets: an include's or a
+    /// relabel's.
+    pub decision: Decision<'a>,
     /// The entities whose redaction the edit narrows: each it touches, and
     /// each in an overlap cluster with one it touches, as entities that
     /// overlap, directly or through others, share one redaction under the
     /// safest operator among them. Any already suppressed is left out. Empty
-    /// for an include, which only adds to what is hidden.
+    /// for an include or a confirmation, which only add to what is hidden.
     pub narrowed: &'a [Narrowed],
     /// Who made the edit, as the deployment named them when it applied the
     /// review.
@@ -97,6 +97,29 @@ impl ProposedEdit<'_> {
     pub fn narrows(&self) -> bool {
         !self.narrowed.is_empty()
     }
+}
+
+/// What a [`ProposedEdit`] does, whatever its modality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision<'a> {
+    /// Add an entity of `label` detection missed.
+    Include {
+        /// The label of the entity.
+        label: &'a LabelRef,
+    },
+    /// Leave an entity unredacted.
+    Suppress,
+    /// Leave every entity a region contains unredacted.
+    SuppressWithin,
+    /// Redact an entity, even after an earlier suppression.
+    Confirm,
+    /// Give an entity another label.
+    Relabel {
+        /// Its new label.
+        label: &'a LabelRef,
+    },
+    /// Move an entity.
+    Relocate,
 }
 
 /// An entity whose redaction a [`ProposedEdit`] narrows.

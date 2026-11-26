@@ -4,10 +4,11 @@
 //! A review is the only way to change what a report says. It names the report
 //! it was made against by digest, carries edits rather than an edited report,
 //! and is applied by [`Orchestrator::review`], which checks each edit against
-//! the policy and records it on the entities it touches as a `Manual` audit
-//! event. So a review layer that never holds the report's authority, a
-//! browser, a review queue, can still say what it wants changed, and the
-//! trusted side decides what it accepts.
+//! the policy and records it on the entities it touches: an include as the
+//! event that starts its entity, every other edit as a `Manual` decision. So a
+//! review layer that never holds the report's authority, a browser, a review
+//! queue, can still say what it wants changed, and the trusted side decides
+//! what it accepts.
 //!
 //! [`Orchestrator::review`]: crate::Orchestrator::review
 
@@ -28,7 +29,9 @@ use uuid::Uuid;
 
 pub use self::edit::{Change, Edit};
 pub(crate) use self::group::{EditGroup, Reviewer};
-pub use self::policy::{And, Narrowed, ProposedEdit, Protect, RequireReason, ReviewPolicy};
+pub use self::policy::{
+    And, Decision, Narrowed, ProposedEdit, Protect, RequireReason, ReviewPolicy,
+};
 use crate::wire::{digest, part_fields};
 use crate::{PartId, Report};
 
@@ -367,16 +370,19 @@ mod tests {
         assert_eq!(entity.id(), id, "the entity has the id the review gave it");
         assert_eq!(*entity.label(), LabelRef::new("PERSON_NAME"));
         assert_eq!(entity.confidence(), Confidence::MAX);
+        let [birth] = entity.audit().events() else {
+            panic!("the inclusion is the entity's only event");
+        };
+        let AuditKind::Include(included) = &birth.kind else {
+            panic!("the entity starts from an inclusion");
+        };
+        assert_eq!(birth.source, "reviewer-7");
+        assert_eq!(included.location, TextLocation::inline(4..12));
         assert_eq!(
-            decisions(entity),
-            [(
-                "reviewer-7".to_owned(),
-                ManualIntent::Include {
-                    label: LabelRef::new("PERSON_NAME")
-                },
-                TextLocation::inline(4..12),
-            )]
+            included.attribution,
+            Some(Attribution::freeform("missed by detection").into())
         );
+        assert!(decisions(entity).is_empty());
         assert!(entity.audit().verify().is_ok());
         assert_eq!(part.unsuppressed().count(), 1);
     }
@@ -767,9 +773,7 @@ mod tests {
         let mut spared = at("EMAIL_ADDRESS", 0..5);
         let id = spared.id();
         let location = spared.location().clone();
-        spared
-            .record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer-7")
-            .unwrap();
+        spared.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer-7");
         let mut report = Report::new().insert_part::<Text>(doc(), vec![spared, at("SSN", 20..26)]);
         let mut review = Review::new(&report);
         review
@@ -804,7 +808,7 @@ mod tests {
         // refused only if it resolves against the relocated entity.
         let protect = Protect::labels(["SSN"]);
         let policy = |edit: &ProposedEdit<'_>| match edit.decision {
-            ManualIntent::Relocate => Ok(()),
+            Decision::Relocate => Ok(()),
             _ => protect.check(edit),
         };
         let err = review
@@ -1008,8 +1012,7 @@ mod tests {
         let mut ssn = at("SSN", 4..10);
         let id = ssn.id();
         let location = ssn.location().clone();
-        ssn.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer")
-            .unwrap();
+        ssn.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer");
         let mut report = Report::new().insert_part::<Text>(doc(), vec![ssn]);
         let mut review = Review::new(&report);
         review

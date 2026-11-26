@@ -1,17 +1,20 @@
 //! [`Edit`] and [`Change`]: one reviewer decision about one part of a report.
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::{Attribution, ManualIntent};
+use elide_core::entity::audit::Attribution;
 use elide_core::modality::{Modality, ModalityLocation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use super::policy::Decision;
 
 /// One reviewer decision about one part of a report: what it changes, and
 /// why. Who made it is named when the review is applied.
 ///
 /// Built through a [`ReviewPart`](super::ReviewPart), and applied by
 /// [`Orchestrator::review`](crate::Orchestrator::review), which records it on
-/// the entities it touches as a `Manual` audit event.
+/// the entities it touches: an include as the event that starts its entity,
+/// every other edit as a `Manual` decision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -102,18 +105,15 @@ pub enum Change<M: Modality> {
 }
 
 impl<M: Modality> Change<M> {
-    /// The reviewer decision the change records on the entities it touches.
-    pub(crate) fn intent(&self) -> ManualIntent {
+    /// What the change does, for the [`ReviewPolicy`](super::ReviewPolicy).
+    pub(crate) fn decision(&self) -> Decision<'_> {
         match self {
-            Self::Include { label, .. } => ManualIntent::Include {
-                label: label.clone(),
-            },
-            Self::Suppress { .. } | Self::SuppressWithin { .. } => ManualIntent::Suppress,
-            Self::Relabel { label, .. } => ManualIntent::Relabel {
-                label: label.clone(),
-            },
-            Self::Relocate { .. } => ManualIntent::Relocate,
-            Self::Confirm { .. } => ManualIntent::Confirm,
+            Self::Include { label, .. } => Decision::Include { label },
+            Self::Suppress { .. } => Decision::Suppress,
+            Self::SuppressWithin { .. } => Decision::SuppressWithin,
+            Self::Confirm { .. } => Decision::Confirm,
+            Self::Relabel { label, .. } => Decision::Relabel { label },
+            Self::Relocate { .. } => Decision::Relocate,
         }
     }
 
