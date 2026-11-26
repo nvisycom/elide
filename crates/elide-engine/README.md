@@ -22,8 +22,8 @@ catalog) is set once and shared by every pipeline, and a part whose modality
 has no pipeline passes through untouched.
 
 Detection and redaction are two phases, so the findings can be reviewed in
-between: suppress a false positive, include a missed one, relabel or relocate
-an entity, each recorded on the entity's audit trail.
+between: suppress a false positive, confirm a finding, include a missed one,
+relabel or relocate an entity, each recorded on the entity's audit trail.
 
 ```rust
 # use elide_core::entity::audit::{Pattern, PatternRule};

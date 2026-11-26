@@ -20,12 +20,10 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::audit::{
-    Annotation, AuditEvent, AuditHash, AuditHasher, AuditLog, Fusion, Manual, ManualIntent,
-};
+use self::audit::{Annotation, AuditEvent, AuditHash, AuditHasher, AuditLog, Fusion, Manual};
 #[cfg(feature = "fixtures")]
 use self::audit::{Pattern, PatternRule};
-pub use self::birth::{Birth, BirthKind, Include};
+pub use self::birth::{Birth, BirthKind};
 pub use self::coref::EntityCoRef;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 use self::state::State;
@@ -290,11 +288,11 @@ impl<M: Modality> Entity<M> {
     /// Record `event` on the audit trail, and apply what it decided.
     ///
     /// The entity's confidence becomes the event's, and what the event
-    /// records takes effect: a reviewer's [`Manual`] decision sets the label
-    /// or location it names, a [`Fusion`] the fused location, and an
+    /// records takes effect: a reviewer's [`Manual`] relabel or relocation
+    /// sets the field it names, a [`Fusion`] the fused location, and an
     /// [`Annotation`] each field it sets. Every other event records what
-    /// happened to the entity without changing what it says; a recognition
-    /// after the birth is provenance, and changes nothing.
+    /// happened to the entity without changing what it says; a recognition or
+    /// an inclusion after the birth is provenance, and changes nothing.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`Fusion`]: crate::entity::audit::Fusion
@@ -333,25 +331,25 @@ impl<M: Modality> Entity<M> {
     /// this entity's confidence, through [`record`](Self::record).
     ///
     /// The decision and its record are one step, so a field a reviewer changed
-    /// is always on the trail with what it was set to: an [`Include`] or a
-    /// [`Relabel`] sets the label, an [`Include`] or a [`Relocate`] moves the
-    /// entity to the decision's location, and a [`Suppress`] leaves the fields
-    /// as they are, its location naming the region the decision covered. The
-    /// event's confidence is this entity's own, so a caller cannot record a
-    /// stale score. `actor` names who made the decision and becomes the event's
-    /// source.
+    /// is always on the trail with what it was set to: a [`Relabel`] sets the
+    /// label, a [`Relocate`] moves the entity to the decision's location, and a
+    /// [`Suppress`] or a [`Confirm`] leaves the fields as they are, its
+    /// location naming the region the decision covered. The event's confidence
+    /// is this entity's own, so a caller cannot record a stale score. `actor`
+    /// names who made the decision and becomes the event's source.
     ///
-    /// A [`Suppress`] is idempotent: if the entity is already
-    /// [suppressed](Self::is_suppressed), nothing is recorded, so re-applying
-    /// one does not grow the trail. Returns whether an event was recorded.
+    /// A verdict is idempotent: a [`Suppress`] or a [`Confirm`] that is
+    /// already the entity's latest [verdict](AuditLog::verdict) records
+    /// nothing, so re-applying one does not grow the trail. Returns whether an
+    /// event was recorded.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
-    /// [`Include`]: ManualIntent::Include
-    /// [`Suppress`]: ManualIntent::Suppress
-    /// [`Relabel`]: ManualIntent::Relabel
-    /// [`Relocate`]: ManualIntent::Relocate
+    /// [`Suppress`]: audit::ManualIntent::Suppress
+    /// [`Confirm`]: audit::ManualIntent::Confirm
+    /// [`Relabel`]: audit::ManualIntent::Relabel
+    /// [`Relocate`]: audit::ManualIntent::Relocate
     pub fn record_manual(&mut self, manual: Manual<M>, actor: &str) -> bool {
-        if manual.intent == ManualIntent::Suppress && self.is_suppressed() {
+        if self.audit.verdict() == Some(&manual.intent) {
             return false;
         }
         let event = AuditEvent::manual(actor.to_owned(), self.state.confidence, manual);
@@ -406,7 +404,9 @@ impl Entity<Text> {
 mod tests {
     use std::slice;
 
-    use super::audit::{Attribution, Pattern, PatternRule, Redaction, RuleMatch, Selection};
+    use super::audit::{
+        Attribution, Include, ManualIntent, Pattern, PatternRule, Redaction, RuleMatch, Selection,
+    };
     use super::*;
     use crate::ErrorKind;
     use crate::modality::text::{Text, TextLocation};
@@ -601,6 +601,24 @@ mod tests {
         assert_eq!(entity.state.location, moved);
         assert!(!entity.is_suppressed(), "an amendment does not suppress");
         assert!(entity.audit.verify().is_ok());
+    }
+
+    /// An inclusion after the birth is provenance, like a repeat recognition:
+    /// it changes nothing but the confidence, and the trail replays to the
+    /// same entity.
+    #[test]
+    fn a_late_inclusion_changes_nothing() {
+        let mut entity = text_entity();
+        let (label, location) = (entity.label().clone(), entity.location().clone());
+        entity.record(AuditEvent::new(
+            "reviewer-7",
+            Confidence::MAX,
+            Include::new("ORG", TextLocation::inline(0..3)),
+        ));
+        assert_eq!((entity.label(), entity.location()), (&label, &location));
+        assert_eq!(entity.confidence(), Confidence::MAX);
+        let read = Entity::from_trail(entity.id, entity.audit.clone()).unwrap();
+        assert_eq!((read.label(), read.location()), (&label, &location));
     }
 
     /// `record_manual(Suppress)` is idempotent: a second call records nothing

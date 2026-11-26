@@ -26,7 +26,7 @@ pub(crate) mod test_support {
     use std::ops::Range;
 
     #[cfg(feature = "schema")]
-    use elide_core::entity::Include;
+    use elide_core::entity::audit::Include;
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
     #[cfg(feature = "schema")]

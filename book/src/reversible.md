@@ -44,7 +44,8 @@ AES-256-GCM ciphertext. A `Deanonymizer` with the same key decrypts it in
 place:
 
 ```rust
-use elide::entity::{Birth, Include};
+use elide::entity::Birth;
+use elide::entity::audit::Include;
 use elide::modality::text::TextLocation;
 use elide::prelude::operators::*;
 use elide::prelude::*;

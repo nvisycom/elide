@@ -4,10 +4,11 @@
 //! A review is the only way to change what a report says. It names the report
 //! it was made against by digest, carries edits rather than an edited report,
 //! and is applied by [`Orchestrator::review`], which checks each edit against
-//! the policy and records it on the entities it touches as a `Manual` audit
-//! event. So a review layer that never holds the report's authority, a
-//! browser, a review queue, can still say what it wants changed, and the
-//! trusted side decides what it accepts.
+//! the policy and records it on the entities it touches: an include as the
+//! event that starts its entity, every other edit as a `Manual` decision. So a
+//! review layer that never holds the report's authority, a browser, a review
+//! queue, can still say what it wants changed, and the trusted side decides
+//! what it accepts.
 //!
 //! [`Orchestrator::review`]: crate::Orchestrator::review
 
@@ -28,7 +29,9 @@ use uuid::Uuid;
 
 pub use self::edit::{Change, Edit};
 pub(crate) use self::group::{EditGroup, Reviewer};
-pub use self::policy::{And, Narrowed, ProposedEdit, Protect, RequireReason, ReviewPolicy};
+pub use self::policy::{
+    And, Decision, Narrowed, ProposedEdit, Protect, RequireReason, ReviewPolicy,
+};
 use crate::wire::{digest, part_fields};
 use crate::{PartId, Report};
 
@@ -268,6 +271,13 @@ impl<M: Modality> ReviewPart<'_, M> {
         self.push(Change::Suppress { entity })
     }
 
+    /// Redact the entity `entity`, a finding the reviewer confirms, even
+    /// after an earlier suppression. Confirming an entity no reviewer has
+    /// suppressed records the confirmation and changes no redaction.
+    pub fn confirm(&mut self, entity: Uuid) -> &mut Self {
+        self.push(Change::Confirm { entity })
+    }
+
     /// Leave every entity `region` contains unredacted, as the review finds
     /// the part when it is applied. An entity reaching outside `region` is
     /// kept, so nothing outside it is spared.
@@ -360,16 +370,19 @@ mod tests {
         assert_eq!(entity.id(), id, "the entity has the id the review gave it");
         assert_eq!(*entity.label(), LabelRef::new("PERSON_NAME"));
         assert_eq!(entity.confidence(), Confidence::MAX);
+        let [birth] = entity.audit().events() else {
+            panic!("the inclusion is the entity's only event");
+        };
+        let AuditKind::Include(included) = &birth.kind else {
+            panic!("the entity starts from an inclusion");
+        };
+        assert_eq!(birth.source, "reviewer-7");
+        assert_eq!(included.location, TextLocation::inline(4..12));
         assert_eq!(
-            decisions(entity),
-            [(
-                "reviewer-7".to_owned(),
-                ManualIntent::Include {
-                    label: LabelRef::new("PERSON_NAME")
-                },
-                TextLocation::inline(4..12),
-            )]
+            included.attribution,
+            Some(Attribution::freeform("missed by detection").into())
         );
+        assert!(decisions(entity).is_empty());
         assert!(entity.audit().verify().is_ok());
         assert_eq!(part.unsuppressed().count(), 1);
     }
@@ -654,6 +667,12 @@ mod tests {
             }),
             Ok(()),
         );
+        assert_eq!(
+            outcome(&|part| {
+                part.confirm(id);
+            }),
+            Ok(()),
+        );
     }
 
     /// An edit narrows the entities overlapping what it touches, as they share
@@ -789,7 +808,7 @@ mod tests {
         // refused only if it resolves against the relocated entity.
         let protect = Protect::labels(["SSN"]);
         let policy = |edit: &ProposedEdit<'_>| match edit.decision {
-            ManualIntent::Relocate => Ok(()),
+            Decision::Relocate => Ok(()),
             _ => protect.check(edit),
         };
         let err = review
@@ -897,6 +916,75 @@ mod tests {
 
         assert_eq!(outcome(None), Err(ErrorKind::Refused));
         assert_eq!(outcome(Some("public")), Ok(()));
+    }
+
+    /// A confirmation takes back an earlier suppression: the latest verdict on
+    /// the entity's own trail decides whether it is redacted.
+    #[test]
+    fn a_confirmation_undoes_a_suppression() {
+        let entity = at("EMAIL_ADDRESS", 4..10);
+        let id = entity.id();
+        let location = entity.location().clone();
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
+        let verdict = |report: &mut Report, edit: &dyn Fn(&mut ReviewPart<'_, Text>)| {
+            let mut review = Review::new(report);
+            edit(&mut review.part::<Text>(&doc()).unwrap());
+            apply(report, &review).unwrap();
+            report.entity_anywhere::<Text>(id).unwrap().is_suppressed()
+        };
+
+        assert!(verdict(&mut report, &|part| {
+            part.suppress(id);
+        }));
+        assert!(!verdict(&mut report, &|part| {
+            part.confirm(id);
+        }));
+        assert!(
+            verdict(&mut report, &|part| {
+                part.confirm(id).suppress(id);
+            }),
+            "the latest verdict wins",
+        );
+
+        let entity = report.entity_anywhere::<Text>(id).unwrap();
+        let decision = |intent| ("reviewer-7".to_owned(), intent, location.clone());
+        assert_eq!(
+            decisions(entity),
+            [
+                decision(ManualIntent::Suppress),
+                decision(ManualIntent::Confirm),
+                decision(ManualIntent::Suppress),
+            ],
+            "a verdict that is already the latest records nothing",
+        );
+        assert!(entity.audit().verify().is_ok());
+    }
+
+    /// Confirming an entity no reviewer suppressed records the confirmation
+    /// once and changes no redaction.
+    #[test]
+    fn confirming_an_unsuppressed_entity_records_it_once() {
+        let entity = at("EMAIL_ADDRESS", 4..10);
+        let id = entity.id();
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().confirm(id).confirm(id);
+        apply(&mut report, &review).unwrap();
+
+        let entity = report.entity_anywhere::<Text>(id).unwrap();
+        assert!(!entity.is_suppressed());
+        assert_eq!(entity.audit().verdict(), Some(&ManualIntent::Confirm));
+        assert_eq!(decisions(entity).len(), 1);
+    }
+
+    /// A confirmation names an entity the part must hold.
+    #[test]
+    fn confirming_a_missing_entity_is_refused() {
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![at("SSN", 4..10)]);
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().confirm(Uuid::now_v7());
+        let err = apply(&mut report, &review).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NotFound);
     }
 
     /// A review that changes nothing applies, and changes nothing: applying it

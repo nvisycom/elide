@@ -83,16 +83,20 @@ and this project adheres to
   (`entities`, `entity`, `suppressed`, `unsuppressed`)
 - A reviewer's decisions are a `Review`, made against one version of a
   report and applied by `Orchestrator::review`: `include`, `relabel`,
-  `relocate`, `suppress`, and `suppress_within`, each with its `because`.
-  `review` takes the actor, the reviewer as the deployment authenticated
-  them, and records each edit as a `Manual` audit event naming them and what
-  it set. The review applies whole or not at all, only to the report version
-  it was made against, so a review that changes the report cannot be applied
-  twice or replace a newer one. A region suppression spares what the region
-  covers, by span, by raw bytes, or by rendered boxes, so a
-  reviewer's mark can clear what it encloses
+  `relocate`, `suppress`, `suppress_within`, and `confirm`, each with its
+  `because`. A suppression and a confirmation are opposite verdicts on an
+  entity, and the latest on its trail decides whether it is redacted, so a
+  confirmation takes back an earlier suppression. `review` takes the actor,
+  the reviewer as the deployment authenticated them, and records each edit
+  on the trail naming them: an include as the `Include` event that starts
+  its entity, and every other edit as a `Manual` decision with what it set.
+  The review applies whole or not at all, only to the report version it was
+  made against, so a review that changes the report cannot be applied twice
+  or replace a newer one. A region suppression spares what the region
+  covers, by span, by raw bytes, or by rendered boxes, so a reviewer's mark
+  can clear what it encloses
 - A `ReviewPolicy` decides which edits a review may make, shown each as a
-  `ProposedEdit`: the decision it records, the entities whose redaction it
+  `ProposedEdit`: what it does (a `Decision`), the entities whose redaction it
   narrows, and its actor and reason. The standard policies each check one
   thing, `Protect` (labels no edit may suppress, relabel, or relocate) and
   `RequireReason` (to narrow), and combine with `and`; a closure is a policy
@@ -117,13 +121,15 @@ and this project adheres to
   absorbed. It is born from a `Birth`: who found it, how sure they are, and
   what they found, a recognition (`Pattern`, `Model`, `Flagged`) or a
   reviewer's `Include` (`Entity::new(Birth::new(source, confidence, kind))`),
-  read
-  through accessors, and changes only by recording an event (`record`,
-  `record_manual`, `fuse`, `annotate`). A recognition records where it
-  matched in the text it read (`recognized_range` on `Pattern` and `Model`).
-  What becomes known about an entity after its birth is an `Annotation`
-  event: a chunk's finding placed in its document (`lift`), a window's range
-  shifted into the full text, its language, or its coreference cluster.
+  read through accessors, and changes only by recording an event (`record`,
+  `record_manual`, `fuse`, `annotate`). A `Manual` decision is a verdict
+  (`Suppress`, `Confirm`) or an amendment (`Relabel`, `Relocate`); an event
+  that starts an entity changes nothing when it follows a birth. A
+  recognition records where it matched in the text it read
+  (`recognized_range` on `Pattern` and `Model`). What becomes known about an
+  entity after its birth is an `Annotation` event: a chunk's finding placed
+  in its document (`lift`), a window's range shifted into the full text, its
+  language, or its coreference cluster.
   `Entity::from_trail` rebuilds an entity from its trail, and one read back
   whose fields disagree with its trail is refused. `Entity::digest` is its id
   and trail tip

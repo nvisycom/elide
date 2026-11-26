@@ -16,8 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    Annotation, AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Manual,
-    ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
+    Annotation, AuditEvent, AuditKind, Calibration, Conflict, Contested, Flagged, Fusion, Include,
+    Manual, ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
 };
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
@@ -247,29 +247,32 @@ impl<M: Modality> AuditLog<M> {
 
     /// Whether a reviewer has suppressed this entity with a [`Manual`] event.
     ///
-    /// That is, of the [`Manual`] events on its [line](Self::line) that decide
-    /// redaction (an include or a suppression), the latest is
-    /// [`ManualIntent::Suppress`]. A relabel or relocation decides nothing
-    /// about it and is skipped, so it leaves the latest include or
-    /// suppression in effect. The audit trail is the single source of truth:
-    /// there is no separate flag to keep in sync.
+    /// That is, the latest [verdict](Self::verdict) on its
+    /// [line](Self::line) is [`ManualIntent::Suppress`]. The audit trail is
+    /// the single source of truth: there is no separate flag to keep in sync.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
     pub fn is_suppressed(&self) -> bool {
-        self.line()
-            .find_map(|e| match &e.kind {
-                // A relabel or relocation amends the entity without deciding
-                // suppression, so one after a `Suppress` must not clear it. Skip
-                // it and read the most recent `Include`/`Suppress` decision.
-                AuditKind::Manual(m) => match m.intent {
-                    ManualIntent::Suppress => Some(true),
-                    ManualIntent::Include { .. } => Some(false),
-                    ManualIntent::Relabel { .. } | ManualIntent::Relocate => None,
-                },
-                _ => None,
-            })
-            .unwrap_or(false)
+        self.verdict() == Some(&ManualIntent::Suppress)
+    }
+
+    /// The latest reviewer verdict on this entity's [line](Self::line): a
+    /// [`Suppress`] or a [`Confirm`], or `None` if no reviewer has given
+    /// one. An include, a relabel or a relocation decides nothing about
+    /// redaction and is skipped.
+    ///
+    /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`Confirm`]: crate::entity::audit::ManualIntent::Confirm
+    pub fn verdict(&self) -> Option<&ManualIntent> {
+        self.line().find_map(|e| match &e.kind {
+            AuditKind::Manual(m)
+                if matches!(m.intent, ManualIntent::Suppress | ManualIntent::Confirm) =>
+            {
+                Some(&m.intent)
+            }
+            _ => None,
+        })
     }
 
     /// The index of the first event whose [`kind`] satisfies `predicate`, or
@@ -516,15 +519,18 @@ mod tests {
             Redaction::new(selection, at.clone()),
             conf,
         )));
+        log.record(fixed(AuditEvent::new(
+            "reviewer",
+            conf,
+            Include::new("ssn", at.clone()).because(why.clone()),
+        )));
         let decisions = [
-            ManualIntent::Include {
-                label: LabelRef::new("ssn"),
-            },
             ManualIntent::Relabel {
                 label: LabelRef::new("iban"),
             },
             ManualIntent::Relocate,
             ManualIntent::Suppress,
+            ManualIntent::Confirm,
         ];
         for intent in decisions {
             log.record(fixed(AuditEvent::manual(
@@ -557,23 +563,23 @@ mod tests {
     }
 
     /// The digests of [`every_kind`]'s events, in order.
-    const PINNED: [&str; 15] = [
-        // pattern
-        "4bdcf255f11836161b03d87ca7b0e4aa752819c1db0d685f31af34a53f9fd72b", // model
-        "12b57ac561ebb7dafa19f1a6fbd46f844a03f941bf7c68eabcb4456e6343c6c8", // flagged
-        "17d5f2ef91525e3b9ecf952034e719bb7d80e08e66ac1024f8b55c43e7a12787", // fusion
-        "8eb6ada2663418d5df28fdbbba64896918186d2a7978996202a0bb61a3939864", // conflict
-        "32670d83b16832696e7cb2fc9434d678914be0dc131f5c4b46029068fb920781", // contested
-        "be8fce5b547ba26d6d00708065531804cf6d532704bcb9e574f9aacecfb0edff", // calibration
-        "0e6863731c263b2c3055aaa397d92a411c0a9bf50b00cefc289fb25b86b598c7", // refinement
-        "c6c28ab2a4c3ab9a9f5aa14e6b564f5038b3d537d77ad8444593c1f5b812caae", // selection
-        "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // redaction
-        "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // include
-        "b057db8cd53a6ee9847d91cd320f1f5889ce05e201286a436a97aba412f7ed45", // relabel
-        "ec50db224d5207b2100d0e86d27988a13672af22a869d09c9b10207726e52af3", // relocate
-        "14b912e2098b07533247c8cad6607132988ac4f050efe0a4b9d4a874347a221d", // suppress
-        "99d30495883350f35a8549d305725e5c32a91e5bea86ad25a7ee24f571c0e1cd", // annotation
-        "d23d41422f3d48fd2886e345c4f036ea17ce4430fca71c8c484cfb95b65427f3",
+    const PINNED: [&str; 16] = [
+        "4bdcf255f11836161b03d87ca7b0e4aa752819c1db0d685f31af34a53f9fd72b", // pattern
+        "12b57ac561ebb7dafa19f1a6fbd46f844a03f941bf7c68eabcb4456e6343c6c8", // model
+        "17d5f2ef91525e3b9ecf952034e719bb7d80e08e66ac1024f8b55c43e7a12787", // flagged
+        "8eb6ada2663418d5df28fdbbba64896918186d2a7978996202a0bb61a3939864", // fusion
+        "32670d83b16832696e7cb2fc9434d678914be0dc131f5c4b46029068fb920781", // conflict
+        "be8fce5b547ba26d6d00708065531804cf6d532704bcb9e574f9aacecfb0edff", // contested
+        "0e6863731c263b2c3055aaa397d92a411c0a9bf50b00cefc289fb25b86b598c7", // calibration
+        "c6c28ab2a4c3ab9a9f5aa14e6b564f5038b3d537d77ad8444593c1f5b812caae", // refinement
+        "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // selection
+        "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // redaction
+        "526b28ea57a81cd85890ce2aee071d84d302cd530c2164289ddc0044f2681eb1", // include
+        "9675fc4b428d9b93741a07dc8703d9ad19039f44987bbba84cb478c4cfe42c82", // relabel
+        "57e873e030788c274c7974269f48432d9c10ddeecf7bcccc2ba37be1b559f50d", // relocate
+        "1d521cb5cf23c5b5be3dd15b78ed845565118e24d4edf9159c4aab1d84debc81", // suppress
+        "fff171ab8c4b47c9aeba32b6bf5d2b7c82c366abf8c97590735de0e4ba284305", // confirm
+        "99f2105bd6d92d7a2b4bcae62b702185791493b78fb7c5b47cf2b36447d346e4", // annotation
     ];
 
     /// Editing any recorded payload field breaks verification.

@@ -1,5 +1,6 @@
 //! Application payloads: the redaction decision and its execution
-//! ([`Selection`] then [`Redaction`]), and human overrides ([`Manual`]).
+//! ([`Selection`] then [`Redaction`]), and a reviewer's work: an entity they
+//! added ([`Include`]), and their decisions about one ([`Manual`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -129,8 +130,69 @@ impl<M: Modality> Redaction<M> {
     }
 }
 
-/// A human override: an entity a reviewer included, suppressed, relabelled,
-/// or relocated.
+/// A reviewer's inclusion: an entity of `label` at `location` that detection
+/// missed (a false negative). It starts the entity's trail, never follows a
+/// birth, and the entity is redacted like any detected one.
+///
+/// Who included it is the event's [`source`], not a payload field.
+///
+/// [`source`]: super::AuditEvent::source
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
+        rename = "{M}Include"
+    )
+)]
+pub struct Include<M: Modality> {
+    /// The label the reviewer gave the entity.
+    pub label: LabelRef,
+    /// Where it sits.
+    pub location: M::Location,
+    /// Why it was included, when the reviewer said.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub attribution: Option<Attribution>,
+}
+
+impl<M: Modality> Include<M> {
+    /// This kind's discriminant byte (see the [payloads overview](super)).
+    pub(crate) const TAG: u8 = 12;
+
+    /// An inclusion of `label` at `location`, with no reason given.
+    pub fn new(label: impl Into<LabelRef>, location: M::Location) -> Self {
+        Self {
+            label: label.into(),
+            location,
+            attribution: None,
+        }
+    }
+
+    /// Give the reason for the inclusion.
+    #[must_use]
+    pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {
+        self.attribution = Some(attribution.into());
+        self
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.label.as_str().as_bytes());
+        out.bytes(&self.location.hash());
+        hash_opt_attribution(out, self.attribution.as_ref());
+    }
+}
+
+/// A reviewer's decision about an entity: they suppressed, confirmed,
+/// relabelled, or relocated it.
 ///
 /// Its provenance is a person's decision, not a recognizer's, so the trail
 /// records what the decision set and *why* (an [`Attribution`], when
@@ -153,17 +215,16 @@ impl<M: Modality> Redaction<M> {
     )
 )]
 pub struct Manual<M: Modality> {
-    /// Which human decision this records, with the label it set when it set
-    /// one. This is the authority on whether the entity is redacted,
+    /// Which decision this records, with the label it set when it set one. This
+    /// is the authority on whether the entity is redacted,
     /// [`AuditLog::is_suppressed`] reads it, so there is no separate flag to
     /// keep in sync.
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
     #[cfg_attr(feature = "serde", serde(flatten))]
     pub intent: ManualIntent,
-    /// Where the override applies, in modality-native coordinates: the
-    /// entity's location after an include or a relocation, or the region a
-    /// suppression covered.
+    /// Where the decision applies, in modality-native coordinates: the
+    /// entity's location after a relocation, or the region a verdict covered.
     pub location: M::Location,
     /// The reviewer's rationale, when supplied (e.g. a freeform
     /// `"false positive"`, or a cited authority). `None` for an unexplained
@@ -206,9 +267,11 @@ impl<M: Modality> Manual<M> {
 
 /// Which reviewer decision a [`Manual`] event records, with what it set.
 ///
-/// [`Include`](ManualIntent::Include) a miss, [`Suppress`](ManualIntent::Suppress)
-/// a false positive, or amend a finding: [`Relabel`](ManualIntent::Relabel) it
-/// or [`Relocate`](ManualIntent::Relocate) it to the event's location.
+/// A verdict, [`Suppress`](ManualIntent::Suppress) a false positive or
+/// [`Confirm`](ManualIntent::Confirm) a finding, or an amendment,
+/// [`Relabel`](ManualIntent::Relabel) it or
+/// [`Relocate`](ManualIntent::Relocate) it to the event's location. A miss a
+/// reviewer adds is an [`Include`], the event that starts its entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "intent", rename_all = "snake_case"))]
@@ -218,13 +281,6 @@ impl<M: Modality> Manual<M> {
     schemars(tag = "intent", rename_all = "snake_case")
 )]
 pub enum ManualIntent {
-    /// A reviewer included an entity of `label` that detection missed (a false
-    /// negative), at the event's location. It is redacted like any detected
-    /// one.
-    Include {
-        /// The label the reviewer gave the entity.
-        label: LabelRef,
-    },
     /// A reviewer marked a detected entity to leave alone (a false positive).
     /// The redaction pass skips it, see [`AuditLog::is_suppressed`].
     ///
@@ -237,28 +293,31 @@ pub enum ManualIntent {
     },
     /// A reviewer moved the entity to the event's location.
     Relocate,
+    /// A reviewer confirmed a finding (a true positive): it is redacted, even
+    /// after an earlier [`Suppress`](Self::Suppress).
+    Confirm,
 }
 
 impl ManualIntent {
     /// This intent's discriminant byte, folded into the hash. Pinned so a
     /// reordered or inserted variant cannot silently change a recorded hash;
-    /// append new variants with the next value.
+    /// append new variants with the next value. 0 is retired and never reused.
     const fn tag(&self) -> u8 {
         match self {
-            Self::Include { .. } => 0,
             Self::Suppress => 1,
             Self::Relabel { .. } => 2,
             Self::Relocate => 3,
+            Self::Confirm => 4,
         }
     }
 
     fn hash_into(&self, out: &mut AuditHasher) {
         out.byte(self.tag());
         match self {
-            Self::Include { label } | Self::Relabel { label } => {
+            Self::Relabel { label } => {
                 out.bytes(label.as_str().as_bytes());
             }
-            Self::Suppress | Self::Relocate => {}
+            Self::Suppress | Self::Relocate | Self::Confirm => {}
         }
     }
 }

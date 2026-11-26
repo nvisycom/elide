@@ -3,14 +3,14 @@
 //!
 //! The per-kind detail lives in the [payload](self) submodules, grouped by
 //! role: [`recognition`] (a recognizer matched), [`reconcile`] (detections were
-//! combined and scored), and [`apply`] (the redaction decision and human
-//! overrides). Each payload owns its fields, its `new` / `with_*` builders, its
+//! combined and scored), and [`apply`] (the redaction decision and a reviewer's
+//! work). Each payload owns its fields, its `new` / `with_*` builders, its
 //! central `TAG` discriminant, and how it folds into the hash.
 
 mod kind;
 
-/// Application payloads: the redaction decision and its execution, and human
-/// overrides.
+/// Application payloads: the redaction decision and its execution, and a
+/// reviewer's inclusions and decisions.
 pub mod apply;
 /// Recognition payloads: a pattern or model recognizer matched an entity.
 pub mod recognition;
@@ -23,7 +23,7 @@ use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
+pub use self::apply::{Include, Manual, ManualIntent, Redaction, Selection};
 pub use self::kind::AuditKind;
 pub use self::recognition::{Annotation, Flagged, Model, ModelId, Pattern, PatternRule};
 pub use self::reconcile::{Calibration, Conflict, Contested, Fusion, Refinement};
@@ -44,12 +44,11 @@ use crate::primitive::Confidence;
 /// event happened.
 ///
 /// Each event links to its [`parents`] by their [`hash`]: a birth event (a
-/// recognizer's first detection) has no parents, a normal step has one, and a
-/// [fusion](crate::entity::Entity::fuse) has several. Its own
-/// [`hash`] folds the
-/// payload together with the parents' hashes, so altering any event breaks
-/// every event downstream of it: [`AuditLog::verify`] walks the DAG and
-/// reports the first break.
+/// recognition or a reviewer's inclusion) has no parents, a normal step has
+/// one, and a [fusion](crate::entity::Entity::fuse) has several. Its own
+/// [`hash`] folds the payload together with the parents' hashes, so altering
+/// any event breaks every event downstream of it: [`AuditLog::verify`] walks
+/// the DAG and reports the first break.
 ///
 /// `entity.confidence` always equals the [`confidence`] of the most recent
 /// event. The confidence *flowing in* is not stored: it is the parents'

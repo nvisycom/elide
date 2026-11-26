@@ -31,8 +31,8 @@ pub use self::part_id::PartId;
 use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
 use self::review::Reviewer;
 pub use self::review::{
-    And, Change, Edit, Narrowed, ProposedEdit, Protect, RequireReason, Review, ReviewPart,
-    ReviewPolicy,
+    And, Change, Decision, Edit, Narrowed, ProposedEdit, Protect, RequireReason, Review,
+    ReviewPart, ReviewPolicy,
 };
 use self::traversal::{Analyze, PartVisitor, Read, Redact, Walk};
 pub use self::wire::{Restorable, Restorer};
@@ -470,13 +470,14 @@ impl Orchestrator {
     ///
     /// `by` is the reviewer as the deployment authenticated them: a review
     /// carries what was decided and why, never who decided it, so it cannot
-    /// speak for anyone else. Each edit is recorded on the entities it touches
-    /// as a `Manual` audit event naming `by` and the edit's reason, and sets
-    /// what it changes: an include adds an entity, a relabel or relocation
-    /// changes the entity's label or location, and a suppression leaves the
-    /// entity unredacted. Edits apply in order, each checked against the
-    /// policy as the edits before it left the part. The review applies whole
-    /// or not at all: a refused edit leaves the report as it was.
+    /// speak for anyone else. Each edit is recorded on the entities it touches,
+    /// naming `by` and the edit's reason, and sets what it changes: an include
+    /// adds an entity, born from an `Include` event, a relabel or relocation
+    /// changes the entity's label or location, and a suppression or a
+    /// confirmation decides whether it is redacted, each as a `Manual` event.
+    /// Edits apply in order, each checked against the policy as the edits
+    /// before it left the part. The review applies whole or not at all: a
+    /// refused edit leaves the report as it was.
     ///
     /// # Errors
     ///

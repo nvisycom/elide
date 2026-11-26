@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
 use super::{
-    Annotation, Calibration, Conflict, Contested, Flagged, Fusion, Manual, Model, Pattern,
+    Annotation, Calibration, Conflict, Contested, Flagged, Fusion, Include, Manual, Model, Pattern,
     Redaction, Refinement, Selection,
 };
 use crate::modality::Modality;
@@ -86,8 +86,10 @@ pub enum AuditKind<M: Modality> {
     /// An operator was *picked* to hide the entity, the redaction decision,
     /// recorded before it is applied so it can be reviewed first.
     Selection(Selection),
-    /// A human override, outside automatic detection: an entity a reviewer
-    /// added by hand, or a detected one they marked to ignore.
+    /// A reviewer included an entity detection missed.
+    Include(Include<M>),
+    /// A reviewer's decision about an entity: a verdict on whether it is
+    /// redacted, or an amendment of its label or location.
     Manual(Manual<M>),
     /// Something became known about the entity besides a decision: where it
     /// sits in another coordinate space, where it matched in the text it was
@@ -149,6 +151,10 @@ impl<M: Modality> AuditKind<M> {
             Self::Selection(s) => {
                 out.byte(Selection::TAG);
                 s.hash_into(out);
+            }
+            Self::Include(i) => {
+                out.byte(Include::<M>::TAG);
+                i.hash_into(out);
             }
             Self::Manual(m) => {
                 out.byte(Manual::<M>::TAG);
@@ -223,6 +229,12 @@ impl<M: Modality> From<Redaction<M>> for AuditKind<M> {
 impl<M: Modality> From<Selection> for AuditKind<M> {
     fn from(payload: Selection) -> Self {
         Self::Selection(payload)
+    }
+}
+
+impl<M: Modality> From<Include<M>> for AuditKind<M> {
+    fn from(payload: Include<M>) -> Self {
+        Self::Include(payload)
     }
 }
 

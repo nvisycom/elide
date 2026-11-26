@@ -1,8 +1,8 @@
 //! [`EditGroup`]: one part's edits, a `Vec<Edit<M>>` behind one type, each
 //! checked against a policy and applied in turn.
 
-use elide_core::entity::audit::Manual;
-use elide_core::entity::{Birth, Entity, Include};
+use elide_core::entity::audit::{Include, Manual, ManualIntent};
+use elide_core::entity::{Birth, Entity};
 use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::primitive::Confidence;
 use elide_core::{Error, Result};
@@ -110,21 +110,15 @@ impl PartReview<'_> {
         let by = self.reviewer.by;
         let targets = targets(self.part, entities, &edit.change)?;
         let narrowed = narrowed(entities, &targets, &edit.change);
-        let decision = edit.change.intent();
         self.reviewer.policy.check(&ProposedEdit {
             part: self.part,
-            decision: &decision,
+            decision: edit.change.decision(),
             narrowed: &narrowed,
             by,
             because: edit.because.as_ref(),
         })?;
 
-        let manual = |location: M::Location| Manual {
-            intent: decision.clone(),
-            location,
-            attribution: edit.because.clone(),
-        };
-        match &edit.change {
+        let intent = match &edit.change {
             Change::Include {
                 entity: id,
                 label,
@@ -137,17 +131,27 @@ impl PartReview<'_> {
                 };
                 let birth = Birth::new(by.to_owned(), Confidence::MAX, included).with_id(*id);
                 entities.push(Entity::new(birth));
+                return Ok(());
             }
-            change => {
-                for i in targets {
-                    let at = match change {
-                        Change::SuppressWithin { region } => region.clone(),
-                        Change::Relocate { location, .. } => location.clone(),
-                        _ => entities[i].location().clone(),
-                    };
-                    entities[i].record_manual(manual(at), by);
-                }
-            }
+            Change::Suppress { .. } | Change::SuppressWithin { .. } => ManualIntent::Suppress,
+            Change::Confirm { .. } => ManualIntent::Confirm,
+            Change::Relabel { label, .. } => ManualIntent::Relabel {
+                label: label.clone(),
+            },
+            Change::Relocate { .. } => ManualIntent::Relocate,
+        };
+        for i in targets {
+            let location = match &edit.change {
+                Change::SuppressWithin { region } => region.clone(),
+                Change::Relocate { location, .. } => location.clone(),
+                _ => entities[i].location().clone(),
+            };
+            let manual = Manual {
+                intent: intent.clone(),
+                location,
+                attribution: edit.because.clone(),
+            };
+            entities[i].record_manual(manual, by);
         }
         Ok(())
     }
@@ -156,18 +160,22 @@ impl PartReview<'_> {
 /// The entities an edit narrows: every one it touches, and every one in an
 /// overlap cluster with what it touches, before the edit or after.
 ///
-/// Only an include adds to what is hidden. A relocation can narrow even into
-/// a region containing the old one, as a rule may choose its operator by
-/// where an entity sits. Entities that overlap, directly or through others,
-/// are redacted as one span under the safest operator among them, so an edit
-/// to one can leave the rest of its cluster under a leakier operator, or
-/// none: they are narrowed too. An entity already suppressed is not
-/// redacted, so no edit narrows it, nor links a cluster.
+/// An include or a confirmation only adds to what is hidden, so it narrows
+/// nothing. A relocation can narrow even into a region containing the old
+/// one, as a rule may choose its operator by where an entity sits. Entities
+/// that overlap, directly or through others, are redacted as one span under
+/// the safest operator among them, so an edit to one can leave the rest of
+/// its cluster under a leakier operator, or none: they are narrowed too. An
+/// entity already suppressed is not redacted, so no edit narrows it, nor
+/// links a cluster.
 fn narrowed<M: Modality>(
     entities: &[Entity<M>],
     targets: &[usize],
     change: &Change<M>,
 ) -> Vec<Narrowed> {
+    if !change.can_narrow() {
+        return Vec::new();
+    }
     let live: Vec<bool> = entities
         .iter()
         .map(|entity| !entity.is_suppressed())
@@ -230,6 +238,7 @@ fn targets<M: Modality>(
             .filter(|&i| region.covers(entities[i].location()))
             .collect()),
         Change::Suppress { entity: id }
+        | Change::Confirm { entity: id }
         | Change::Relabel { entity: id, .. }
         | Change::Relocate { entity: id, .. } => position(*id)
             .map(|i| vec![i])
