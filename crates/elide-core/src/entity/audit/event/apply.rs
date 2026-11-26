@@ -301,13 +301,13 @@ pub enum ManualIntent {
 impl ManualIntent {
     /// This intent's discriminant byte, folded into the hash. Pinned so a
     /// reordered or inserted variant cannot silently change a recorded hash;
-    /// append new variants with the next value.
+    /// append new variants with the next value. 0 is retired and never reused.
     const fn tag(&self) -> u8 {
         match self {
-            Self::Suppress => 0,
-            Self::Relabel { .. } => 1,
-            Self::Relocate => 2,
-            Self::Confirm => 3,
+            Self::Suppress => 1,
+            Self::Relabel { .. } => 2,
+            Self::Relocate => 3,
+            Self::Confirm => 4,
         }
     }
 

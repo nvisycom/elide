@@ -575,11 +575,11 @@ mod tests {
         "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // selection
         "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // redaction
         "526b28ea57a81cd85890ce2aee071d84d302cd530c2164289ddc0044f2681eb1", // include
-        "e6b532659e85596add3c31ea43fa44143695fc4d647b650d3bd7de78ed046cbb", // relabel
-        "e6862a908b9631804d3e7f5ef8c3a0baab971ed1eb5269b3ee3f74db7ad20d3b", // relocate
-        "4557866b6640890495e35d31579c3fe7b036db68532cde8a89183d865ff02612", // suppress
-        "db893bbe18a1a0393885b992db47001107bf6f60bdaa9f381cd5d7837c38059d", // confirm
-        "91f2510110ac32be5f6689a0a7e3644beda54b2298c9c97a7aad9dd6cd777753", // annotation
+        "9675fc4b428d9b93741a07dc8703d9ad19039f44987bbba84cb478c4cfe42c82", // relabel
+        "57e873e030788c274c7974269f48432d9c10ddeecf7bcccc2ba37be1b559f50d", // relocate
+        "1d521cb5cf23c5b5be3dd15b78ed845565118e24d4edf9159c4aab1d84debc81", // suppress
+        "fff171ab8c4b47c9aeba32b6bf5d2b7c82c366abf8c97590735de0e4ba284305", // confirm
+        "99f2105bd6d92d7a2b4bcae62b702185791493b78fb7c5b47cf2b36447d346e4", // annotation
     ];
 
     /// Editing any recorded payload field breaks verification.
