@@ -3,18 +3,21 @@
 use std::fmt;
 use std::hash::Hash;
 use std::ops::Range;
+use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::de::Error as _;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::{Error, Result};
+
 /// A 32-byte BLAKE3 digest that links and verifies an audit trail's events.
 ///
 /// The tamper-evident link in an [`AuditLog`] DAG: each [`AuditEvent`] hashes
 /// its payload together with its parents' hashes, so altering any event breaks
 /// every event downstream of it. Displays and (with the `serde` feature)
-/// (de)serializes as lowercase hex.
+/// (de)serializes as lowercase hex, and [parses](FromStr) back from it.
 ///
 /// The all-zero hash is [`GENESIS`](AuditHash::GENESIS), the link a birth event
 /// (one with no parents) chains from.
@@ -33,6 +36,12 @@ pub struct AuditHash(#[cfg_attr(feature = "schema", schemars(with = "String"))] 
 impl AuditHash {
     /// The genesis link: the all-zero hash a birth event chains from.
     pub const GENESIS: Self = Self(HexBytes([0u8; 32]));
+
+    /// The hash with the raw 32 digest `bytes`, as [`as_bytes`](Self::as_bytes)
+    /// returns them.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(HexBytes(bytes))
+    }
 
     /// The raw 32 digest bytes.
     pub const fn as_bytes(&self) -> &[u8; 32] {
@@ -127,6 +136,19 @@ impl AuditHasher {
     }
 }
 
+impl FromStr for AuditHash {
+    type Err = Error;
+
+    /// Accepts the 64 hex digits [`Display`](fmt::Display) writes, in either
+    /// case.
+    fn from_str(hex: &str) -> Result<Self> {
+        let mut bytes = [0u8; 32];
+        hex::decode_to_slice(hex, &mut bytes)
+            .map_err(|error| Error::malformed(format!("audit hash: {error}")))?;
+        Ok(Self::from_bytes(bytes))
+    }
+}
+
 impl fmt::Debug for AuditHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AuditHash({self})")
@@ -155,10 +177,34 @@ impl Serialize for HexBytes {
 impl<'de> Deserialize<'de> for HexBytes {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let hex = String::deserialize(deserializer)?;
-        let bytes = hex::decode(&hex).map_err(D::Error::custom)?;
-        let bytes: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| D::Error::custom("audit hash must be 32 bytes"))?;
-        Ok(Self(bytes))
+        let hash: AuditHash = hex.parse().map_err(D::Error::custom)?;
+        Ok(hash.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hash_parses_back_from_its_hex() {
+        let hash = AuditHash::of_fields(["a", "b"]);
+        assert_eq!(hash.to_string().parse::<AuditHash>().unwrap(), hash);
+        assert_eq!(
+            hash.to_string()
+                .to_uppercase()
+                .parse::<AuditHash>()
+                .unwrap(),
+            hash
+        );
+        assert_eq!(AuditHash::from_bytes(*hash.as_bytes()), hash);
+    }
+
+    #[test]
+    fn a_malformed_hash_is_refused() {
+        let hex = AuditHash::GENESIS.to_string();
+        for bad in ["", &hex[1..], &format!("{hex}00"), &hex.replace('0', "g")] {
+            assert!(bad.parse::<AuditHash>().is_err(), "{bad:?}");
+        }
     }
 }

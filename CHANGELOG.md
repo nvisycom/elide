@@ -139,7 +139,10 @@ and this project adheres to
   every entity's fields and audit trail, by part and entity id; a review's
   the report version it was made against and every edit; an artifact set's
   every artifact as serialized. `Restorer::restore` checks it, and
-  `restore_unchecked` skips the check by name
+  `restore_unchecked` skips the check by name. An `AuditHash` reads back
+  from its hex (`parse`) or its 32 bytes (`from_bytes`)
+- `ArtifactSet::is_empty` tells whether a set holds any part without
+  serializing it
 - Every `Report` has an id, a UUIDv7 minted when it is created and kept across
   reviews and round trips, so two reports with the same findings never share
   a digest
