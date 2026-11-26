@@ -90,6 +90,14 @@ impl ArtifactSet {
         Self::default()
     }
 
+    /// Whether the set holds no part, as when it serializes to `parts: []`.
+    ///
+    /// A part whose artifact is empty (an image OCR'd to no text) still counts.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+
     /// The enrichment [`artifact`](Modality::Artifact) of part `id`, as
     /// modality `P`.
     ///
@@ -236,5 +244,19 @@ fn encode(value: &Value, out: &mut Vec<u8>) {
             len(out, v.len());
             out.extend_from_slice(v);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use elide_core::modality::text::{Text, Tokens};
+
+    use super::*;
+
+    #[test]
+    fn a_set_with_an_empty_artifact_is_not_empty() {
+        assert!(ArtifactSet::new().is_empty());
+        let set = ArtifactSet::new().insert_part::<Text>(PartId::leaf("a.txt"), Tokens::default());
+        assert!(!set.is_empty());
     }
 }
