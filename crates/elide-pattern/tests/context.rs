@@ -1,9 +1,9 @@
 //! End-to-end: feed real input through a [`Pattern`] →
 //! [`PatternRecognizer`] and verify that confidence is boosted, and a
-//! [`Refinement`] step is appended only for matches that had a nearby
+//! [`Refined`] step is appended only for matches that had a nearby
 //! keyword.
 //!
-//! [`Refinement`]: elide_core::entity::audit::AuditKind::Refinement
+//! [`Refined`]: elide_core::entity::audit::AuditKind::Refined
 
 use elide_core::entity::audit::AuditKind;
 use elide_core::entity::{LabelCatalog, builtins};
@@ -61,7 +61,7 @@ async fn keywords_boost_matches_near_them_only() {
         near.audit()
             .events()
             .iter()
-            .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
+            .any(|e| matches!(e.kind, AuditKind::Refined(_))),
         "near-keyword match should have a Refinement step",
     );
 
@@ -82,7 +82,7 @@ async fn keywords_boost_matches_near_them_only() {
         !far.audit()
             .events()
             .iter()
-            .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
+            .any(|e| matches!(e.kind, AuditKind::Refined(_))),
         "far-from-keyword match should have no Refinement step",
     );
 }

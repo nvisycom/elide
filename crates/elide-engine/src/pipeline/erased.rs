@@ -80,7 +80,7 @@ pub(crate) trait ErasedPipeline: Send + Sync {
     ) -> BoxFuture<'a, Result<bool>>;
 
     /// Record on each of `entities` the operator this pipeline's anonymizer
-    /// will apply, as a `Selection` event, without touching the document.
+    /// will apply, as a `Selected` event, without touching the document.
     fn pick(&self, entities: &mut dyn EntityGroup, scope: &Scope) -> Result<()>;
 
     /// The pipeline as `&mut dyn Any`, to `downcast_mut` to a concrete

@@ -88,7 +88,7 @@ and this project adheres to
   entity, and the latest on its trail decides whether it is redacted, so a
   confirmation takes back an earlier suppression. `review` takes the actor,
   the reviewer as the deployment authenticated them, and records each edit
-  on the trail naming them: an include as the `Include` event that starts
+  on the trail naming them: an include as the `Included` event that starts
   its entity, and every other edit as a `Manual` decision with what it set.
   The review applies whole or not at all, only to the report version it was
   made against, so a review that changes the report cannot be applied twice
@@ -105,8 +105,9 @@ and this project adheres to
   embedded ones included, such as what each entity covers before
   `anonymize_with` changes it
 - `Orchestrator::pick` records on every entity the operator `anonymize_with`
-  will apply, as a `Selection` event, so a review can show the plan before
-  anything is applied
+  will apply, as a `Selected` event, so a review can show the plan before
+  anything is applied. Applying records a `Redacted` event naming the
+  `Selected` event it ran
 - A reviewer can mark text by where it sits rather than by span: raw bytes in
   a part (DOCX, PPTX, HTML, XML, JSON, TXT) or a region of a rendered
   PDF page. Applying the report resolves each mark to the text it covers
@@ -120,14 +121,14 @@ and this project adheres to
   birth to its tip, through its own history and not the ones a fusion
   absorbed. It is born from a `Birth`: who found it, how sure they are, and
   what they found, a recognition (`Pattern`, `Model`, `Flagged`) or a
-  reviewer's `Include` (`Entity::new(Birth::new(source, confidence, kind))`),
+  reviewer's `Included` (`Entity::new(Birth::new(source, confidence, kind))`),
   read through accessors, and changes only by recording an event (`record`,
   `record_manual`, `fuse`, `annotate`). A `Manual` decision is a verdict
   (`Suppress`, `Confirm`) or an amendment (`Relabel`, `Relocate`); an event
   that starts an entity changes nothing when it follows a birth. A
   recognition records where it matched in the text it read
   (`recognized_range` on `Pattern` and `Model`). What becomes known about an
-  entity after its birth is an `Annotation` event: a chunk's finding placed
+  entity after its birth is an `Annotated` event: a chunk's finding placed
   in its document (`lift`), a window's range shifted into the full text, its
   language, or its coreference cluster.
   `Entity::from_trail` rebuilds an entity from its trail, and one read back

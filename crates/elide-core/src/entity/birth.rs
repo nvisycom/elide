@@ -4,7 +4,7 @@
 use hipstr::HipStr;
 use uuid::Uuid;
 
-use super::audit::{AuditEvent, AuditKind, Flagged, Include, Model, Pattern};
+use super::audit::{AuditEvent, AuditKind, Flagged, Included, Model, Pattern};
 use super::state::State;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
@@ -57,7 +57,7 @@ pub enum BirthKind<M: Modality> {
     /// A format flagged an item of hidden content.
     Flagged(Flagged<M>),
     /// A reviewer included what detection missed.
-    Include(Include<M>),
+    Included(Included<M>),
 }
 
 impl<M: Modality> BirthKind<M> {
@@ -67,7 +67,7 @@ impl<M: Modality> BirthKind<M> {
             Self::Pattern(p) => p.into(),
             Self::Model(m) => m.into(),
             Self::Flagged(f) => f.into(),
-            Self::Include(i) => i.into(),
+            Self::Included(i) => i.into(),
         }
     }
 }
@@ -90,8 +90,8 @@ impl<M: Modality> From<Flagged<M>> for BirthKind<M> {
     }
 }
 
-impl<M: Modality> From<Include<M>> for BirthKind<M> {
-    fn from(include: Include<M>) -> Self {
-        Self::Include(include)
+impl<M: Modality> From<Included<M>> for BirthKind<M> {
+    fn from(include: Included<M>) -> Self {
+        Self::Included(include)
     }
 }

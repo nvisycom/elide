@@ -10,7 +10,7 @@ mod scan;
 
 use std::sync::Arc;
 
-use elide_core::entity::audit::{AuditEvent, Pattern, Refinement};
+use elide_core::entity::audit::{AuditEvent, Pattern, Refined};
 use elide_core::entity::{Birth, Entity};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
@@ -175,14 +175,14 @@ fn record_boost<M: TextRecognizable>(
         (None, Some(range)) => M::locate(range, subject.data(), subject.artifact()),
         (None, None) => None,
     };
-    let mut refinement = Refinement::new(boost.keyword);
+    let mut refinement = Refined::new(boost.keyword);
     if let Some(hint) = hint {
         refinement = refinement.with_hint(hint.hint.clone());
     }
     if let Some(location) = location {
         refinement = refinement.with_location(location);
     }
-    entity.record(AuditEvent::refinement(
+    entity.record(AuditEvent::refined(
         boost.source,
         boost.confidence,
         refinement,

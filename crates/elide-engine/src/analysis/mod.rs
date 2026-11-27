@@ -26,7 +26,7 @@ pub(crate) mod test_support {
     use std::ops::Range;
 
     #[cfg(feature = "schema")]
-    use elide_core::entity::audit::Include;
+    use elide_core::entity::audit::Included;
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
     #[cfg(feature = "schema")]
@@ -57,7 +57,7 @@ pub(crate) mod test_support {
     #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         let location = TextLocation::marked_source(SourceRef::new(0..4));
-        let included = Include::new(LabelRef::new(label), location);
+        let included = Included::new(LabelRef::new(label), location);
         Entity::new(Birth::new("manual", Confidence::MAX, included))
     }
 

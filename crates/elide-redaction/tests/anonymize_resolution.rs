@@ -224,7 +224,7 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
         .await
         .unwrap();
 
-    // The Selection records the decision, and the Redaction names it.
+    // The Selected event records the decision, and the Redacted event names it.
     let selection = entities[0]
         .audit()
         .selection()

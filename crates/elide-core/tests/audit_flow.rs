@@ -15,7 +15,7 @@ use elide_core::{Component, Result};
 
 mod fixtures;
 use elide_core::entity::Birth;
-use elide_core::entity::audit::{Fusion, Model, Pattern};
+use elide_core::entity::audit::{Fused, Model, Pattern};
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
 
 /// A trivial "highest confidence wins" fusion: the strongest entity absorbs
@@ -25,7 +25,7 @@ fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
     entities.sort_by(|a, b| b.confidence().partial_cmp(&a.confidence()).unwrap());
     let mut base = entities.remove(0);
     let (confidence, location) = (base.confidence(), base.location().clone());
-    base.fuse(&entities, Fusion::new("max", location), confidence);
+    base.fuse(&entities, Fused::new("max", location), confidence);
     base
 }
 
@@ -79,7 +79,7 @@ fn two_recognizers_fuse_into_one() {
     assert_eq!(entity.audit().events().len(), 3);
     assert_matches!(
         entity.audit().events().last().unwrap().kind,
-        AuditKind::Fusion(ref dedup) if dedup.strategy == "max");
+        AuditKind::Fused(ref dedup) if dedup.strategy == "max");
     assert_eq!(
         entity.audit().final_confidence(),
         Some(Confidence::new(0.95).unwrap())
@@ -97,7 +97,7 @@ fn two_recognizers_fuse_into_one() {
     assert_eq!(entity.coref().map(EntityCoRef::as_str), Some("ref-1"));
     assert_matches!(
         entity.audit().events().last().unwrap().kind,
-        AuditKind::Annotation(ref annotation) if annotation.coref.is_some());
+        AuditKind::Annotated(ref annotation) if annotation.coref.is_some());
     assert!(entity.audit().verify().is_ok());
 }
 

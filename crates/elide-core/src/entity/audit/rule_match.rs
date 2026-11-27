@@ -12,7 +12,7 @@ use crate::entity::LabelRef;
 /// A serializable summary, the automatic "why" behind a redaction.
 ///
 /// The anonymizer selects an operator by walking an ordered rule list and
-/// taking the first match. That decision is recorded on the [`Selection`]
+/// taking the first match. That decision is recorded on the [`Selected`]
 /// event as a `RuleMatch` so an audit can see *why* this operator ran
 /// ("matched label EMAIL_ADDRESS", "carried tag financial", "the fallback").
 ///
@@ -20,7 +20,7 @@ use crate::entity::LabelRef;
 /// closure into provenance, so [`Predicate`] records only that a predicate
 /// matched, not which one.
 ///
-/// [`Selection`]: crate::entity::audit::AuditKind::Selection
+/// [`Selected`]: crate::entity::audit::AuditKind::Selected
 /// [`Predicate`]: RuleMatch::Predicate
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

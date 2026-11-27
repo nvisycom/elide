@@ -18,14 +18,14 @@ implements the `Operator` trait from `elide-core`; the reversible ones
 an ordered list of selection `Rule`s (bind an operator to a label, a tag, a
 predicate over a `MatchContext`, or a catch-all fallback) and two paths:
 
-- `pick` runs the rules and records each entity's decision as a `Selection`
+- `pick` runs the rules and records each entity's decision as a `Selected`
   audit event (the operator, how much its output leaks, the rule that matched,
   and the policy's rationale) without reading any data: the decision phase,
   inspectable before anything is applied, while the entities can still be
   edited.
 - `anonymize` resolves the same decisions, records any not already on an
   entity's trail, computes each `Replacement`, applies the batch back into the
-  target, and records a `Redaction` naming the operator that ran.
+  target, and records a `Redacted` event naming the operator that ran.
 
 `Deanonymizer` reverses a reversible operator given the key, recovering the
 original value.

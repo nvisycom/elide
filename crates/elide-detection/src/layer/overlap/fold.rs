@@ -2,7 +2,7 @@
 //! entities.
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{AuditEvent, Conflict, Contested};
+use elide_core::entity::audit::{AuditEvent, Contested, Resolved};
 use elide_core::modality::Modality;
 
 use super::Cluster;
@@ -84,12 +84,12 @@ impl Verdicts {
             if self.dropped[winner] {
                 continue; // winner later lost elsewhere; its claim travels nowhere
             }
-            let conflict = Conflict::new(
+            let conflict = Resolved::new(
                 entities[loser].label().clone(),
                 entities[loser].confidence(),
                 name.to_owned(),
             );
-            let event = AuditEvent::conflict(conflict, entities[winner].confidence());
+            let event = AuditEvent::resolved(conflict, entities[winner].confidence());
             entities[winner].record(event);
         }
     }

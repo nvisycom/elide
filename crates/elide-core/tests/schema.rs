@@ -8,10 +8,14 @@
 #![cfg(feature = "schema")]
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::AuditEvent;
-use elide_core::modality::text::{Text, TextLocation};
+use elide_core::entity::audit::{
+    Annotated, AuditEvent, AuditLog, Calibrated, Contested, Flagged, Fused, Included, Manual,
+    Model, Pattern, Redacted, Refined, Resolved, Selected,
+};
+use elide_core::modality::text::{SourceRef, Text, TextLocation};
+use elide_core::primitive::UnitBoundingBox;
 use elide_core::recognition::Scope;
-use schemars::schema_for;
+use schemars::{JsonSchema, schema_for};
 
 /// The generic `Entity<Text>` generates a schema covering its fields, with the
 /// `LanguageTag` field rendered as a string (via `with = "Option<String>"`).
@@ -102,9 +106,6 @@ fn text_location_schema() {
 #[cfg(feature = "serde")]
 #[test]
 fn text_location_rejects_empty_and_round_trips() {
-    use elide_core::modality::text::SourceRef;
-    use elide_core::primitive::UnitBoundingBox;
-
     // A location naming nothing is unrepresentable on the wire.
     for bad in [
         "{}",
@@ -161,9 +162,46 @@ fn scope_schema() {
 /// modality crate's own tests, e.g. `elide-image`.)
 #[test]
 fn generic_schema_name_carries_modality_prefix() {
-    use elide_core::entity::audit::AuditLog;
-    use schemars::JsonSchema;
-
     assert_eq!(Entity::<Text>::schema_name(), "TextEntity");
     assert_eq!(AuditLog::<Text>::schema_name(), "TextAuditLog");
+}
+
+/// An audit payload's schema is named for the event, as a participle where
+/// something happened to the entity, so it does not collide with a caller's
+/// own type of a common name (`TextRedaction`, `Selection`, `Calibration`).
+#[test]
+fn audit_payload_schemas_are_named_for_their_event() {
+    let names = [
+        Pattern::<Text>::schema_name(),
+        Model::<Text>::schema_name(),
+        Flagged::<Text>::schema_name(),
+        Fused::<Text>::schema_name(),
+        Resolved::schema_name(),
+        Contested::schema_name(),
+        Calibrated::schema_name(),
+        Refined::<Text>::schema_name(),
+        Redacted::<Text>::schema_name(),
+        Selected::schema_name(),
+        Included::<Text>::schema_name(),
+        Manual::<Text>::schema_name(),
+        Annotated::<Text>::schema_name(),
+    ];
+    assert_eq!(
+        names.map(|name| name.into_owned()),
+        [
+            "TextPattern",
+            "TextModel",
+            "TextFlagged",
+            "TextFused",
+            "Resolved",
+            "Contested",
+            "Calibrated",
+            "TextRefined",
+            "TextRedacted",
+            "Selected",
+            "TextIncluded",
+            "TextManual",
+            "TextAnnotated",
+        ]
+    );
 }

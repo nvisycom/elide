@@ -96,7 +96,7 @@ async fn analyze_fuses_resolves_filters() {
     let last = phone.audit().events().last().unwrap();
     assert_matches!(
         last.kind,
-        AuditKind::Fusion(ref d) if d.strategy == "max");
+        AuditKind::Fused(ref d) if d.strategy == "max");
     assert_eq!(phone.audit().final_confidence(), Some(phone.confidence()));
 }
 

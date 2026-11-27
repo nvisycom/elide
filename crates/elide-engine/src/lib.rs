@@ -472,7 +472,7 @@ impl Orchestrator {
     /// carries what was decided and why, never who decided it, so it cannot
     /// speak for anyone else. Each edit is recorded on the entities it touches,
     /// naming `by` and the edit's reason, and sets what it changes: an include
-    /// adds an entity, born from an `Include` event, a relabel or relocation
+    /// adds an entity, born from an `Included` event, a relabel or relocation
     /// changes the entity's label or location, and a suppression or a
     /// confirmation decides whether it is redacted, each as a `Manual` event.
     /// Edits apply in order, each checked against the policy as the edits
@@ -498,7 +498,7 @@ impl Orchestrator {
     }
 
     /// Record on every entity of `report` the operator [`anonymize_with`] will
-    /// apply to it, as a `Selection` event, without touching any document.
+    /// apply to it, as a `Selected` event, without touching any document.
     ///
     /// Each part is picked by the anonymizer registered for its modality, under
     /// the orchestrator's [`with_scope`], the same ones [`anonymize_with`]

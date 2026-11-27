@@ -1,6 +1,6 @@
 //! Application payloads: the redaction decision and its execution
-//! ([`Selection`] then [`Redaction`]), and a reviewer's work: an entity they
-//! added ([`Include`]), and their decisions about one ([`Manual`]).
+//! ([`Selected`] then [`Redacted`]), and a reviewer's work: an entity they
+//! added ([`Included`]), and their decisions about one ([`Manual`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -22,12 +22,12 @@ use crate::redaction::LeakProfile;
 /// the entity edited) first.
 ///
 /// It carries the whole decision: which operator, how much its output leaks,
-/// which rule chose it, and the policy's rationale. The [`Redaction`] that
+/// which rule chose it, and the policy's rationale. The [`Redacted`] event that
 /// applies it names this event by its hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Selection {
+pub struct Selected {
     /// Identity (name + version) of the operator picked. Its *config* is not
     /// recorded; it lives in the policy that will run it, so apply re-resolves
     /// the configured operator rather than reading it here.
@@ -46,7 +46,7 @@ pub struct Selection {
     pub attribution: Option<Attribution>,
 }
 
-impl Selection {
+impl Selected {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 9;
 
@@ -78,8 +78,8 @@ impl Selection {
     }
 }
 
-/// The redaction *execution*: the entity was hidden by applying a
-/// [`Selection`] at a location.
+/// The redaction *execution*: the entity was hidden by applying the decision
+/// a [`Selected`] event records, at a location.
 ///
 /// It names that selection event by its hash, so which operator ran, why, and
 /// how much its output leaks are read from the decision itself, see
@@ -101,21 +101,21 @@ impl Selection {
     feature = "schema",
     schemars(
         bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
-        rename = "{M}Redaction"
+        rename = "{M}Redacted"
     )
 )]
-pub struct Redaction<M: Modality> {
-    /// The hash of the [`Selection`] event this redaction applied.
+pub struct Redacted<M: Modality> {
+    /// The hash of the [`Selected`] event this redaction applied.
     pub selection: AuditHash,
     /// Where the operator wrote.
     pub location: M::Location,
 }
 
-impl<M: Modality> Redaction<M> {
+impl<M: Modality> Redacted<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 7;
 
-    /// A redaction applying the [`Selection`] event whose hash is `selection`
+    /// A redaction applying the [`Selected`] event whose hash is `selection`
     /// at `location`.
     pub fn new(selection: AuditHash, location: M::Location) -> Self {
         Self {
@@ -148,10 +148,10 @@ impl<M: Modality> Redaction<M> {
     feature = "schema",
     schemars(
         bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
-        rename = "{M}Include"
+        rename = "{M}Included"
     )
 )]
-pub struct Include<M: Modality> {
+pub struct Included<M: Modality> {
     /// The label the reviewer gave the entity.
     pub label: LabelRef,
     /// Where it sits.
@@ -164,7 +164,7 @@ pub struct Include<M: Modality> {
     pub attribution: Option<Attribution>,
 }
 
-impl<M: Modality> Include<M> {
+impl<M: Modality> Included<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 12;
 
@@ -271,7 +271,7 @@ impl<M: Modality> Manual<M> {
 /// [`Confirm`](ManualIntent::Confirm) a finding, or an amendment,
 /// [`Relabel`](ManualIntent::Relabel) it or
 /// [`Relocate`](ManualIntent::Relocate) it to the event's location. A miss a
-/// reviewer adds is an [`Include`], the event that starts its entity.
+/// reviewer adds is an [`Included`] event, which starts its entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "intent", rename_all = "snake_case"))]

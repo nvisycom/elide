@@ -56,7 +56,7 @@ impl<R> Calibrated<R> {
             let factor = self.calibration.factor(entity.label());
             if factor != Multiplier::IDENTITY {
                 let scaled = entity.confidence().saturating_mul(factor.get());
-                entity.record(AuditEvent::calibration(scaled, factor.get()));
+                entity.record(AuditEvent::calibrated(scaled, factor.get()));
             }
         }
         entities
@@ -147,7 +147,7 @@ mod tests {
             assert_eq!(organization.confidence(), Confidence::new(0.5).unwrap());
             assert!(matches!(
                 organization.audit().events().last().unwrap().kind,
-                AuditKind::Calibration(_)
+                AuditKind::Calibrated(_)
             ));
             assert!(organization.audit().verify().is_ok());
         }
