@@ -6,14 +6,14 @@
 use std::collections::{HashMap, HashSet};
 
 use elide_codec::StreamMut;
-use elide_core::modality::{DataReader, Modality, NoArtifact};
+use elide_core::modality::{DataReader, Modality};
 use elide_core::recognition::Scope;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
 use super::{Child, Fold, PartVisitor};
 use crate::Orchestrator;
-use crate::analysis::{ArtifactGroup, ArtifactSet, ModalityTag, Report, StrippedRecord};
+use crate::analysis::{ArtifactSet, ModalityTag, Report, StrippedRecord};
 use crate::part_id::PartId;
 use crate::pipeline::{BoxFuture, PartAnalysis, Seeded};
 
@@ -43,7 +43,6 @@ impl PartVisitor for Analyze<'_> {
         policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
-            let no_artifact: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
             // Same-modality parts analyze together, so an OCR/STT enricher issues
             // one batched provider round-trip across them. Each pipeline claims the
             // handles it covers; leftovers have no covering pipeline (pass-through).
@@ -61,11 +60,7 @@ impl PartVisitor for Analyze<'_> {
                     .zip(handles)
                     .map(|(id, stream)| Seeded {
                         stream,
-                        seed: self
-                            .prior
-                            .parts
-                            .get(id)
-                            .map_or(no_artifact.as_ref(), |e| e.artifact.as_ref()),
+                        seed: self.prior.parts.get(id).map(|e| e.artifact.as_ref()),
                     })
                     .collect();
                 let analyses = pipeline

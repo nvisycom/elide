@@ -694,6 +694,7 @@ mod tests {
     #[cfg(feature = "schema")]
     use elide_core::entity::audit::Attribution;
     use elide_core::entity::audit::{Manual, ManualIntent};
+    use elide_core::modality::metadata::Metadata;
     use elide_core::modality::text::{Text, TextLocation};
     #[cfg(feature = "image")]
     use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
@@ -938,8 +939,8 @@ mod tests {
     /// one that is not made to the other fails here rather than handing a
     /// generated client a schema that lies about the wire.
     ///
-    /// Uses an `Image` artifact for a richer payload than text's `NoArtifact`,
-    /// so it needs `image` as well as `schema`.
+    /// Uses an `Image` artifact for a payload with regions, so it needs `image`
+    /// as well as `schema`.
     #[cfg(all(feature = "schema", feature = "image"))]
     #[test]
     fn serialized_artifact_sets_validate_against_the_schema() {
@@ -964,6 +965,16 @@ mod tests {
                 panic!("serialized artifact set does not match its schema: {e}\n{json:#}");
             }
         }
+    }
+
+    /// The set never holds a part with nothing to carry, so its schema has no
+    /// arm for one: a generated client sees no metadata entry.
+    #[cfg(feature = "schema")]
+    #[test]
+    fn the_artifact_set_schema_has_no_metadata_arm() {
+        let schema = serde_json::to_string(&schemars::schema_for!(ArtifactSet)).unwrap();
+        assert!(schema.contains(r#""const":"text""#), "{schema}");
+        assert!(!schema.contains(r#""const":"metadata""#), "{schema}");
     }
 
     #[test]
@@ -1280,5 +1291,18 @@ mod tests {
                 "the part artifact was dropped: {json}",
             );
         }
+    }
+
+    /// A metadata entry read back, as a set saved with one holds, is dropped:
+    /// it carries nothing, so the set it reads into has no entry for it.
+    #[test]
+    fn a_metadata_entry_reads_back_as_no_entry() {
+        let registry = Restorer::new().with_modality::<Metadata>();
+        let json = r#"{ "parts": [{ "id": ["doc", "core.xml"], "modality": "metadata", "artifact": null }] }"#;
+        let mut de = serde_json::Deserializer::from_str(json);
+        let set = registry
+            .restore_unchecked::<ArtifactSet, _>(&mut de)
+            .expect("a metadata entry deserializes");
+        assert!(set.is_empty());
     }
 }

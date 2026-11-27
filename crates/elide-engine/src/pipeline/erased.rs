@@ -22,10 +22,10 @@ use crate::analysis::{ArtifactGroup, EntityGroup};
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A stream to analyze, with the enrichment artifact a prior run left it:
-/// `NoArtifact` on a first pass, a restored artifact on a re-run.
+/// none on a first pass, a restored artifact on a re-run.
 pub(crate) struct Seeded<'s, 'a> {
     pub(crate) stream: StreamMut<'s>,
-    pub(crate) seed: &'a dyn ArtifactGroup,
+    pub(crate) seed: Option<&'a dyn ArtifactGroup>,
 }
 
 /// What analyzing one stream produced: its entities, and its enrichment
@@ -39,8 +39,8 @@ pub(crate) struct PartAnalysis {
 ///
 /// Every document stream is a [`StreamMut`] the orchestrator buckets by
 /// modality ([`matches`]) so it never names the modality statically. The analyze
-/// phase is seeded with the group's prior enrichment artifact, `NoArtifact` on a
-/// first pass, a restored artifact on a re-run, so the same path serves both. The
+/// phase is seeded with the group's prior enrichment artifact, none on a first
+/// pass, a restored artifact on a re-run, so the same path serves both. The
 /// phases:
 /// - [`analyze_streams`] analyzes the matched parts together, coalescing
 ///   enrichment into one provider round-trip, and returns one result per handle.
@@ -108,12 +108,15 @@ where
         scope: &'a Scope,
         policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>> {
-        // A matching prior artifact restores; anything else (first-pass
-        // `NoArtifact`, another modality) is `None`, so the group enriches from
-        // scratch.
+        // A matching prior artifact restores; no prior artifact, or one of
+        // another modality, is `None`, so the group enriches from scratch.
         let seeds: Vec<Option<M::Artifact>> = parts
             .iter()
-            .map(|part| part.seed.as_any().downcast_ref::<M::Artifact>().cloned())
+            .map(|part| {
+                part.seed
+                    .and_then(|seed| seed.as_any().downcast_ref::<M::Artifact>())
+                    .cloned()
+            })
             .collect();
         Box::pin(async move {
             // The orchestrator grouped these streams by `matches`, so every one

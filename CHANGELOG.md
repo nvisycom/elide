@@ -142,8 +142,9 @@ and this project adheres to
   every artifact as serialized. `Restorer::restore` checks it, and
   `restore_unchecked` skips the check by name. An `AuditHash` reads back
   from its hex (`parse`) or its 32 bytes (`from_bytes`)
-- `ArtifactSet::is_empty` tells whether a set holds any part without
-  serializing it
+- An `ArtifactSet` holds only parts that were enriched or restored; a part
+  with nothing to enrich (metadata) has no entry. `ArtifactSet::is_empty`
+  tells whether a set holds any part without serializing it
 - Every `Report` has an id, a UUIDv7 minted when it is created and kept across
   reviews and round trips, so two reports with the same findings never share
   a digest
