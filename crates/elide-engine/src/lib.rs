@@ -349,9 +349,8 @@ impl Orchestrator {
     /// prior enrichment from `prior` (an empty set on a first pass, so every
     /// group enriches from scratch). The seeded artifact is downcast against the
     /// group's modality by the erased pipeline, so a `prior` entry for a
-    /// different modality resolves to the default (empty) and that group
-    /// re-enriches, a document's own content and its parts resolve their seed
-    /// the same way.
+    /// different modality is no seed and that group re-enriches, a document's
+    /// own content and its parts resolve their seed the same way.
     async fn drive(
         &self,
         documents: &mut [Document],

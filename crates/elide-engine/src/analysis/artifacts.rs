@@ -66,16 +66,21 @@ impl ModalityTag {
     }
 }
 
-/// The enrichment an analysis produced: every part's artifact, by [`PartId`].
+/// The enrichment an analysis produced: every enriched part's artifact, by
+/// [`PartId`].
 ///
 /// It is keyed exactly as the [`Report`] keys its parts: a named document's own
 /// artifact is under its [`Document::id`](crate::Document::id).
 ///
 /// Produced beside a [`Report`] by [`analyze`](crate::Orchestrator::analyze)
 /// (see [`AnalyzedDocument`](crate::AnalyzedDocument)) and consumed by
-/// [`re_analyze`](crate::Orchestrator::re_analyze). A modality with no
-/// enrichment (text, tabular) contributes an empty artifact, omitted from the
-/// serialized form.
+/// [`re_analyze`](crate::Orchestrator::re_analyze). A part is in the set only
+/// when it was enriched or restored, even to an empty artifact (an image OCR'd
+/// to no text); a part of a modality with nothing to enrich (metadata, whose
+/// artifact is [`NoArtifact`](elide_core::modality::NoArtifact)) has no
+/// entry. An artifact whose type serializes to `null` is held in memory, but
+/// is written as `null` and so reads back as no entry; the digest leaves it
+/// out to match.
 ///
 /// [`Report`]: crate::Report
 #[derive(Default)]
@@ -121,7 +126,7 @@ impl ArtifactSet {
         self
     }
 
-    /// Store an already-erased part artifact (the analyze path).
+    /// Store an already-erased part artifact (the analyze and read-back paths).
     pub(crate) fn set_part(
         &mut self,
         id: PartId,
@@ -144,8 +149,8 @@ impl ArtifactSet {
     ///
     /// An artifact is covered by its serialized form, so the digest holds every
     /// field the set carries across a review gap, whatever its type. One that
-    /// serializes to nothing (a modality with no enrichment) is left out, as
-    /// it is never read back.
+    /// serializes to nothing (`null`) is left out, as reading the set back
+    /// drops it: the set reads back with the digest it was written with.
     pub(crate) fn digest_fields(&self) -> Vec<Vec<u8>> {
         part_fields(self.parts.iter().filter_map(|(id, entry)| {
             // An artifact that cannot serialize cannot be written either; it is

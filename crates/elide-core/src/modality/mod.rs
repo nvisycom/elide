@@ -202,7 +202,7 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 ///
 /// An image's OCR `Layout`, an audio clip's STT `Transcription`: context
 /// state produced once per payload and read through the medium's text/location
-/// projection, never entering an entity. A medium with no enrichment uses
+/// projection, never entering an entity. A medium with nothing to enrich uses
 /// [`NoArtifact`].
 ///
 /// This trait is a marker over the bounds such an artifact must satisfy.
@@ -212,19 +212,17 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 /// sentinel.
 ///
 /// [`Enricher`]: crate::enrichment::Enricher
-pub trait ModalityArtifact:
-    Clone + fmt::Debug + Default + PartialEq + Send + Sync + 'static
-{
-}
+pub trait ModalityArtifact: Clone + fmt::Debug + PartialEq + Send + Sync + 'static {}
 
-/// The artifact of a medium that is never enriched, such as plain text.
+/// The artifact of a medium with nothing to enrich, such as metadata.
 ///
-/// A zero-sized stand-in (plain text, tabular) that carries nothing and is
-/// omitted from a serialized report.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// It has no values, so such a medium never has an artifact: an
+/// `Option<NoArtifact>` is always [`None`], no enricher can produce one, and an
+/// analysis records none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct NoArtifact;
+pub enum NoArtifact {}
 
 impl ModalityArtifact for NoArtifact {}
 
@@ -251,7 +249,7 @@ pub trait Modality: Copy + fmt::Debug + Eq + Send + Sync + 'static {
     type Replacement: ModalityReplacement;
 
     /// Enrichment a recognizer reads for this medium ([`NoArtifact`] when the
-    /// medium has none).
+    /// medium has nothing to enrich).
     type Artifact: ModalityArtifact;
 
     /// Stable, human-readable name for the medium (e.g. `"text"`).
