@@ -696,6 +696,7 @@ mod tests {
     use elide_core::entity::audit::{Manual, ManualIntent};
     use elide_core::modality::metadata::Metadata;
     use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::modality::{Modality, ModalityArtifact};
     #[cfg(feature = "image")]
     use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
     #[cfg(feature = "image")]
@@ -1304,5 +1305,35 @@ mod tests {
             .restore_unchecked::<ArtifactSet, _>(&mut de)
             .expect("a metadata entry deserializes");
         assert!(set.is_empty());
+    }
+
+    /// An artifact that serializes to `null` reads back as no entry, and the
+    /// digest leaves it out to match, so an unchanged set restores against
+    /// the digest it was written with.
+    #[test]
+    fn a_null_serializing_artifact_restores_against_its_digest() {
+        #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+        struct Nothing;
+        impl ModalityArtifact for Nothing {}
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct Bare;
+        impl Modality for Bare {
+            type Artifact = Nothing;
+            type Data = <Text as Modality>::Data;
+            type Location = <Text as Modality>::Location;
+            type Replacement = <Text as Modality>::Replacement;
+
+            const NAME: &'static str = "bare";
+        }
+
+        let set = ArtifactSet::new().insert_part::<Bare>(doc(), Nothing);
+        let registry = Restorer::new().with_modality::<Bare>();
+        let json = serde_json::to_string(&set).unwrap();
+        let mut de = serde_json::Deserializer::from_str(&json);
+        let back: ArtifactSet = registry
+            .restore(&set.digest(), &mut de)
+            .expect("an unchanged set restores");
+        assert!(back.is_empty());
     }
 }

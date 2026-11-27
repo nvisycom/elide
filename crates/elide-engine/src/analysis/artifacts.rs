@@ -21,7 +21,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 
 use elide_core::entity::audit::AuditHash;
-use elide_core::modality::{Modality, NoArtifact};
+use elide_core::modality::Modality;
 use serde_value::Value;
 
 use super::group::{ArtifactGroup, ErasedGroup};
@@ -76,7 +76,8 @@ impl ModalityTag {
 /// (see [`AnalyzedDocument`](crate::AnalyzedDocument)) and consumed by
 /// [`re_analyze`](crate::Orchestrator::re_analyze). A part is in the set only
 /// when it was enriched or restored, even to an empty artifact (an image OCR'd
-/// to no text); a part of a modality with nothing to enrich (metadata) has no
+/// to no text); a part of a modality with nothing to enrich (metadata, whose
+/// artifact is [`NoArtifact`](elide_core::modality::NoArtifact)) has no
 /// entry.
 ///
 /// [`Report`]: crate::Report
@@ -113,7 +114,7 @@ impl ArtifactSet {
     }
 
     /// Set the artifact of the part `id`, as modality `P`, replacing any already
-    /// set for that part. A [`NoArtifact`] is not stored.
+    /// set for that part.
     #[must_use]
     pub fn insert_part<P: Modality>(mut self, id: PartId, artifact: P::Artifact) -> Self
     where
@@ -124,18 +125,12 @@ impl ArtifactSet {
     }
 
     /// Store an already-erased part artifact (the analyze and read-back paths).
-    ///
-    /// A [`NoArtifact`] carries nothing, so it is never stored: a part of a
-    /// modality with nothing to enrich (metadata) has no entry.
     pub(crate) fn set_part(
         &mut self,
         id: PartId,
         modality: ModalityTag,
         artifact: Box<dyn ArtifactGroup>,
     ) {
-        if artifact.as_any().is::<NoArtifact>() {
-            return;
-        }
         self.parts.insert(id, ArtifactEntry { modality, artifact });
     }
 
@@ -151,12 +146,15 @@ impl ArtifactSet {
     /// modality and its artifact.
     ///
     /// An artifact is covered by its serialized form, so the digest holds every
-    /// field the set carries across a review gap, whatever its type.
+    /// field the set carries across a review gap, whatever its type. One that
+    /// serializes to nothing (`null`) is left out, as reading the set back
+    /// drops it: the set reads back with the digest it was written with.
     pub(crate) fn digest_fields(&self) -> Vec<Vec<u8>> {
-        part_fields(self.parts.iter().map(|(id, entry)| {
+        part_fields(self.parts.iter().filter_map(|(id, entry)| {
             // An artifact that cannot serialize cannot be written either; it is
             // still covered, by its error, so the digest never skips it.
             let bytes = match serde_value::to_value(Erased(entry.artifact.as_ref())) {
+                Ok(Value::Unit | Value::Option(None)) => return None,
                 Ok(value) => {
                     let mut bytes = Vec::new();
                     encode(&value, &mut bytes);
@@ -164,7 +162,7 @@ impl ArtifactSet {
                 }
                 Err(error) => [&[u8::MAX], error.to_string().as_bytes()].concat(),
             };
-            (id, entry.modality.name, vec![bytes])
+            Some((id, entry.modality.name, vec![bytes]))
         }))
     }
 }
@@ -254,7 +252,6 @@ fn encode(value: &Value, out: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::modality::metadata::Metadata;
     use elide_core::modality::text::{Text, Tokens};
 
     use super::*;
@@ -264,11 +261,5 @@ mod tests {
         assert!(ArtifactSet::new().is_empty());
         let set = ArtifactSet::new().insert_part::<Text>(PartId::leaf("a.txt"), Tokens::default());
         assert!(!set.is_empty());
-    }
-
-    #[test]
-    fn a_part_with_nothing_to_carry_is_not_stored() {
-        let set = ArtifactSet::new().insert_part::<Metadata>(PartId::leaf("core.xml"), NoArtifact);
-        assert!(set.is_empty());
     }
 }

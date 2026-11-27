@@ -154,8 +154,8 @@ impl JsonSchema for ArtifactSet {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // One arm per compiled-in modality with something to enrich,
         // discriminated by `modality`, mirroring `Report`, so a client reads both
-        // halves the same way. Metadata has no arm: the set never holds a part
-        // with nothing to carry.
+        // halves the same way. Metadata has no arm: its artifact, `NoArtifact`,
+        // has no values, so the set can never hold a metadata entry.
         let arms = vec![
             artifact_arm::<Text>(generator),
             #[cfg(feature = "image")]
