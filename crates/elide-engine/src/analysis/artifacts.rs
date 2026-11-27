@@ -78,7 +78,9 @@ impl ModalityTag {
 /// when it was enriched or restored, even to an empty artifact (an image OCR'd
 /// to no text); a part of a modality with nothing to enrich (metadata, whose
 /// artifact is [`NoArtifact`](elide_core::modality::NoArtifact)) has no
-/// entry.
+/// entry. An artifact whose type serializes to `null` is held in memory, but
+/// is written as `null` and so reads back as no entry; the digest leaves it
+/// out to match.
 ///
 /// [`Report`]: crate::Report
 #[derive(Default)]

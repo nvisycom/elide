@@ -29,9 +29,9 @@ pub struct Subject<M: Modality> {
     /// The medium's enrichment for this chunk (a `Layout` for an image, a
     /// `Transcription` for audio), or [`None`] until an enricher runs (or a
     /// saved artifact is restored), and always for a medium whose artifact is
-    /// [`NoArtifact`]. `Some(empty)`
-    /// — enriched to nothing — is distinct from `None` (not yet enriched), so an
-    /// enricher skips a restored empty artifact rather than re-running.
+    /// [`NoArtifact`]. `Some(empty)` — enriched to nothing — is distinct from
+    /// `None` (not yet enriched), so an enricher skips a restored empty artifact
+    /// rather than re-running.
     ///
     /// [`NoArtifact`]: crate::modality::NoArtifact
     artifact: Option<M::Artifact>,
