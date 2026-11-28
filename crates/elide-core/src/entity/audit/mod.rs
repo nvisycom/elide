@@ -6,6 +6,7 @@ mod attribution;
 mod event;
 mod hash;
 mod rule_match;
+mod standing;
 
 use std::iter;
 
@@ -23,6 +24,7 @@ pub use self::event::{
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
 pub use self::rule_match::RuleMatch;
+pub use self::standing::Standing;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 use crate::{Error, Result};
@@ -247,29 +249,29 @@ impl<M: Modality> AuditLog<M> {
         self.line().any(|e| matches!(e.kind, AuditKind::Flagged(_)))
     }
 
-    /// Whether redaction leaves this entity alone: detection [`Dropped`] it or
-    /// a reviewer suppressed it, and no reviewer confirmed it since.
+    /// Whether redaction leaves this entity alone: its [standing](Self::standing)
+    /// is a detection drop or a reviewer's suppression, not taken back by a
+    /// confirmation since.
     ///
-    /// The latest of a [`Dropped`] event, a [`ManualIntent::Suppress`], and a
-    /// [`ManualIntent::Confirm`] on its [line](Self::line) decides. The audit
-    /// trail is the single source of truth: there is no separate flag to keep
-    /// in sync. Which of the two suppressed it is read from [`dropped`] and
-    /// [`verdict`].
-    ///
-    /// [`dropped`]: Self::dropped
-    /// [`verdict`]: Self::verdict
+    /// The audit trail is the single source of truth: there is no separate
+    /// flag to keep in sync.
     pub fn is_suppressed(&self) -> bool {
-        self.line()
-            .find_map(|e| match &e.kind {
-                AuditKind::Dropped(_) => Some(true),
-                AuditKind::Manual(m) => match m.intent {
-                    ManualIntent::Suppress => Some(true),
-                    ManualIntent::Confirm => Some(false),
-                    ManualIntent::Relabel { .. } | ManualIntent::Relocate => None,
-                },
-                _ => None,
-            })
-            .unwrap_or(false)
+        self.standing().is_some_and(Standing::is_suppressed)
+    }
+
+    /// The latest decision on its [line](Self::line) about whether this entity
+    /// is redacted: a [`Dropped`] event, a [`ManualIntent::Suppress`], or a
+    /// [`ManualIntent::Confirm`]. `None` when nothing decided it.
+    pub fn standing(&self) -> Option<Standing> {
+        self.line().find_map(|e| match &e.kind {
+            AuditKind::Dropped(_) => Some(Standing::Dropped),
+            AuditKind::Manual(m) => match m.intent {
+                ManualIntent::Suppress => Some(Standing::Suppressed),
+                ManualIntent::Confirm => Some(Standing::Confirmed),
+                ManualIntent::Relabel { .. } | ManualIntent::Relocate => None,
+            },
+            _ => None,
+        })
     }
 
     /// Why detection left this entity out, when it did: the [`Dropped`] event

@@ -13,7 +13,7 @@ pub struct Analysis<M: Modality> {
     /// dropped.
     ///
     /// A dropped entity is [suppressed](Entity::is_suppressed), so redaction
-    /// leaves it alone; its trail ends in a [`Dropped`] event naming the layer
+    /// leaves it alone; its trail holds a [`Dropped`] event naming the layer
     /// that dropped it and, for a lost overlap, the entity that won, which may
     /// be dropped too. An analyzer that [discards its
     /// drops](crate::Analyzer::discard_dropped) returns only the findings.

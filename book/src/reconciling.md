@@ -59,7 +59,7 @@ recording them.
 ## Why a finding is missing
 
 An analysis keeps everything it drops, beside its findings. A dropped entity's
-audit trail ends in a `Dropped` event: the component that dropped it (a layer,
+audit trail holds a `Dropped` event: the component that dropped it (a layer,
 or the catalog filter) and, when it lost an overlap, the id of the entity that
 beat it. That entity may itself be dropped, so a chain reads in full:
 

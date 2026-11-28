@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use self::audit::{
-    Annotated, AuditEvent, AuditHash, AuditHasher, AuditLog, Fused, Manual, ManualIntent,
+    Annotated, AuditEvent, AuditHash, AuditHasher, AuditLog, Fused, Manual, ManualIntent, Standing,
 };
 #[cfg(feature = "fixtures")]
 use self::audit::{Pattern, PatternRule};
@@ -340,11 +340,12 @@ impl<M: Modality> Entity<M> {
     /// is this entity's own, so a caller cannot record a stale score. `actor`
     /// names who made the decision and becomes the event's source.
     ///
-    /// A verdict that changes nothing records nothing, so re-applying one
-    /// does not grow the trail: a [`Suppress`] of an entity already
-    /// [suppressed](Self::is_suppressed), by a reviewer or by a detection
-    /// drop, or a [`Confirm`] that is already its latest
-    /// [verdict](AuditLog::verdict). Returns whether an event was recorded.
+    /// A verdict that repeats the entity's [standing](AuditLog::standing)
+    /// records nothing, so re-applying one does not grow the trail: a
+    /// [`Suppress`] of an entity already dropped or suppressed, or a
+    /// [`Confirm`] of one already confirmed. A confirmation followed by a drop
+    /// stands as the drop, so confirming again records. Returns whether an
+    /// event was recorded.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     /// [`Suppress`]: audit::ManualIntent::Suppress
@@ -352,10 +353,13 @@ impl<M: Modality> Entity<M> {
     /// [`Relabel`]: audit::ManualIntent::Relabel
     /// [`Relocate`]: audit::ManualIntent::Relocate
     pub fn record_manual(&mut self, manual: Manual<M>, actor: &str) -> bool {
-        let repeated = match manual.intent {
-            ManualIntent::Suppress => self.is_suppressed(),
-            _ => self.audit.verdict() == Some(&manual.intent),
-        };
+        let repeated = matches!(
+            (&manual.intent, self.audit.standing()),
+            (
+                ManualIntent::Suppress,
+                Some(Standing::Dropped | Standing::Suppressed)
+            ) | (ManualIntent::Confirm, Some(Standing::Confirmed))
+        );
         if repeated {
             return false;
         }
@@ -608,6 +612,7 @@ mod tests {
         ));
         assert!(entity.is_dropped());
         assert!(entity.is_suppressed());
+        assert_eq!(entity.audit().standing(), Some(Standing::Dropped));
         assert_eq!(entity.audit().verdict(), None, "no reviewer has decided");
 
         assert!(
@@ -619,8 +624,29 @@ mod tests {
             !entity.is_suppressed(),
             "the confirmation overrides the drop"
         );
+        assert_eq!(entity.audit().standing(), Some(Standing::Confirmed));
         assert_eq!(entity.audit().dropped(), Some(&Dropped::rejected(by)));
         assert!(entity.audit().verify().is_ok());
+    }
+
+    /// A drop recorded after a confirmation suppresses the entity again, and
+    /// confirming it again takes that drop back.
+    #[test]
+    fn a_confirmation_after_a_later_drop_records() {
+        let mut entity = text_entity();
+        let loc = entity.state.location.clone();
+        let confidence = entity.confidence();
+        entity.record_manual(Manual::new(ManualIntent::Confirm, loc.clone()), "reviewer");
+        let by = ComponentId::new("threshold", "1");
+        entity.record(AuditEvent::dropped(Dropped::rejected(by), confidence));
+        assert!(entity.is_suppressed());
+
+        assert!(entity.record_manual(Manual::new(ManualIntent::Confirm, loc.clone()), "reviewer"));
+        assert!(!entity.is_suppressed());
+        assert!(
+            !entity.record_manual(Manual::new(ManualIntent::Confirm, loc), "reviewer"),
+            "a confirmation that changes nothing records nothing"
+        );
     }
 
     /// A relabel and a relocation set the fields they name, and record what

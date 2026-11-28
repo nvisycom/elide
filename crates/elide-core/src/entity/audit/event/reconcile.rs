@@ -61,7 +61,7 @@ impl<M: Modality> Fused<M> {
 /// A competing detection of a *different* label lost to this entity.
 ///
 /// It covered the same span and was resolved against this (winning) entity.
-/// The loser is kept beside it, its own trail ending in a [`Dropped`] event
+/// The loser is kept beside it, its own trail holding a [`Dropped`] event
 /// superseded by this entity, unless the analyzer discards what it drops.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

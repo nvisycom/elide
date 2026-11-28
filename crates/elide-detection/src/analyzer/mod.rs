@@ -115,7 +115,7 @@ impl<M: Modality> Analyzer<M> {
     /// Discard what the reduction drops instead of keeping it.
     ///
     /// By default every dropped entity stays in the [`Analysis`], its trail
-    /// ending in a [`Dropped`] event that names the layer and, for a lost
+    /// holding a [`Dropped`] event that names the layer and, for a lost
     /// overlap, the winner: redaction leaves it alone, and a reviewer can read
     /// why it is missing or confirm it. A low threshold over a noisy
     /// recognizer can drop many more candidates than it keeps; discarding
