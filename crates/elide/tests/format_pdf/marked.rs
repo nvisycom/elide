@@ -2,6 +2,8 @@
 //! the glyphs it covers, which are deleted like a detection's. A region that
 //! covers no text fails the apply rather than being skipped.
 
+use std::num::NonZeroU32;
+
 use elide::codec::FormatRegistry;
 use elide::entity::{LabelRef, builtins};
 use elide::modality::text::{Marked, Text, TextLocation};
@@ -24,13 +26,16 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator> {
 }
 
 /// A report holding one reviewer mark over `rect` on `page`.
-fn marked(page: u32, rect: UnitBoundingBox) -> Report {
+fn marked(page: NonZeroU32, rect: UnitBoundingBox) -> Report {
     let mark = TextLocation::marked_rendered(page, rect);
     included(&PartId::from(DOC), builtins::PHONE_NUMBER.to_ref(), mark)
 }
 
 /// The page and first rectangle a detection of `label` is drawn in.
-async fn drawn(orchestrator: &Orchestrator, label: LabelRef) -> Result<(u32, UnitBoundingBox)> {
+async fn drawn(
+    orchestrator: &Orchestrator,
+    label: LabelRef,
+) -> Result<(NonZeroU32, UnitBoundingBox)> {
     let mut document = FormatRegistry::with_builtin()
         .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
         .await?;
@@ -127,7 +132,7 @@ async fn a_region_with_no_text_fails() -> Result<()> {
         .await?;
     let corner = UnitBoundingBox::new(0.995, 0.995, 0.005, 0.005);
     let Err(error) = orchestrator(&registry)?
-        .anonymize_with(&mut document, marked(1, corner))
+        .anonymize_with(&mut document, marked(NonZeroU32::MIN, corner))
         .await
     else {
         panic!("a mark over no text must fail");

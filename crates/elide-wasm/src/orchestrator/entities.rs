@@ -7,6 +7,7 @@
 //! holds and from the enrichment artifacts for what OCR or a transcript holds.
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 use elide::entity::Entity as RustEntity;
@@ -88,7 +89,7 @@ struct TextGroup<'r> {
     /// The part the text is in.
     part: PartId,
     /// The page the text is on, for a rendered part.
-    page: Option<u32>,
+    page: Option<NonZeroU32>,
     /// A location of one of the entities, to anchor the read on its page.
     anchor: &'r TextLocation,
     /// The entities and their spans, ascending by start.
@@ -104,7 +105,7 @@ impl Reader<'_> {
     /// of the UTF-16 units before each.
     async fn text(&mut self) {
         let mut groups: Vec<TextGroup<'_>> = Vec::new();
-        let mut index: HashMap<(PartId, Option<u32>), usize> = HashMap::new();
+        let mut index: HashMap<(PartId, Option<NonZeroU32>), usize> = HashMap::new();
         for (part, entity) in entities_of::<Text>(self.report) {
             // A hidden item flagged whole has no span of its own to read.
             let Some(span) = entity.location().range() else {
@@ -206,7 +207,7 @@ impl Reader<'_> {
 ///
 /// A page's text is read by its span and page; the `anchor` entity's regions
 /// only keep the location rendered, since a rendered location has at least one.
-fn prefix(anchor: &TextLocation, page: Option<u32>, end: usize) -> TextLocation {
+fn prefix(anchor: &TextLocation, page: Option<NonZeroU32>, end: usize) -> TextLocation {
     match page {
         Some(page) => TextLocation::rendered(0..end, page, anchor.rects().to_vec()),
         None => TextLocation::inline(0..end),
@@ -252,7 +253,7 @@ pub(super) fn to_entities(report: &Report, values: Values) -> Vec<Entity> {
     out.push::<Text>(|entity, utf16| {
         let span = entity.location().range().cloned().unwrap_or_default();
         let rendered = entity.location().page().map(|page| Rendered {
-            page,
+            page: page.get(),
             rects: entity.location().rects().iter().map(Rect::from).collect(),
         });
         Location::Text {

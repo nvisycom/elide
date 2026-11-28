@@ -3,6 +3,7 @@
 //! medium with no decoded text. Each carries where that text physically lives.
 
 use std::cmp::Ordering;
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 #[cfg(feature = "serde")]
@@ -91,7 +92,10 @@ impl<'de> Deserialize<'de> for TextLocation {
 /// The span is always set; the variant says where that text physically lives.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Detected {
     /// Plain text, CSV: the decoded span is its own source, no separate anchor.
@@ -117,7 +121,7 @@ pub enum Detected {
         #[cfg_attr(feature = "schema", schemars(with = "Range<usize>"))]
         span: Range<usize>,
         /// 1-based page number.
-        page: u32,
+        page: NonZeroU32,
         /// The regions in page-normalized `0.0..=1.0` coordinates (top-left), one
         /// per line the span wraps across. Non-empty.
         #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
@@ -131,7 +135,10 @@ pub enum Detected {
 /// not a `Marked`; hence no inline variant here.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Marked {
     /// Anchored at raw source bytes (a specific container part). `refs` non-empty.
@@ -143,7 +150,7 @@ pub enum Marked {
     /// Anchored at a rendered-page region. `rects` non-empty.
     Rendered {
         /// 1-based page number.
-        page: u32,
+        page: NonZeroU32,
         /// The regions in page-normalized coordinates. Non-empty.
         #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
         rects: Vec<UnitBoundingBox>,
@@ -172,7 +179,7 @@ impl TextLocation {
     /// Empty `rects` falls back to [`inline`](Self::inline).
     pub fn rendered(
         span: Range<usize>,
-        page: u32,
+        page: NonZeroU32,
         rects: impl IntoIterator<Item = UnitBoundingBox>,
     ) -> Self {
         let rects: Vec<_> = rects.into_iter().collect();
@@ -204,7 +211,7 @@ impl TextLocation {
     /// A reviewer's mark with no decoded span, anchored at a single rendered-page
     /// region. One `rect` (not a collection) keeps the anchor non-empty by
     /// construction.
-    pub fn marked_rendered(page: u32, rect: UnitBoundingBox) -> Self {
+    pub fn marked_rendered(page: NonZeroU32, rect: UnitBoundingBox) -> Self {
         TextLocation::Marked(Marked::Rendered {
             page,
             rects: vec![rect],
@@ -228,7 +235,11 @@ impl TextLocation {
     /// (inline). A reviewer mark has no span to re-anchor and is returned
     /// unchanged.
     #[must_use]
-    pub fn with_rects(self, page: u32, rects: impl IntoIterator<Item = UnitBoundingBox>) -> Self {
+    pub fn with_rects(
+        self,
+        page: NonZeroU32,
+        rects: impl IntoIterator<Item = UnitBoundingBox>,
+    ) -> Self {
         match self.range() {
             Some(span) => Self::rendered(span.clone(), page, rects),
             None => self,
@@ -270,18 +281,12 @@ impl TextLocation {
 
     /// The 1-based page the span is rendered on, if it has a rendered anchor.
     #[must_use]
-    pub fn page(&self) -> Option<u32> {
+    pub fn page(&self) -> Option<NonZeroU32> {
         match self {
             TextLocation::Detected(Detected::Rendered { page, .. })
             | TextLocation::Marked(Marked::Rendered { page, .. }) => Some(*page),
             _ => None,
         }
-    }
-
-    /// The effective page for ordering/hashing: the rendered page, or 0 when the
-    /// location has no rendered anchor (so unpaged text sorts before page 1).
-    fn effective_page(&self) -> u32 {
-        self.page().unwrap_or(0)
     }
 
     /// Whether this is a reviewer's mark (no decoded span).
@@ -336,7 +341,7 @@ impl ModalityLocation for TextLocation {
         // A span is page-local, so two spans only share a coordinate space when
         // they are on the same rendered page (both unpaged, or equal page). Spans
         // on different pages are disjoint even with identical byte ranges.
-        if self.effective_page() != other.effective_page() {
+        if self.page() != other.page() {
             return Overlap::Disjoint;
         }
         // Range geometry is defined on the decoded span. A reviewer mark has no
@@ -384,7 +389,7 @@ impl ModalityLocation for TextLocation {
     fn union(&self, other: &Self) -> Option<Self> {
         // A single span can't straddle two pages; require page agreement (both
         // unpaged, or both on the same rendered page).
-        if self.effective_page() != other.effective_page() {
+        if self.page() != other.page() {
             return None;
         }
         // Fusion unions decoded spans only; a reviewer mark has no span to
@@ -413,11 +418,11 @@ impl ModalityLocation for TextLocation {
     }
 
     fn position_cmp(&self, other: &Self) -> Ordering {
-        // Reading order: rendered page first (unpaged = page 0), then the span. A
+        // Reading order: rendered page first (unpaged before page 1), then the span. A
         // span-bearing location sorts before a reviewer mark (which has no
         // position); two marks sort by their anchor payloads.
-        self.effective_page()
-            .cmp(&other.effective_page())
+        self.page()
+            .cmp(&other.page())
             .then_with(|| span_cmp_for_order(self.range(), other.range()))
             .then_with(|| self.source_refs().cmp(other.source_refs()))
             .then_with(|| rects_order(self.rects(), other.rects()))
@@ -425,9 +430,9 @@ impl ModalityLocation for TextLocation {
 
     fn hash(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        // Effective page, then the span, then the physical anchor — the
+        // The page (0 when unpaged), then the span, then the physical anchor — the
         // tamper-evidence fold. (Box floats are folded by bit pattern.)
-        bytes.extend_from_slice(&self.effective_page().to_le_bytes());
+        bytes.extend_from_slice(&self.page().map_or(0, NonZeroU32::get).to_le_bytes());
         match self.range() {
             Some(span) => {
                 bytes.push(1);
@@ -453,9 +458,9 @@ fn merge_refs(a: &[SourceRef], b: &[SourceRef]) -> Option<Vec<SourceRef>> {
 }
 
 /// Merge two locations' rendered rects on their shared page, or `None` when
-/// neither is rendered. (Union already required equal `effective_page`, so any
+/// neither is rendered. (Union already required equal pages, so any
 /// rendered anchors agree on the page.)
-fn merge_rects(a: &TextLocation, b: &TextLocation) -> Option<(u32, Vec<UnitBoundingBox>)> {
+fn merge_rects(a: &TextLocation, b: &TextLocation) -> Option<(NonZeroU32, Vec<UnitBoundingBox>)> {
     let page = a.page().or_else(|| b.page())?;
     let mut rects: Vec<UnitBoundingBox> = a.rects().iter().chain(b.rects()).copied().collect();
     rects.dedup();
@@ -561,6 +566,10 @@ mod tests {
         SourceRef::new(start..end)
     }
 
+    fn page(number: u32) -> NonZeroU32 {
+        NonZeroU32::new(number).unwrap()
+    }
+
     #[test]
     fn position_cmp_orders_by_start_then_end() {
         let a = TextLocation::inline(0..5);
@@ -573,9 +582,13 @@ mod tests {
 
     #[test]
     fn position_cmp_orders_pages_before_offsets() {
-        let early_page =
-            TextLocation::rendered(100..110, 1, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
-        let late_page = TextLocation::rendered(0..5, 2, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
+        let early_page = TextLocation::rendered(
+            100..110,
+            page(1),
+            [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)],
+        );
+        let late_page =
+            TextLocation::rendered(0..5, page(2), [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
         // Page 1 sorts before page 2 even with a larger offset.
         assert_eq!(early_page.position_cmp(&late_page), Ordering::Less);
     }
@@ -592,9 +605,12 @@ mod tests {
         assert!(!elsewhere.covers(&detected));
         assert!(!detected.covers(&mark));
 
-        let boxed = TextLocation::rendered(0..5, 2, [UnitBoundingBox::new(0.2, 0.2, 0.1, 0.05)]);
-        let region = TextLocation::marked_rendered(2, UnitBoundingBox::new(0.1, 0.1, 0.5, 0.5));
-        let other_page = TextLocation::marked_rendered(3, UnitBoundingBox::new(0.1, 0.1, 0.5, 0.5));
+        let boxed =
+            TextLocation::rendered(0..5, page(2), [UnitBoundingBox::new(0.2, 0.2, 0.1, 0.05)]);
+        let region =
+            TextLocation::marked_rendered(page(2), UnitBoundingBox::new(0.1, 0.1, 0.5, 0.5));
+        let other_page =
+            TextLocation::marked_rendered(page(3), UnitBoundingBox::new(0.1, 0.1, 0.5, 0.5));
         assert!(region.covers(&boxed));
         assert!(!other_page.covers(&boxed));
     }
@@ -623,8 +639,8 @@ mod tests {
 
     #[test]
     fn union_requires_same_page() {
-        let a = TextLocation::rendered(0..5, 1, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
-        let b = TextLocation::rendered(3..12, 2, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
+        let a = TextLocation::rendered(0..5, page(1), [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
+        let b = TextLocation::rendered(3..12, page(2), [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
         assert_eq!(a.union(&b), None);
     }
 
@@ -642,12 +658,12 @@ mod tests {
         // pages must not overlap (nor union) — else reconcile would wrongly merge
         // an entity on page 2 with an unrelated one at the same offset on page 3.
         let full = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
-        let p2 = TextLocation::rendered(181..202, 2, [full]);
-        let p3 = TextLocation::rendered(181..202, 3, [full]);
+        let p2 = TextLocation::rendered(181..202, page(2), [full]);
+        let p3 = TextLocation::rendered(181..202, page(3), [full]);
         assert_eq!(p2.overlap(&p3), Overlap::Disjoint);
         assert_eq!(p2.union(&p3), None);
         // Same page, same span: still overlaps as before.
-        let p2b = TextLocation::rendered(181..202, 2, [full]);
+        let p2b = TextLocation::rendered(181..202, page(2), [full]);
         assert_eq!(p2.overlap(&p2b), Overlap::Contains);
     }
 
@@ -717,8 +733,8 @@ mod tests {
     fn rendered_exposes_page_and_rects() {
         let r1 = UnitBoundingBox::new(0.1, 0.2, 0.3, 0.05);
         let r2 = UnitBoundingBox::new(0.1, 0.3, 0.2, 0.05);
-        let loc = TextLocation::rendered(0..20, 2, [r1, r2]);
-        assert_eq!(loc.page(), Some(2));
+        let loc = TextLocation::rendered(0..20, page(2), [r1, r2]);
+        assert_eq!(loc.page(), Some(page(2)));
         assert_eq!(loc.rects(), &[r1, r2]);
     }
 
@@ -751,9 +767,9 @@ mod tests {
         let cases = [
             TextLocation::inline(0..5),
             TextLocation::source(0..5, [r(2, 4)]),
-            TextLocation::rendered(0..5, 3, [UnitBoundingBox::new(0.1, 0.2, 0.3, 0.05)]),
+            TextLocation::rendered(0..5, page(3), [UnitBoundingBox::new(0.1, 0.2, 0.3, 0.05)]),
             TextLocation::marked_source(r(3, 12)),
-            TextLocation::marked_rendered(2, UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)),
+            TextLocation::marked_rendered(page(2), UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)),
         ];
         for case in cases {
             let json = serde_json::to_string(&case).expect("serializes");

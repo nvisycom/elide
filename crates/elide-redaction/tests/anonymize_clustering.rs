@@ -6,6 +6,8 @@
 
 mod fixtures;
 
+use std::num::NonZeroU32;
+
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
@@ -89,9 +91,13 @@ async fn non_coalescible_overlap_stays_separate() {
     // union() is None, so clustering must keep them apart.
     let full = elide_core::primitive::UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
     let mut a = Entity::fixture("A", 0..5);
-    a.lift(a.location().clone().with_rects(1, [full]));
+    a.lift(a.location().clone().with_rects(NonZeroU32::MIN, [full]));
     let mut b = Entity::fixture("B", 0..5);
-    b.lift(b.location().clone().with_rects(2, [full]));
+    b.lift(
+        b.location()
+            .clone()
+            .with_rects(NonZeroU32::new(2).unwrap(), [full]),
+    );
     let mut entities = vec![a, b];
 
     Anonymizer::new()

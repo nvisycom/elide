@@ -12,7 +12,7 @@ use elide_image::ImageBuffer;
 use elide_image::modality::{Image, ImageData, ImageFormat, ImageLocation, ImageReplacement};
 use elide_image::primitive::BoundingBox;
 
-use super::FORMAT_ID;
+use super::{FORMAT_ID, page_number};
 use crate::content::page::ScannedPage;
 
 /// A page's render: the image pipeline reads it for OCR and redacts it in
@@ -98,7 +98,7 @@ impl PageStream {
     /// if it names another page.
     fn on_this_page(&self, location: &ImageLocation) -> Result<()> {
         match location.page {
-            Some(page) if page != self.number => Err(Error::malformed(format!(
+            Some(page) if page.get() != self.number => Err(Error::malformed(format!(
                 "a region of page {page} addressed to page {}'s render",
                 self.number
             ))),
@@ -115,7 +115,7 @@ impl Stream<Image> for PageStream {
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
         let render = self.open()?;
         let chunk = Chunk {
-            location: render.frame().with_page(self.number),
+            location: render.frame().with_page(page_number(self.number)?),
             data: render.data()?,
             hints: Vec::new(),
         };

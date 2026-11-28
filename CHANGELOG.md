@@ -18,6 +18,10 @@ and this project adheres to
   that found it, how overlapping findings were reconciled, confidence
   adjustments, reviewer decisions, the operator picked to hide it, and the
   redaction applied, verifiable as a hash-linked DAG
+- A text location is a span found over decoded text or a reviewer's mark,
+  each a `kind`-tagged shape that admits no other field, so a value on the
+  wire reads as exactly one of them; a page, in text and image locations
+  alike, is numbered from 1
 - Recognizers, enrichers, redaction operators, detection layers, fusion
   scorings, and reconcilers are each a `Component` with one name-and-version
   identity (`ComponentId`), recorded in the audit trail; `#[derive(Component)]` takes it from the crate, fixed attributes, a
@@ -71,7 +75,7 @@ and this project adheres to
 - An `Analyzer` per modality that runs enrichers, then recognizers, then the
   layers that fuse, arbitrate, and threshold their findings, then restricts
   them to the request's catalog; every entity it drops stays in the analysis
-  and the report, suppressed, its trail ending in a `Dropped` event naming
+  and the report, suppressed, its trail holding a `Dropped` event naming
   the component that dropped it and the entity it lost to, which records the
   loser's id in turn, so a reviewer can read why a finding is missing and
   confirm it (`Analyzer::discard_dropped` leaves drops out); recognizer

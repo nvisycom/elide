@@ -32,7 +32,10 @@ mod plan;
 mod state;
 mod stream;
 
+use std::num::NonZeroU32;
+
 use elide_codec::{Format, FormatId};
+use elide_core::{Error, Result};
 
 use self::loader::PdfDocumentLoader;
 #[cfg(feature = "render")]
@@ -40,6 +43,16 @@ use crate::primitive::{Dpi, RasterMode};
 
 /// The stable [`FormatId`] of the PDF format, `elide.document.pdf`.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
+
+/// The 1-based page `number` as a location names it.
+///
+/// # Errors
+///
+/// [`MalformedInput`](elide_core::ErrorKind::MalformedInput) for page 0: the
+/// document's pages are numbered from 1, so it names none of them.
+fn page_number(number: u32) -> Result<NonZeroU32> {
+    NonZeroU32::new(number).ok_or_else(|| Error::malformed("pages are numbered from 1, not 0"))
+}
 
 /// The body stream's part id; excluded from the blob-part fold on assemble.
 const BODY_PART_ID: &str = "body";

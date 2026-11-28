@@ -7,6 +7,8 @@
 
 #![cfg(feature = "schema")]
 
+use std::num::NonZeroU32;
+
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{
     Annotated, AuditEvent, AuditLog, Calibrated, Contested, Flagged, Fused, Included, Manual,
@@ -16,6 +18,12 @@ use elide_core::modality::text::{SourceRef, Text, TextLocation};
 use elide_core::primitive::UnitBoundingBox;
 use elide_core::recognition::Scope;
 use schemars::{JsonSchema, schema_for};
+
+/// The 1-based page `number`.
+#[cfg(feature = "serde")]
+fn page(number: u32) -> NonZeroU32 {
+    NonZeroU32::new(number).unwrap()
+}
 
 /// The generic `Entity<Text>` generates a schema covering its fields, with the
 /// `LanguageTag` field rendered as a string (via `with = "Option<String>"`).
@@ -31,8 +39,9 @@ fn entity_text_schema() {
 
 /// The location schema is a closed set of tagged shapes, not a bag of optional
 /// fields: a union (`anyOf`) of `Detected`/`Marked`, each a `oneOf` of
-/// `kind`-tagged arms that list their discriminant under `required`. A location
-/// naming nothing (`{}`) matches no arm. This is the invariant the whole enum
+/// `kind`-tagged arms that list their discriminant under `required` and admit
+/// no other field, so each JSON value matches exactly one arm. A location
+/// naming nothing (`{}`) matches no arm, and a page is numbered from 1. This is the invariant the whole enum
 /// redesign exists to express to downstream SDK consumers, so the test asserts
 /// the structure (not substrings, which could match a stray description word).
 #[test]
@@ -49,7 +58,8 @@ fn text_location_schema() {
     assert_eq!(arms.len(), 2, "two top-level arms (Detected, Marked)");
 
     // Every leaf variant (resolving $refs into $defs) is a closed object that
-    // lists `kind` under `required` — so none of them accepts `{}`.
+    // lists `kind` under `required` — so none of them accepts `{}`, and a mark
+    // carrying a span matches only the detected arm.
     let defs = json.get("$defs").and_then(|v| v.as_object());
     let leaf_arms = |node: &serde_json::Value| -> Vec<serde_json::Value> {
         let resolved = node
@@ -67,6 +77,7 @@ fn text_location_schema() {
     };
     let mut leaves = 0;
     let mut anchor_arrays = 0;
+    let mut pages = 0;
     for arm in arms {
         for leaf in leaf_arms(arm) {
             leaves += 1;
@@ -78,6 +89,19 @@ fn text_location_schema() {
                 required.iter().any(|f| f == "kind"),
                 "variant arm must require `kind`: {leaf}"
             );
+            assert_eq!(
+                leaf.get("additionalProperties"),
+                Some(&serde_json::Value::Bool(false)),
+                "variant arm must admit no other field: {leaf}"
+            );
+            if let Some(page) = leaf.get("properties").and_then(|p| p.get("page")) {
+                pages += 1;
+                assert_eq!(
+                    page.get("minimum").and_then(|m| m.as_u64()),
+                    Some(1),
+                    "`page` must be numbered from 1: {leaf}"
+                );
+            }
             // An anchor array (`refs`/`rects`) must carry `minItems: 1` — the
             // non-empty invariant expressed in the schema, not just at deserialize,
             // so a generated SDK validator rejects an empty anchor too.
@@ -97,6 +121,8 @@ fn text_location_schema() {
     assert_eq!(leaves, 5, "five concrete variant shapes");
     // Source + Rendered on each of Detected and Marked = 4 anchor arrays.
     assert_eq!(anchor_arrays, 4, "four non-empty anchor arrays");
+    // Rendered on each of Detected and Marked = 2 pages.
+    assert_eq!(pages, 2, "two page numbers");
 }
 
 /// The authoritative runtime contract behind the schema: the serde impl rejects
@@ -106,27 +132,33 @@ fn text_location_schema() {
 #[cfg(feature = "serde")]
 #[test]
 fn text_location_rejects_empty_and_round_trips() {
-    // A location naming nothing is unrepresentable on the wire.
+    // A location naming nothing, on page 0, or with a field its shape does not
+    // have is unrepresentable on the wire.
+    let full = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
+    let rect = serde_json::to_string(&full).unwrap();
     for bad in [
-        "{}",
-        r#"{"kind":"source","span":{"start":0,"end":5},"refs":[]}"#,
-        r#"{"kind":"source","refs":[]}"#,
-        r#"{"kind":"rendered","span":{"start":0,"end":5},"page":1,"rects":[]}"#,
+        "{}".to_owned(),
+        r#"{"kind":"source","span":{"start":0,"end":5},"refs":[]}"#.to_owned(),
+        r#"{"kind":"source","refs":[]}"#.to_owned(),
+        r#"{"kind":"rendered","span":{"start":0,"end":5},"page":1,"rects":[]}"#.to_owned(),
+        format!(r#"{{"kind":"rendered","page":0,"rects":[{rect}]}}"#),
+        format!(r#"{{"kind":"rendered","span":{{"start":0,"end":5}},"page":0,"rects":[{rect}]}}"#),
+        format!(r#"{{"kind":"rendered","page":1,"rects":[{rect}],"note":"x"}}"#),
+        r#"{"kind":"inline","span":{"start":0,"end":5},"page":1}"#.to_owned(),
     ] {
         assert!(
-            serde_json::from_str::<TextLocation>(bad).is_err(),
-            "must reject a location that names nothing: {bad}"
+            serde_json::from_str::<TextLocation>(&bad).is_err(),
+            "must reject: {bad}"
         );
     }
 
     // Every real variant round-trips.
-    let full = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
     for good in [
         TextLocation::inline(0..5),
         TextLocation::source(0..5, [SourceRef::new(2..4)]),
-        TextLocation::rendered(0..5, 3, [full]),
+        TextLocation::rendered(0..5, page(3), [full]),
         TextLocation::marked_source(SourceRef::new(3..12)),
-        TextLocation::marked_rendered(2, full),
+        TextLocation::marked_rendered(page(2), full),
     ] {
         let json = serde_json::to_string(&good).expect("serializes");
         let back: TextLocation = serde_json::from_str(&json).expect("round-trips");

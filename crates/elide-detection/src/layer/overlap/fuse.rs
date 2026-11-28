@@ -151,6 +151,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::ops::Range;
 
     use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
@@ -288,8 +289,11 @@ mod tests {
     #[test]
     fn members_that_cannot_be_united_fuse_by_location() {
         let on_page = |page: u32, conf: f32| {
-            let location =
-                TextLocation::rendered(0..5, page, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]);
+            let location = TextLocation::rendered(
+                0..5,
+                NonZeroU32::new(page).unwrap(),
+                [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)],
+            );
             let confidence = Confidence::new(conf).unwrap();
             Entity::new(Birth::new(
                 "t",
@@ -311,7 +315,7 @@ mod tests {
         let page_two = out
             .kept()
             .iter()
-            .find(|entity| entity.location().page() == Some(2))
+            .find(|entity| entity.location().page() == NonZeroU32::new(2))
             .expect("page 2 survives");
         assert!((page_two.confidence().get() - 0.84).abs() < 1e-5);
     }

@@ -11,8 +11,8 @@ use elide_core::primitive::UnitBoundingBox;
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
-use super::FORMAT_ID;
 use super::state::{PdfState, Span};
+use super::{FORMAT_ID, page_number};
 
 /// The whole of a page, as a rendered rectangle.
 const WHOLE_PAGE: UnitBoundingBox = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
@@ -34,16 +34,21 @@ impl Stream<Text> for PdfStream {
         // (`0..len`). A whole-page rendered anchor carries which page the chunk
         // is on (so `lift` and redaction know it) without a document-wide offset;
         // detection runs per chunk, so a span can never straddle a page boundary.
-        Ok(self
-            .state
+        self.state
             .texts()
             .into_iter()
-            .map(|(number, text)| Chunk {
-                location: TextLocation::rendered(0..text.len(), number, [WHOLE_PAGE]),
-                data: TextData::new(text),
-                hints: Vec::new(),
+            .map(|(number, text)| {
+                Ok(Chunk {
+                    location: TextLocation::rendered(
+                        0..text.len(),
+                        page_number(number)?,
+                        [WHOLE_PAGE],
+                    ),
+                    data: TextData::new(text),
+                    hints: Vec::new(),
+                })
             })
-            .collect())
+            .collect()
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
@@ -65,7 +70,7 @@ impl Stream<Text> for PdfStream {
         let page_text = chunk.data.as_str();
         let rects = self
             .state
-            .geometry(number)
+            .geometry(number.get())
             .and_then(|geometry| {
                 let char_start = page_text.get(..local_range.start)?.chars().count();
                 let char_end = page_text.get(..local_range.end)?.chars().count();
@@ -94,7 +99,7 @@ impl Stream<Text> for PdfStream {
                 "a source-byte mark does not address a PDF page",
             ));
         };
-        let number = *page;
+        let number = page.get();
         let text = self.state.text(number)?;
         let geometry = self.state.geometry(number).ok_or_else(|| {
             Error::malformed(format!(
@@ -119,7 +124,7 @@ impl Stream<Text> for PdfStream {
             )
             .collect::<Result<Vec<_>>>()?;
         let span = text.contiguous_span(pieces)?;
-        Ok(TextLocation::rendered(span, number, rects.clone()))
+        Ok(TextLocation::rendered(span, *page, rects.clone()))
     }
 }
 
@@ -172,7 +177,7 @@ impl DataWriter<Text> for PdfStream {
 /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
 fn page_span(location: &TextLocation) -> Result<(&Range<usize>, u32)> {
     match (location.range(), location.page()) {
-        (Some(range), Some(page)) => Ok((range, page)),
+        (Some(range), Some(page)) => Ok((range, page.get())),
         _ => Err(Error::malformed(
             "a PDF location needs a page-local span and its page",
         )),
@@ -202,7 +207,7 @@ mod tests {
 
     fn redaction(page: u32, range: Range<usize>) -> (TextLocation, TextReplacement) {
         (
-            TextLocation::rendered(range, page, [WHOLE_PAGE]),
+            TextLocation::rendered(range, page_number(page).unwrap(), [WHOLE_PAGE]),
             TextReplacement::replaced("[NAME]"),
         )
     }
