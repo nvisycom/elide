@@ -167,7 +167,7 @@ mod tests {
     use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
 
     use super::group::CrossLabel;
     use super::*;
@@ -177,9 +177,13 @@ mod tests {
         let loc = TextLocation::inline(span);
         let confidence = Confidence::new(conf).unwrap();
         Entity::new(Birth::new(
-            "t",
             confidence,
-            Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new(label),
+                loc,
+                PatternRule::default(),
+            ),
         ))
     }
 

@@ -18,12 +18,11 @@ mod flagged;
 
 use std::any::Any;
 
-use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
+use elide_core::{Component, Result};
 
 pub use self::erased::{StreamMut, TypedStream};
 pub use self::flagged::FlaggedItem;
-use super::FormatId;
 
 /// A redactable modality stream, owned by its format's [`Native`] document.
 ///
@@ -31,9 +30,13 @@ use super::FormatId;
 /// (`read_at`) and batch redaction (`write_at`) come from those shared traits,
 /// so a codec-backed stream plugs straight into anything that bounds on them
 /// (the toolkit's anonymizer). On top of that base it adds the codec surface:
-/// identify itself ([`format`]), hand back its decoded chunks ([`chunks`]) and
-/// the hidden content its format labels ([`flagged`]), and lift a chunk-local
-/// finding back to source coordinates ([`lift`]).
+/// hand back its decoded chunks ([`chunks`]) and the hidden content its format
+/// labels ([`flagged`]), and lift a chunk-local finding back to source
+/// coordinates ([`lift`]).
+///
+/// A stream is a [`Component`] named after its format's
+/// [`FormatId`](crate::FormatId) (e.g. `elide.text.txt`): its
+/// [`id`](Component::id) is recorded on everything it flags.
 ///
 /// A stream does not write bytes: the [`Native`] document that owns it reads it
 /// and writes the document out. It is lent to the engine as a
@@ -46,14 +49,12 @@ use super::FormatId;
 /// [`DataWriter`]: elide_core::modality::DataWriter
 /// [`write_at`]: elide_core::modality::DataWriter::write_at
 /// [`Native`]: super::Native
-/// [`format`]: Stream::format
 /// [`chunks`]: Stream::chunks
 /// [`flagged`]: Stream::flagged
 /// [`lift`]: Stream::lift
-pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Any + Send + Sync {
-    /// Stable id of the format this stream represents (e.g. `"elide.text.txt"`).
-    fn format(&self) -> FormatId;
-
+pub trait Stream<M: Modality>:
+    Component + DataReader<M> + DataWriter<M> + Any + Send + Sync
+{
     /// Every decoded chunk this stream holds, front to back.
     ///
     /// # Errors

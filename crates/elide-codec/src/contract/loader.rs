@@ -10,7 +10,7 @@ use elide_core::Result;
 use elide_core::modality::Modality;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::{Document, Encode, Stream};
+use super::{Document, Encode, FormatId, Stream};
 use crate::content::ContentData;
 
 /// A per-modality loader for a leaf format: decodes bytes into one stream.
@@ -78,20 +78,23 @@ pub trait DocumentLoader: Send + Sync + 'static {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document>;
 }
 
-/// A [`Loader`] wrapped so it produces a leaf [`Document`].
+/// A [`Loader`] wrapped so it produces a leaf [`Document`] of the format
+/// registered as `id`.
 ///
 /// Its one stream becomes a [`LeafDocument`](super::LeafDocument): the bridge
 /// for a leaf format that has only a [`Loader`] and no embedded files. Such a
 /// format carries no hidden content, so the [`HiddenContentPolicy`] has nothing
 /// to act on; a format with hidden content implements [`DocumentLoader`]
 /// itself.
-pub(crate) struct LeafLoader<L>(pub(crate) L);
+pub(crate) struct LeafLoader<L> {
+    pub(crate) id: FormatId,
+    pub(crate) loader: L,
+}
 
 #[async_trait::async_trait]
 impl<L: Loader> DocumentLoader for LeafLoader<L> {
     async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
-        let stream = Loader::decode(&self.0, content).await?;
-        let format_id = Stream::format(&stream);
-        Ok(Document::leaf(format_id, stream))
+        let stream = Loader::decode(&self.loader, content).await?;
+        Ok(Document::leaf(self.id, stream))
     }
 }

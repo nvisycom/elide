@@ -15,7 +15,7 @@ use elide_core::Component;
 use elide_core::entity::audit::{AuditKind, Dropped, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
-use elide_core::primitive::Confidence;
+use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::Scope;
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
@@ -30,9 +30,9 @@ fn detected(recognizer: &str, Found(label, span, conf): Found) -> Entity<Text> {
     let location = TextLocation::inline(span);
     let confidence = Confidence::new(conf).unwrap();
     Entity::new(Birth::new(
-        recognizer.to_owned(),
         confidence,
         Pattern::new(
+            ComponentId::new(recognizer.to_owned(), "1"),
             label.clone(),
             location,
             PatternRule {
@@ -152,9 +152,14 @@ async fn analyze_stamps_language_from_recognized_range() {
     use elide_core::primitive::LanguageTag;
 
     // An entity carrying a recognized_range (where it was found in the text).
-    let found = Pattern::new("PERSON", TextLocation::inline(0..5), PatternRule::default())
-        .with_recognized_range(0..5);
-    let e = Entity::new(Birth::new("pattern", Confidence::new(0.9).unwrap(), found));
+    let found = Pattern::new(
+        ComponentId::new("t", "1"),
+        "PERSON",
+        TextLocation::inline(0..5),
+        PatternRule::default(),
+    )
+    .with_recognized_range(0..5);
+    let e = Entity::new(Birth::new(Confidence::new(0.9).unwrap(), found));
 
     let analyzer = Analyzer::<Text>::new().with_recognizer(MockRecognizer::new(vec![e]));
 

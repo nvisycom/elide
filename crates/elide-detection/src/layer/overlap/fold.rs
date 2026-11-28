@@ -93,7 +93,7 @@ impl Verdicts {
                 entities[loser].confidence(),
                 by.clone(),
             );
-            let event = AuditEvent::resolved(conflict, entities[winner].confidence());
+            let event = AuditEvent::new(entities[winner].confidence(), conflict);
             entities[winner].record(event);
         }
     }
@@ -105,23 +105,23 @@ impl Verdicts {
             if self.is_dropped(a) || self.is_dropped(b) {
                 continue;
             }
-            let on_a = AuditEvent::contested(
+            let on_a = AuditEvent::new(
+                entities[a].confidence(),
                 Contested::new(
                     entities[b].id(),
                     entities[b].label().clone(),
                     entities[b].confidence(),
                     by.clone(),
                 ),
-                entities[a].confidence(),
             );
-            let on_b = AuditEvent::contested(
+            let on_b = AuditEvent::new(
+                entities[b].confidence(),
                 Contested::new(
                     entities[a].id(),
                     entities[a].label().clone(),
                     entities[a].confidence(),
                     by.clone(),
                 ),
-                entities[b].confidence(),
             );
             entities[a].record(on_a);
             entities[b].record(on_b);

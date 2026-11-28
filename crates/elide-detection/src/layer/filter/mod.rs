@@ -83,7 +83,7 @@ mod tests {
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Label, LabelCatalog, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::recognition::Scope;
 
     use super::*;
@@ -91,9 +91,9 @@ mod tests {
 
     fn entity(label: &str, confidence: f32) -> Entity<Text> {
         Entity::new(Birth::new(
-            "t",
             Confidence::new(confidence).unwrap(),
             Pattern::new(
+                ComponentId::new("t", "1"),
                 LabelRef::new(label),
                 TextLocation::inline(0..1),
                 PatternRule::default(),

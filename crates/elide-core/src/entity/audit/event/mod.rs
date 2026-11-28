@@ -1,11 +1,13 @@
-//! A single [`AuditEvent`] in an entity's life: its spine (source, confidence,
+//! A single [`AuditEvent`] in an entity's life: its spine (confidence,
 //! timestamp), its [`AuditKind`], and its tamper-evident links.
 //!
 //! The per-kind detail lives in the [payload](self) submodules, grouped by
 //! role: [`recognition`] (a recognizer matched), [`reconcile`] (detections were
 //! combined and scored), and [`apply`] (the redaction decision and a reviewer's
 //! work). Each payload owns its fields, its `new` / `with_*` builders, its
-//! central `TAG` discriminant, and how it folds into the hash.
+//! central `TAG` discriminant, and how it folds into the hash. Who acted is a
+//! payload field typed to what can act there: a component for a recognition,
+//! a reconciliation, or an operator's pick, a reviewer for their decisions.
 
 mod kind;
 
@@ -18,7 +20,6 @@ pub mod recognition;
 /// context boosting.
 pub mod reconcile;
 
-use hipstr::HipStr;
 use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -39,9 +40,9 @@ use crate::primitive::{ComponentId, Confidence};
 /// Events are recorded on an entity's [`AuditLog`], forming the full audit
 /// trail of its life: each recognizer that found it, the fusion that
 /// joined them, any score calibration, and the redaction that hid it. The
-/// uniform spine (who, resulting score, when) is the same for every event; the
-/// [`kind`] carries the event-specific detail *and* the explanation of why the
-/// event happened.
+/// uniform spine (resulting score, when) is the same for every event; the
+/// [`kind`] carries the event-specific detail, who acted (read whatever the
+/// kind with [`actor`]), *and* the explanation of why the event happened.
 ///
 /// Each event links to its [`parents`] by their [`hash`]: a birth event (a
 /// recognition or a reviewer's inclusion) has no parents, a normal step has
@@ -57,6 +58,7 @@ use crate::primitive::{ComponentId, Confidence};
 /// [`AuditLog`]: crate::entity::audit::AuditLog
 /// [`AuditLog::verify`]: crate::entity::audit::AuditLog::verify
 /// [`kind`]: AuditEvent::kind
+/// [`actor`]: AuditEvent::actor
 /// [`parents`]: AuditEvent::parents
 /// [`hash`]: AuditEvent::hash
 /// [`confidence`]: AuditEvent::confidence
@@ -75,17 +77,14 @@ use crate::primitive::{ComponentId, Confidence};
     )
 )]
 pub struct AuditEvent<M: Modality> {
-    /// Who produced this event: a recognizer name, a fusion strategy,
-    /// an operator, or whatever acted.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub source: HipStr<'static>,
     /// Confidence after this event: the entity's effective confidence once it
     /// has happened.
     pub confidence: Confidence,
     /// When the event happened (UTC).
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub timestamp: Timestamp,
-    /// Kind of event, with its event-specific detail and its rationale.
+    /// Kind of event, with its event-specific detail, who acted, and its
+    /// rationale.
     pub kind: AuditKind<M>,
     /// The events this one follows, by their hash. Empty for a birth event, one
     /// entry for a normal step, several for a fusion. Assigned by [`AuditLog`]
@@ -109,31 +108,29 @@ pub struct AuditEvent<M: Modality> {
     pub(super) hash: AuditHash,
 }
 
+/// Who acted in an [`AuditEvent`], read from its payload by
+/// [`AuditEvent::actor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Actor<'a> {
+    /// A component: a recognizer, a stream that flagged hidden content, a
+    /// layer, a scoring, a reconciler, or an operator.
+    Component(&'a ComponentId),
+    /// A reviewer, by the id they gave.
+    Reviewer(&'a str),
+}
+
 impl<M: Modality> AuditEvent<M> {
-    /// Assemble an event from its `source` (who produced it), the `confidence`
-    /// after it, and its `kind`, pass a payload with `.into()` (e.g.
-    /// `Redacted::new(..).into()`). [`parents`] is empty and [`hash`] is
-    /// [`GENESIS`] until [`AuditLog`] records it and assigns the links.
-    ///
-    /// The kind-specific constructors ([`fused`], [`redacted`], …) are
-    /// convenience wrappers that derive `source` and build the kind for you;
-    /// reach for `new` to set an explicit source (e.g. a reviewer's id on a
-    /// [`manual`] override) or to build a kind the wrappers don't cover.
+    /// An event of `kind` with the `confidence` after it, happening now; pass a
+    /// payload with `.into()` (e.g. `Redacted::new(..).into()`), or as it is.
+    /// [`parents`] is empty and [`hash`] is [`GENESIS`] until [`AuditLog`]
+    /// records it and assigns the links.
     ///
     /// [`parents`]: Self::parents
     /// [`hash`]: Self::hash
     /// [`GENESIS`]: AuditHash::GENESIS
     /// [`AuditLog`]: crate::entity::audit::AuditLog
-    /// [`fused`]: Self::fused
-    /// [`redacted`]: Self::redacted
-    /// [`manual`]: Self::manual
-    pub fn new(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        kind: impl Into<AuditKind<M>>,
-    ) -> Self {
+    pub fn new(confidence: Confidence, kind: impl Into<AuditKind<M>>) -> Self {
         Self {
-            source: source.into(),
             confidence,
             timestamp: Timestamp::now(),
             kind: kind.into(),
@@ -142,8 +139,8 @@ impl<M: Modality> AuditEvent<M> {
         }
     }
 
-    /// This event's hash: BLAKE3 over its parents' hashes, its spine (source,
-    /// timestamp, confidence), and its [`kind`](Self::kind) detail.
+    /// This event's hash: BLAKE3 over its parents' hashes, its spine
+    /// (timestamp, confidence), and its [`kind`](Self::kind) detail.
     ///
     /// The kind folds itself in through its own `hash_into`, which hashes
     /// each field directly (locations via [`ModalityLocation::hash`]), so no
@@ -160,107 +157,36 @@ impl<M: Modality> AuditEvent<M> {
             hasher.raw(parent.as_bytes());
         }
         hasher.raw(&(self.parents.len() as u64).to_le_bytes());
-        // `source` is variable-width, so length-prefix it (`bytes`), the
-        // fixed-width spine fields around it use `raw`.
-        hasher.bytes(self.source.as_bytes());
         hasher.raw(&self.timestamp.as_nanosecond().to_le_bytes());
         hasher.raw(&self.confidence.get().to_le_bytes());
         self.kind.hash_into(&mut hasher);
         hasher.finish()
     }
 
-    /// A fusion event combining several detections of one finding into one at
-    /// `location`, the union of theirs. Its `confidence` is the pooled score
-    /// of the fused entities; the `source` is the fusion strategy's name.
-    pub fn fused(strategy: ComponentId, confidence: Confidence, location: M::Location) -> Self {
-        Self::new(
-            strategy.name.clone(),
-            confidence,
-            Fused::new(strategy, location),
-        )
-    }
-
-    /// A resolved event: a competing detection was arbitrated against
-    /// this entity, which won. The loser is recorded in `conflict` rather than
-    /// dropped silently; `confidence` is the winner's own (unchanged) score. The
-    /// `source` is the name of the conflict payload's `resolved_by`.
-    pub fn resolved(conflict: Resolved, confidence: Confidence) -> Self {
-        Self::new(conflict.resolved_by.name.clone(), confidence, conflict)
-    }
-
-    /// Contested event: a cross-label overlap left unresolved for human review,
-    /// recorded on each entity of the pair naming the other in `contested`.
-    /// `confidence` is this entity's own (unchanged) score; the `source` is the
-    /// name of the payload's `flagged_by`.
-    pub fn contested(contested: Contested, confidence: Confidence) -> Self {
-        Self::new(contested.flagged_by.name.clone(), confidence, contested)
-    }
-
-    /// A dropped event: detection left the entity out, as `dropped` records.
-    /// `confidence` is the entity's own (unchanged) score; the `source` is the
-    /// name of the layer that dropped it.
-    pub fn dropped(dropped: Dropped, confidence: Confidence) -> Self {
-        Self::new(dropped.by.name.clone(), confidence, dropped)
-    }
-
-    /// A calibrated event rescaling confidence by `factor`. `confidence` is the
-    /// score after rescaling.
-    pub fn calibrated(confidence: Confidence, factor: f64) -> Self {
-        Self::new(
-            HipStr::borrowed("calibration"),
-            confidence,
-            Calibrated { factor },
-        )
-    }
-
-    /// A refined event: a context keyword near the entity lifted its confidence
-    /// to `confidence`, produced by the `source` recognizer. Build the
-    /// `refinement` payload with its keyword and (optionally) hint / location.
-    pub fn refined(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        refinement: Refined<M>,
-    ) -> Self {
-        Self::new(source, confidence, refinement)
-    }
-
-    /// A redaction event: the `source` operator applied a selection.
+    /// Who acted, as the payload names them: the component, or the reviewer.
+    /// `None` for an [annotation](AuditKind::Annotated), which records a fact
+    /// rather than an act, and for a [redaction](AuditKind::Redacted), whose
+    /// operator is the one its selection names, see
+    /// [`AuditLog::applied_selection`].
     ///
-    /// The selection `redaction` names is the one applied, at the location it
-    /// names; the entity's `confidence` is unchanged.
-    pub fn redacted(
-        source: impl Into<HipStr<'static>>,
-        redaction: Redacted<M>,
-        confidence: Confidence,
-    ) -> Self {
-        Self::new(source, confidence, redaction)
-    }
-
-    /// The redaction *decision*: the operator in `selection` was picked to hide
-    /// the entity (at its `confidence`), recorded before it is applied so the
-    /// pick can be reviewed. The [`redacted`](Self::redacted) event that
-    /// applies it names this event by its hash. The `source` is the operator's
-    /// name.
-    pub fn selected(selection: Selected, confidence: Confidence) -> Self {
-        Self::new(selection.operator.name.clone(), confidence, selection)
-    }
-
-    /// A human override recording `manual` at the entity's asserted
-    /// `confidence`.
-    ///
-    /// The `manual` detail is built with its intent, location, and optional
-    /// [`Attribution`]. The `source` names the reviewer who made the override:
-    /// pass their id, or `"manual"` when unattributed. To record one on an
-    /// entity, use `Entity::record_manual`, which takes the entity's own
-    /// confidence.
-    ///
-    /// [`Attribution`]: crate::entity::audit::Attribution
-    pub fn manual(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        manual: Manual<M>,
-    ) -> Self {
-        Self::new(source, confidence, manual)
+    /// [`AuditLog::applied_selection`]: crate::entity::audit::AuditLog::applied_selection
+    pub fn actor(&self) -> Option<Actor<'_>> {
+        let component = match &self.kind {
+            AuditKind::Pattern(p) => &p.recognizer,
+            AuditKind::Model(m) => &m.recognizer,
+            AuditKind::Flagged(f) => &f.flagged_by,
+            AuditKind::Fused(f) => &f.strategy,
+            AuditKind::Resolved(r) => &r.resolved_by,
+            AuditKind::Contested(c) => &c.flagged_by,
+            AuditKind::Dropped(d) => &d.by,
+            AuditKind::Calibrated(c) => &c.recognizer,
+            AuditKind::Refined(r) => &r.recognizer,
+            AuditKind::Selected(s) => &s.operator,
+            AuditKind::Included(i) => return Some(Actor::Reviewer(&i.by)),
+            AuditKind::Manual(m) => return Some(Actor::Reviewer(&m.by)),
+            AuditKind::Redacted(_) | AuditKind::Annotated(_) => return None,
+        };
+        Some(Actor::Component(component))
     }
 
     /// Whether this event is a recognition (pattern, model, or flagged item).

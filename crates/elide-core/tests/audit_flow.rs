@@ -40,9 +40,9 @@ fn two_recognizers_fuse_into_one() {
     // Recognizer 1: a regex pattern.
     let pattern_conf = Confidence::new(0.8).unwrap();
     let pattern = Entity::new(Birth::new(
-        "us-phone-pattern",
         pattern_conf,
         Pattern::new(
+            ComponentId::new("us-phone-pattern", "1"),
             phone.clone(),
             TextLocation::inline(10..22),
             PatternRule {
@@ -56,9 +56,9 @@ fn two_recognizers_fuse_into_one() {
     // Recognizer 2: an NER model, slightly different span, higher confidence.
     let ner_conf = Confidence::new(0.95).unwrap();
     let ner = Entity::new(Birth::new(
-        "ner-model",
         ner_conf,
         Model::new(
+            ComponentId::new("ner-model", "1"),
             phone.clone(),
             TextLocation::inline(10..23),
             ModelId {

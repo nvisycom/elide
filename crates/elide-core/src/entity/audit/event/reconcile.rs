@@ -52,8 +52,7 @@ impl<M: Modality> Fused<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
-        out.bytes(self.strategy.name.as_bytes());
-        out.bytes(self.strategy.version.as_bytes());
+        out.component(&self.strategy);
         out.bytes(&self.location.hash());
     }
 }
@@ -103,8 +102,7 @@ impl Resolved {
         out.raw(self.competing_id.as_bytes());
         out.bytes(self.competing_label.as_str().as_bytes());
         out.raw(&self.competing_confidence.get().to_le_bytes());
-        out.bytes(self.resolved_by.name.as_bytes());
-        out.bytes(self.resolved_by.version.as_bytes());
+        out.component(&self.resolved_by);
     }
 }
 
@@ -152,8 +150,7 @@ impl Contested {
         out.raw(self.competing_id.as_bytes());
         out.bytes(self.competing_label.as_str().as_bytes());
         out.raw(&self.competing_confidence.get().to_le_bytes());
-        out.bytes(self.flagged_by.name.as_bytes());
-        out.bytes(self.flagged_by.version.as_bytes());
+        out.component(&self.flagged_by);
     }
 }
 
@@ -201,8 +198,7 @@ impl Dropped {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
-        out.bytes(self.by.name.as_bytes());
-        out.bytes(self.by.version.as_bytes());
+        out.component(&self.by);
         match self.superseded_by {
             Some(winner) => {
                 out.byte(1);
@@ -215,11 +211,14 @@ impl Dropped {
     }
 }
 
-/// The entity's confidence was rescaled by a per-recognizer factor.
+/// The entity's confidence was rescaled by the factor its recognizer's
+/// calibration gives its label.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Calibrated {
+    /// The recognizer whose scores were rescaled.
+    pub recognizer: ComponentId,
     /// Multiplier applied.
     pub factor: f64,
 }
@@ -228,7 +227,13 @@ impl Calibrated {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 5;
 
+    /// The `recognizer`'s score rescaled by `factor`.
+    pub fn new(recognizer: ComponentId, factor: f64) -> Self {
+        Self { recognizer, factor }
+    }
+
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.component(&self.recognizer);
         out.raw(&self.factor.to_bits().to_le_bytes());
     }
 }
@@ -249,6 +254,8 @@ impl Calibrated {
     )
 )]
 pub struct Refined<M: Modality> {
+    /// The recognizer whose context keyword fired.
+    pub recognizer: ComponentId,
     /// Keyword that fired the boost.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub keyword: HipStr<'static>,
@@ -271,11 +278,12 @@ impl<M: Modality> Refined<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 6;
 
-    /// A refinement fired by `keyword`, with no located hint or resolved
-    /// location. Attach them with [`with_hint`](Self::with_hint) /
-    /// [`with_location`](Self::with_location).
-    pub fn new(keyword: impl Into<HipStr<'static>>) -> Self {
+    /// A refinement fired by the `recognizer`'s `keyword`, with no located
+    /// hint or resolved location. Attach them with
+    /// [`with_hint`](Self::with_hint) / [`with_location`](Self::with_location).
+    pub fn new(recognizer: ComponentId, keyword: impl Into<HipStr<'static>>) -> Self {
         Self {
+            recognizer,
             keyword: keyword.into(),
             hint: None,
             location: None,
@@ -299,6 +307,7 @@ impl<M: Modality> Refined<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.component(&self.recognizer);
         out.bytes(self.keyword.as_bytes());
         // The hint's location identifies where the keyword sits; its data
         // payload is auxiliary context and stays out of the hash.

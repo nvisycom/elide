@@ -1,8 +1,12 @@
 //! Recognition payloads: a [`Pattern`] or [`Model`] recognizer matched an
 //! entity, each carrying the [`label`](Pattern::label) it found, the match
 //! [`location`](Pattern::location), and what matched ([`PatternRule`] /
-//! [`ModelId`]), or a format [`Flagged`] an item of hidden content; and an
-//! [`Annotated`] event, what became known about an entity after.
+//! [`ModelId`]), or a format's stream [`Flagged`] an item of hidden content;
+//! and an [`Annotated`] event, what became known about an entity after.
+//!
+//! A recognition names the component that made it: the recognizer, or the
+//! stream that flagged the item. An annotation names none: it records a fact
+//! about the entity, not a decision anything made.
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -17,13 +21,14 @@ use serde::{Deserialize, Serialize};
 use super::super::hash::AuditHasher;
 use crate::entity::{EntityCoRef, LabelRef};
 use crate::modality::{Modality, ModalityLocation};
-use crate::primitive::LanguageTag;
+use crate::primitive::{ComponentId, LanguageTag};
 use crate::redaction::HiddenContentKind;
 
 /// Detail of a pattern or dictionary recognition: what it found, where, and by
 /// which rule.
 ///
-/// The [`PatternRule`] in `rule` matched `label` at `location`.
+/// The [`PatternRule`] in `rule` of the `recognizer` matched `label` at
+/// `location`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -39,6 +44,8 @@ use crate::redaction::HiddenContentKind;
     )
 )]
 pub struct Pattern<M: Modality> {
+    /// The recognizer that matched.
+    pub recognizer: ComponentId,
     /// The label the recognizer found.
     pub label: LabelRef,
     /// Where the recognizer matched.
@@ -61,9 +68,15 @@ impl<M: Modality> Pattern<M> {
     /// the payload's own bytes (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 0;
 
-    /// `rule` matched `label` at `location`.
-    pub fn new(label: impl Into<LabelRef>, location: M::Location, rule: PatternRule) -> Self {
+    /// The `recognizer`'s `rule` matched `label` at `location`.
+    pub fn new(
+        recognizer: ComponentId,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+        rule: PatternRule,
+    ) -> Self {
         Self {
+            recognizer,
             label: label.into(),
             location,
             rule,
@@ -79,6 +92,7 @@ impl<M: Modality> Pattern<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.component(&self.recognizer);
         out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         out.bytes(self.rule.name.as_bytes());
@@ -91,7 +105,8 @@ impl<M: Modality> Pattern<M> {
 /// Detail of a model or NER recognition: what it found, where, and by which
 /// model.
 ///
-/// The model named by `model` matched `label` at `location`.
+/// The `recognizer`, asking the model named by `model`, matched `label` at
+/// `location`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -107,6 +122,8 @@ impl<M: Modality> Pattern<M> {
     )
 )]
 pub struct Model<M: Modality> {
+    /// The recognizer that asked the model.
+    pub recognizer: ComponentId,
     /// The label the recognizer found.
     pub label: LabelRef,
     /// Where the recognizer matched.
@@ -128,9 +145,15 @@ impl<M: Modality> Model<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 1;
 
-    /// `model` matched `label` at `location`.
-    pub fn new(label: impl Into<LabelRef>, location: M::Location, model: ModelId) -> Self {
+    /// The `recognizer`, asking `model`, matched `label` at `location`.
+    pub fn new(
+        recognizer: ComponentId,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+        model: ModelId,
+    ) -> Self {
         Self {
+            recognizer,
             label: label.into(),
             location,
             model,
@@ -146,6 +169,7 @@ impl<M: Modality> Model<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.component(&self.recognizer);
         out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         out.bytes(self.model.name.as_bytes());
@@ -158,7 +182,7 @@ impl<M: Modality> Model<M> {
 ///
 /// An item of hidden content its format labels (a metadata field, a comment, an
 /// author, a tracked deletion) was made a redaction subject of `label` at
-/// `location`, with its kind in `content`.
+/// `location`, with its kind in `content`, by the stream that decoded it.
 ///
 /// Distinct from [`Pattern`]/[`Model`] because a flagged item is not *matched*
 /// out of free content: the format names it, and it is simply present. There
@@ -179,6 +203,8 @@ impl<M: Modality> Model<M> {
     )
 )]
 pub struct Flagged<M: Modality> {
+    /// The stream that flagged the item, named after its format.
+    pub flagged_by: ComponentId,
     /// The label the item was flagged as.
     pub label: LabelRef,
     /// The item's location.
@@ -193,13 +219,15 @@ impl<M: Modality> Flagged<M> {
     pub(crate) const TAG: u8 = 10;
 
     /// An item of hidden content of kind `content`, flagged as `label` at
-    /// `location`.
+    /// `location` by the stream `flagged_by`.
     pub fn new(
+        flagged_by: ComponentId,
         label: impl Into<LabelRef>,
         location: M::Location,
         content: HiddenContentKind,
     ) -> Self {
         Self {
+            flagged_by,
             label: label.into(),
             location,
             content,
@@ -207,6 +235,7 @@ impl<M: Modality> Flagged<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.component(&self.flagged_by);
         out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         out.byte(self.content as u8);
@@ -353,10 +382,10 @@ pub struct PatternRule {
 ///
 /// What a backend's response names as its [`model`].
 /// Distinct from a [`ComponentId`]: it names the model, not the recognizer
-/// that ran it (the event's `source`), and a model's version is often unknown.
+/// that asked it ([`Model::recognizer`]), and a model's version is often
+/// unknown.
 ///
 /// [`model`]: crate::backend::Response::model
-/// [`ComponentId`]: crate::primitive::ComponentId
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

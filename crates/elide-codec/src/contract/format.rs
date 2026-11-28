@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
+use hipstr::HipStr;
 
 use super::{Document, DocumentLoader, LeafLoader, Loader};
 use crate::content::ContentData;
@@ -44,6 +45,12 @@ impl FormatId {
 impl fmt::Display for FormatId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.0)
+    }
+}
+
+impl From<FormatId> for HipStr<'static> {
+    fn from(id: FormatId) -> Self {
+        HipStr::borrowed(id.0)
     }
 }
 
@@ -87,7 +94,7 @@ impl Format {
             id,
             extensions: Vec::new(),
             content_types: Vec::new(),
-            loader: Arc::new(LeafLoader(loader)),
+            loader: Arc::new(LeafLoader { id, loader }),
         }
     }
 

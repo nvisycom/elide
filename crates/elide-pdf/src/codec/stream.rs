@@ -3,16 +3,16 @@
 
 use std::ops::Range;
 
+use elide_codec::Stream;
 use elide_codec::string::ContiguousSpan;
-use elide_codec::{FormatId, Stream};
 use elide_core::modality::text::{Marked, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::primitive::UnitBoundingBox;
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
+use super::page_number;
 use super::state::{PdfState, Span};
-use super::{FORMAT_ID, page_number};
 
 /// The whole of a page, as a rendered rectangle.
 const WHOLE_PAGE: UnitBoundingBox = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
@@ -20,15 +20,13 @@ const WHOLE_PAGE: UnitBoundingBox = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
 /// The body [`Stream<Text>`] of a PDF: yields each page's text as a chunk and
 /// records per-page redactions onto the shared [`PdfState`], which the
 /// [`PdfDocument`](super::document::PdfDocument) applies on encode.
+#[derive(Component)]
+#[component(name = "elide.document.pdf")]
 pub(super) struct PdfStream {
     pub(super) state: PdfState,
 }
 
 impl Stream<Text> for PdfStream {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         // One chunk per page, each addressed in its *own* page-local byte space
         // (`0..len`). A whole-page rendered anchor carries which page the chunk

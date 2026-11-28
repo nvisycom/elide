@@ -338,14 +338,19 @@ fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
         .audit()
         .events()
         .iter()
-        .filter(|event| event.is_recognition())
-        .map(|event| Source {
-            recognizer: event.source.to_string(),
-            model: match &event.kind {
-                AuditKind::Model(model) => Some(model.model.name.to_string()),
-                _ => None,
-            },
-            confidence: decimal(event.confidence),
+        .filter_map(|event| {
+            let (recognizer, model) = match &event.kind {
+                AuditKind::Pattern(pattern) => (&pattern.recognizer, None),
+                AuditKind::Model(model) => (&model.recognizer, Some(model.model.name.to_string())),
+                AuditKind::Flagged(flagged) => (&flagged.flagged_by, None),
+                _ => return None,
+            };
+            Some(Source {
+                recognizer: recognizer.name.to_string(),
+                version: recognizer.version.to_string(),
+                model,
+                confidence: decimal(event.confidence),
+            })
         })
         .collect()
 }

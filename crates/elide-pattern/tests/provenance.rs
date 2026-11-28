@@ -20,15 +20,15 @@ async fn a_validated_match_records_its_validator() {
         .await
         .expect("recognize");
 
-    let (source, rule) = entities
+    let (found_by, rule) = entities
         .iter()
         .flat_map(|e| e.audit().events())
         .find_map(|event| match &event.kind {
-            AuditKind::Pattern(pattern) => Some((&event.source, &pattern.rule)),
+            AuditKind::Pattern(pattern) => Some((&pattern.recognizer, &pattern.rule)),
             _ => None,
         })
         .expect("a pattern event");
-    assert_eq!(*source, recognizer.id().name);
+    assert_eq!(*found_by, recognizer.id());
     assert_eq!(rule.name, "ssn");
     assert_eq!(rule.validator.as_deref(), Some("us.ssn"));
     assert!(rule.regex.is_some());

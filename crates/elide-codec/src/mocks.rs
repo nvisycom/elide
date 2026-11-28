@@ -22,7 +22,7 @@ use bytes::Bytes;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::{HiddenContentPolicy, Redactions};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use crate::content::ContentData;
 use crate::string::RedactRange;
@@ -99,16 +99,13 @@ pub const MOCK_BODY_ID: &str = "body";
 ///
 /// It is yielded as one chunk and redacted by byte range; [`MockDocument`]
 /// writes it out with the blobs.
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[component(name = "elide.test.mock")]
 pub struct MockStream {
     body: String,
 }
 
 impl Stream<Text> for MockStream {
-    fn format(&self) -> FormatId {
-        MOCK_FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         Ok(vec![Chunk {
             location: TextLocation::inline(0..self.body.len()),

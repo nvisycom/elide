@@ -358,10 +358,9 @@ impl<M: Modality> Anonymizer<M> {
                     .selection_event()
                     .expect("every member's selection is recorded above")
                     .hash();
-                let event = AuditEvent::redacted(
-                    cluster.selection.operator.name.clone(),
-                    Redacted::new(selection, location.clone()),
+                let event = AuditEvent::new(
                     entities[i].confidence(),
+                    Redacted::new(selection, location.clone()),
                 );
                 pending.push((i, event));
             }
@@ -408,7 +407,7 @@ impl<M: Modality> ResolvedCluster<M> {
             if entities[i].audit().selection() == Some(&self.selection) {
                 continue;
             }
-            let event = AuditEvent::selected(self.selection.clone(), entities[i].confidence());
+            let event = AuditEvent::new(entities[i].confidence(), self.selection.clone());
             entities[i].record(event);
         }
     }
@@ -478,7 +477,7 @@ mod tests {
         Attribution, AuditEvent, AuditKind, Flagged, Manual, ManualIntent, RuleMatch,
     };
     use elide_core::modality::text::{Text, TextDoc};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::redaction::HiddenContentKind;
 
     use super::*;
@@ -678,10 +677,11 @@ mod tests {
         assert!(!wrote.unwrap(), "no entity, no write");
 
         let mut suppressed = entity("NAME", 0, 5);
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+        suppressed.record_manual(Manual::new(
             "reviewer",
-        );
+            ManualIntent::Suppress,
+            suppressed.location().clone(),
+        ));
         let wrote = anonymizer
             .anonymize(&mut target, &mut [suppressed], &scope)
             .await;
@@ -727,9 +727,12 @@ mod tests {
         let live_id = live.id();
         // The reviewer marks the second detection as a false positive.
         suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone())
-                .with_attribution(Attribution::freeform("false positive")),
-            "reviewer",
+            Manual::new(
+                "reviewer",
+                ManualIntent::Suppress,
+                suppressed.location().clone(),
+            )
+            .with_attribution(Attribution::freeform("false positive")),
         );
         let mut entities = vec![live, suppressed];
 
@@ -803,10 +806,11 @@ mod tests {
         let mut suppressed = entity("NAME", 0, 5); // overlaps the live span
         let live_id = live.id();
         let suppressed_id = suppressed.id();
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+        suppressed.record_manual(Manual::new(
             "reviewer",
-        );
+            ManualIntent::Suppress,
+            suppressed.location().clone(),
+        ));
         let mut entities = vec![live, suppressed];
 
         // The suppressed NAME would win the tiebreak on span if it counted; if it
@@ -845,10 +849,11 @@ mod tests {
         let live_b = entity("B", 10, 15);
         let mut bridge = entity("BRIDGE", 4, 11);
         let (a_id, b_id, bridge_id) = (live_a.id(), live_b.id(), bridge.id());
-        bridge.record_manual(
-            Manual::new(ManualIntent::Suppress, bridge.location().clone()),
+        bridge.record_manual(Manual::new(
             "reviewer",
-        );
+            ManualIntent::Suppress,
+            bridge.location().clone(),
+        ));
         let mut entities = vec![live_a, bridge, live_b];
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
@@ -877,9 +882,9 @@ mod tests {
         let mut target = TextDoc::new("ask bob by Friday");
         let mut comment = entity("COMMENT", 0, 17);
         comment.record(AuditEvent::new(
-            "test",
             comment.confidence(),
             Flagged::new(
+                ComponentId::new("t", "1"),
                 "COMMENT",
                 comment.location().clone(),
                 HiddenContentKind::Collaboration,

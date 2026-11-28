@@ -19,7 +19,7 @@ use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use super::loader::CsvLoader;
 use crate::control::{self, Stripped};
@@ -120,7 +120,8 @@ enum RowAt {
 
 /// Handler for parsed CSV content. Each cell is independently addressable
 /// via a [`TabularLocation`].
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[component(name = "elide.tabular.csv")]
 pub(crate) struct CsvHandler {
     data: CsvData,
 }
@@ -328,10 +329,6 @@ impl CsvHandler {
 }
 
 impl Stream<Tabular> for CsvHandler {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
         let mut chunks = Vec::new();
         for (row, cells) in (0..).zip(self.data.all_rows()) {

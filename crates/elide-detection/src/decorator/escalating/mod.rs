@@ -126,7 +126,7 @@ mod tests {
     use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::recognition::{Context, Scope};
 
     use super::*;
@@ -138,9 +138,9 @@ mod tests {
         let location = TextLocation::inline(0..1);
         let confidence = Confidence::new(confidence).unwrap();
         Entity::new(Birth::new(
-            "baseline",
             confidence,
             Pattern::new(
+                ComponentId::new("baseline", "1"),
                 label.clone(),
                 location,
                 PatternRule {

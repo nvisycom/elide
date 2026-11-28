@@ -45,16 +45,16 @@ impl LlmModality for Image {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::ModelId;
+    use elide_core::primitive::ComponentId;
     use elide_image::fixtures;
-    use hipstr::HipStr;
 
     use super::*;
     use crate::candidates::UnitBox;
 
     fn lift(batch: Candidates<ImageCandidate>, data: &ImageData) -> Vec<Entity<Image>> {
-        let source = HipStr::borrowed("llm");
+        let recognizer = ComponentId::new("llm", "1");
         let model = ModelId::new("model");
-        Image::lift(batch, data, &Lifter::new(&source, &model))
+        Image::lift(batch, data, &Lifter::new(&recognizer, &model))
     }
 
     /// A candidate over the box `[x_min, y_min, x_max, y_max]`.

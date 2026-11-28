@@ -176,7 +176,7 @@ impl<M: Modality> AuditKind<M> {
 }
 
 // Each payload converts into its `AuditKind` variant, so a built payload flows
-// into `AuditEvent::new(source, confidence, payload.into())` without naming the
+// into `AuditEvent::new(confidence, payload.into())` without naming the
 // variant.
 
 impl<M: Modality> From<Pattern<M>> for AuditKind<M> {

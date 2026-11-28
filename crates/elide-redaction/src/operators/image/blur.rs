@@ -94,7 +94,7 @@ impl Operator<Image> for Blur {
 mod tests {
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::redaction::Operator;
     use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Color, Dimensions, Point};
@@ -106,9 +106,13 @@ mod tests {
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(2.0, 2.0));
         let location = ImageLocation::new(bbox);
         let entity = Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
-            Pattern::new(LabelRef::new("FACE"), location, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new("FACE"),
+                location,
+                PatternRule::default(),
+            ),
         ));
         let data = elide_image::fixtures::blank_image_data();
         (entity, data)

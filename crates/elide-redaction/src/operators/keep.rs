@@ -46,7 +46,7 @@ mod tests {
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::redaction::Operator;
 
     use super::Keep;
@@ -55,9 +55,9 @@ mod tests {
     async fn keep_writes_nothing() {
         let location = TextLocation::inline(0..6);
         let entity: Entity<Text> = Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
             Pattern::new(
+                ComponentId::new("t", "1"),
                 LabelRef::new("AMOUNT"),
                 location.clone(),
                 PatternRule::default(),

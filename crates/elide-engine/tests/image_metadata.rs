@@ -13,7 +13,7 @@ use bytes::Bytes;
 use elide_core::entity::audit::{Model, ModelId};
 use elide_core::entity::{Birth, Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
-use elide_core::primitive::Confidence;
+use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
 use elide_core::{Component, Result};
@@ -247,9 +247,9 @@ impl Recognizer<Image> for WholeFrame {
         );
         let location = ImageLocation::new(bbox);
         let entity = Entity::new(Birth::new(
-            "whole-frame",
             Confidence::MAX,
             Model::new(
+                ComponentId::new("whole-frame", "1"),
                 builtins::PERSON_NAME.to_ref(),
                 location,
                 ModelId::new("model"),

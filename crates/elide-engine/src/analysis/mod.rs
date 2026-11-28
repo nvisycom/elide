@@ -32,7 +32,7 @@ pub(crate) mod test_support {
     #[cfg(feature = "schema")]
     use elide_core::modality::text::SourceRef;
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
 
     use crate::PartId;
 
@@ -45,9 +45,13 @@ pub(crate) mod test_support {
     pub(crate) fn text_entity_at(label: &str, range: Range<usize>) -> Entity<Text> {
         let loc = TextLocation::inline(range);
         Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
-            Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new(label),
+                loc,
+                PatternRule::default(),
+            ),
         ))
     }
 
@@ -57,8 +61,8 @@ pub(crate) mod test_support {
     #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         let location = TextLocation::marked_source(SourceRef::new(0..4));
-        let included = Included::new(LabelRef::new(label), location);
-        Entity::new(Birth::new("manual", Confidence::MAX, included))
+        let included = Included::new("reviewer", LabelRef::new(label), location);
+        Entity::new(Birth::new(Confidence::MAX, included))
     }
 
     /// A one-segment [`PartId`] naming the sole document under test.

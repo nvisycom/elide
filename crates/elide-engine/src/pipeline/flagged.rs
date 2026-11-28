@@ -11,7 +11,7 @@ use elide_core::entity::{Birth, Entity};
 use elide_core::modality::Modality;
 use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::Text;
-use elide_core::primitive::Confidence;
+use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::Scope;
 use elide_core::redaction::{Disposition, HiddenContentPolicy, Operator};
 use elide_core::{Error, Result};
@@ -71,16 +71,16 @@ pub(crate) fn entities<M: Modality>(
     scope: &Scope,
     policy: HiddenContentPolicy,
 ) -> Result<Vec<Entity<M>>> {
-    let source = stream.format();
+    let flagged_by = stream.id();
     let entities: Vec<_> = stream
         .flagged()?
         .into_iter()
         .filter(|item| selects(policy, scope, item))
-        .map(|item| entity(source.as_str(), item))
+        .map(|item| entity(&flagged_by, item))
         .collect();
     if !entities.is_empty() && erase_rule::<M>().is_none() {
         return Err(Error::capability_unavailable(format!(
-            "{source} flags hidden content in {}, which has no rule to remove it",
+            "{flagged_by} flags hidden content in {}, which has no rule to remove it",
             M::NAME
         )));
     }
@@ -98,15 +98,19 @@ fn selects<M: Modality>(policy: HiddenContentPolicy, scope: &Scope, item: &Flagg
     }
 }
 
-/// The entity for `item`, attributed to the format `source` that flagged it.
+/// The entity for `item`, attributed to the stream `flagged_by` that flagged it.
 ///
 /// A flagged item is present or it is not, nothing probabilistic to weigh, so
 /// the entity carries [`Confidence::MAX`].
-fn entity<M: Modality>(source: &str, item: FlaggedItem<M>) -> Entity<M> {
+fn entity<M: Modality>(flagged_by: &ComponentId, item: FlaggedItem<M>) -> Entity<M> {
     Entity::new(Birth::new(
-        source.to_owned(),
         Confidence::MAX,
-        Flagged::new(item.label.clone(), item.location.clone(), item.kind),
+        Flagged::new(
+            flagged_by.clone(),
+            item.label.clone(),
+            item.location.clone(),
+            item.kind,
+        ),
     ))
 }
 

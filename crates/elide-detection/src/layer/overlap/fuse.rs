@@ -157,7 +157,7 @@ mod tests {
     use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::{Confidence, UnitBoundingBox};
+    use elide_core::primitive::{ComponentId, Confidence, UnitBoundingBox};
 
     use super::*;
     use crate::layer::Run;
@@ -166,9 +166,13 @@ mod tests {
         let loc = TextLocation::inline(span);
         let confidence = Confidence::new(conf).unwrap();
         Entity::new(Birth::new(
-            "t",
             confidence,
-            Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new(label),
+                loc,
+                PatternRule::default(),
+            ),
         ))
     }
 
@@ -296,9 +300,13 @@ mod tests {
             );
             let confidence = Confidence::new(conf).unwrap();
             Entity::new(Birth::new(
-                "t",
                 confidence,
-                Pattern::new(LabelRef::new("EMAIL"), location, PatternRule::default()),
+                Pattern::new(
+                    ComponentId::new("t", "1"),
+                    LabelRef::new("EMAIL"),
+                    location,
+                    PatternRule::default(),
+                ),
             ))
         };
         let out = FuseLayer::noisy_or().with_grouping(AnyWhere).run(vec![

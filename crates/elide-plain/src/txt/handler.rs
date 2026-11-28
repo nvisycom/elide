@@ -23,7 +23,7 @@ use elide_codec::{Encode, Format, FormatId, Stream};
 use elide_core::modality::text::{Marked, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use super::TxtLoader;
 use crate::slice::{slice, span};
@@ -43,7 +43,8 @@ pub fn format() -> Format {
 /// paragraph spans a recognizer sees. A redaction splices the buffer in
 /// place, so encoding is byte-exact and block offsets stay valid because
 /// edits are applied right-to-left.
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[component(name = "elide.text.txt")]
 pub(crate) struct TxtHandler {
     text: String,
     blocks: Vec<Range<usize>>,
@@ -56,10 +57,6 @@ pub(crate) struct TxtHandler {
 }
 
 impl Stream<Text> for TxtHandler {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         Ok(self
             .blocks

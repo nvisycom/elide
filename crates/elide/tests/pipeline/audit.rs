@@ -22,16 +22,19 @@ fn redacted_entity(label: &str) -> Entity<Text> {
         RuleMatch::Fallback,
     );
     let mut entity = Entity::new(Birth::new(
-        "t",
         conf,
-        Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+        Pattern::new(
+            ComponentId::new("t", "1"),
+            LabelRef::new(label),
+            location,
+            PatternRule::default(),
+        ),
     ));
-    entity.record(AuditEvent::selected(selection, conf));
+    entity.record(AuditEvent::new(conf, selection));
     let picked = entity.audit().selection_event().unwrap().hash();
-    entity.record(AuditEvent::redacted(
-        "remove",
-        Redacted::new(picked, TextLocation::inline(0..5)),
+    entity.record(AuditEvent::new(
         conf,
+        Redacted::new(picked, TextLocation::inline(0..5)),
     ));
     entity
 }

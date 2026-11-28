@@ -21,6 +21,7 @@ use elide_core::backend::{Backend, BackendBatchExt};
 use elide_core::entity::audit::Model;
 use elide_core::entity::{Birth, Entity, Label};
 use elide_core::modality::TextRecognizable;
+use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Component, Result};
 use hipstr::HipStr;
@@ -106,7 +107,7 @@ where
         };
         let response = self.backend.call(request).await?;
         let spans = response.spans.len();
-        let entities = entities(&response, subject, &self.name);
+        let entities = entities(&response, subject, &self.id());
         tracing::debug!(
             target: TARGET,
             recognizer = %self.name,
@@ -144,7 +145,7 @@ where
         let responses = self.backend.call_aligned(requests).await?;
         let spans: usize = responses.iter().map(|response| response.spans.len()).sum();
         for (&index, response) in targets.iter().zip(responses) {
-            per_subject[index] = entities(&response, subjects[index], &self.name);
+            per_subject[index] = entities(&response, subjects[index], &self.id());
         }
         let placed: usize = per_subject.iter().map(Vec::len).sum();
         tracing::debug!(
@@ -162,26 +163,27 @@ where
 }
 
 /// The entities for the spans of `response`, located in `subject` and
-/// attributed to the recognizer named `source` running the response's model. A
+/// attributed to the `recognizer` running the response's model. A
 /// span whose range can't be placed in the medium (an OCR/transcript range no
 /// enrichment covers) is dropped.
 fn entities<M: TextRecognizable>(
     response: &NerResponse,
     subject: &Subject<M>,
-    source: &HipStr<'static>,
+    recognizer: &ComponentId,
 ) -> Vec<Entity<M>> {
     response
         .spans
         .iter()
         .filter_map(|span| {
             let location = M::locate(span.offset.clone(), subject.data(), subject.artifact())?;
-            let found = Model::new(span.label.clone(), location, response.model.clone())
-                .with_recognized_range(span.offset.clone());
-            Some(Entity::new(Birth::new(
-                source.clone(),
-                span.confidence,
-                found,
-            )))
+            let found = Model::new(
+                recognizer.clone(),
+                span.label.clone(),
+                location,
+                response.model.clone(),
+            )
+            .with_recognized_range(span.offset.clone());
+            Some(Entity::new(Birth::new(span.confidence, found)))
         })
         .collect()
 }
@@ -209,7 +211,7 @@ mod tests {
 
     use elide_core::ErrorKind;
     use elide_core::entity::LabelCatalog;
-    use elide_core::entity::audit::{AuditKind, ModelId};
+    use elide_core::entity::audit::{Actor, AuditKind, ModelId};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::recognition::Scope;
 
@@ -303,7 +305,11 @@ mod tests {
         let batch = recognizer.recognize_batch(&[&subject], &ctx).await.unwrap();
 
         for entity in single.iter().chain(&batch[0]) {
-            assert_eq!(entity.audit().events()[0].source, "ner-clinical");
+            assert_eq!(
+                entity.audit().events()[0].actor(),
+                Some(Actor::Component(&recognizer.id())),
+            );
+            assert_eq!(recognizer.id().name, "ner-clinical");
         }
     }
 

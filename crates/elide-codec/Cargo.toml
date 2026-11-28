@@ -57,6 +57,7 @@ elide-core = { workspace = true, features = [] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
+hipstr = { workspace = true, features = [] }
 
 # Encoding & hashing
 hex = { workspace = true, optional = true, features = [] }

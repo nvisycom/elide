@@ -15,10 +15,10 @@ use std::fmt;
 use elide_codec::content::ContentData;
 use elide_codec::extract::{ExtractStream, Splice, splice};
 use elide_codec::{Encode, Format, FormatId, Stream};
-use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
+use elide_core::{Component, Result};
 
 use super::JsonLoader;
 use super::escape::json_escape;
@@ -37,6 +37,8 @@ pub fn format() -> Format {
 }
 
 /// Handler for loaded JSON content: the item stream over the retained source.
+#[derive(Component)]
+#[component(name = "elide.text.json")]
 pub(crate) struct JsonHandler {
     /// The keys, string values, and scalars.
     body: ExtractStream<JsonSpan>,
@@ -95,10 +97,6 @@ impl JsonHandler {
 }
 
 impl Stream<Text> for JsonHandler {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         self.body.chunks()
     }

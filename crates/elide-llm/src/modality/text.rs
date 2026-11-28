@@ -29,7 +29,7 @@ impl LlmModality for Text {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::ModelId;
-    use hipstr::HipStr;
+    use elide_core::primitive::ComponentId;
 
     use super::*;
 
@@ -45,12 +45,16 @@ mod tests {
     }
 
     fn lift(text: &str, candidates: Vec<TextCandidate>) -> Vec<Entity<Text>> {
-        let source = HipStr::borrowed("llm");
+        let recognizer = ComponentId::new("llm", "1");
         let model = ModelId::new("model");
         let batch = Candidates {
             entities: candidates,
         };
-        Text::lift(batch, &TextData::new(text), &Lifter::new(&source, &model))
+        Text::lift(
+            batch,
+            &TextData::new(text),
+            &Lifter::new(&recognizer, &model),
+        )
     }
 
     /// One call's mentions of a cluster share an id; the same handle in

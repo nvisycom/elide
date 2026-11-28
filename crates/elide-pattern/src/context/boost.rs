@@ -19,15 +19,6 @@ const PREFIX_WORDS: usize = 5;
 /// context ("123-45-6789 (social security)") counts the same as leading.
 const SUFFIX_WORDS: usize = 5;
 
-/// Audit source of a lift by a keyword in the text around the match.
-const SOURCE_WINDOW: &str = "context";
-
-/// Audit source of a lift by a keyword in an out-of-band hint.
-const SOURCE_HINT: &str = "context-hint";
-
-/// Audit source of a lift by a neighbouring anchor match.
-const SOURCE_ANCHOR: &str = "context-anchor";
-
 /// What context reads around the matches of one subject.
 pub(crate) struct Surroundings<'a> {
     /// The recognized text the matches' ranges index into.
@@ -44,8 +35,6 @@ pub(crate) struct Surroundings<'a> {
 pub(crate) struct Boost {
     /// Index of the lifted match.
     pub(crate) target: usize,
-    /// Audit source of the lift.
-    pub(crate) source: &'static str,
     /// The match's confidence after the lift.
     pub(crate) confidence: Confidence,
     /// The text that fired: a keyword occurrence, or the anchor's label.
@@ -58,7 +47,6 @@ pub(crate) struct Boost {
 
 /// Where a keyword fired for one match.
 struct Found {
-    source: &'static str,
     keyword: HipStr<'static>,
     hint: Option<usize>,
     keyword_range: Option<Range<usize>>,
@@ -93,7 +81,6 @@ pub(crate) fn boost(
         m.confidence = lifted;
         boosts.push(Boost {
             target,
-            source: found.source,
             confidence: lifted,
             keyword: found.keyword,
             hint: found.hint,
@@ -141,7 +128,6 @@ pub(crate) fn boost(
             changed = true;
             boosts.push(Boost {
                 target,
-                source: SOURCE_ANCHOR,
                 confidence: lifted,
                 keyword: anchor.label.as_str().into(),
                 hint: None,
@@ -171,7 +157,6 @@ fn find_keyword(
         .min_by_key(|hit| hit.start);
     if let Some(hit) = in_text {
         return Some(Found {
-            source: SOURCE_WINDOW,
             keyword: HipStr::from(&window[hit.clone()]),
             hint: None,
             keyword_range: Some(offset + hit.start..offset + hit.end),
@@ -183,7 +168,6 @@ fn find_keyword(
             .active_keywords(around.languages)
             .find_map(|keywords| first_hit(context, matcher, text, &[], keywords))?;
         Some(Found {
-            source: SOURCE_HINT,
             keyword: HipStr::from(&text[hit]),
             hint: Some(hint),
             keyword_range: None,
@@ -303,7 +287,6 @@ mod tests {
 
         assert_eq!(matches[0].confidence, Confidence::new(0.85).unwrap());
         assert_eq!(boosts.len(), 1);
-        assert_eq!(boosts[0].source, SOURCE_WINDOW);
         // The text that fired, as written, and where it sits.
         assert_eq!(boosts[0].keyword, "Social Security");
         assert_eq!(boosts[0].keyword_range, Some(0..15));
@@ -359,7 +342,6 @@ mod tests {
         let boosts = run_with("123-45-6789", &[(1, "ssn")], &mut matches, &contexts);
 
         assert_eq!(matches[0].confidence, Confidence::new(0.85).unwrap());
-        assert_eq!(boosts[0].source, SOURCE_HINT);
         assert_eq!(boosts[0].hint, Some(1));
         assert!(boosts[0].keyword_range.is_none());
     }
@@ -375,8 +357,8 @@ mod tests {
 
         assert!(matches[0].confidence.get() > 0.1);
         assert_eq!(matches[1].confidence, Confidence::new(0.5).unwrap());
-        assert_eq!(boosts[0].source, SOURCE_ANCHOR);
         assert_eq!(boosts[0].keyword, "currency");
+        assert!(boosts[0].hint.is_none() && boosts[0].keyword_range.is_none());
     }
 
     #[test]

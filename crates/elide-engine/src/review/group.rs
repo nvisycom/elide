@@ -125,11 +125,12 @@ impl PartReview<'_> {
                 location,
             } => {
                 let included = Included {
+                    by: by.to_owned().into(),
                     label: label.clone(),
                     location: location.clone(),
                     attribution: edit.because.clone(),
                 };
-                let birth = Birth::new(by.to_owned(), Confidence::MAX, included).with_id(*id);
+                let birth = Birth::new(Confidence::MAX, included).with_id(*id);
                 entities.push(Entity::new(birth));
                 return Ok(());
             }
@@ -147,11 +148,12 @@ impl PartReview<'_> {
                 _ => entities[i].location().clone(),
             };
             let manual = Manual {
+                by: by.to_owned().into(),
                 intent: intent.clone(),
                 location,
                 attribution: edit.because.clone(),
             };
-            entities[i].record_manual(manual, by);
+            entities[i].record_manual(manual);
         }
         Ok(())
     }

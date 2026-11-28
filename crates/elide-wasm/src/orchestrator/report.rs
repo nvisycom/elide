@@ -93,8 +93,11 @@ pub struct Dropped {
 #[derive(Serialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
-    /// The recognizer's name, like `js-callback-ner` or a pattern recognizer's.
+    /// The recognizer's name, like `js-callback-ner` or a pattern recognizer's,
+    /// or the format's for hidden content it flagged.
     pub recognizer: String,
+    /// The version of the recognizer, or of the codec that flagged it.
+    pub version: String,
     /// The model that answered, for a model-backed recognizer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,

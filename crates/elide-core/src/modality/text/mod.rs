@@ -50,15 +50,14 @@ impl Entity<Text> {
     /// coordinate space from the source document, so `recognized_range` stays put
     /// as the artifact key. The birth event keeps the recognizer's own
     /// window-local view, which is genuinely where the match was reported, and
-    /// the shift is recorded after it as an [`Annotated`] event, by
-    /// `"offset"`.
+    /// the shift is recorded after it as an [`Annotated`] event.
     #[must_use]
     pub fn offset(mut self, delta: usize) -> Option<Self> {
         let mut annotation = Annotated::new().with_location(self.location().offset(delta)?);
         if let Some(range) = self.recognized_range() {
             annotation = annotation.with_recognized_range(range.start + delta..range.end + delta);
         }
-        self.annotate("offset", annotation);
+        self.annotate(annotation);
         Some(self)
     }
 }
@@ -95,22 +94,31 @@ mod tests {
     use super::*;
     use crate::entity::Birth;
     use crate::entity::audit::{Pattern, PatternRule};
-    use crate::primitive::Confidence;
+    use crate::primitive::{ComponentId, Confidence};
     use crate::redaction::Redactions;
 
     fn text_entity(location: TextLocation) -> Entity<Text> {
         Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
-            Pattern::new("US_SSN", location, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                "US_SSN",
+                location,
+                PatternRule::default(),
+            ),
         ))
     }
 
     #[test]
     fn entity_offset_shifts_location_and_recognized_range_together() {
-        let found = Pattern::new("US_SSN", TextLocation::inline(2..5), PatternRule::default())
-            .with_recognized_range(2..5);
-        let entity = Entity::new(Birth::new("t", Confidence::MAX, found));
+        let found = Pattern::new(
+            ComponentId::new("t", "1"),
+            "US_SSN",
+            TextLocation::inline(2..5),
+            PatternRule::default(),
+        )
+        .with_recognized_range(2..5);
+        let entity = Entity::new(Birth::new(Confidence::MAX, found));
         let moved = entity.offset(100).expect("inline location has a span");
         assert_eq!(moved.state.location.range(), Some(&(102..105)));
         assert_eq!(moved.state.recognized_range, Some(102..105));

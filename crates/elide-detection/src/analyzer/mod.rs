@@ -356,7 +356,7 @@ impl<M: Modality> Analyzer<M> {
                         superseded_by,
                     };
                     let confidence = entity.confidence();
-                    entity.record(AuditEvent::dropped(reason, confidence));
+                    entity.record(AuditEvent::new(confidence, reason));
                     dropped_entities.push(entity);
                 }
             }
@@ -385,12 +385,12 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::entity::audit::{AuditEvent, Pattern, PatternRule};
+    use elide_core::entity::audit::{AuditEvent, Calibrated, Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::{Component, ErrorKind};
 
     use super::*;
@@ -456,9 +456,9 @@ mod tests {
         let location = TextLocation::inline(loc.0..loc.1);
         let confidence = Confidence::new(0.9).unwrap();
         Entity::new(Birth::new(
-            "mock",
             confidence,
             Pattern::new(
+                ComponentId::new("mock", "1"),
                 label.clone(),
                 location,
                 PatternRule {
@@ -606,7 +606,10 @@ mod tests {
     fn dropping_analyzer() -> Analyzer<Text> {
         let weak = {
             let mut weak = detected("PHONE", (1, 2));
-            weak.record(AuditEvent::calibrated(Confidence::new(0.2).unwrap(), 0.2));
+            weak.record(AuditEvent::new(
+                Confidence::new(0.2).unwrap(),
+                Calibrated::new(ComponentId::new("calibration", "1"), 0.2),
+            ));
             weak
         };
         Analyzer::<Text>::new()

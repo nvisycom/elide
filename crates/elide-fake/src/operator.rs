@@ -113,7 +113,7 @@ mod tests {
     use elide_core::modality::Modality;
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
 
     use super::*;
 
@@ -135,9 +135,13 @@ mod tests {
     /// An entity a test pattern found as `label` at `location`.
     fn born<M: Modality>(label: LabelRef, location: M::Location) -> Entity<M> {
         Entity::new(Birth::new(
-            "test",
             Confidence::MAX,
-            Pattern::new(label, location, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("test", "1"),
+                label,
+                location,
+                PatternRule::default(),
+            ),
         ))
     }
 

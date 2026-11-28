@@ -14,7 +14,7 @@ use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Birth, Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
-use elide_core::primitive::Confidence;
+use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Component, Result};
@@ -49,9 +49,13 @@ impl Recognizer<Text> for PiiRecognizer {
             let end = start + PII.len();
             let loc = TextLocation::inline(start..end);
             entities.push(Entity::new(Birth::new(
-                "mock-pii",
                 Confidence::MAX,
-                Pattern::new(EMAIL_ADDRESS.to_ref(), loc.clone(), PatternRule::default()),
+                Pattern::new(
+                    ComponentId::new("mock-pii", "1"),
+                    EMAIL_ADDRESS.to_ref(),
+                    loc.clone(),
+                    PatternRule::default(),
+                ),
             )));
             from = end;
         }

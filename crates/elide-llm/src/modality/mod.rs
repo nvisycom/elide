@@ -12,8 +12,7 @@ mod text;
 use elide_core::entity::audit::{Model, ModelId};
 use elide_core::entity::{Birth, Entity, EntityCoRef, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::primitive::Confidence;
-use hipstr::HipStr;
+use elide_core::primitive::{ComponentId, Confidence};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -48,16 +47,17 @@ const DEFAULT_CONFIDENCE: f64 = 0.5;
 /// Builds the entities of one recognizer call: each attributed to the call's
 /// model, with the model's coreference handles scoped to the call.
 pub struct Lifter<'a> {
-    source: &'a HipStr<'static>,
+    recognizer: &'a ComponentId,
     model: &'a ModelId,
     scope: CorefScope,
 }
 
 impl<'a> Lifter<'a> {
-    /// A lifter for one call, its audit events naming `source` and `model`.
-    pub fn new(source: &'a HipStr<'static>, model: &'a ModelId) -> Self {
+    /// A lifter for one call, its audit events naming the `recognizer` and
+    /// the `model` it asked.
+    pub fn new(recognizer: &'a ComponentId, model: &'a ModelId) -> Self {
         Self {
-            source,
+            recognizer,
             model,
             scope: CorefScope::new(),
         }
@@ -85,9 +85,8 @@ impl<'a> Lifter<'a> {
         };
         let label = LabelRef::new(finding.label);
         let entity = Entity::new(Birth::new(
-            self.source.clone(),
             confidence,
-            Model::new(label, location, self.model.clone()),
+            Model::new(self.recognizer.clone(), label, location, self.model.clone()),
         ));
         // The model groups mentions of the same real-world entity under a
         // shared handle; scoped to this call, it is the entity's coreference
