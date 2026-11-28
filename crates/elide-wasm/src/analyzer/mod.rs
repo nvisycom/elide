@@ -51,6 +51,7 @@ pub struct Analyzer {
     enrichers: Vec<Enricher>,
     recognizers: Vec<Recognizer>,
     layers: Vec<Layer>,
+    discard_dropped: bool,
 }
 
 #[wasm_bindgen]
@@ -102,6 +103,14 @@ impl Analyzer {
         self.layers.push(layer);
         self
     }
+
+    /// Discard what the layers drop instead of returning it, unredacted, with
+    /// a `dropped` reason beside the findings. Consumes the handle.
+    #[wasm_bindgen(js_name = discardDropped)]
+    pub fn discard_dropped(mut self) -> Analyzer {
+        self.discard_dropped = true;
+        self
+    }
 }
 
 impl Analyzer {
@@ -111,6 +120,7 @@ impl Analyzer {
             enrichers: Vec::new(),
             recognizers: Vec::new(),
             layers: Vec::new(),
+            discard_dropped: false,
         }
     }
 
@@ -132,7 +142,7 @@ impl Analyzer {
         for recognizer in self.recognizers {
             analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Text>()?);
         }
-        Ok(with_layers(analyzer, self.layers))
+        Ok(with_layers(analyzer, self.layers, self.discard_dropped))
     }
 
     /// Build the Rust [`Analyzer<Tabular>`](elide::detection::Analyzer).
@@ -148,7 +158,7 @@ impl Analyzer {
         for recognizer in self.recognizers {
             analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Tabular>()?);
         }
-        Ok(with_layers(analyzer, self.layers))
+        Ok(with_layers(analyzer, self.layers, self.discard_dropped))
     }
 
     /// Build the Rust [`Analyzer<Image>`](elide::detection::Analyzer).
@@ -164,7 +174,7 @@ impl Analyzer {
         for recognizer in self.recognizers {
             analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Image>()?);
         }
-        Ok(with_layers(analyzer, self.layers))
+        Ok(with_layers(analyzer, self.layers, self.discard_dropped))
     }
 
     /// Build the Rust [`Analyzer<Audio>`](elide::detection::Analyzer).
@@ -180,13 +190,21 @@ impl Analyzer {
         for recognizer in self.recognizers {
             analyzer = analyzer.with_recognizer(recognizer.into_recognizer::<Audio>()?);
         }
-        Ok(with_layers(analyzer, self.layers))
+        Ok(with_layers(analyzer, self.layers, self.discard_dropped))
     }
 }
 
 /// Fold the configured `layers` into `analyzer`, or the default reconcile-and-
-/// filter stack when none were configured.
-fn with_layers<M: Modality>(mut analyzer: RustAnalyzer<M>, layers: Vec<Layer>) -> RustAnalyzer<M> {
+/// filter stack when none were configured, discarding what they drop when
+/// `discard_dropped`.
+fn with_layers<M: Modality>(
+    mut analyzer: RustAnalyzer<M>,
+    layers: Vec<Layer>,
+    discard_dropped: bool,
+) -> RustAnalyzer<M> {
+    if discard_dropped {
+        analyzer = analyzer.discard_dropped();
+    }
     if layers.is_empty() {
         return analyzer
             .with_layer(FuseLayer::max())

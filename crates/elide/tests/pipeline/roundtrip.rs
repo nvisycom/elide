@@ -69,7 +69,8 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     );
 
     // The rebuilt report (no cached handles) redacts against a fresh decode of
-    // the same document, stamping pick + redaction on every entity.
+    // the same document, stamping pick + redaction on every entity it
+    // considers, and leaving the dropped ones as they were.
     let mut doc2 = registry
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
@@ -79,10 +80,14 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         .ok()
         .map(|part| part.entities())
         .expect("applied content")
-        .iter()
     {
-        assert!(entity.audit().selection().is_some(), "records the pick");
-        assert!(entity.is_redacted(), "records the redaction");
+        let considered = !entity.is_suppressed();
+        assert_eq!(
+            entity.audit().selection().is_some(),
+            considered,
+            "records the pick"
+        );
+        assert_eq!(entity.is_redacted(), considered, "records the redaction");
     }
     // The document re-encodes after redaction.
     assert!(!doc2.document.encode()?.as_bytes().is_empty());

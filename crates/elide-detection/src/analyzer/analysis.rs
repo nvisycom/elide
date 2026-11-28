@@ -1,14 +1,24 @@
-//! [`Analysis`]: the output of one analysis — the reconciled entities plus the
+//! [`Analysis`]: the output of one analysis — the entities found, and the
 //! enrichment artifact they were produced from.
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
-/// The output of one analysis: the reconciled entities and the enrichment
+/// The output of one analysis: the entities found, and the enrichment
 /// artifact.
 #[derive(Debug, Clone)]
 pub struct Analysis<M: Modality> {
-    /// The reconciled entities, in the caller's coordinate system.
+    /// The entities, in the caller's coordinate system, chunk by chunk: each
+    /// chunk's findings, then what the reduction dropped from it, in the order
+    /// dropped.
+    ///
+    /// A dropped entity is [suppressed](Entity::is_suppressed), so redaction
+    /// leaves it alone; its trail ends in a [`Dropped`] event naming the layer
+    /// that dropped it and, for a lost overlap, the entity that won, which may
+    /// be dropped too. An analyzer that [discards its
+    /// drops](crate::Analyzer::discard_dropped) returns only the findings.
+    ///
+    /// [`Dropped`]: elide_core::entity::audit::Dropped
     pub entities: Vec<Entity<M>>,
     /// The enrichment artifact the analysis produced (or was seeded with): the
     /// OCR `Layout` / STT `Transcription` the recognizers read. Carried out

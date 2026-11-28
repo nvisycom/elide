@@ -33,13 +33,15 @@ impl<'r, M: Modality> Part<'r, M> {
         self.entities.iter().find(|entity| entity.id() == id)
     }
 
-    /// The entities a reviewer suppressed, which redaction leaves as they are.
+    /// The entities detection dropped or a reviewer suppressed, which
+    /// redaction leaves as they are.
     pub fn suppressed(&self) -> impl Iterator<Item = &'r Entity<M>> {
         self.entities.iter().filter(|entity| entity.is_suppressed())
     }
 
-    /// The entities no reviewer suppressed, which redaction considers. Whether
-    /// one is hidden is still the anonymizer's rules' decision.
+    /// The entities redaction considers: the findings, and any a reviewer
+    /// confirmed since it was dropped or suppressed. Whether one is hidden is
+    /// still the anonymizer's rules' decision.
     pub fn unsuppressed(&self) -> impl Iterator<Item = &'r Entity<M>> {
         self.entities
             .iter()

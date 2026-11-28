@@ -16,8 +16,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    Annotated, AuditEvent, AuditKind, Calibrated, Contested, Flagged, Fused, Included, Manual,
-    ManualIntent, Model, ModelId, Pattern, PatternRule, Redacted, Refined, Resolved, Selected,
+    Annotated, AuditEvent, AuditKind, Calibrated, Contested, Dropped, Flagged, Fused, Included,
+    Manual, ManualIntent, Model, ModelId, Pattern, PatternRule, Redacted, Refined, Resolved,
+    Selected,
 };
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
@@ -246,16 +247,39 @@ impl<M: Modality> AuditLog<M> {
         self.line().any(|e| matches!(e.kind, AuditKind::Flagged(_)))
     }
 
-    /// Whether a reviewer has suppressed this entity with a [`Manual`] event.
+    /// Whether redaction leaves this entity alone: detection [`Dropped`] it or
+    /// a reviewer suppressed it, and no reviewer confirmed it since.
     ///
-    /// That is, the latest [verdict](Self::verdict) on its
-    /// [line](Self::line) is [`ManualIntent::Suppress`]. The audit trail is
-    /// the single source of truth: there is no separate flag to keep in sync.
+    /// The latest of a [`Dropped`] event, a [`ManualIntent::Suppress`], and a
+    /// [`ManualIntent::Confirm`] on its [line](Self::line) decides. The audit
+    /// trail is the single source of truth: there is no separate flag to keep
+    /// in sync. Which of the two suppressed it is read from [`dropped`] and
+    /// [`verdict`].
     ///
-    /// [`Manual`]: crate::entity::audit::Manual
-    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`dropped`]: Self::dropped
+    /// [`verdict`]: Self::verdict
     pub fn is_suppressed(&self) -> bool {
-        self.verdict() == Some(&ManualIntent::Suppress)
+        self.line()
+            .find_map(|e| match &e.kind {
+                AuditKind::Dropped(_) => Some(true),
+                AuditKind::Manual(m) => match m.intent {
+                    ManualIntent::Suppress => Some(true),
+                    ManualIntent::Confirm => Some(false),
+                    ManualIntent::Relabel { .. } | ManualIntent::Relocate => None,
+                },
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// Why detection left this entity out, when it did: the [`Dropped`] event
+    /// on its [line](Self::line). A reviewer's later confirmation does not
+    /// erase it, see [`is_suppressed`](Self::is_suppressed).
+    pub fn dropped(&self) -> Option<&Dropped> {
+        self.line().find_map(|e| match &e.kind {
+            AuditKind::Dropped(dropped) => Some(dropped),
+            _ => None,
+        })
     }
 
     /// The latest reviewer verdict on this entity's [line](Self::line): a
@@ -435,6 +459,7 @@ impl<M: Modality> Default for AuditLog<M> {
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use uuid::Uuid;
 
     use super::*;
     use crate::entity::{EntityCoRef, LabelRef};
@@ -455,6 +480,7 @@ mod tests {
         let at = TextLocation::inline(3..9);
         let conf = Confidence::new(0.5).unwrap();
         let operator = ComponentId::new("mask", "1");
+        let rival = Uuid::from_u128(7);
         let why = Attribution::cited("GDPR", "Art. 17").with_rationale("erasure");
         let events = [
             AuditEvent::new(
@@ -489,9 +515,25 @@ mod tests {
                 conf,
                 Flagged::new("author", at.clone(), HiddenContentKind::Collaboration),
             ),
-            AuditEvent::fused("union", conf, at.clone()),
-            AuditEvent::resolved(Resolved::new(LabelRef::new("iban"), conf, "longest"), conf),
-            AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
+            AuditEvent::fused(ComponentId::new("union", "1"), conf, at.clone()),
+            AuditEvent::resolved(
+                Resolved::new(
+                    rival,
+                    LabelRef::new("iban"),
+                    conf,
+                    ComponentId::new("longest", "1"),
+                ),
+                conf,
+            ),
+            AuditEvent::contested(
+                Contested::new(
+                    rival,
+                    LabelRef::new("iban"),
+                    conf,
+                    ComponentId::new("review", "1"),
+                ),
+                conf,
+            ),
             AuditEvent::calibrated(conf, 0.5),
             AuditEvent::refined(
                 "context",
@@ -549,6 +591,10 @@ mod tests {
                 .with_language("en".parse().unwrap())
                 .with_coref(EntityCoRef::new("c1")),
         )));
+        log.record(fixed(AuditEvent::dropped(
+            Dropped::superseded(ComponentId::new("structural", "1"), Uuid::from_u128(7)),
+            conf,
+        )));
         log
     }
 
@@ -564,23 +610,24 @@ mod tests {
     }
 
     /// The digests of [`every_kind`]'s events, in order.
-    const PINNED: [&str; 16] = [
+    const PINNED: [&str; 17] = [
         "4bdcf255f11836161b03d87ca7b0e4aa752819c1db0d685f31af34a53f9fd72b", // pattern
         "12b57ac561ebb7dafa19f1a6fbd46f844a03f941bf7c68eabcb4456e6343c6c8", // model
         "17d5f2ef91525e3b9ecf952034e719bb7d80e08e66ac1024f8b55c43e7a12787", // flagged
-        "8eb6ada2663418d5df28fdbbba64896918186d2a7978996202a0bb61a3939864", // fusion
-        "32670d83b16832696e7cb2fc9434d678914be0dc131f5c4b46029068fb920781", // conflict
-        "be8fce5b547ba26d6d00708065531804cf6d532704bcb9e574f9aacecfb0edff", // contested
-        "0e6863731c263b2c3055aaa397d92a411c0a9bf50b00cefc289fb25b86b598c7", // calibration
-        "c6c28ab2a4c3ab9a9f5aa14e6b564f5038b3d537d77ad8444593c1f5b812caae", // refinement
-        "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // selection
-        "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // redaction
-        "526b28ea57a81cd85890ce2aee071d84d302cd530c2164289ddc0044f2681eb1", // include
-        "9675fc4b428d9b93741a07dc8703d9ad19039f44987bbba84cb478c4cfe42c82", // relabel
-        "57e873e030788c274c7974269f48432d9c10ddeecf7bcccc2ba37be1b559f50d", // relocate
-        "1d521cb5cf23c5b5be3dd15b78ed845565118e24d4edf9159c4aab1d84debc81", // suppress
-        "fff171ab8c4b47c9aeba32b6bf5d2b7c82c366abf8c97590735de0e4ba284305", // confirm
-        "99f2105bd6d92d7a2b4bcae62b702185791493b78fb7c5b47cf2b36447d346e4", // annotation
+        "3511fb0bff7ca0c19cf605bb8bfa0b31db3bdd9e7c51a491d19a5a27e3e014a3", // fused
+        "fac64c9a579acbf6afb8edf2a79d4c2a984dea0fcb4c2ba409fca9548f5a180d", // resolved
+        "3098f4b9ffdb49060cf85f9c2f88a4a6de4c5d2c7f26c0c0d2cdc9e6e4fc9507", // contested
+        "4cb31f57b3784c922fed601015c3d1fe68e414fc67379feb4bf0499037add74b", // calibrated
+        "e3e2d0e33bd0053f39fde794a664d6c235afeb34b9076b570f985afc470f5795", // refined
+        "e1d95304b106b2117321e78796e4a6aac1390f82ed6571fbff092c4d1ca59d90", // selected
+        "0796f8e7568f4d3b486cd4aafc895b2f085ed2e6e549a6b7a13f5544829a28d2", // redacted
+        "d36b3c2a94856d37e39a2bea2b018eefe3b64b2fe2278e8054b476b63727b553", // included
+        "92ee6f287a2cf87f181483041a93e8bcb4cfe9f8e28bb64fce47ff30a37f29ef", // relabel
+        "98a4f39e552c33b8d23771e2eb0a0c926503c8fd130043880cff26e564b8fe80", // relocate
+        "6a8c9e15189d547bfc493268b604ec8eca3464bfa5edb292b22a96b8d1e92447", // suppress
+        "d827618373b2473d52b45fc4a129909ad0a960141caf038f370111bf052c569e", // confirm
+        "bc8a8c140fc3f64075016a39c97f15511edd6a91e904f1af54aa06b2f1d85fcb", // annotated
+        "8b9a3b5f0881c0b6940f4b94bff9389ef6a4db56fb398401ef5329903d1d00e3", // dropped
     ];
 
     /// Editing any recorded payload field breaks verification.

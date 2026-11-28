@@ -20,7 +20,9 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::audit::{Annotated, AuditEvent, AuditHash, AuditHasher, AuditLog, Fused, Manual};
+use self::audit::{
+    Annotated, AuditEvent, AuditHash, AuditHasher, AuditLog, Fused, Manual, ManualIntent,
+};
 #[cfg(feature = "fixtures")]
 use self::audit::{Pattern, PatternRule};
 pub use self::birth::{Birth, BirthKind};
@@ -45,8 +47,8 @@ use crate::{Error, Result};
 /// Everything an entity says is what its [`audit`] trail records, read along
 /// the trail's [line](AuditLog::line) from its birth to its tip: its label,
 /// location, and confidence, where it matched in the recognized text, its
-/// language and coreference cluster, whether a reviewer suppressed it, and
-/// the operator picked and applied. The fields are that reading, kept as it
+/// language and coreference cluster, whether detection dropped it or a
+/// reviewer suppressed it, and the operator picked and applied. The fields are that reading, kept as it
 /// changes: an entity changes only by recording an event, and an entity read
 /// back whose fields disagree with its trail is refused.
 ///
@@ -266,7 +268,7 @@ impl<M: Modality> Entity<M> {
             self.audit
                 .absorb(events.filter(|event| seen.insert(event.hash())));
         }
-        let event = AuditEvent::new(fusion.strategy.clone(), confidence, fusion);
+        let event = AuditEvent::new(fusion.strategy.name.clone(), confidence, fusion);
         self.state.apply(&event);
         self.audit.record_fusion(event, heads);
     }
@@ -338,10 +340,11 @@ impl<M: Modality> Entity<M> {
     /// is this entity's own, so a caller cannot record a stale score. `actor`
     /// names who made the decision and becomes the event's source.
     ///
-    /// A verdict is idempotent: a [`Suppress`] or a [`Confirm`] that is
-    /// already the entity's latest [verdict](AuditLog::verdict) records
-    /// nothing, so re-applying one does not grow the trail. Returns whether an
-    /// event was recorded.
+    /// A verdict that changes nothing records nothing, so re-applying one
+    /// does not grow the trail: a [`Suppress`] of an entity already
+    /// [suppressed](Self::is_suppressed), by a reviewer or by a detection
+    /// drop, or a [`Confirm`] that is already its latest
+    /// [verdict](AuditLog::verdict). Returns whether an event was recorded.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     /// [`Suppress`]: audit::ManualIntent::Suppress
@@ -349,7 +352,11 @@ impl<M: Modality> Entity<M> {
     /// [`Relabel`]: audit::ManualIntent::Relabel
     /// [`Relocate`]: audit::ManualIntent::Relocate
     pub fn record_manual(&mut self, manual: Manual<M>, actor: &str) -> bool {
-        if self.audit.verdict() == Some(&manual.intent) {
+        let repeated = match manual.intent {
+            ManualIntent::Suppress => self.is_suppressed(),
+            _ => self.audit.verdict() == Some(&manual.intent),
+        };
+        if repeated {
             return false;
         }
         let event = AuditEvent::manual(actor.to_owned(), self.state.confidence, manual);
@@ -357,14 +364,26 @@ impl<M: Modality> Entity<M> {
         true
     }
 
-    /// Whether a reviewer has suppressed this entity, as its audit trail
-    /// records.
+    /// Whether redaction leaves this entity alone: detection dropped it or a
+    /// reviewer suppressed it, and no reviewer confirmed it since, as its
+    /// audit trail records.
     ///
     /// The audit trail is the single source of truth. Delegates to
     /// [`AuditLog::is_suppressed`](crate::entity::audit::AuditLog::is_suppressed).
     #[must_use]
     pub fn is_suppressed(&self) -> bool {
         self.audit.is_suppressed()
+    }
+
+    /// Whether detection left this entity out of its findings, a [`Dropped`]
+    /// event is on its [`audit`](Self::audit) line. A convenience for
+    /// [`audit().dropped()`](crate::entity::audit::AuditLog::dropped), which
+    /// says why.
+    ///
+    /// [`Dropped`]: crate::entity::audit::Dropped
+    #[must_use]
+    pub fn is_dropped(&self) -> bool {
+        self.audit.dropped().is_some()
     }
 
     /// Whether an operator has hidden this entity, a [`Redacted`] event is on
@@ -405,7 +424,8 @@ mod tests {
     use std::slice;
 
     use super::audit::{
-        Attribution, Included, ManualIntent, Pattern, PatternRule, Redacted, RuleMatch, Selected,
+        Attribution, Dropped, Included, ManualIntent, Pattern, PatternRule, Redacted, RuleMatch,
+        Selected,
     };
     use super::*;
     use crate::ErrorKind;
@@ -443,7 +463,7 @@ mod tests {
         let mut fused = survivor.clone();
         fused.fuse(
             slice::from_ref(&other),
-            Fused::new("max", loc.clone()),
+            Fused::new(ComponentId::new("max", "1"), loc.clone()),
             conf,
         );
 
@@ -574,6 +594,35 @@ mod tests {
         assert!(entity.is_suppressed());
     }
 
+    /// A detection drop suppresses the entity until a reviewer confirms it;
+    /// the drop stays on the trail as why detection left it out.
+    #[test]
+    fn a_drop_suppresses_until_a_reviewer_confirms() {
+        let mut entity = text_entity();
+        let loc = entity.state.location.clone();
+        let by = ComponentId::new("threshold", "1");
+        let confidence = entity.confidence();
+        entity.record(AuditEvent::dropped(
+            Dropped::rejected(by.clone()),
+            confidence,
+        ));
+        assert!(entity.is_dropped());
+        assert!(entity.is_suppressed());
+        assert_eq!(entity.audit().verdict(), None, "no reviewer has decided");
+
+        assert!(
+            !entity.record_manual(Manual::new(ManualIntent::Suppress, loc.clone()), "reviewer"),
+            "suppressing a dropped entity changes nothing, so records nothing"
+        );
+        entity.record_manual(Manual::new(ManualIntent::Confirm, loc), "reviewer");
+        assert!(
+            !entity.is_suppressed(),
+            "the confirmation overrides the drop"
+        );
+        assert_eq!(entity.audit().dropped(), Some(&Dropped::rejected(by)));
+        assert!(entity.audit().verify().is_ok());
+    }
+
     /// A relabel and a relocation set the fields they name, and record what
     /// they set, without suppressing the entity.
     #[test]
@@ -658,7 +707,11 @@ mod tests {
         let absorbed = [base.clone(), base.clone()];
         let conf = base.state.confidence;
         let location = base.state.location.clone();
-        base.fuse(&absorbed, Fused::new("max", location), conf);
+        base.fuse(
+            &absorbed,
+            Fused::new(ComponentId::new("max", "1"), location),
+            conf,
+        );
 
         assert_eq!(base.audit.events().len(), 2, "one birth, one fusion");
         assert!(base.audit.verify().is_ok());
@@ -672,7 +725,11 @@ mod tests {
         let other = text_entity();
         let conf = base.state.confidence;
         let location = base.state.location.clone();
-        base.fuse(slice::from_ref(&other), Fused::new("max", location), conf);
+        base.fuse(
+            slice::from_ref(&other),
+            Fused::new(ComponentId::new("max", "1"), location),
+            conf,
+        );
 
         assert_eq!(other.audit.events().len(), 1);
         let read = Entity::from_trail(other.id, other.audit.clone()).unwrap();
@@ -699,7 +756,7 @@ mod tests {
         let location = base.state.location.clone();
         base.fuse(
             &[absorbed],
-            Fused::new("max", location.clone()),
+            Fused::new(ComponentId::new("max", "1"), location.clone()),
             Confidence::MAX,
         );
         base.record(AuditEvent::redacted(
@@ -729,7 +786,7 @@ mod tests {
             ),
         ));
         entity.record(AuditEvent::fused(
-            "max",
+            ComponentId::new("max", "1"),
             entity.state.confidence,
             moved.clone(),
         ));

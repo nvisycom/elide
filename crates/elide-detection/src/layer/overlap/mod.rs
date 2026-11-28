@@ -26,8 +26,10 @@ mod reconciler;
 
 use std::collections::HashMap;
 
+use elide_core::Component;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
+use elide_core::recognition::Context;
 
 use self::fold::fold;
 pub use self::fuse::FuseLayer;
@@ -90,12 +92,15 @@ where
 /// [`Reconciler`] (keep both, contest, or resolve to a winner).
 ///
 /// Generic over the grouping `G` (by default [`CrossLabel`]: different
-/// labels, overlapping) and the reconciler `R`; see the [module docs].
+/// labels, overlapping) and the reconciler `R`; see the [module docs]. Each
+/// loser is dropped in its winner's favor. The layer is identified by its
+/// [`Reconciler`].
 ///
 /// [module docs]: self
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
 pub struct ReconcileLayer<G = CrossLabel, R = Structural> {
     group: G,
+    #[component(delegate)]
     reconciler: R,
 }
 
@@ -149,7 +154,7 @@ where
     G: GroupPredicate<M>,
     R: Reconciler<M>,
 {
-    fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M> {
+    fn apply(&self, entities: Vec<Entity<M>>, _ctx: &Context<'_>) -> LayerOutput<M> {
         let clusters = cluster(&self.group, &entities);
         fold(&self.reconciler, entities, clusters)
     }
@@ -166,6 +171,7 @@ mod tests {
 
     use super::group::CrossLabel;
     use super::*;
+    use crate::layer::Run;
 
     fn entity(label: &str, span: Range<usize>, conf: f32) -> Entity<Text> {
         let loc = TextLocation::inline(span);
@@ -192,8 +198,8 @@ mod tests {
             entity("ADDRESS", 0..30, 0.8),
             entity("POSTAL_CODE", 20..28, 0.9),
         ];
-        let out = structural().apply(entities);
-        assert_eq!(out.kept.len(), 2);
+        let out = structural().run(entities);
+        assert_eq!(out.kept().len(), 2);
     }
 
     /// A weak contained match subsumed by a strong container is dropped.
@@ -203,10 +209,10 @@ mod tests {
             entity("iban", 0..27, 0.85),
             entity("drivers_license", 0..4, 0.4),
         ];
-        let out = structural().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        assert_eq!(*out.kept[0].label(), LabelRef::new("iban"));
-        assert_eq!(out.dropped.len(), 1);
+        let out = structural().run(entities);
+        assert_eq!(out.kept().len(), 1);
+        assert_eq!(*out.kept()[0].label(), LabelRef::new("iban"));
+        assert_eq!(out.dropped().len(), 1);
     }
 
     /// A contained match exactly `margin` (0.25) weaker than its container is
@@ -218,27 +224,69 @@ mod tests {
             entity("payment_card", 0..17, 0.65),
             entity("postal_code", 5..11, 0.40), // 0.40 + 0.25 == 0.65
         ];
-        let out = structural().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        assert_eq!(*out.kept[0].label(), LabelRef::new("payment_card"));
-        assert_eq!(out.dropped.len(), 1);
+        let out = structural().run(entities);
+        assert_eq!(out.kept().len(), 1);
+        assert_eq!(*out.kept()[0].label(), LabelRef::new("payment_card"));
+        assert_eq!(out.dropped().len(), 1);
     }
 
     /// A near-coincident cross-label overlap is a true conflict: the winner
-    /// survives and records the loser; the loser is dropped.
+    /// survives and records the loser by id; the loser is dropped in the
+    /// winner's favor.
     #[test]
     fn structural_resolves_true_conflict() {
-        let entities = vec![
+        let (person, org) = (
             entity("PERSON_NAME", 0..12, 0.9),
             entity("ORGANIZATION", 2..14, 0.7),
-        ];
-        let out = structural().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        assert_eq!(out.dropped.len(), 1);
-        assert_eq!(*out.kept[0].label(), LabelRef::new("PERSON_NAME"));
-        assert!(has_kind(&out.kept[0], |k| matches!(
+        );
+        let (person_id, org_id) = (person.id(), org.id());
+        let layer = structural();
+        let out = layer.run(vec![person, org]);
+
+        let [winner] = out.kept() else {
+            panic!("one survivor: {:?}", out.kept());
+        };
+        assert_eq!(winner.id(), person_id);
+        assert!(has_kind(winner, |k| matches!(
             k,
-            AuditKind::Resolved(c) if c.competing_label == LabelRef::new("ORGANIZATION")
+            AuditKind::Resolved(c) if c.competing_id == org_id
+                && c.competing_label == LabelRef::new("ORGANIZATION")
+                && c.resolved_by == layer.id()
+        )));
+
+        let [(loser, winner)] = out.dropped() else {
+            panic!("one drop: {:?}", out.dropped());
+        };
+        assert_eq!(loser.id(), org_id);
+        assert_eq!(*winner, Some(person_id));
+    }
+
+    /// A winner that later loses to a third entity still records its own win:
+    /// each loser names the entity that beat it, so the chain reads whole.
+    #[test]
+    fn exclusive_chains_each_loser_to_its_winner() {
+        let (strong, middle, weak) = (
+            entity("IBAN", 0..12, 0.9),
+            entity("PERSON_NAME", 0..12, 0.6),
+            entity("ORGANIZATION", 0..12, 0.3),
+        );
+        let ids = (strong.id(), middle.id(), weak.id());
+        // `middle` meets `weak` first, then loses to `strong`.
+        let out = ReconcileLayer::exclusive().run(vec![middle, weak, strong]);
+
+        assert_eq!(out.kept().len(), 1);
+        assert_eq!(out.kept()[0].id(), ids.0);
+        let dropped = |id| {
+            out.dropped()
+                .iter()
+                .find(|(entity, _)| entity.id() == id)
+                .expect("dropped")
+        };
+        assert_eq!(dropped(ids.1).1, Some(ids.0));
+        assert_eq!(dropped(ids.2).1, Some(ids.1));
+        assert!(has_kind(&dropped(ids.1).0, |k| matches!(
+            k,
+            AuditKind::Resolved(c) if c.competing_id == ids.2
         )));
     }
 
@@ -251,11 +299,16 @@ mod tests {
             entity("ORGANIZATION", 2..14, 0.7),
         ];
         let layer = ReconcileLayer::new(Structural::standard().reviewing());
-        let out = layer.apply(entities);
-        assert_eq!(out.kept.len(), 2, "contest keeps both");
-        assert!(out.dropped.is_empty());
-        for e in &out.kept {
-            assert!(has_kind(e, |k| matches!(k, AuditKind::Contested(_))));
+        let out = layer.run(entities);
+        assert_eq!(out.kept().len(), 2, "contest keeps both");
+        assert!(out.dropped().is_empty());
+        let (a, b) = (&out.kept()[0], &out.kept()[1]);
+        for (entity, other) in [(a, b), (b, a)] {
+            assert!(has_kind(entity, |k| matches!(
+                k,
+                AuditKind::Contested(c) if c.competing_id == other.id()
+                    && c.flagged_by == layer.id()
+            )));
         }
     }
 
@@ -268,10 +321,10 @@ mod tests {
             let person = || entity("PERSON_NAME", 0..12, weak);
             let org = || entity("ORGANIZATION", 0..12, strong);
             for entities in [vec![person(), org()], vec![org(), person()]] {
-                let out = structural().apply(entities);
-                assert_eq!(out.kept.len(), 1);
-                assert_eq!(*out.kept[0].label(), LabelRef::new("ORGANIZATION"));
-                assert!(has_kind(&out.kept[0], |k| matches!(
+                let out = structural().run(entities);
+                assert_eq!(out.kept().len(), 1);
+                assert_eq!(*out.kept()[0].label(), LabelRef::new("ORGANIZATION"));
+                assert!(has_kind(&out.kept()[0], |k| matches!(
                     k,
                     AuditKind::Resolved(c) if c.competing_label == LabelRef::new("PERSON_NAME")
                 )));
@@ -288,9 +341,9 @@ mod tests {
             entity("ORGANIZATION", 0..12, 0.7),
         ];
         let layer = ReconcileLayer::new(Structural::standard().reviewing());
-        let out = layer.apply(entities);
-        assert_eq!(out.kept.len(), 2);
-        for e in &out.kept {
+        let out = layer.run(entities);
+        assert_eq!(out.kept().len(), 2);
+        for e in out.kept() {
             assert!(has_kind(e, |k| matches!(k, AuditKind::Contested(_))));
         }
     }
@@ -302,8 +355,8 @@ mod tests {
             entity("PERSON_NAME", 0..12, 0.9),
             entity("ORGANIZATION", 2..14, 0.7),
         ];
-        let out = ReconcileLayer::permissive().apply(entities);
-        assert_eq!(out.kept.len(), 2);
-        assert!(out.dropped.is_empty());
+        let out = ReconcileLayer::permissive().run(entities);
+        assert_eq!(out.kept().len(), 2);
+        assert!(out.dropped().is_empty());
     }
 }

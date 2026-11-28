@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use super::builtins::BUILT_INS;
 use super::{Category, Label, LabelRef};
-use crate::entity::Entity;
-use crate::modality::Modality;
 
 /// A registry of [`Label`]s keyed by id: the entity types a call detects.
 ///
@@ -64,26 +62,6 @@ impl LabelCatalog {
     /// Whether the catalog defines a label for `label`.
     pub fn contains(&self, label: &LabelRef) -> bool {
         self.0.contains_key(label.as_str())
-    }
-
-    /// Keep only the entities whose label this catalog declares, dropping the
-    /// rest.
-    ///
-    /// The output-restriction counterpart to [`contains`](Self::contains): a
-    /// detection pipeline may emit entities the caller did not ask for (so a
-    /// strong out-of-catalog match can still subsume a weak in-catalog one
-    /// during reconciliation) and cull them here, after reconciliation, so only
-    /// the requested types reach the caller. Called only with a non-empty
-    /// catalog, an empty request detects nothing and is gated before
-    /// recognition.
-    pub fn retain_declared<M>(&self, entities: Vec<Entity<M>>) -> Vec<Entity<M>>
-    where
-        M: Modality,
-    {
-        entities
-            .into_iter()
-            .filter(|entity| self.contains(entity.label()))
-            .collect()
     }
 
     /// The [`Category`] of `label`, resolved through this catalog.
@@ -150,34 +128,6 @@ mod tests {
 
         // An unknown tag yields nothing.
         assert_eq!(catalog.tagged("nonexistent").count(), 0);
-    }
-
-    #[test]
-    fn retain_declared_keeps_only_in_catalog_labels() {
-        use crate::entity::Birth;
-        use crate::entity::audit::{Pattern, PatternRule};
-        use crate::modality::text::{Text, TextLocation};
-        use crate::primitive::Confidence;
-
-        fn entity(label: &str) -> Entity<Text> {
-            let loc = TextLocation::inline(0..1);
-            let conf = Confidence::new(0.9).unwrap();
-            Entity::new(Birth::new(
-                "t",
-                conf,
-                Pattern::new(LabelRef::new(label), loc, PatternRule::default()),
-            ))
-        }
-
-        let catalog: LabelCatalog = [Label::new("email_address", "email")].into_iter().collect();
-        let kept = catalog.retain_declared(vec![entity("email_address"), entity("iban")]);
-        assert_eq!(kept.len(), 1);
-        assert_eq!(*kept[0].label(), LabelRef::new("email_address"));
-
-        // An empty catalog declares no type, so it keeps nothing.
-        let none =
-            LabelCatalog::new().retain_declared(vec![entity("email_address"), entity("iban")]);
-        assert!(none.is_empty());
     }
 
     #[test]

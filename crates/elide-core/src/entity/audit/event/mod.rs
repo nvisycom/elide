@@ -26,11 +26,11 @@ use serde::{Deserialize, Serialize};
 pub use self::apply::{Included, Manual, ManualIntent, Redacted, Selected};
 pub use self::kind::AuditKind;
 pub use self::recognition::{Annotated, Flagged, Model, ModelId, Pattern, PatternRule};
-pub use self::reconcile::{Calibrated, Contested, Fused, Refined, Resolved};
+pub use self::reconcile::{Calibrated, Contested, Dropped, Fused, Refined, Resolved};
 use super::AuditHash;
 use super::hash::AuditHasher;
 use crate::modality::Modality;
-use crate::primitive::Confidence;
+use crate::primitive::{ComponentId, Confidence};
 
 /// One node of an entity's audit DAG: something that happened to the entity.
 ///
@@ -172,29 +172,35 @@ impl<M: Modality> AuditEvent<M> {
     /// A fusion event combining several detections of one finding into one at
     /// `location`, the union of theirs. Its `confidence` is the pooled score
     /// of the fused entities; the `source` is the fusion strategy's name.
-    pub fn fused(
-        strategy: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        location: M::Location,
-    ) -> Self {
-        let strategy = strategy.into();
-        Self::new(strategy.clone(), confidence, Fused { strategy, location })
+    pub fn fused(strategy: ComponentId, confidence: Confidence, location: M::Location) -> Self {
+        Self::new(
+            strategy.name.clone(),
+            confidence,
+            Fused::new(strategy, location),
+        )
     }
 
     /// A resolved event: a competing detection was arbitrated against
     /// this entity, which won. The loser is recorded in `conflict` rather than
     /// dropped silently; `confidence` is the winner's own (unchanged) score. The
-    /// `source` is the conflict payload's `resolved_by`.
+    /// `source` is the name of the conflict payload's `resolved_by`.
     pub fn resolved(conflict: Resolved, confidence: Confidence) -> Self {
-        Self::new(conflict.resolved_by.clone(), confidence, conflict)
+        Self::new(conflict.resolved_by.name.clone(), confidence, conflict)
     }
 
     /// Contested event: a cross-label overlap left unresolved for human review,
     /// recorded on each entity of the pair naming the other in `contested`.
     /// `confidence` is this entity's own (unchanged) score; the `source` is the
-    /// payload's `flagged_by`.
+    /// name of the payload's `flagged_by`.
     pub fn contested(contested: Contested, confidence: Confidence) -> Self {
-        Self::new(contested.flagged_by.clone(), confidence, contested)
+        Self::new(contested.flagged_by.name.clone(), confidence, contested)
+    }
+
+    /// A dropped event: detection left the entity out, as `dropped` records.
+    /// `confidence` is the entity's own (unchanged) score; the `source` is the
+    /// name of the layer that dropped it.
+    pub fn dropped(dropped: Dropped, confidence: Confidence) -> Self {
+        Self::new(dropped.by.name.clone(), confidence, dropped)
     }
 
     /// A calibrated event rescaling confidence by `factor`. `confidence` is the

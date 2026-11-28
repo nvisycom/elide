@@ -314,10 +314,10 @@ mod tests {
 
     use elide_core::ErrorKind;
     use elide_core::entity::Entity;
-    use elide_core::entity::audit::{AuditKind, Manual, ManualIntent};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, Dropped, Manual, ManualIntent};
     use elide_core::modality::metadata::Metadata;
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
 
     use super::*;
     use crate::Restorer;
@@ -975,6 +975,27 @@ mod tests {
         assert!(!entity.is_suppressed());
         assert_eq!(entity.audit().verdict(), Some(&ManualIntent::Confirm));
         assert_eq!(decisions(entity).len(), 1);
+    }
+
+    /// Confirming an entity detection dropped takes the drop back: it is
+    /// redacted after all, and its trail still says why detection left it out.
+    #[test]
+    fn confirming_a_dropped_entity_takes_the_drop_back() {
+        let mut entity = at("SSN", 4..10);
+        let confidence = entity.confidence();
+        let dropped = Dropped::rejected(ComponentId::new("threshold", "1"));
+        entity.record(AuditEvent::dropped(dropped.clone(), confidence));
+        let id = entity.id();
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
+        assert!(report.entity_anywhere::<Text>(id).unwrap().is_suppressed());
+
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().confirm(id);
+        apply(&mut report, &review).unwrap();
+
+        let entity = report.entity_anywhere::<Text>(id).unwrap();
+        assert!(!entity.is_suppressed());
+        assert_eq!(entity.audit().dropped(), Some(&dropped));
     }
 
     /// A confirmation names an entity the part must hold.

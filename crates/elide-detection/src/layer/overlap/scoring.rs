@@ -1,5 +1,6 @@
 //! The [`Scoring`] trait, how fusion pools confidence, and its impls.
 
+use elide_core::Component;
 use elide_core::primitive::Confidence;
 
 /// How a fused cluster's confidences pool into the fused finding's score.
@@ -12,11 +13,11 @@ use elide_core::primitive::Confidence;
 /// associative and commutative for the result not to depend on the members'
 /// order (both shipped scorings are).
 ///
+/// A scoring is a [`Component`]: its [`id`](Component::id) is recorded on the
+/// fusion event, and names the [`FuseLayer`] it runs in.
+///
 /// [`FuseLayer`]: super::FuseLayer
-pub trait Scoring: Send + Sync {
-    /// Stable name of the scoring, recorded in the fusion event.
-    fn name(&self) -> &'static str;
-
+pub trait Scoring: Component + Send + Sync {
     /// Combine two confidences into the merged score.
     fn score(&self, a: Confidence, b: Confidence) -> Confidence;
 }
@@ -27,14 +28,11 @@ pub trait Scoring: Send + Sync {
 /// single strong witness carries the cluster. The merged confidence is one
 /// recognizer's existing score, so it assumes nothing about the members being
 /// independent or their scores being comparable probabilities. Associative.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
+#[component(name = "max")]
 pub struct MaxConfidence;
 
 impl Scoring for MaxConfidence {
-    fn name(&self) -> &'static str {
-        "max"
-    }
-
     fn score(&self, a: Confidence, b: Confidence) -> Confidence {
         if a >= b { a } else { b }
     }
@@ -52,14 +50,11 @@ impl Scoring for MaxConfidence {
 /// of three or more.
 ///
 /// [`Calibrated`]: crate::decorator::calibrated::Calibrated
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
+#[component(name = "noisy_or")]
 pub struct NoisyOrConfidence;
 
 impl Scoring for NoisyOrConfidence {
-    fn name(&self) -> &'static str {
-        "noisy_or"
-    }
-
     fn score(&self, a: Confidence, b: Confidence) -> Confidence {
         let combined = 1.0 - (1.0 - f64::from(a.get())) * (1.0 - f64::from(b.get()));
         Confidence::clamped(combined as f32)

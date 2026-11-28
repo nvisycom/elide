@@ -1,5 +1,6 @@
 //! The [`Exclusive`] reconciler.
 
+use elide_core::Component;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
@@ -11,7 +12,8 @@ use super::{Disposition, Reconciler, Winner};
 /// Every grouped pair is a conflict, resolved by `tiebreaker`, never keeps
 /// both. For callers who want a strict, mutually-exclusive output (no nesting,
 /// no co-existing overlaps).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
+#[component(name = "exclusive")]
 pub struct Exclusive<T = HighestConfidence> {
     /// How the winner is chosen.
     tiebreaker: T,
@@ -52,9 +54,5 @@ where
                 Winner::Second
             },
         }
-    }
-
-    fn name(&self) -> &'static str {
-        "exclusive"
     }
 }

@@ -1,5 +1,6 @@
 //! The [`Permissive`] reconciler.
 
+use elide_core::Component;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
@@ -13,7 +14,8 @@ use super::{Disposition, Reconciler};
 /// silent.
 ///
 /// [`contesting`]: Permissive::contesting
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
+#[component(name = "permissive")]
 pub struct Permissive {
     /// Whether survivors are flagged contested (for review) or kept silently.
     contest: bool,
@@ -39,9 +41,5 @@ impl<M: Modality> Reconciler<M> for Permissive {
         } else {
             Disposition::KeepBoth
         }
-    }
-
-    fn name(&self) -> &'static str {
-        "permissive"
     }
 }

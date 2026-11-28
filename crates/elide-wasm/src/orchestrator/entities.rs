@@ -20,7 +20,7 @@ use elide::modality::text::{Text, TextLocation};
 use elide::primitive::Confidence;
 use elide::{AnalyzedDocument, Document, Orchestrator, PartId, Report};
 
-use super::report::{Entity, Location, Rect, Redaction, Rendered, Source, Span};
+use super::report::{Dropped, Entity, Location, Rect, Redaction, Rendered, Source, Span};
 
 /// What an entity matched, read before redaction.
 pub(super) struct Matched {
@@ -324,6 +324,7 @@ impl Collected<'_> {
                 coref: entity.coref().map(|coref| coref.as_str().to_owned()),
                 sources: sources(entity),
                 redaction: redaction(entity),
+                dropped: dropped(entity),
                 id,
             });
         }
@@ -346,6 +347,14 @@ fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
             confidence: decimal(event.confidence),
         })
         .collect()
+}
+
+/// Why detection left `entity` out, when it did.
+fn dropped<M: Modality>(entity: &RustEntity<M>) -> Option<Dropped> {
+    entity.audit().dropped().map(|dropped| Dropped {
+        by: dropped.by.name.to_string(),
+        superseded_by: dropped.superseded_by.map(|winner| winner.to_string()),
+    })
 }
 
 /// The redaction applied to `entity`: the operator the applied selection

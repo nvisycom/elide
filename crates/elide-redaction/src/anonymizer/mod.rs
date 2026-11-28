@@ -177,7 +177,8 @@ impl<M: Modality> Anonymizer<M> {
     /// leak profile, the rule that matched, and any policy attribution, on
     /// **every** entity the cluster covers, so a merged non-winner still shows
     /// why it will be hidden. No document data is touched. Entities whose label has no operator and no
-    /// fallback get no pick; a reviewer-suppressed entity is skipped entirely.
+    /// fallback get no pick; a suppressed entity (one detection dropped or a reviewer suppressed) is
+    /// skipped entirely.
     ///
     /// Idempotent: re-running `pick`, or calling [`anonymize`] after it, does
     /// not stack a second identical [`Selected`] event; a decision that
@@ -210,13 +211,13 @@ impl<M: Modality> Anonymizer<M> {
     }
 
     /// Resolve each overlap cluster to its winning operator, dropping
-    /// reviewer-suppressed entities and clusters no rule covers, the shared
+    /// suppressed entities and clusters no rule covers, the shared
     /// decision behind [`pick`](Self::pick) and [`anonymize`](Self::anonymize).
     ///
     /// Operators are cloned out of the rule registry (config intact) so the
     /// borrow on `self` ends and the caller can mutate `entities` freely.
     fn resolve_clusters(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<ResolvedCluster<M>> {
-        // A reviewer-suppressed entity is left alone: it contributes no operator
+        // A suppressed entity is left alone: it contributes no operator
         // and does not extend the redacted span. (Where it overlaps a live
         // entity, the shared bytes still fall inside the live member's own span;
         // span-level redaction cannot spare those.) Exclude suppressed entities
@@ -291,7 +292,7 @@ impl<M: Modality> Anonymizer<M> {
     /// the audit: a reviewer overrides by editing the entity (suppress,
     /// retag), not by rewriting the pick. A decision an edit changed is
     /// recorded anew before it is applied, and each redaction names the
-    /// selection event it applied. A reviewer-suppressed entity is left alone.
+    /// selection event it applied. A suppressed entity is left alone.
     ///
     /// Returns whether anything was written: `false` when nothing was left to
     /// write (no entity given, all suppressed, or every operator left its

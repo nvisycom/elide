@@ -104,7 +104,7 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
         !outcome.audited.is_empty(),
         "the applied report should surface the redacted entities",
     );
-    for entity in &outcome.audited {
+    for entity in outcome.audited.iter().filter(|e| !e.is_suppressed()) {
         let last = entity
             .audit()
             .events()

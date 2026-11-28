@@ -3,8 +3,9 @@
 //! Wraps enrichers, recognizers, and a layer pipeline into one
 //! Presidio-style entry point. Enrichers, recognizers, and [`Layer`]s are added
 //! with the `with_*` builders; the `analyze*` entries run three phases in order:
-//! enrich (sequential), recognize (concurrent), reduce (the layers), returning a
-//! clean entity set.
+//! enrich (sequential), recognize (concurrent), reduce (the layers, then the
+//! catalog), returning the findings, with everything the reduction dropped
+//! kept beside them, suppressed, so their trails say why.
 //!
 //! Streamed sources, one or many, run through one engine, [`analyze_streams`]:
 //! it drains each source's chunks into subjects, enriches the whole flat batch
@@ -23,25 +24,32 @@
 
 mod analysis;
 
+use std::iter;
 use std::sync::Arc;
 
 use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
+use elide_core::entity::audit::{AuditEvent, Dropped};
 use elide_core::modality::{Chunk, ChunkReader, Modality};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 use futures::future;
 
 pub use self::analysis::Analysis;
 use crate::batch::expect_one_per_input;
 use crate::layer::Layer;
+use crate::layer::filter::CatalogFilter;
 
 /// The find engine: enrichers, recognizers, and layers, in one call.
 ///
 /// Generic over the [`Modality`] `M`. Enrichers, recognizers, and
 /// layers are added with [`with_enricher`], [`with_recognizer`], and
 /// [`with_layer`], each in the order it should run. [`analyze`] runs the three
-/// phases and returns an [`Analysis`] carrying the reconciled entities.
+/// phases and returns an [`Analysis`] carrying the reconciled entities, and
+/// every entity a layer or the request's catalog dropped, suppressed by a
+/// [`Dropped`] event on its trail (or discarded, see [`discard_dropped`]).
+///
+/// [`discard_dropped`]: Analyzer::discard_dropped
 ///
 /// ```ignore
 /// let analysis = Analyzer::new()
@@ -53,7 +61,7 @@ use crate::layer::Layer;
 ///     .with_layer(ThresholdLayer::default())
 ///     .analyze(data, &Scope::new().with_catalog(LabelCatalog::with_builtins()))
 ///     .await?;
-/// let entities = analysis.entities;
+/// let found = analysis.entities.iter().filter(|entity| !entity.is_dropped());
 /// ```
 ///
 /// [`with_enricher`]: Analyzer::with_enricher
@@ -64,6 +72,7 @@ pub struct Analyzer<M: Modality> {
     enrichers: Vec<Arc<dyn Enricher<M>>>,
     recognizers: Vec<Arc<dyn Recognizer<M>>>,
     layers: Vec<Arc<dyn Layer<M>>>,
+    retain_dropped: bool,
 }
 
 impl<M: Modality> Analyzer<M> {
@@ -73,6 +82,7 @@ impl<M: Modality> Analyzer<M> {
             enrichers: Vec::new(),
             recognizers: Vec::new(),
             layers: Vec::new(),
+            retain_dropped: true,
         }
     }
 
@@ -99,6 +109,20 @@ impl<M: Modality> Analyzer<M> {
     #[must_use]
     pub fn with_layer<L: Layer<M> + 'static>(mut self, layer: L) -> Self {
         self.layers.push(Arc::new(layer));
+        self
+    }
+
+    /// Discard what the reduction drops instead of keeping it.
+    ///
+    /// By default every dropped entity stays in the [`Analysis`], its trail
+    /// ending in a [`Dropped`] event that names the layer and, for a lost
+    /// overlap, the winner: redaction leaves it alone, and a reviewer can read
+    /// why it is missing or confirm it. A low threshold over a noisy
+    /// recognizer can drop many more candidates than it keeps; discarding
+    /// them keeps the analysis to its findings.
+    #[must_use]
+    pub fn discard_dropped(mut self) -> Self {
+        self.retain_dropped = false;
         self
     }
 
@@ -296,24 +320,46 @@ impl<M: Modality> Analyzer<M> {
         mut entities: Vec<Entity<M>>,
     ) -> Analysis<M> {
         ctx.languages(subject).stamp(&mut entities);
-        let reduced = self.reduce(entities);
-        // Restrict the *output* to the requested catalog only after reconciliation,
-        // so a strong out-of-catalog detection can subsume a weak in-catalog one
-        // nested inside it before being culled itself.
-        let entities = ctx.catalog().retain_declared(reduced);
+        let entities = self.reduce(entities, ctx);
         // Carry the enrichment artifact out with the entities so it can be
         // persisted and restored for a re-run without re-enriching.
         Analysis::new(entities).with_artifact(subject.artifact().cloned())
     }
 
-    /// Run every layer in order over `entities`, threading each
-    /// layer's kept output into the next and returning the survivors.
-    fn reduce(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
+    /// Run every layer in order over `entities`, then the [`CatalogFilter`],
+    /// threading each one's kept entities into the next: the survivors, then
+    /// everything dropped, in the order dropped, each with a [`Dropped`] event
+    /// naming the layer that dropped it (unless the analyzer discards them).
+    ///
+    /// The layer is named here, not by the layer itself, so no layer can
+    /// misname what it drops.
+    ///
+    /// The catalog runs last, so a strong out-of-catalog detection can subsume
+    /// a weak in-catalog one nested inside it before being culled itself.
+    fn reduce(&self, mut entities: Vec<Entity<M>>, ctx: &Context<'_>) -> Vec<Entity<M>> {
         let before = entities.len();
         let mut dropped = 0usize;
-        for layer in &self.layers {
-            let output = layer.apply(entities);
+        let mut dropped_entities = Vec::new();
+        let layers = self
+            .layers
+            .iter()
+            .map(|layer| &**layer)
+            .chain(iter::once(&CatalogFilter as &dyn Layer<M>));
+        for layer in layers {
+            let output = layer.apply(entities, ctx);
             dropped += output.dropped.len();
+            if self.retain_dropped {
+                let by = layer.id();
+                for (mut entity, superseded_by) in output.dropped {
+                    let reason = Dropped {
+                        by: by.clone(),
+                        superseded_by,
+                    };
+                    let confidence = entity.confidence();
+                    entity.record(AuditEvent::dropped(reason, confidence));
+                    dropped_entities.push(entity);
+                }
+            }
             entities = output.kept;
         }
         tracing::debug!(
@@ -323,6 +369,7 @@ impl<M: Modality> Analyzer<M> {
             dropped,
             "layers complete"
         );
+        entities.extend(dropped_entities);
         entities
     }
 }
@@ -338,7 +385,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::entity::audit::{Pattern, PatternRule};
+    use elide_core::entity::audit::{AuditEvent, Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
@@ -347,6 +394,7 @@ mod tests {
     use elide_core::{Component, ErrorKind};
 
     use super::*;
+    use crate::layer::filter::ThresholdLayer;
 
     /// A [`Text`] source over a fixed list of chunks, with the identity lift (a
     /// chunk's decoded range already addresses the source), for driving the engine
@@ -486,6 +534,96 @@ mod tests {
             .collect();
         assert!(ranges.contains(&(0..3)));
         assert!(ranges.contains(&(3..6)));
+    }
+
+    /// What the layers and the catalog drop comes back with the analysis after
+    /// each chunk's findings, suppressed, each trail naming its dropper, and
+    /// lifted to its source's coordinates like the findings.
+    #[tokio::test]
+    async fn analyze_streams_carries_drops_in_source_coordinates() {
+        let analysis = dropping_analyzer()
+            .analyze_streams(
+                &mut [&mut two_chunks()],
+                &scope_for(&["EMAIL", "PHONE"]),
+                vec![None],
+            )
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        let entities: Vec<_> = analysis
+            .entities
+            .iter()
+            .map(|entity| {
+                (
+                    entity.label().as_str(),
+                    entity.location().range().cloned().unwrap(),
+                    entity
+                        .audit()
+                        .dropped()
+                        .map(|dropped| dropped.by.name.as_str()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            entities,
+            [
+                ("EMAIL", 0..3, None),
+                ("PHONE", 1..2, Some("threshold")),
+                ("IBAN", 0..3, Some("catalog")),
+                ("EMAIL", 3..6, None),
+                ("PHONE", 4..5, Some("threshold")),
+                ("IBAN", 3..6, Some("catalog")),
+            ]
+        );
+        for entity in &analysis.entities {
+            assert_eq!(entity.is_suppressed(), entity.is_dropped());
+            assert!(entity.audit().verify().is_ok());
+        }
+    }
+
+    /// An analyzer that discards its drops returns only the findings.
+    #[tokio::test]
+    async fn a_discarding_analyzer_returns_only_the_findings() {
+        let analysis = dropping_analyzer()
+            .discard_dropped()
+            .analyze_streams(
+                &mut [&mut two_chunks()],
+                &scope_for(&["EMAIL", "PHONE"]),
+                vec![None],
+            )
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(analysis.entities.len(), 2, "one EMAIL per chunk");
+        assert!(analysis.entities.iter().all(|entity| !entity.is_dropped()));
+    }
+
+    /// An analyzer that finds an EMAIL, an out-of-catalog IBAN over it, and a
+    /// weak PHONE the threshold drops, on every chunk.
+    fn dropping_analyzer() -> Analyzer<Text> {
+        let weak = {
+            let mut weak = detected("PHONE", (1, 2));
+            weak.record(AuditEvent::calibrated(Confidence::new(0.2).unwrap(), 0.2));
+            weak
+        };
+        Analyzer::<Text>::new()
+            .with_recognizer(MockRecognizer::new(vec![
+                detected("EMAIL", (0, 3)),
+                detected("IBAN", (0, 3)),
+                weak,
+            ]))
+            .with_layer(ThresholdLayer::default())
+    }
+
+    /// A source of two three-byte chunks.
+    fn two_chunks() -> VecTextSource {
+        VecTextSource(vec![
+            Chunk::new(TextLocation::inline(0..3), TextData::new("ccc".to_owned())),
+            Chunk::new(TextLocation::inline(3..6), TextData::new("ddd".to_owned())),
+        ])
     }
 
     /// A seeds vector that does not match the sources one-for-one is malformed

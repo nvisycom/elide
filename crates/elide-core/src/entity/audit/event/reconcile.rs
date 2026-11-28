@@ -1,7 +1,8 @@
 //! Reconciliation payloads: what happened to an entity as detections were
 //! combined and scored, fusion ([`Fused`]), cross-label arbitration
-//! ([`Resolved`] / [`Contested`]), confidence rescaling ([`Calibrated`]), and
-//! context-keyword boosting ([`Refined`]).
+//! ([`Resolved`] / [`Contested`]), confidence rescaling ([`Calibrated`]),
+//! context-keyword boosting ([`Refined`]), and leaving a finding out
+//! ([`Dropped`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
 //! own bytes so two kinds can never hash alike, see the [payloads
@@ -10,11 +11,12 @@
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::super::hash::AuditHasher;
 use crate::entity::LabelRef;
 use crate::modality::{Hint, Modality, ModalityLocation};
-use crate::primitive::Confidence;
+use crate::primitive::{ComponentId, Confidence};
 
 /// Several detections of the same finding were fused into this one entity,
 /// located at the span that covers them all.
@@ -33,9 +35,8 @@ use crate::primitive::Confidence;
     )
 )]
 pub struct Fused<M: Modality> {
-    /// Name of the fusion strategy that combined them.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub strategy: HipStr<'static>,
+    /// The scoring that pooled their confidences.
+    pub strategy: ComponentId,
     /// Where the fused entity sits: the union of the detections' locations.
     pub location: M::Location,
 }
@@ -46,59 +47,64 @@ impl<M: Modality> Fused<M> {
 
     /// The `strategy` fused detections into one at `location`, the union of
     /// theirs.
-    pub fn new(strategy: impl Into<HipStr<'static>>, location: M::Location) -> Self {
-        Self {
-            strategy: strategy.into(),
-            location,
-        }
+    pub fn new(strategy: ComponentId, location: M::Location) -> Self {
+        Self { strategy, location }
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
-        out.bytes(self.strategy.as_bytes());
+        out.bytes(self.strategy.name.as_bytes());
+        out.bytes(self.strategy.version.as_bytes());
         out.bytes(&self.location.hash());
     }
 }
 
 /// A competing detection of a *different* label lost to this entity.
 ///
-/// It covered the same span and was resolved against this (winning) entity; the
-/// loser is recorded, not dropped.
+/// It covered the same span and was resolved against this (winning) entity.
+/// The loser is kept beside it, its own trail ending in a [`Dropped`] event
+/// superseded by this entity, unless the analyzer discards what it drops.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Resolved {
+    /// The id of the entity that lost arbitration. An analyzer that discards
+    /// what it drops leaves this naming no entity.
+    pub competing_id: Uuid,
     /// The label of the detection that lost arbitration.
     pub competing_label: LabelRef,
     /// The loser's confidence at resolution time.
     pub competing_confidence: Confidence,
-    /// Name of the conflict policy that chose the winner.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub resolved_by: HipStr<'static>,
+    /// The reconciler that chose the winner.
+    pub resolved_by: ComponentId,
 }
 
 impl Resolved {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 3;
 
-    /// The loser of a cross-label arbitration: its `competing_label` and
-    /// `competing_confidence`, and the policy (`resolved_by`) that chose the
-    /// winner.
+    /// The loser of a cross-label arbitration, `competing_id` with its
+    /// `competing_label` and `competing_confidence`, and the reconciler
+    /// (`resolved_by`) that chose the winner.
     pub fn new(
+        competing_id: Uuid,
         competing_label: LabelRef,
         competing_confidence: Confidence,
-        resolved_by: impl Into<HipStr<'static>>,
+        resolved_by: ComponentId,
     ) -> Self {
         Self {
+            competing_id,
             competing_label,
             competing_confidence,
-            resolved_by: resolved_by.into(),
+            resolved_by,
         }
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.raw(self.competing_id.as_bytes());
         out.bytes(self.competing_label.as_str().as_bytes());
         out.raw(&self.competing_confidence.get().to_le_bytes());
-        out.bytes(self.resolved_by.as_bytes());
+        out.bytes(self.resolved_by.name.as_bytes());
+        out.bytes(self.resolved_by.version.as_bytes());
     }
 }
 
@@ -110,38 +116,102 @@ impl Resolved {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Contested {
+    /// The id of the competing entity. A fusion that absorbs it afterwards
+    /// leaves this naming no entity.
+    pub competing_id: Uuid,
     /// The label of the competing detection.
     pub competing_label: LabelRef,
     /// The competing detection's confidence.
     pub competing_confidence: Confidence,
-    /// Name of the policy that flagged the contest.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub flagged_by: HipStr<'static>,
+    /// The reconciler that flagged the contest.
+    pub flagged_by: ComponentId,
 }
 
 impl Contested {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 4;
 
-    /// The other side of an unresolved cross-label overlap: its
-    /// `competing_label` and `competing_confidence`, and the policy
-    /// (`flagged_by`) that flagged the contest.
+    /// The other side of an unresolved cross-label overlap, `competing_id`
+    /// with its `competing_label` and `competing_confidence`, and the
+    /// reconciler (`flagged_by`) that flagged the contest.
     pub fn new(
+        competing_id: Uuid,
         competing_label: LabelRef,
         competing_confidence: Confidence,
-        flagged_by: impl Into<HipStr<'static>>,
+        flagged_by: ComponentId,
     ) -> Self {
         Self {
+            competing_id,
             competing_label,
             competing_confidence,
-            flagged_by: flagged_by.into(),
+            flagged_by,
         }
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.raw(self.competing_id.as_bytes());
         out.bytes(self.competing_label.as_str().as_bytes());
         out.raw(&self.competing_confidence.get().to_le_bytes());
-        out.bytes(self.flagged_by.as_bytes());
+        out.bytes(self.flagged_by.name.as_bytes());
+        out.bytes(self.flagged_by.version.as_bytes());
+    }
+}
+
+/// Detection left this entity out of its findings: a layer rejected it, or
+/// another entity superseded it.
+///
+/// The entity is kept, so the trail says why it is missing, but redaction
+/// leaves it alone unless a reviewer confirms it, see
+/// [`AuditLog::is_suppressed`].
+///
+/// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Dropped {
+    /// The layer that dropped it.
+    pub by: ComponentId,
+    /// The entity that won over it, when it lost an overlap rather than being
+    /// rejected outright.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub superseded_by: Option<Uuid>,
+}
+
+impl Dropped {
+    /// This kind's discriminant byte (see the [payloads overview](super)).
+    pub(crate) const TAG: u8 = 13;
+
+    /// A rejection by `by`: the entity was left out on its own account.
+    pub fn rejected(by: ComponentId) -> Self {
+        Self {
+            by,
+            superseded_by: None,
+        }
+    }
+
+    /// A supersession by `by`: the entity `winner` was kept over it.
+    pub fn superseded(by: ComponentId, winner: Uuid) -> Self {
+        Self {
+            by,
+            superseded_by: Some(winner),
+        }
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.by.name.as_bytes());
+        out.bytes(self.by.version.as_bytes());
+        match self.superseded_by {
+            Some(winner) => {
+                out.byte(1);
+                out.raw(winner.as_bytes());
+            }
+            None => {
+                out.byte(0);
+            }
+        }
     }
 }
 

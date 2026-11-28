@@ -29,15 +29,17 @@ let analysis = Analyzer::new()
     .with_layer(ReconcileLayer::structural())
     .analyze(data, &scope)
     .await?;
-let entities = analysis.entities;
+let findings = analysis.entities.iter().filter(|entity| !entity.is_dropped());
 ```
 
 The `layer` module ships the reduce stages, each a `Layer` run in order after
-recognition:
+recognition. A layer sees the request's `Context` and decides each entity's
+fate: keep it, reject it, or drop it in favor of another. A layer is a
+`Component`, and the analyzer records a `Dropped` event naming the layer's id,
+and the id of the finding it lost to, if any, on everything it drops. Dropped
+entities stay in `Analysis::entities`, suppressed so redaction leaves them
+alone, unless the analyzer is built with `discard_dropped`.
 
-- **calibrate** — scale each entity's confidence by a per-recognizer multiplier,
-  so detectors with different score distributions are comparable before
-  reconciliation.
 - **overlap** — decide what happens to overlapping entities. A
   `GroupPredicate` chooses *which* entities cluster (`SameLabel` same-label,
   `CrossLabel` cross-label); two layers act on the clusters:
@@ -51,7 +53,9 @@ recognition:
       (`Structural::standard().reviewing()`).
     - **`Exclusive`** — one finding per span; **`Permissive`** — keep every
       overlap (Presidio-style), deferring to the edit step.
-- **filter** — drop entities below a confidence threshold.
+- **filter** — drop entities below a confidence threshold (`ThresholdLayer`),
+  and the labels the request's catalog does not declare (`CatalogFilter`),
+  which the analyzer runs after every other layer.
 
 The engine is modality-generic: the same `Analyzer<M>` drives text, tabular,
 image, and audio detection.

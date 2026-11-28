@@ -6,12 +6,13 @@ use std::assert_matches;
 use std::ops::Range;
 
 use elide::detection::Analyzer;
-use elide::detection::filter::ThresholdLayer;
+use elide::detection::filter::{CatalogFilter, ThresholdLayer};
 use elide::detection::overlap::{FuseLayer, ReconcileLayer};
 use elide::entity::Birth;
 use elide::entity::audit::Pattern;
 use elide::recognition::decorator::calibrated::{Calibrated, Calibration, Multiplier};
-use elide_core::entity::audit::{AuditKind, PatternRule};
+use elide_core::Component;
+use elide_core::entity::audit::{AuditKind, Dropped, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
 use elide_core::primitive::Confidence;
@@ -75,16 +76,22 @@ async fn analyze_fuses_resolves_filters() {
         .with_layer(ReconcileLayer::structural())
         .with_layer(ThresholdLayer::default());
 
-    let mut entities = analyzer
+    let entities = analyzer
         .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER", "WEAK"]))
         .await
         .unwrap()
         .entities;
 
     // The two PHONE_NUMBER detections fused into one; the weak stray was
-    // filtered out below the 0.35 baseline.
-    assert_eq!(entities.len(), 1);
-    let phone = entities.pop().unwrap();
+    // dropped below the 0.35 baseline.
+    let [phone, weak] = entities.as_slice() else {
+        panic!("one finding, one drop: {entities:?}");
+    };
+    assert_eq!(*weak.label(), LabelRef::new("WEAK"));
+    assert_eq!(
+        weak.audit().dropped(),
+        Some(&Dropped::rejected(ThresholdLayer::default().id()))
+    );
     assert_eq!(*phone.label(), LabelRef::new("PHONE_NUMBER"));
     // Fusion kept the higher-confidence, larger span and recorded both
     // recognitions plus a fusion event.
@@ -96,7 +103,7 @@ async fn analyze_fuses_resolves_filters() {
     let last = phone.audit().events().last().unwrap();
     assert_matches!(
         last.kind,
-        AuditKind::Fused(ref d) if d.strategy == "max");
+        AuditKind::Fused(ref d) if d.strategy.name == "max");
     assert_eq!(phone.audit().final_confidence(), Some(phone.confidence()));
 }
 
@@ -211,11 +218,10 @@ async fn each_recognizer_is_calibrated_on_its_own() {
 /// by the request catalog. This is the `IBAN`-covers-`GB29` case: the caller's
 /// catalog excludes `IBAN` but the recognizer still emits it, so reconciliation
 /// can use it to drop the loose `DRIVERS_LICENSE` prefix before the catalog
-/// restriction removes the `IBAN` itself.
+/// restriction removes the `IBAN` itself. The drops tell that chain: the
+/// prefix lost to the `IBAN`, and the `IBAN` was not in the catalog.
 #[tokio::test]
 async fn out_of_catalog_container_subsumes_then_is_culled() {
-    use elide_core::entity::{Label, LabelCatalog};
-
     // A validated IBAN (0.85) fully containing a loose driver's-license
     // prefix (0.4), plus an in-catalog SSN elsewhere.
     let recognizer = MockRecognizer::new(vec![
@@ -239,23 +245,25 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
         .with_layer(ThresholdLayer::default());
 
     let scope = Scope::new().with_catalog(catalog);
-    let entities = analyzer
-        .analyze(TextData::new(""), &scope)
-        .await
-        .unwrap()
-        .entities;
+    let analysis = analyzer.analyze(TextData::new(""), &scope).await.unwrap();
+    let [ssn, prefix, iban] = analysis.entities.as_slice() else {
+        panic!("one finding, two drops: {:?}", analysis.entities);
+    };
 
-    let labels: Vec<&str> = entities.iter().map(|e| e.label().as_str()).collect();
-    // The nested driver's-license prefix was subsumed by the IBAN.
-    assert!(
-        !labels.contains(&"DRIVERS_LICENSE"),
-        "GB29 must not survive"
+    // The in-catalog SSN is the one finding.
+    assert_eq!(*ssn.label(), LabelRef::new("GOVERNMENT_ID"));
+    assert!(!ssn.is_suppressed());
+    // The nested driver's-license prefix was subsumed by the IBAN, which did
+    // its job, then dropped out (not in catalog). Both stay, suppressed, their
+    // trails saying why.
+    assert_eq!(*prefix.label(), LabelRef::new("DRIVERS_LICENSE"));
+    let lost = prefix.audit().dropped().expect("the prefix was dropped");
+    assert_eq!(lost.by.name, "structural");
+    assert_eq!(lost.superseded_by, Some(iban.id()));
+    assert_eq!(*iban.label(), LabelRef::new("IBAN"));
+    assert_eq!(
+        iban.audit().dropped(),
+        Some(&Dropped::rejected(CatalogFilter.id()))
     );
-    // The IBAN did its job then dropped out (not in catalog).
-    assert!(
-        !labels.contains(&"IBAN"),
-        "out-of-catalog IBAN must not be output"
-    );
-    // The in-catalog SSN survives.
-    assert_eq!(labels, ["GOVERNMENT_ID"]);
+    assert!(prefix.is_suppressed() && iban.is_suppressed());
 }

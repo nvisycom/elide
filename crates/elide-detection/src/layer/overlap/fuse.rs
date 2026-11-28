@@ -1,8 +1,10 @@
 //! [`FuseLayer`]: fuse each cluster of the same finding into one entity.
 
+use elide_core::Component;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::Fused;
 use elide_core::modality::{Modality, ModalityLocation};
+use elide_core::recognition::Context;
 
 use super::group::{GroupPredicate, SameLabel};
 use super::scoring::{MaxConfidence, NoisyOrConfidence, Scoring};
@@ -18,12 +20,16 @@ use crate::layer::{Layer, LayerOutput};
 /// joins every member's: one fusion event whose parents are each member's trail
 /// head. A lone entity passes through unchanged.
 ///
+/// Fusion drops nothing: each absorbed member, its whole trail, lives on in
+/// the fused entity. The layer is identified by its [`Scoring`].
+///
 /// Pooling covers the whole cluster at once, so a scoring that accumulates
 /// evidence ([`NoisyOrConfidence`]) counts every witness, whatever order they
 /// arrived in.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Component)]
 pub struct FuseLayer<G = SameLabel, S = MaxConfidence> {
     group: G,
+    #[component(delegate)]
     scoring: S,
 }
 
@@ -70,39 +76,35 @@ where
     G: GroupPredicate<M>,
     S: Scoring,
 {
-    fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M> {
+    fn apply(&self, entities: Vec<Entity<M>>, _ctx: &Context<'_>) -> LayerOutput<M> {
         let clusters = cluster(&self.group, &entities);
         let mut slots: Vec<Option<Entity<M>>> = entities.into_iter().map(Some).collect();
-        let mut dropped = Vec::new();
         for members in clusters {
             // Fuse in rounds: each round fuses the members that can be located
             // as one with its strongest member, and the rest fuse among
             // themselves in the next. Each round settles at least its base.
             let mut remaining = members;
             while remaining.len() > 1 {
-                let (absorbed, rest) = self.fuse(&mut slots, &remaining);
-                dropped.extend(absorbed);
-                remaining = rest;
+                remaining = self.fuse(&mut slots, &remaining);
             }
         }
-        LayerOutput::split(slots.into_iter().flatten().collect(), dropped)
+        let mut output = LayerOutput::new();
+        for entity in slots.into_iter().flatten() {
+            output.keep(entity);
+        }
+        output
     }
 }
 
 impl<G, S: Scoring> FuseLayer<G, S> {
     /// Fuse `members` into the highest-confidence one (ties to the earliest),
-    /// left in its slot; returns the members it absorbed, emptied of their
-    /// trails, and the indices of the ones it could not unite.
+    /// left in its slot; returns the indices of the ones it could not unite.
     ///
     /// A member whose location cannot be united with the fused one (a custom
     /// grouping that clusters findings on different pages, say) is left in its
     /// own slot for the next round: fusion merges only what it can locate as
     /// one, and never drops a finding it cannot cover.
-    fn fuse<M: Modality>(
-        &self,
-        slots: &mut [Option<Entity<M>>],
-        members: &Cluster,
-    ) -> (Vec<Entity<M>>, Cluster) {
+    fn fuse<M: Modality>(&self, slots: &mut [Option<Entity<M>>], members: &Cluster) -> Cluster {
         let mut base_index = members[0];
         for &index in &members[1..] {
             let candidate = slots[index].as_ref().map(|e| e.confidence());
@@ -131,7 +133,7 @@ impl<G, S: Scoring> FuseLayer<G, S> {
         }
         if absorbed.is_empty() {
             slots[base_index] = Some(base);
-            return (absorbed, rest);
+            return rest;
         }
 
         let confidence = absorbed.iter().fold(base.confidence(), |pooled, other| {
@@ -139,11 +141,11 @@ impl<G, S: Scoring> FuseLayer<G, S> {
         });
         base.fuse(
             &absorbed,
-            Fused::new(self.scoring.name(), location),
+            Fused::new(self.scoring.id(), location),
             confidence,
         );
         slots[base_index] = Some(base);
-        (absorbed, rest)
+        rest
     }
 }
 
@@ -157,6 +159,7 @@ mod tests {
     use elide_core::primitive::{Confidence, UnitBoundingBox};
 
     use super::*;
+    use crate::layer::Run;
 
     fn entity(label: &str, span: Range<usize>, conf: f32) -> Entity<Text> {
         let loc = TextLocation::inline(span);
@@ -168,28 +171,46 @@ mod tests {
         ))
     }
 
+    fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {
+        entity.audit().events().iter().any(|e| f(&e.kind))
+    }
+
     /// Same-label overlapping findings fuse into one entity spanning their
-    /// union, with the pooled confidence.
+    /// union, with the pooled confidence. Nothing is dropped: the absorbed
+    /// member's trail lives on in the fused entity's.
     #[test]
     fn fuses_same_label_into_the_union() {
-        let entities = vec![entity("EMAIL", 0..10, 0.9), entity("EMAIL", 6..25, 0.6)];
-        let out = FuseLayer::max().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        let fused = &out.kept[0];
+        let absorbed = entity("EMAIL", 6..25, 0.6);
+        let entities = vec![entity("EMAIL", 0..10, 0.9), absorbed.clone()];
+        let out = FuseLayer::max().run(entities);
+        assert_eq!(out.kept().len(), 1);
+        assert!(out.dropped().is_empty(), "fusion drops nothing");
+        let fused = &out.kept()[0];
         let range = fused.location().range().unwrap();
         assert_eq!((range.start, range.end), (0, 25));
         assert_eq!(*fused.label(), LabelRef::new("EMAIL"));
         assert_eq!(fused.confidence(), Confidence::new(0.9).unwrap());
-        assert_eq!(out.dropped.len(), 1);
+        assert!(
+            fused
+                .audit()
+                .events()
+                .iter()
+                .any(|event| event.hash() == absorbed.audit().tip()),
+            "the absorbed member's trail is in the fused entity's"
+        );
+        assert!(has_kind(fused, |kind| matches!(
+            kind,
+            AuditKind::Fused(fused) if fused.strategy == MaxConfidence.id()
+        )));
     }
 
     /// `NoisyOrConfidence` accumulates: two agreeing 0.6 witnesses → 0.84.
     #[test]
     fn noisy_or_accumulates() {
         let entities = vec![entity("EMAIL", 0..10, 0.6), entity("EMAIL", 0..10, 0.6)];
-        let out = FuseLayer::noisy_or().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        assert!((out.kept[0].confidence().get() - 0.84).abs() < 1e-5);
+        let out = FuseLayer::noisy_or().run(entities);
+        assert_eq!(out.kept().len(), 1);
+        assert!((out.kept()[0].confidence().get() - 0.84).abs() < 1e-5);
     }
 
     /// `NoisyOrConfidence` pools every member of a cluster: three agreeing 0.6
@@ -201,12 +222,12 @@ mod tests {
             entity("EMAIL", 0..10, 0.6),
             entity("EMAIL", 0..10, 0.6),
         ];
-        let out = FuseLayer::noisy_or().apply(entities);
-        assert_eq!(out.kept.len(), 1);
+        let out = FuseLayer::noisy_or().run(entities);
+        assert_eq!(out.kept().len(), 1);
         assert!(
-            (out.kept[0].confidence().get() - 0.936).abs() < 1e-5,
+            (out.kept()[0].confidence().get() - 0.936).abs() < 1e-5,
             "got {}",
-            out.kept[0].confidence().get()
+            out.kept()[0].confidence().get()
         );
     }
 
@@ -219,9 +240,9 @@ mod tests {
             entity("EMAIL", 8..18, 0.8),
             entity("EMAIL", 16..26, 0.7),
         ];
-        let out = FuseLayer::max().apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        let range = out.kept[0].location().range().unwrap();
+        let out = FuseLayer::max().run(entities);
+        assert_eq!(out.kept().len(), 1);
+        let range = out.kept()[0].location().range().unwrap();
         assert_eq!((range.start, range.end), (0, 26));
     }
 
@@ -234,8 +255,8 @@ mod tests {
             entity("EMAIL", 0..10, 0.8),
             entity("EMAIL", 0..10, 0.7),
         ];
-        let out = FuseLayer::max().apply(entities);
-        let audit = out.kept[0].audit();
+        let out = FuseLayer::max().run(entities);
+        let audit = out.kept()[0].audit();
         let fusions: Vec<_> = audit
             .events()
             .iter()
@@ -276,15 +297,19 @@ mod tests {
                 Pattern::new(LabelRef::new("EMAIL"), location, PatternRule::default()),
             ))
         };
-        let out = FuseLayer::noisy_or().with_grouping(AnyWhere).apply(vec![
+        let out = FuseLayer::noisy_or().with_grouping(AnyWhere).run(vec![
             on_page(1, 0.9),
             on_page(2, 0.6),
             on_page(2, 0.6),
         ]);
-        assert_eq!(out.kept.len(), 2, "one entity per page");
-        assert_eq!(out.dropped.len(), 1, "the page-2 pair fused");
+        assert_eq!(
+            out.kept().len(),
+            2,
+            "one entity per page, the page-2 pair fused"
+        );
+        assert!(out.dropped().is_empty());
         let page_two = out
-            .kept
+            .kept()
             .iter()
             .find(|entity| entity.location().page() == Some(2))
             .expect("page 2 survives");
@@ -296,8 +321,8 @@ mod tests {
     #[test]
     fn fusion_ignores_different_labels() {
         let entities = vec![entity("EMAIL", 0..10, 0.9), entity("PHONE", 0..10, 0.8)];
-        let out = FuseLayer::max().apply(entities);
-        assert_eq!(out.kept.len(), 2);
-        assert!(out.dropped.is_empty());
+        let out = FuseLayer::max().run(entities);
+        assert_eq!(out.kept().len(), 2);
+        assert!(out.dropped().is_empty());
     }
 }
