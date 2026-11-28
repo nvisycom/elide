@@ -6,6 +6,7 @@
 //! own bytes so two kinds can never hash alike, see the [payloads
 //! overview](super).
 
+use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -70,8 +71,7 @@ impl Selected {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
-        out.bytes(self.operator.name.as_bytes());
-        out.bytes(self.operator.version.as_bytes());
+        out.component(&self.operator);
         out.byte(self.leak_profile as u8);
         self.matched_by.hash_into(out);
         hash_opt_attribution(out, self.attribution.as_ref());
@@ -133,10 +133,6 @@ impl<M: Modality> Redacted<M> {
 /// A reviewer's inclusion: an entity of `label` at `location` that detection
 /// missed (a false negative). It starts the entity's trail, never follows a
 /// birth, and the entity is redacted like any detected one.
-///
-/// Who included it is the event's [`source`], not a payload field.
-///
-/// [`source`]: super::AuditEvent::source
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -152,6 +148,9 @@ impl<M: Modality> Redacted<M> {
     )
 )]
 pub struct Included<M: Modality> {
+    /// The reviewer who included it.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub by: HipStr<'static>,
     /// The label the reviewer gave the entity.
     pub label: LabelRef,
     /// Where it sits.
@@ -168,9 +167,15 @@ impl<M: Modality> Included<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 12;
 
-    /// An inclusion of `label` at `location`, with no reason given.
-    pub fn new(label: impl Into<LabelRef>, location: M::Location) -> Self {
+    /// The reviewer `by`'s inclusion of `label` at `location`, with no reason
+    /// given.
+    pub fn new(
+        by: impl Into<HipStr<'static>>,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+    ) -> Self {
         Self {
+            by: by.into(),
             label: label.into(),
             location,
             attribution: None,
@@ -185,6 +190,7 @@ impl<M: Modality> Included<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.by.as_bytes());
         out.bytes(self.label.as_str().as_bytes());
         out.bytes(&self.location.hash());
         hash_opt_attribution(out, self.attribution.as_ref());
@@ -195,11 +201,8 @@ impl<M: Modality> Included<M> {
 /// relabelled, or relocated it.
 ///
 /// Its provenance is a person's decision, not a recognizer's, so the trail
-/// records what the decision set and *why* (an [`Attribution`], when
-/// supplied). *Who* made the override is the event's [`source`], not a payload
-/// field.
-///
-/// [`source`]: super::AuditEvent::source
+/// records who made it, what it set, and *why* (an [`Attribution`], when
+/// supplied).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -215,6 +218,9 @@ impl<M: Modality> Included<M> {
     )
 )]
 pub struct Manual<M: Modality> {
+    /// The reviewer who made the decision.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub by: HipStr<'static>,
     /// Which decision this records, with the label it set when it set one. This
     /// is the authority on whether the entity is redacted,
     /// [`AuditLog::is_suppressed`] reads it, so there is no separate flag to
@@ -240,11 +246,15 @@ impl<M: Modality> Manual<M> {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 8;
 
-    /// A human override recording `intent` at `location`, with no rationale.
-    /// Attach one with [`with_attribution`](Self::with_attribution). *Who* made
-    /// the override is the event's source, not set here.
-    pub fn new(intent: ManualIntent, location: M::Location) -> Self {
+    /// The reviewer `by`'s decision recording `intent` at `location`, with no
+    /// rationale. Attach one with [`with_attribution`](Self::with_attribution).
+    pub fn new(
+        by: impl Into<HipStr<'static>>,
+        intent: ManualIntent,
+        location: M::Location,
+    ) -> Self {
         Self {
+            by: by.into(),
             intent,
             location,
             attribution: None,
@@ -259,6 +269,7 @@ impl<M: Modality> Manual<M> {
     }
 
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.by.as_bytes());
         self.intent.hash_into(out);
         out.bytes(&self.location.hash());
         hash_opt_attribution(out, self.attribution.as_ref());

@@ -6,7 +6,7 @@ use std::ops::Range;
 use elide_core::modality::text::{Marked, SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use super::{ExtractedItem, ItemEdit, Passage, SourceAddresser, SpliceState};
 use crate::string::DisjointSpans;
@@ -21,8 +21,12 @@ use crate::{FlaggedItem, FormatId, Stream};
 /// format's [`Native`](crate::Native) document reads the redacted ones through
 /// [`items`](Self::items) to write the document out.
 ///
+/// It is named after the format it was decoded from.
+///
 /// [`Chunk`]: elide_core::modality::Chunk
+#[derive(Component)]
 pub struct ExtractStream<A> {
+    #[component(name)]
     format_id: FormatId,
     state: SpliceState<A>,
     addresser: Box<dyn SourceAddresser<A>>,
@@ -137,10 +141,6 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
 }
 
 impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
-    fn format(&self) -> FormatId {
-        self.format_id
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         let state = &self.state;
         Ok(state

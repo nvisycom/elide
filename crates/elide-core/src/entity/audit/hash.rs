@@ -10,6 +10,7 @@ use serde::de::Error as _;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::primitive::ComponentId;
 use crate::{Error, Result};
 
 /// A 32-byte BLAKE3 digest that links and verifies an audit trail's events.
@@ -104,6 +105,12 @@ impl AuditHasher {
             }
             None => self.byte(0),
         }
+    }
+
+    /// Fold in a component's identity: its name, then its version.
+    pub(crate) fn component(&mut self, id: &ComponentId) -> &mut Self {
+        self.bytes(id.name.as_bytes());
+        self.bytes(id.version.as_bytes())
     }
 
     /// Fold in an optional byte range: a presence byte, then its bounds if

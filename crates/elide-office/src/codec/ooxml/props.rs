@@ -17,17 +17,14 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use elide_codec::metadata::MetadataFields;
-use elide_codec::{FlaggedItem, FormatId, LocalId, Stream, StreamMut};
-use elide_core::Result;
+use elide_codec::{FlaggedItem, LocalId, Stream, StreamMut};
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::{HiddenContentPolicy, Redactions};
+use elide_core::{Component, Result};
 
 use crate::codec::local_id;
 use crate::opc::{PartPath, PartReplacement, props};
-
-/// Stable [`FormatId`] for an OOXML property part's metadata stream.
-pub(crate) const FORMAT_ID: FormatId = FormatId::new("elide.office.docprops");
 
 /// A package's document-property parts, each a metadata stream keyed by the
 /// part it was read from. Shared by every OOXML document (docx, pptx, xlsx).
@@ -87,7 +84,8 @@ impl DocProps {
 
 /// Stream for an OOXML property part: yields its labelled fields and rewrites
 /// the property XML as each batch of redactions edits them.
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[component(name = "elide.office.docprops")]
 pub(crate) struct DocPropsStream {
     /// The property part's XML bytes as read, which every rewrite starts
     /// from: a custom property is keyed by its position here, and one
@@ -119,10 +117,6 @@ impl DocPropsStream {
 }
 
 impl Stream<Metadata> for DocPropsStream {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {
         Ok(self.fields.chunks())
     }

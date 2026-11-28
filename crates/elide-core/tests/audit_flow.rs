@@ -9,7 +9,7 @@ use elide_core::entity::audit::{AuditKind, ModelId, PatternRule};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::{
-    Confidence, ConfidenceThreshold, CountryCode, LanguageClaim, LanguageTag,
+    ComponentId, Confidence, ConfidenceThreshold, CountryCode, LanguageClaim, LanguageTag,
 };
 use elide_core::{Component, Result};
 
@@ -25,7 +25,11 @@ fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
     entities.sort_by(|a, b| b.confidence().partial_cmp(&a.confidence()).unwrap());
     let mut base = entities.remove(0);
     let (confidence, location) = (base.confidence(), base.location().clone());
-    base.fuse(&entities, Fused::new("max", location), confidence);
+    base.fuse(
+        &entities,
+        Fused::new(ComponentId::new("max", "1"), location),
+        confidence,
+    );
     base
 }
 
@@ -36,9 +40,9 @@ fn two_recognizers_fuse_into_one() {
     // Recognizer 1: a regex pattern.
     let pattern_conf = Confidence::new(0.8).unwrap();
     let pattern = Entity::new(Birth::new(
-        "us-phone-pattern",
         pattern_conf,
         Pattern::new(
+            ComponentId::new("us-phone-pattern", "1"),
             phone.clone(),
             TextLocation::inline(10..22),
             PatternRule {
@@ -52,9 +56,9 @@ fn two_recognizers_fuse_into_one() {
     // Recognizer 2: an NER model, slightly different span, higher confidence.
     let ner_conf = Confidence::new(0.95).unwrap();
     let ner = Entity::new(Birth::new(
-        "ner-model",
         ner_conf,
         Model::new(
+            ComponentId::new("ner-model", "1"),
             phone.clone(),
             TextLocation::inline(10..23),
             ModelId {
@@ -79,7 +83,7 @@ fn two_recognizers_fuse_into_one() {
     assert_eq!(entity.audit().events().len(), 3);
     assert_matches!(
         entity.audit().events().last().unwrap().kind,
-        AuditKind::Fused(ref dedup) if dedup.strategy == "max");
+        AuditKind::Fused(ref dedup) if dedup.strategy.name == "max");
     assert_eq!(
         entity.audit().final_confidence(),
         Some(Confidence::new(0.95).unwrap())

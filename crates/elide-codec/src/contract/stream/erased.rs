@@ -13,10 +13,10 @@ use std::fmt;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, ChunkReader, DataReader, DataWriter, Modality};
+use elide_core::primitive::ComponentId;
 use elide_core::redaction::Redactions;
 
 use super::{FlaggedItem, Stream};
-use crate::contract::FormatId;
 
 /// The function that recovers a [`StreamMut`]'s stream as a `dyn Stream<M>`.
 type Cast<M> = fn(&mut (dyn Any + Send + Sync)) -> &mut dyn Stream<M>;
@@ -90,9 +90,9 @@ pub struct TypedStream<'a, M: Modality> {
 }
 
 impl<M: Modality> TypedStream<'_, M> {
-    /// The [`FormatId`] of the format this stream represents.
-    pub fn format(&self) -> FormatId {
-        self.stream.format()
+    /// The stream's identity, named after its format; see [`Stream`].
+    pub fn id(&self) -> ComponentId {
+        self.stream.id()
     }
 
     /// The items of hidden content the stream's format labels; see

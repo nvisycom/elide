@@ -13,7 +13,7 @@ use std::sync::Arc;
 use elide_core::entity::audit::{AuditEvent, Pattern, Refined};
 use elide_core::entity::{Birth, Entity};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::LanguageTag;
+use elide_core::primitive::{ComponentId, LanguageTag};
 use elide_core::recognition::{Context, Languages, Recognizer, Subject};
 use elide_core::{Component, Result};
 use regex::RegexSet;
@@ -129,9 +129,9 @@ impl PatternRecognizer {
         subject: &Subject<M>,
     ) -> Option<Entity<M>> {
         let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
-        let found =
-            Pattern::new(raw.label.clone(), location, raw.rule).with_recognized_range(raw.range);
-        Some(Entity::new(Birth::new(self.id().name, raw.score, found)))
+        let found = Pattern::new(self.id(), raw.label.clone(), location, raw.rule)
+            .with_recognized_range(raw.range);
+        Some(Entity::new(Birth::new(raw.score, found)))
     }
 }
 
@@ -154,7 +154,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
             .collect();
         for boost in boosts {
             if let Some(entity) = entities[boost.target].as_mut() {
-                record_boost(entity, boost, subject);
+                record_boost(entity, self.id(), boost, subject);
             }
         }
         Ok(entities.into_iter().flatten().collect())
@@ -166,6 +166,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
 /// box, a time span), mirroring how the entity itself was located.
 fn record_boost<M: TextRecognizable>(
     entity: &mut Entity<M>,
+    recognizer: ComponentId,
     boost: context::Boost,
     subject: &Subject<M>,
 ) {
@@ -175,16 +176,12 @@ fn record_boost<M: TextRecognizable>(
         (None, Some(range)) => M::locate(range, subject.data(), subject.artifact()),
         (None, None) => None,
     };
-    let mut refinement = Refined::new(boost.keyword);
+    let mut refinement = Refined::new(recognizer, boost.keyword);
     if let Some(hint) = hint {
         refinement = refinement.with_hint(hint.hint.clone());
     }
     if let Some(location) = location {
         refinement = refinement.with_location(location);
     }
-    entity.record(AuditEvent::refined(
-        boost.source,
-        boost.confidence,
-        refinement,
-    ));
+    entity.record(AuditEvent::new(boost.confidence, refinement));
 }

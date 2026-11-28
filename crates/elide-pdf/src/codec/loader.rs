@@ -210,6 +210,7 @@ fn attachment_hint(name: &str) -> String {
 #[cfg(all(test, feature = "render"))]
 mod tests {
     use std::io::Cursor;
+    use std::num::NonZeroU32;
 
     use bytes::Bytes;
     use elide_codec::content::ContentData;
@@ -564,7 +565,7 @@ mod tests {
     async fn a_region_of_another_page_is_refused() {
         let mut doc = scanned_document(&scanned_doc(), &png(30, 30, [200, 200, 200]), vec![]);
         let mut elsewhere = region(0.0, 0.0, 30.0, 30.0);
-        elsewhere.page = Some(2);
+        elsewhere.page = NonZeroU32::new(2);
         let err = redact_page(&mut doc, elsewhere, BLACK).await.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         let out = doc.encode().unwrap().to_bytes();

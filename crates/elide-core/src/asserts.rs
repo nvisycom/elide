@@ -5,7 +5,9 @@
 //! the *test* call site (like `assert_eq!`), and each takes one or more labels
 //! in a single call. They operate on any slice of
 //! [`Entity<M>`](crate::entity::Entity), so a text, tabular, or image suite
-//! uses the same assertions.
+//! uses the same assertions. An entity detection
+//! [dropped](crate::entity::Entity::is_dropped) is no finding, so they pass
+//! over it.
 //!
 //! Gated behind the `fixtures` feature and intended for `[dev-dependencies]`:
 //! `elide-core = { ..., features = ["fixtures"] }`, then
@@ -24,13 +26,14 @@
 macro_rules! assert_label_present {
     ($entities:expr, $($label:expr),+ $(,)?) => {{
         let entities = &$entities;
+        let found: ::std::vec::Vec<_> = entities.iter().filter(|e| !e.is_dropped()).collect();
         $(
             let label = $label;
             assert!(
-                entities.iter().any(|e| *e.label() == label),
+                found.iter().any(|e| *e.label() == label),
                 "expected an entity labeled {:?}; found {:?}",
                 label,
-                entities.iter().map(|e| e.label().clone()).collect::<Vec<_>>(),
+                found.iter().map(|e| e.label().clone()).collect::<::std::vec::Vec<_>>(),
             );
         )+
     }};
@@ -51,7 +54,10 @@ macro_rules! assert_label_absent {
         let entities = &$entities;
         $(
             let label = $label;
-            let found = entities.iter().filter(|e| *e.label() == label).count();
+            let found = entities
+                .iter()
+                .filter(|e| !e.is_dropped() && *e.label() == label)
+                .count();
             assert!(
                 found == 0,
                 "expected no entity labeled {:?}, but found {found}",

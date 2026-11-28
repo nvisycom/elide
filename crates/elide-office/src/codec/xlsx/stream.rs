@@ -1,30 +1,26 @@
 //! [`XlsxStream`]: the body [`Stream<Tabular>`] of a workbook's cells.
 
-use elide_codec::{FormatId, Stream};
+use elide_codec::Stream;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::TextData;
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
-use super::XlsxCodec;
 use super::state::XlsxState;
-use crate::codec::CodecIdentity;
 use crate::xlsx::CellCoord;
 
 /// The body [`Stream<Tabular>`] of an XLSX workbook: each cell is independently
 /// addressable via a [`TabularLocation`] scoped by sheet name. Redactions land on
 /// its [`XlsxState`]; the [`XlsxDocument`](super::document::XlsxDocument)
 /// re-packs from it.
+#[derive(Component)]
+#[component(name = "elide.tabular.xlsx")]
 pub(super) struct XlsxStream {
     pub(super) state: XlsxState,
 }
 
 impl Stream<Tabular> for XlsxStream {
-    fn format(&self) -> FormatId {
-        XlsxCodec::FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
         let headers = self.state.column_headers();
         Ok(self

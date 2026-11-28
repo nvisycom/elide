@@ -1,5 +1,6 @@
 //! The [`Structural`] reconciler and its [`OnConflict`] knob.
 
+use elide_core::Component;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, ModalityLocation, Overlap};
 
@@ -36,7 +37,8 @@ pub enum OnConflict {
 ///   [`reviewing`](Structural::reviewing), contested for human review.
 ///
 /// [intersection-over-union]: elide_core::modality::Overlap::Crossing
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(name = "structural")]
 pub struct Structural<T = HighestConfidence> {
     /// The IoU at or above which a non-nested overlap counts as a conflict
     /// rather than two distinct findings.
@@ -160,10 +162,6 @@ where
             // Substantially the same span: a true conflict.
             Overlap::Crossing { .. } => self.settle(a, b),
         }
-    }
-
-    fn name(&self) -> &'static str {
-        "structural"
     }
 }
 

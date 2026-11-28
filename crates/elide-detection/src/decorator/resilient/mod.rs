@@ -110,7 +110,7 @@ mod tests {
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::recognition::{Scope, Subject};
     use elide_core::{Component, Error};
 
@@ -182,9 +182,13 @@ mod tests {
             let location = TextLocation::inline(0..1);
             let confidence = Confidence::new(0.9).unwrap();
             Ok(vec![Entity::new(Birth::new(
-                "t",
                 confidence,
-                Pattern::new(LabelRef::new("THING"), location, PatternRule::default()),
+                Pattern::new(
+                    ComponentId::new("t", "1"),
+                    LabelRef::new("THING"),
+                    location,
+                    PatternRule::default(),
+                ),
             ))])
         }
 

@@ -155,7 +155,7 @@ mod tests {
         let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
         assert_eq!(doc.streams_mut().len(), 1);
         let stream = pixels(&mut doc);
-        assert_eq!(stream.format().as_str(), PNG);
+        assert_eq!(stream.id().name, PNG);
         let chunks = stream.chunks().unwrap();
         // The stream yields exactly one full-frame chunk.
         assert_eq!(chunks.len(), 1);

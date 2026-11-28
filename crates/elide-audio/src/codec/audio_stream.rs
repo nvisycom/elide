@@ -4,7 +4,7 @@
 use elide_codec::{FormatId, Stream};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
 use crate::AudioBuffer;
 use crate::modality::{Audio, AudioData, AudioLocation};
@@ -12,9 +12,10 @@ use crate::modality::{Audio, AudioData, AudioLocation};
 /// The clip stream. Holds the clip as an [`AudioBuffer`]; redaction accumulates
 /// on it, and the document's encode applies the batch and re-serializes to the
 /// original format. All sample work delegates to the [`AudioBuffer`] engine.
-#[derive(Debug)]
+#[derive(Debug, Component)]
 pub(super) struct AudioStream {
     pub(super) clip: AudioBuffer,
+    #[component(name)]
     pub(super) format_id: FormatId,
     /// The clip's duration, rounded down to the millisecond. Redaction keeps
     /// the source's timeline, so it holds for every location.
@@ -63,10 +64,6 @@ impl AudioStream {
 }
 
 impl Stream<Audio> for AudioStream {
-    fn format(&self) -> FormatId {
-        self.format_id
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Audio>>> {
         Ok(vec![Chunk {
             location: AudioLocation::from_millis(0, self.duration_ms),

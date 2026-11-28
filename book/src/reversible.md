@@ -78,8 +78,8 @@ Anonymizer::<Text>::new()
 
 // Later, by whoever holds the key: an entity for each ciphertext in the
 // redacted document, under the label it was encrypted with, included by them.
-let located = Included::new(builtins::EMAIL_ADDRESS.to_ref(), TextLocation::inline(ciphertext));
-let encrypted: Entity<Text> = Entity::new(Birth::new("key-holder", Confidence::MAX, located));
+let located = Included::new("key-holder", builtins::EMAIL_ADDRESS.to_ref(), TextLocation::inline(ciphertext));
+let encrypted: Entity<Text> = Entity::new(Birth::new(Confidence::MAX, located));
 
 Deanonymizer::<Text>::new()
     .with_label(builtins::EMAIL_ADDRESS.to_ref(), AesEncrypt::with_key(key))

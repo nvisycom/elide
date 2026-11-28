@@ -241,6 +241,7 @@ impl<M: TextRedactable> TryOperator<M> for GeneralizeDate {
 #[cfg(test)]
 mod tests {
     use elide_core::modality::text::{Text, TextData};
+    use elide_core::primitive::ComponentId;
 
     use super::*;
 
@@ -364,9 +365,9 @@ mod tests {
 
         let location = TextLocation::inline(0..8);
         let e: Entity<Text> = Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
             Pattern::new(
+                ComponentId::new("t", "1"),
                 LabelRef::new("date_of_birth"),
                 location.clone(),
                 PatternRule::default(),

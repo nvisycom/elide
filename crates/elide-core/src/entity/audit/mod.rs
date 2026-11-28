@@ -6,6 +6,7 @@ mod attribution;
 mod event;
 mod hash;
 mod rule_match;
+mod standing;
 
 use std::iter;
 
@@ -16,12 +17,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    Annotated, AuditEvent, AuditKind, Calibrated, Contested, Flagged, Fused, Included, Manual,
-    ManualIntent, Model, ModelId, Pattern, PatternRule, Redacted, Refined, Resolved, Selected,
+    Actor, Annotated, AuditEvent, AuditKind, Calibrated, Contested, Dropped, Flagged, Fused,
+    Included, Manual, ManualIntent, Model, ModelId, Pattern, PatternRule, Redacted, Refined,
+    Resolved, Selected,
 };
 pub use self::hash::AuditHash;
 pub(crate) use self::hash::AuditHasher;
 pub use self::rule_match::RuleMatch;
+pub use self::standing::Standing;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 use crate::{Error, Result};
@@ -246,16 +249,39 @@ impl<M: Modality> AuditLog<M> {
         self.line().any(|e| matches!(e.kind, AuditKind::Flagged(_)))
     }
 
-    /// Whether a reviewer has suppressed this entity with a [`Manual`] event.
+    /// Whether redaction leaves this entity alone: its [standing](Self::standing)
+    /// is a detection drop or a reviewer's suppression, not taken back by a
+    /// confirmation since.
     ///
-    /// That is, the latest [verdict](Self::verdict) on its
-    /// [line](Self::line) is [`ManualIntent::Suppress`]. The audit trail is
-    /// the single source of truth: there is no separate flag to keep in sync.
-    ///
-    /// [`Manual`]: crate::entity::audit::Manual
-    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// The audit trail is the single source of truth: there is no separate
+    /// flag to keep in sync.
     pub fn is_suppressed(&self) -> bool {
-        self.verdict() == Some(&ManualIntent::Suppress)
+        self.standing().is_some_and(Standing::is_suppressed)
+    }
+
+    /// The latest decision on its [line](Self::line) about whether this entity
+    /// is redacted: a [`Dropped`] event, a [`ManualIntent::Suppress`], or a
+    /// [`ManualIntent::Confirm`]. `None` when nothing decided it.
+    pub fn standing(&self) -> Option<Standing> {
+        self.line().find_map(|e| match &e.kind {
+            AuditKind::Dropped(_) => Some(Standing::Dropped),
+            AuditKind::Manual(m) => match m.intent {
+                ManualIntent::Suppress => Some(Standing::Suppressed),
+                ManualIntent::Confirm => Some(Standing::Confirmed),
+                ManualIntent::Relabel { .. } | ManualIntent::Relocate => None,
+            },
+            _ => None,
+        })
+    }
+
+    /// Why detection left this entity out, when it did: the [`Dropped`] event
+    /// on its [line](Self::line). A reviewer's later confirmation does not
+    /// erase it, see [`is_suppressed`](Self::is_suppressed).
+    pub fn dropped(&self) -> Option<&Dropped> {
+        self.line().find_map(|e| match &e.kind {
+            AuditKind::Dropped(dropped) => Some(dropped),
+            _ => None,
+        })
     }
 
     /// The latest reviewer verdict on this entity's [line](Self::line): a
@@ -435,6 +461,7 @@ impl<M: Modality> Default for AuditLog<M> {
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use uuid::Uuid;
 
     use super::*;
     use crate::entity::{EntityCoRef, LabelRef};
@@ -455,12 +482,13 @@ mod tests {
         let at = TextLocation::inline(3..9);
         let conf = Confidence::new(0.5).unwrap();
         let operator = ComponentId::new("mask", "1");
+        let rival = Uuid::from_u128(7);
         let why = Attribution::cited("GDPR", "Art. 17").with_rationale("erasure");
         let events = [
             AuditEvent::new(
-                "pattern",
                 conf,
                 Pattern::new(
+                    ComponentId::new("t", "1"),
                     "ssn",
                     at.clone(),
                     PatternRule {
@@ -472,9 +500,9 @@ mod tests {
                 .with_recognized_range(3..9),
             ),
             AuditEvent::new(
-                "model",
                 conf,
                 Model::new(
+                    ComponentId::new("t", "1"),
                     "ssn",
                     at.clone(),
                     ModelId {
@@ -485,29 +513,51 @@ mod tests {
                 .with_recognized_range(3..9),
             ),
             AuditEvent::new(
-                "codec",
                 conf,
-                Flagged::new("author", at.clone(), HiddenContentKind::Collaboration),
+                Flagged::new(
+                    ComponentId::new("t", "1"),
+                    "author",
+                    at.clone(),
+                    HiddenContentKind::Collaboration,
+                ),
             ),
-            AuditEvent::fused("union", conf, at.clone()),
-            AuditEvent::resolved(Resolved::new(LabelRef::new("iban"), conf, "longest"), conf),
-            AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
-            AuditEvent::calibrated(conf, 0.5),
-            AuditEvent::refined(
-                "context",
+            AuditEvent::new(conf, Fused::new(ComponentId::new("union", "1"), at.clone())),
+            AuditEvent::new(
                 conf,
-                Refined::new("ssn")
+                Resolved::new(
+                    rival,
+                    LabelRef::new("iban"),
+                    conf,
+                    ComponentId::new("longest", "1"),
+                ),
+            ),
+            AuditEvent::new(
+                conf,
+                Contested::new(
+                    rival,
+                    LabelRef::new("iban"),
+                    conf,
+                    ComponentId::new("review", "1"),
+                ),
+            ),
+            AuditEvent::new(
+                conf,
+                Calibrated::new(ComponentId::new("calibration", "1"), 0.5),
+            ),
+            AuditEvent::new(
+                conf,
+                Refined::new(ComponentId::new("context", "1"), "ssn")
                     .with_hint(Hint::new(TextLocation::inline(0..2)))
                     .with_location(TextLocation::inline(0..2)),
             ),
-            AuditEvent::selected(
+            AuditEvent::new(
+                conf,
                 Selected::new(
                     operator.clone(),
                     LeakProfile::Partial,
                     RuleMatch::Tag("pii".into()),
                 )
                 .with_attribution(why.clone()),
-                conf,
             ),
         ];
         let mut log = AuditLog::default();
@@ -515,15 +565,13 @@ mod tests {
             log.record(fixed(event));
         }
         let selection = log.selection_event().unwrap().hash();
-        log.record(fixed(AuditEvent::redacted(
-            operator.name,
-            Redacted::new(selection, at.clone()),
+        log.record(fixed(AuditEvent::new(
             conf,
+            Redacted::new(selection, at.clone()),
         )));
         log.record(fixed(AuditEvent::new(
-            "reviewer",
             conf,
-            Included::new("ssn", at.clone()).because(why.clone()),
+            Included::new("reviewer", "ssn", at.clone()).because(why.clone()),
         )));
         let decisions = [
             ManualIntent::Relabel {
@@ -534,20 +582,22 @@ mod tests {
             ManualIntent::Confirm,
         ];
         for intent in decisions {
-            log.record(fixed(AuditEvent::manual(
-                "reviewer",
+            log.record(fixed(AuditEvent::new(
                 conf,
-                Manual::new(intent, at.clone()).with_attribution(why.clone()),
+                Manual::new("reviewer", intent, at.clone()).with_attribution(why.clone()),
             )));
         }
         log.record(fixed(AuditEvent::new(
-            "lift",
             conf,
             Annotated::new()
                 .with_location(TextLocation::inline(13..19))
                 .with_recognized_range(3..9)
                 .with_language("en".parse().unwrap())
                 .with_coref(EntityCoRef::new("c1")),
+        )));
+        log.record(fixed(AuditEvent::new(
+            conf,
+            Dropped::superseded(ComponentId::new("structural", "1"), Uuid::from_u128(7)),
         )));
         log
     }
@@ -564,24 +614,65 @@ mod tests {
     }
 
     /// The digests of [`every_kind`]'s events, in order.
-    const PINNED: [&str; 16] = [
-        "4bdcf255f11836161b03d87ca7b0e4aa752819c1db0d685f31af34a53f9fd72b", // pattern
-        "12b57ac561ebb7dafa19f1a6fbd46f844a03f941bf7c68eabcb4456e6343c6c8", // model
-        "17d5f2ef91525e3b9ecf952034e719bb7d80e08e66ac1024f8b55c43e7a12787", // flagged
-        "8eb6ada2663418d5df28fdbbba64896918186d2a7978996202a0bb61a3939864", // fusion
-        "32670d83b16832696e7cb2fc9434d678914be0dc131f5c4b46029068fb920781", // conflict
-        "be8fce5b547ba26d6d00708065531804cf6d532704bcb9e574f9aacecfb0edff", // contested
-        "0e6863731c263b2c3055aaa397d92a411c0a9bf50b00cefc289fb25b86b598c7", // calibration
-        "c6c28ab2a4c3ab9a9f5aa14e6b564f5038b3d537d77ad8444593c1f5b812caae", // refinement
-        "b9de18ca37492a4198e3d1bafd680cfcd897d2ccc35f4be4738081ad76c8d8d3", // selection
-        "1dc0e97acc0f1b153b13bfb9020a08de47c7a776c9e7c5b7500c5dc3a7309c41", // redaction
-        "526b28ea57a81cd85890ce2aee071d84d302cd530c2164289ddc0044f2681eb1", // include
-        "9675fc4b428d9b93741a07dc8703d9ad19039f44987bbba84cb478c4cfe42c82", // relabel
-        "57e873e030788c274c7974269f48432d9c10ddeecf7bcccc2ba37be1b559f50d", // relocate
-        "1d521cb5cf23c5b5be3dd15b78ed845565118e24d4edf9159c4aab1d84debc81", // suppress
-        "fff171ab8c4b47c9aeba32b6bf5d2b7c82c366abf8c97590735de0e4ba284305", // confirm
-        "99f2105bd6d92d7a2b4bcae62b702185791493b78fb7c5b47cf2b36447d346e4", // annotation
+    const PINNED: [&str; 17] = [
+        "5364bbbf2978490c02cbc6e2523062b80ed647f8dc2da68c1eee3bb10653d199", // pattern
+        "8a8a420e0372c5d17979a9980dc13833f90a59fb753fff1b73e105540450106e", // model
+        "361b00d6edfdcd059aba830596bfe5664eb5b12b27332c0f7c693f798af6c7cb", // flagged
+        "a8b947729254a5c549c9822c6f2afb7b82ae59d4d73f05eef58e5b20f5220325", // fused
+        "4fce5993d05b0bfc7fed2467d0939b9217908ceacacc56ecb11ea999979f5f48", // resolved
+        "b4113bebb3017512ed3d1c54c4b9acb84579146562b8231c1bad2da343a319ec", // contested
+        "c329b980514479ea43c950bfaf9ea77bf6de78b66328f48390e01ad424b29e65", // calibrated
+        "b592be88fecbacc023d89af9ee79c622dd40859156af0bb2c6e6686e150e9db1", // refined
+        "4c2f24a604205f745169f37e6e352e236387717e44daf829af45cfe0076de9e6", // selected
+        "d90ef0b3be51086674f4583edbad08bcae1708dce1c8cd4cec5110b2979fd0ec", // redacted
+        "3c1cc961d9251c5be695c63516e4c93e9217656ab01030293c7e540a82ba32e2", // included
+        "d3dfbae44d77ae1ec050efa18eb6f424ee94f73a8801fad75cce730be793cfec", // relabel
+        "35e5e428c24a13b1b59269ae731ec6c0072b2e15778402b69a542c12fe68e04f", // relocate
+        "16de49740a3034fb6ab821e78c956bca340978408c2c97d18c1081b50e839e06", // suppress
+        "45c9c2fa56492f1c499c0a6d6200ac12bcedd0cf0246428c22754ad82f85b3c1", // confirm
+        "d5c1329549dda76f3af99f59d0f91eb74248b94b67352e7981eb9ba401a7d2c9", // annotated
+        "39f091c4df87414cb2b6ad6a2ed612564c1f2edb5d92dfbef7fb561c848e1509", // dropped
     ];
+
+    /// Every event names who acted, typed to what can act there: a component
+    /// for a recognition, a reconciliation, a drop, or a pick, a reviewer for
+    /// an inclusion or a decision, and no one for an annotation or for a
+    /// redaction, whose operator is its selection's.
+    #[test]
+    fn every_kind_names_its_actor() {
+        let log = every_kind();
+        let actors: Vec<_> = log
+            .events()
+            .iter()
+            .map(|event| match event.actor() {
+                Some(Actor::Component(id)) => format!("component {}", id.name),
+                Some(Actor::Reviewer(by)) => format!("reviewer {by}"),
+                None => "none".to_owned(),
+            })
+            .collect();
+        assert_eq!(
+            actors,
+            [
+                "component t",
+                "component t",
+                "component t",
+                "component union",
+                "component longest",
+                "component review",
+                "component calibration",
+                "component context",
+                "component mask",
+                "none",
+                "reviewer reviewer",
+                "reviewer reviewer",
+                "reviewer reviewer",
+                "reviewer reviewer",
+                "reviewer reviewer",
+                "none",
+                "component structural",
+            ]
+        );
+    }
 
     /// Editing any recorded payload field breaks verification.
     #[test]
@@ -625,7 +716,7 @@ mod tests {
             LeakProfile::Irrecoverable,
             RuleMatch::Fallback,
         );
-        log.record(AuditEvent::selected(replan.clone(), conf));
+        log.record(AuditEvent::new(conf, replan.clone()));
 
         assert_eq!(log.selection(), Some(&replan));
         assert_eq!(log.applied_selection(), Some(&applied));
@@ -640,16 +731,16 @@ mod tests {
         let at = TextLocation::inline(0..2);
         let mut log = AuditLog::<Text>::default();
         log.record(AuditEvent::new(
-            "pattern",
             conf,
-            Pattern::new("ssn", at.clone(), PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                "ssn",
+                at.clone(),
+                PatternRule::default(),
+            ),
         ));
         let detection = log.events()[0].hash();
-        log.record(AuditEvent::redacted(
-            "mask",
-            Redacted::new(detection, at),
-            conf,
-        ));
+        log.record(AuditEvent::new(conf, Redacted::new(detection, at)));
 
         assert!(log.applied_selection().is_none());
         assert!(log.verify().is_err());

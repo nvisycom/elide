@@ -80,7 +80,10 @@ a review takes the edits for one part, which can:
 - **Confirm** an entity: `confirm` marks it a true finding, so it is
   redacted. A suppression and a confirmation are opposite verdicts, and the
   latest on the entity's trail wins, so a confirmation takes back an earlier
-  suppression. A verdict that is already the latest records nothing.
+  suppression. It takes back a detection drop the same way: a finding a
+  layer left out (below the threshold, say) is in the report, suppressed,
+  and confirming it puts it back in front of redaction. A verdict that is
+  already the latest records nothing.
 - **Amend** an entity: `relabel` gives it another label and `relocate` moves
   it.
 

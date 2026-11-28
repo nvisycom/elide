@@ -9,17 +9,19 @@
 
 use elide_codec::metadata::MetadataFields;
 use elide_codec::{FlaggedItem, FormatId, Stream};
-use elide_core::Result;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
+use elide_core::{Component, Result};
 
 use super::image_state::ImageState;
 
 /// The EXIF metadata part: yields one chunk per surfaced field and edits the
 /// fields in place on the shared [`ImageState`].
+#[derive(Component)]
 pub(super) struct ExifStream {
     state: ImageState,
+    #[component(name)]
     format_id: FormatId,
     /// Every surfaced field, read once at decode and kept in document order.
     fields: MetadataFields,
@@ -38,10 +40,6 @@ impl ExifStream {
 }
 
 impl Stream<Metadata> for ExifStream {
-    fn format(&self) -> FormatId {
-        self.format_id
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {
         Ok(self.fields.chunks())
     }

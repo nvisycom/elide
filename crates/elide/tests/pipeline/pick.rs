@@ -45,14 +45,14 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let report = orchestrator.analyze(&mut doc).await?.report;
     let report = orchestrator.anonymize_with(&mut doc, report).await?;
 
-    let body = report
+    let body: Vec<_> = report
         .part::<Text>(&doc.id())
         .ok()
-        .map(|part| part.entities())
+        .map(|part| part.unsuppressed().collect())
         .expect("the docx body is text and its pipeline is registered");
     assert!(!body.is_empty(), "the body detected entities to redact");
 
-    for entity in body.iter() {
+    for entity in &body {
         let picked = entity
             .audit()
             .selection()
@@ -109,8 +109,7 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
 
     let planned: Vec<(uuid::Uuid, String)> = report
         .part::<Text>(&doc.id())?
-        .entities()
-        .iter()
+        .unsuppressed()
         .map(|entity| {
             let selection = entity.audit().selection().expect("every entity is planned");
             assert!(

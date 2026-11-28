@@ -24,8 +24,9 @@ async function run(): Promise<void> {
 
     el.output.textContent = res.redacted;
     el.result.hidden = false;
-    renderFindings(res.entities);
-    el.status.textContent = `Done. ${res.entities.length} found in ${ms} ms.`;
+    const findings = res.entities.filter((e) => !e.dropped);
+    renderFindings(findings);
+    el.status.textContent = `Done. ${findings.length} found in ${ms} ms.`;
   } catch (err) {
     el.status.textContent = `Error: ${err}`;
     console.error(err);

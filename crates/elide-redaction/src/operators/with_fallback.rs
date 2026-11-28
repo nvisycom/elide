@@ -158,9 +158,13 @@ mod tests {
     fn entity() -> Entity<Text> {
         let location = TextLocation::inline(0..3);
         Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
-            Pattern::new(LabelRef::new("age"), location, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new("age"),
+                location,
+                PatternRule::default(),
+            ),
         ))
     }
 

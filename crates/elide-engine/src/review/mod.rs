@@ -314,10 +314,10 @@ mod tests {
 
     use elide_core::ErrorKind;
     use elide_core::entity::Entity;
-    use elide_core::entity::audit::{AuditKind, Manual, ManualIntent};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, Dropped, Manual, ManualIntent};
     use elide_core::modality::metadata::Metadata;
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
 
     use super::*;
     use crate::Restorer;
@@ -331,7 +331,7 @@ mod tests {
             .iter()
             .filter_map(|event| match &event.kind {
                 AuditKind::Manual(manual) => Some((
-                    event.source.to_string(),
+                    manual.by.to_string(),
                     manual.intent.clone(),
                     manual.location.clone(),
                 )),
@@ -376,7 +376,7 @@ mod tests {
         let AuditKind::Included(included) = &birth.kind else {
             panic!("the entity starts from an inclusion");
         };
-        assert_eq!(birth.source, "reviewer-7");
+        assert_eq!(included.by, "reviewer-7");
         assert_eq!(included.location, TextLocation::inline(4..12));
         assert_eq!(
             included.attribution,
@@ -773,7 +773,7 @@ mod tests {
         let mut spared = at("EMAIL_ADDRESS", 0..5);
         let id = spared.id();
         let location = spared.location().clone();
-        spared.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer-7");
+        spared.record_manual(Manual::new("reviewer-7", ManualIntent::Suppress, location));
         let mut report = Report::new().insert_part::<Text>(doc(), vec![spared, at("SSN", 20..26)]);
         let mut review = Review::new(&report);
         review
@@ -977,6 +977,27 @@ mod tests {
         assert_eq!(decisions(entity).len(), 1);
     }
 
+    /// Confirming an entity detection dropped takes the drop back: it is
+    /// redacted after all, and its trail still says why detection left it out.
+    #[test]
+    fn confirming_a_dropped_entity_takes_the_drop_back() {
+        let mut entity = at("SSN", 4..10);
+        let confidence = entity.confidence();
+        let dropped = Dropped::rejected(ComponentId::new("threshold", "1"));
+        entity.record(AuditEvent::new(confidence, dropped.clone()));
+        let id = entity.id();
+        let mut report = Report::new().insert_part::<Text>(doc(), vec![entity]);
+        assert!(report.entity_anywhere::<Text>(id).unwrap().is_suppressed());
+
+        let mut review = Review::new(&report);
+        review.part::<Text>(&doc()).unwrap().confirm(id);
+        apply(&mut report, &review).unwrap();
+
+        let entity = report.entity_anywhere::<Text>(id).unwrap();
+        assert!(!entity.is_suppressed());
+        assert_eq!(entity.audit().dropped(), Some(&dropped));
+    }
+
     /// A confirmation names an entity the part must hold.
     #[test]
     fn confirming_a_missing_entity_is_refused() {
@@ -1012,7 +1033,7 @@ mod tests {
         let mut ssn = at("SSN", 4..10);
         let id = ssn.id();
         let location = ssn.location().clone();
-        ssn.record_manual(Manual::new(ManualIntent::Suppress, location), "reviewer");
+        ssn.record_manual(Manual::new("reviewer", ManualIntent::Suppress, location));
         let mut report = Report::new().insert_part::<Text>(doc(), vec![ssn]);
         let mut review = Review::new(&report);
         review

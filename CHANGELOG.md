@@ -17,11 +17,21 @@ and this project adheres to
 - Every detected entity carries a tamper-evident audit trail: the recognizers
   that found it, how overlapping findings were reconciled, confidence
   adjustments, reviewer decisions, the operator picked to hide it, and the
-  redaction applied, verifiable as a hash-linked DAG
-- Recognizers, enrichers, and redaction operators are each a `Component`
-  with one name-and-version identity (`ComponentId`), recorded in the audit
-  trail; `#[derive(Component)]` takes it from the crate, fixed attributes, a
-  name field, or a wrapped component
+  redaction applied, verifiable as a hash-linked DAG. Each event names who
+  acted, in its own payload and typed to what can act there: the component
+  (with its version) for a recognition, a reconciliation, a drop, or an
+  operator's pick, the reviewer for an inclusion or a decision; an
+  annotation names no one, and `AuditEvent::actor` reads any of them
+- A text location is a span found over decoded text or a reviewer's mark,
+  each a `kind`-tagged shape that admits no other field, so a value on the
+  wire reads as exactly one of them; a page, in text and image locations
+  alike, is numbered from 1
+- Recognizers, enrichers, redaction operators, detection layers, fusion
+  scorings, reconcilers, and codec streams are each a `Component` with one
+  name-and-version identity (`ComponentId`), recorded in the audit trail; a
+  stream is named after its format, and a format is looked up by its
+  `FormatId`; `#[derive(Component)]` takes the identity from the crate, fixed
+  attributes, a name field, or a wrapped component
 - Every backend response names the model that produced it, so an entity
   found by a model is attributed to the model that answered its request,
   through language routing and failover alike
@@ -32,8 +42,9 @@ and this project adheres to
   behind a `Backend` with rate and concurrency limits, failover, and language
   routes, and every redaction operator but pseudonymization is available.
   Each entity reports the text it matched, its span in UTF-16 as well as
-  bytes, the recognizers and models that found it, and the operator that
-  redacted it
+  bytes, the recognizers (with their versions) and models that found it,
+  the operator that redacted it, and, for an entity detection dropped, which
+  layer dropped it and the entity it lost to
 - The rate limiter runs on wasm32, on the browser's clock and timer
 
 #### Formats
@@ -68,7 +79,12 @@ and this project adheres to
   backend
 - Speech-to-text and OCR enrichers that make audio and images text-recognizable
 - An `Analyzer` per modality that runs enrichers, then recognizers, then the
-  layers that fuse, arbitrate, and threshold their findings; recognizer
+  layers that fuse, arbitrate, and threshold their findings, then restricts
+  them to the request's catalog; every entity it drops stays in the analysis
+  and the report, suppressed, its trail holding a `Dropped` event naming
+  the component that dropped it and the entity it lost to, which records the
+  loser's id in turn, so a reviewer can read why a finding is missing and
+  confirm it (`Analyzer::discard_dropped` leaves drops out); recognizer
   decorators `resilient`, `chunked`, `escalating`, and `calibrated`, the last
   scaling a recognizer's confidence by a multiplier for it and per label,
   each applied by method through `RecognizerExt`

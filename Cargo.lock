@@ -1221,6 +1221,7 @@ dependencies = [
  "bytes",
  "elide-core",
  "hex",
+ "hipstr",
  "serde_json",
  "tokio",
 ]
@@ -1257,6 +1258,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ mod exclusive;
 mod permissive;
 mod structural;
 
+use elide_core::Component;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
@@ -41,8 +42,8 @@ pub enum Disposition {
     /// a human to resolve at the edit step. A genuine disagreement the
     /// machine declines to settle.
     Contest,
-    /// One entity wins; the loser is dropped and recorded on the winner's
-    /// provenance.
+    /// One entity wins; the loser is dropped in its favor and recorded on the
+    /// winner's provenance.
     Resolve {
         /// Which entity wins.
         winner: Winner,
@@ -59,12 +60,12 @@ pub enum Disposition {
 /// [`Exclusive`] (always resolve), and [`Permissive`] (always keep both). A
 /// consumer can supply their own.
 ///
+/// A reconciler is a [`Component`]: its [`id`](Component::id) is recorded on
+/// the provenance of resolved and contested entities, names the
+/// [`ReconcileLayer`] it runs in, and so every entity that layer drops.
+///
 /// [`ReconcileLayer`]: super::ReconcileLayer
-pub trait Reconciler<M: Modality>: Send + Sync {
+pub trait Reconciler<M: Modality>: Component + Send + Sync {
     /// Decide the disposition of the grouped pair `a`, `b`.
     fn decide(&self, a: &Entity<M>, b: &Entity<M>) -> Disposition;
-
-    /// Stable name, recorded on the provenance of resolved and contested
-    /// entities.
-    fn name(&self) -> &'static str;
 }

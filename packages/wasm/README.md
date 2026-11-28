@@ -48,6 +48,12 @@ entities[0].sources;  // -> which recognizers (and models) found it
 entities[0].redaction; // -> { operator: "replace", leakProfile: "irrecoverable" }
 ```
 
+What detection dropped comes back too, unredacted, with a `dropped` reason
+(`{ by: "threshold" }`, or `{ by: "structural", supersededBy }` for a lost
+overlap) so a caller can show why a finding is missing; filter on
+`!entity.dropped` for the findings, or build the analyzer with
+`discardDropped()` to leave them out.
+
 An `Orchestrator` pairs a detect side (an `Analyzer`) with an optional redact
 side (an `Anonymizer`) per modality, then runs the pipeline over a blob with
 `redact`, dispatching by the format hint: a file extension, or nothing, to

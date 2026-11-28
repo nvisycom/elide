@@ -177,7 +177,8 @@ impl<M: Modality> Anonymizer<M> {
     /// leak profile, the rule that matched, and any policy attribution, on
     /// **every** entity the cluster covers, so a merged non-winner still shows
     /// why it will be hidden. No document data is touched. Entities whose label has no operator and no
-    /// fallback get no pick; a reviewer-suppressed entity is skipped entirely.
+    /// fallback get no pick; a suppressed entity (one detection dropped or a reviewer suppressed) is
+    /// skipped entirely.
     ///
     /// Idempotent: re-running `pick`, or calling [`anonymize`] after it, does
     /// not stack a second identical [`Selected`] event; a decision that
@@ -210,13 +211,13 @@ impl<M: Modality> Anonymizer<M> {
     }
 
     /// Resolve each overlap cluster to its winning operator, dropping
-    /// reviewer-suppressed entities and clusters no rule covers, the shared
+    /// suppressed entities and clusters no rule covers, the shared
     /// decision behind [`pick`](Self::pick) and [`anonymize`](Self::anonymize).
     ///
     /// Operators are cloned out of the rule registry (config intact) so the
     /// borrow on `self` ends and the caller can mutate `entities` freely.
     fn resolve_clusters(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<ResolvedCluster<M>> {
-        // A reviewer-suppressed entity is left alone: it contributes no operator
+        // A suppressed entity is left alone: it contributes no operator
         // and does not extend the redacted span. (Where it overlaps a live
         // entity, the shared bytes still fall inside the live member's own span;
         // span-level redaction cannot spare those.) Exclude suppressed entities
@@ -291,7 +292,7 @@ impl<M: Modality> Anonymizer<M> {
     /// the audit: a reviewer overrides by editing the entity (suppress,
     /// retag), not by rewriting the pick. A decision an edit changed is
     /// recorded anew before it is applied, and each redaction names the
-    /// selection event it applied. A reviewer-suppressed entity is left alone.
+    /// selection event it applied. A suppressed entity is left alone.
     ///
     /// Returns whether anything was written: `false` when nothing was left to
     /// write (no entity given, all suppressed, or every operator left its
@@ -357,10 +358,9 @@ impl<M: Modality> Anonymizer<M> {
                     .selection_event()
                     .expect("every member's selection is recorded above")
                     .hash();
-                let event = AuditEvent::redacted(
-                    cluster.selection.operator.name.clone(),
-                    Redacted::new(selection, location.clone()),
+                let event = AuditEvent::new(
                     entities[i].confidence(),
+                    Redacted::new(selection, location.clone()),
                 );
                 pending.push((i, event));
             }
@@ -407,7 +407,7 @@ impl<M: Modality> ResolvedCluster<M> {
             if entities[i].audit().selection() == Some(&self.selection) {
                 continue;
             }
-            let event = AuditEvent::selected(self.selection.clone(), entities[i].confidence());
+            let event = AuditEvent::new(entities[i].confidence(), self.selection.clone());
             entities[i].record(event);
         }
     }
@@ -477,7 +477,7 @@ mod tests {
         Attribution, AuditEvent, AuditKind, Flagged, Manual, ManualIntent, RuleMatch,
     };
     use elide_core::modality::text::{Text, TextDoc};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::redaction::HiddenContentKind;
 
     use super::*;
@@ -677,10 +677,11 @@ mod tests {
         assert!(!wrote.unwrap(), "no entity, no write");
 
         let mut suppressed = entity("NAME", 0, 5);
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+        suppressed.record_manual(Manual::new(
             "reviewer",
-        );
+            ManualIntent::Suppress,
+            suppressed.location().clone(),
+        ));
         let wrote = anonymizer
             .anonymize(&mut target, &mut [suppressed], &scope)
             .await;
@@ -726,9 +727,12 @@ mod tests {
         let live_id = live.id();
         // The reviewer marks the second detection as a false positive.
         suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone())
-                .with_attribution(Attribution::freeform("false positive")),
-            "reviewer",
+            Manual::new(
+                "reviewer",
+                ManualIntent::Suppress,
+                suppressed.location().clone(),
+            )
+            .with_attribution(Attribution::freeform("false positive")),
         );
         let mut entities = vec![live, suppressed];
 
@@ -802,10 +806,11 @@ mod tests {
         let mut suppressed = entity("NAME", 0, 5); // overlaps the live span
         let live_id = live.id();
         let suppressed_id = suppressed.id();
-        suppressed.record_manual(
-            Manual::new(ManualIntent::Suppress, suppressed.location().clone()),
+        suppressed.record_manual(Manual::new(
             "reviewer",
-        );
+            ManualIntent::Suppress,
+            suppressed.location().clone(),
+        ));
         let mut entities = vec![live, suppressed];
 
         // The suppressed NAME would win the tiebreak on span if it counted; if it
@@ -844,10 +849,11 @@ mod tests {
         let live_b = entity("B", 10, 15);
         let mut bridge = entity("BRIDGE", 4, 11);
         let (a_id, b_id, bridge_id) = (live_a.id(), live_b.id(), bridge.id());
-        bridge.record_manual(
-            Manual::new(ManualIntent::Suppress, bridge.location().clone()),
+        bridge.record_manual(Manual::new(
             "reviewer",
-        );
+            ManualIntent::Suppress,
+            bridge.location().clone(),
+        ));
         let mut entities = vec![live_a, bridge, live_b];
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Remove));
@@ -876,9 +882,9 @@ mod tests {
         let mut target = TextDoc::new("ask bob by Friday");
         let mut comment = entity("COMMENT", 0, 17);
         comment.record(AuditEvent::new(
-            "test",
             comment.confidence(),
             Flagged::new(
+                ComponentId::new("t", "1"),
                 "COMMENT",
                 comment.location().clone(),
                 HiddenContentKind::Collaboration,

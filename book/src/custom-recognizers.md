@@ -39,9 +39,10 @@ impl Recognizer<Text> for TicketRecognizer {
             })
             .map(|span| {
                 let rule = PatternRule { name: "ops-ticket".into(), ..PatternRule::default() };
-                let found = Pattern::new(builtins::INTERNAL_ID.to_ref(), TextLocation::inline(span.clone()), rule)
+                let location = TextLocation::inline(span.clone());
+                let found = Pattern::new(self.id(), builtins::INTERNAL_ID.to_ref(), location, rule)
                     .with_recognized_range(span);
-                Entity::new(Birth::new("ticket-recognizer", confidence, found))
+                Entity::new(Birth::new(confidence, found))
             })
             .collect();
         Ok(entities)

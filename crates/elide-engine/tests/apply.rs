@@ -8,7 +8,7 @@ use elide_core::entity::{Birth, Entity};
 use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::modality::{Modality, NoArtifact};
-use elide_core::primitive::Confidence;
+use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{ErrorKind, Result};
 use elide_engine::{Document, Orchestrator, PartId, Report};
@@ -31,9 +31,13 @@ impl Modality for Unregistered {
 fn entity<M: Modality<Location = TextLocation>>() -> Entity<M> {
     let location = TextLocation::inline(0..4);
     Entity::new(Birth::new(
-        "test",
         Confidence::MAX,
-        Pattern::new(EMAIL_ADDRESS.to_ref(), location, PatternRule::default()),
+        Pattern::new(
+            ComponentId::new("test", "1"),
+            EMAIL_ADDRESS.to_ref(),
+            location,
+            PatternRule::default(),
+        ),
     ))
 }
 

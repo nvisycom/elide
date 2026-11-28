@@ -187,7 +187,7 @@ mod tests {
     use elide_core::entity::Birth;
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use zeroize::Zeroizing;
 
     use super::*;
@@ -195,9 +195,9 @@ mod tests {
     fn entity() -> Entity<Text> {
         let location = TextLocation::inline(0..5);
         Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
             Pattern::new(
+                ComponentId::new("t", "1"),
                 LabelRef::new("email_address"),
                 location,
                 PatternRule::default(),
@@ -278,17 +278,25 @@ mod tests {
         let card = {
             let loc = TextLocation::inline(0..5);
             Entity::<Text>::new(Birth::new(
-                "t",
                 Confidence::MAX,
-                Pattern::new(LabelRef::new("payment_card"), loc, PatternRule::default()),
+                Pattern::new(
+                    ComponentId::new("t", "1"),
+                    LabelRef::new("payment_card"),
+                    loc,
+                    PatternRule::default(),
+                ),
             ))
         };
         let ssn = {
             let loc = TextLocation::inline(0..5);
             Entity::<Text>::new(Birth::new(
-                "t",
                 Confidence::MAX,
-                Pattern::new(LabelRef::new("ssn"), loc, PatternRule::default()),
+                Pattern::new(
+                    ComponentId::new("t", "1"),
+                    LabelRef::new("ssn"),
+                    loc,
+                    PatternRule::default(),
+                ),
             ))
         };
 

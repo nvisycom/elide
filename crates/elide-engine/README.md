@@ -48,8 +48,8 @@ relabel or relocate an entity, each recorded on the entity's audit trail.
 #         let text = subject.data().as_str();
 #         Ok(text.find("jane@example.com").map(|start| {
 #             let location = TextLocation::inline(start..start + 16);
-#             let found = Pattern::new(EMAIL_ADDRESS.to_ref(), location, PatternRule::default());
-#             Entity::new(Birth::new("email", Confidence::MAX, found))
+#             let found = Pattern::new(self.id(), EMAIL_ADDRESS.to_ref(), location, PatternRule::default());
+#             Entity::new(Birth::new(Confidence::MAX, found))
 #         }).into_iter().collect())
 #     }
 # }

@@ -139,16 +139,20 @@ mod tests {
     use elide_audio::primitive::TimeSpan;
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, LabelRef};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
 
     use super::*;
 
     fn audio_entity() -> Entity<Audio> {
         let location = AudioLocation::new(TimeSpan::from_millis(0, 100));
         Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
-            Pattern::new(LabelRef::new("PERSON"), location, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new("PERSON"),
+                location,
+                PatternRule::default(),
+            ),
         ))
     }
 

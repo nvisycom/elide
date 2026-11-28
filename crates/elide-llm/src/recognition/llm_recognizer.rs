@@ -125,7 +125,8 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
         let prompt = self.prompt.build(subject, ctx)?;
         let response = self.backend.call(request(&prompt, subject, ctx)).await?;
         let candidates = response.candidates.entities.len();
-        let lifter = Lifter::new(&self.name, &response.model);
+        let id = self.id();
+        let lifter = Lifter::new(&id, &response.model);
         let entities = B::Modality::lift(response.candidates, subject.data(), &lifter);
         tracing::debug!(
             target: TARGET,
@@ -160,7 +161,8 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
             .into_iter()
             .zip(subjects)
             .map(|(response, subject)| {
-                let lifter = Lifter::new(&self.name, &response.model);
+                let id = self.id();
+                let lifter = Lifter::new(&id, &response.model);
                 B::Modality::lift(response.candidates, subject.data(), &lifter)
             })
             .collect();
@@ -196,7 +198,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use elide_core::backend::Backend;
-    use elide_core::entity::audit::{AuditKind, ModelId};
+    use elide_core::entity::audit::{Actor, AuditKind, ModelId};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::recognition::Scope;
 
@@ -276,7 +278,11 @@ mod tests {
         let batch = recognizer.recognize_batch(&[&subject], &ctx).await.unwrap();
 
         for entity in single.iter().chain(&batch[0]) {
-            assert_eq!(entity.audit().events()[0].source, "llm-strict");
+            assert_eq!(
+                entity.audit().events()[0].actor(),
+                Some(Actor::Component(&recognizer.id())),
+            );
+            assert_eq!(recognizer.id().name, "llm-strict");
         }
     }
 

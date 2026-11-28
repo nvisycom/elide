@@ -6,21 +6,19 @@
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 
-use super::{Blob, Encode, FormatId, LocalId, Native, Stream, StreamMut};
+use super::{Blob, Encode, LocalId, Native, Stream, StreamMut};
 use crate::content::ContentData;
 
 /// A minimal text stream holding one editable string, which it encodes as the
 /// document. It yields no chunks and reads nothing (the tests exercise wiring,
 /// not chunking).
+#[derive(Component)]
+#[component(name = "elide.test.str")]
 pub(crate) struct StrStream(pub String);
 
 impl Stream<Text> for StrStream {
-    fn format(&self) -> FormatId {
-        FormatId::new("elide.test.str")
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         Ok(Vec::new())
     }

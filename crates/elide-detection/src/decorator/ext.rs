@@ -63,7 +63,7 @@ mod tests {
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::entity::{Birth, Entity, builtins};
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::recognition::{Context, Recognizer, Scope, Subject};
     use elide_core::{Error, Result};
 
@@ -89,9 +89,13 @@ mod tests {
             }
             let at = TextLocation::inline(0..4);
             Ok(vec![Entity::new(Birth::new(
-                "one-find",
                 Confidence::MAX,
-                Pattern::new(builtins::PERSON_NAME.to_ref(), at, PatternRule::default()),
+                Pattern::new(
+                    ComponentId::new("one-find", "1"),
+                    builtins::PERSON_NAME.to_ref(),
+                    at,
+                    PatternRule::default(),
+                ),
             ))])
         }
     }

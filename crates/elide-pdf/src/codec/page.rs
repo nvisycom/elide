@@ -4,15 +4,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytes::Bytes;
-use elide_codec::{FormatId, LocalId, Stream};
+use elide_codec::{LocalId, Stream};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, Result};
+use elide_core::{Component, Error, Result};
 use elide_image::ImageBuffer;
 use elide_image::modality::{Image, ImageData, ImageFormat, ImageLocation, ImageReplacement};
 use elide_image::primitive::BoundingBox;
 
-use super::FORMAT_ID;
+use super::page_number;
 use crate::content::page::ScannedPage;
 
 /// A page's render: the image pipeline reads it for OCR and redacts it in
@@ -21,6 +21,8 @@ use crate::content::page::ScannedPage;
 ///
 /// The render is held as its PNG and decoded only to be read or redacted, so
 /// a long scan does not hold every page's pixels at once.
+#[derive(Component)]
+#[component(name = "elide.document.pdf")]
 pub(super) struct PageStream {
     /// 1-based page number.
     number: u32,
@@ -98,7 +100,7 @@ impl PageStream {
     /// if it names another page.
     fn on_this_page(&self, location: &ImageLocation) -> Result<()> {
         match location.page {
-            Some(page) if page != self.number => Err(Error::malformed(format!(
+            Some(page) if page.get() != self.number => Err(Error::malformed(format!(
                 "a region of page {page} addressed to page {}'s render",
                 self.number
             ))),
@@ -108,14 +110,10 @@ impl PageStream {
 }
 
 impl Stream<Image> for PageStream {
-    fn format(&self) -> FormatId {
-        FORMAT_ID
-    }
-
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
         let render = self.open()?;
         let chunk = Chunk {
-            location: render.frame().with_page(self.number),
+            location: render.frame().with_page(page_number(self.number)?),
             data: render.data()?,
             hints: Vec::new(),
         };

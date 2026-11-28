@@ -145,7 +145,7 @@ impl<'a> Languages<'a> {
                 && entity.language() != Some(&claim.language)
             {
                 let annotation = Annotated::new().with_language(claim.language.clone());
-                entity.annotate("languages", annotation);
+                entity.annotate(annotation);
             }
         }
     }
@@ -159,7 +159,7 @@ mod tests {
     use crate::entity::audit::{Pattern, PatternRule};
     use crate::entity::{Birth, LabelRef};
     use crate::modality::text::{Text, TextLocation};
-    use crate::primitive::{Confidence, LanguageClaim, LanguageTag};
+    use crate::primitive::{ComponentId, Confidence, LanguageClaim, LanguageTag};
 
     fn tag(s: &str) -> LanguageTag {
         s.parse().unwrap()
@@ -168,9 +168,14 @@ mod tests {
     fn entity(label: &str, range: Range<usize>) -> Entity<Text> {
         let location = TextLocation::inline(range.clone());
         let label = LabelRef::new(label.to_owned());
-        let found =
-            Pattern::new(label, location, PatternRule::default()).with_recognized_range(range);
-        Entity::new(Birth::new("t", Confidence::MAX, found))
+        let found = Pattern::new(
+            ComponentId::new("t", "1"),
+            label,
+            location,
+            PatternRule::default(),
+        )
+        .with_recognized_range(range);
+        Entity::new(Birth::new(Confidence::MAX, found))
     }
 
     fn lang_of(e: &Entity<Text>) -> Option<String> {

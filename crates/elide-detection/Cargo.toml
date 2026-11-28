@@ -45,6 +45,9 @@ futures = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
+# Primitive datatypes
+uuid = { workspace = true, features = [] }
+
 # Templating & schema
 schemars = { workspace = true, features = [], optional = true }
 

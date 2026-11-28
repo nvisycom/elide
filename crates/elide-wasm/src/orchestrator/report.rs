@@ -70,14 +70,34 @@ pub struct Entity {
     /// How the entity was redacted; absent when no rule redacted it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redaction: Option<Redaction>,
+    /// Why detection left the entity out of its findings; absent for a
+    /// finding. A dropped entity is not redacted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<Dropped>,
+}
+
+/// Why detection left an entity out: the layer that dropped it, and the
+/// entity that won over it.
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct Dropped {
+    /// The name of the layer that dropped it, like `threshold` or `catalog`.
+    pub by: String,
+    /// The id of the entity kept over it, when it lost an overlap rather than
+    /// being rejected outright.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
 }
 
 /// One detection that found an entity: the recognizer, and the model it asked.
 #[derive(Serialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
-    /// The recognizer's name, like `js-callback-ner` or a pattern recognizer's.
+    /// The recognizer's name, like `js-callback-ner` or a pattern recognizer's,
+    /// or the format's for hidden content it flagged.
     pub recognizer: String,
+    /// The version of the recognizer, or of the codec that flagged it.
+    pub version: String,
     /// The model that answered, for a model-backed recognizer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,

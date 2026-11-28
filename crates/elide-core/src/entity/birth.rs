@@ -1,7 +1,6 @@
 //! [`Birth`]: the event an [`Entity`](super::Entity) starts from, and what it
 //! can be.
 
-use hipstr::HipStr;
 use uuid::Uuid;
 
 use super::audit::{AuditEvent, AuditKind, Flagged, Included, Model, Pattern};
@@ -9,8 +8,8 @@ use super::state::State;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 
-/// The event an [`Entity`](super::Entity) starts from: who found it, how sure
-/// they are, and what they found, with the entity's identity.
+/// The event an [`Entity`](super::Entity) starts from: how sure its finder is,
+/// and what it found (which names who found it), with the entity's identity.
 ///
 /// Only a recognition or a reviewer's inclusion starts an entity, so a birth
 /// holds only one of those, as its [`BirthKind`]. Its id is a fresh
@@ -23,13 +22,9 @@ pub struct Birth<M: Modality> {
 }
 
 impl<M: Modality> Birth<M> {
-    /// The birth `source` records, at `confidence`, of what `kind` found.
-    pub fn new(
-        source: impl Into<HipStr<'static>>,
-        confidence: Confidence,
-        kind: impl Into<BirthKind<M>>,
-    ) -> Self {
-        let event = AuditEvent::new(source, confidence, kind.into().into_kind());
+    /// The birth, at `confidence`, of what `kind` found.
+    pub fn new(confidence: Confidence, kind: impl Into<BirthKind<M>>) -> Self {
+        let event = AuditEvent::new(confidence, kind.into().into_kind());
         let state = State::born(&event).expect("a recognition or an inclusion starts an entity");
         Self {
             id: Uuid::now_v7(),

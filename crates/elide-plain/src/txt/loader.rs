@@ -37,9 +37,8 @@ impl DocumentLoader for TxtLoader {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use elide_codec::Stream;
-    use elide_core::ErrorKind;
     use elide_core::redaction::HiddenContent;
+    use elide_core::{Component, ErrorKind};
 
     use super::*;
 
@@ -49,7 +48,7 @@ mod tests {
             handler: doc,
             stripped,
         } = TxtLoader.load(ContentData::from_text("hello\nworld\n"))?;
-        assert_eq!(doc.format().as_str(), "elide.text.txt");
+        assert_eq!(doc.id().name, "elide.text.txt");
         // The source is held verbatim, blank lines and trailing newline included.
         assert_eq!(doc.text(), "hello\nworld\n");
         assert!(stripped.is_empty());

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
 use super::{
-    Annotated, Calibrated, Contested, Flagged, Fused, Included, Manual, Model, Pattern, Redacted,
-    Refined, Resolved, Selected,
+    Annotated, Calibrated, Contested, Dropped, Flagged, Fused, Included, Manual, Model, Pattern,
+    Redacted, Refined, Resolved, Selected,
 };
 use crate::modality::Modality;
 
@@ -79,6 +79,9 @@ pub enum AuditKind<M: Modality> {
     Contested(Contested),
     /// The entity's confidence was rescaled by a per-recognizer factor.
     Calibrated(Calibrated),
+    /// Detection left the entity out: a layer rejected it, or another entity
+    /// superseded it.
+    Dropped(Dropped),
     /// A context keyword near the entity lifted its confidence.
     Refined(Refined<M>),
     /// An operator hid the entity.
@@ -140,6 +143,10 @@ impl<M: Modality> AuditKind<M> {
                 out.byte(Calibrated::TAG);
                 c.hash_into(out);
             }
+            Self::Dropped(d) => {
+                out.byte(Dropped::TAG);
+                d.hash_into(out);
+            }
             Self::Refined(r) => {
                 out.byte(Refined::<M>::TAG);
                 r.hash_into(out);
@@ -169,7 +176,7 @@ impl<M: Modality> AuditKind<M> {
 }
 
 // Each payload converts into its `AuditKind` variant, so a built payload flows
-// into `AuditEvent::new(source, confidence, payload.into())` without naming the
+// into `AuditEvent::new(confidence, payload.into())` without naming the
 // variant.
 
 impl<M: Modality> From<Pattern<M>> for AuditKind<M> {
@@ -193,6 +200,12 @@ impl<M: Modality> From<Flagged<M>> for AuditKind<M> {
 impl<M: Modality> From<Fused<M>> for AuditKind<M> {
     fn from(payload: Fused<M>) -> Self {
         Self::Fused(payload)
+    }
+}
+
+impl<M: Modality> From<Dropped> for AuditKind<M> {
+    fn from(payload: Dropped) -> Self {
+        Self::Dropped(payload)
     }
 }
 

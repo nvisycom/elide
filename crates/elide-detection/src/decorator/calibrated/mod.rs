@@ -7,7 +7,7 @@ mod calibration;
 mod multiplier;
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::AuditEvent;
+use elide_core::entity::audit::{AuditEvent, Calibrated as CalibratedEvent};
 use elide_core::modality::Modality;
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Component, Result};
@@ -51,12 +51,16 @@ impl<R> Calibrated<R> {
     }
 
     /// Scale each of `entities` by its label's multiplier.
-    fn calibrate<M: Modality>(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
+    fn calibrate<M: Modality>(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>>
+    where
+        R: Component,
+    {
         for entity in &mut entities {
             let factor = self.calibration.factor(entity.label());
             if factor != Multiplier::IDENTITY {
                 let scaled = entity.confidence().saturating_mul(factor.get());
-                entity.record(AuditEvent::calibrated(scaled, factor.get()));
+                let calibrated = CalibratedEvent::new(self.inner.id(), factor.get());
+                entity.record(AuditEvent::new(scaled, calibrated));
             }
         }
         entities
@@ -88,7 +92,7 @@ mod tests {
     use elide_core::entity::audit::{AuditKind, Pattern, PatternRule};
     use elide_core::entity::{Birth, builtins};
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use elide_core::recognition::Scope;
 
     use super::*;
@@ -113,9 +117,13 @@ mod tests {
             .map(|label| {
                 let at = TextLocation::inline(0..4);
                 Entity::new(Birth::new(
-                    "two-finds",
                     Confidence::MAX,
-                    Pattern::new(label, at, PatternRule::default()),
+                    Pattern::new(
+                        ComponentId::new("two-finds", "1"),
+                        label,
+                        at,
+                        PatternRule::default(),
+                    ),
                 ))
             })
             .collect())

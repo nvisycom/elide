@@ -37,9 +37,9 @@ impl DocumentLoader for JsonLoader {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::{Encode, Stream};
-    use elide_core::ErrorKind;
+    use elide_codec::Encode;
     use elide_core::redaction::HiddenContent;
+    use elide_core::{Component, ErrorKind};
 
     use super::*;
 
@@ -49,7 +49,7 @@ mod tests {
             handler: doc,
             stripped,
         } = JsonLoader.load(ContentData::from_text(r#"{"a":1}"#))?;
-        assert_eq!(doc.format().as_str(), "elide.text.json");
+        assert_eq!(doc.id().name, "elide.text.json");
         assert!(stripped.is_empty());
         Ok(())
     }

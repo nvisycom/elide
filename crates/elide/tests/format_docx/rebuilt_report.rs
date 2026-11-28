@@ -62,13 +62,12 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     );
 
     // The returned report carries the audit even on the re-decode path (this
-    // report had no cached handles): the applied body entities each end with
-    // a redaction event.
-    let audited = applied
+    // report had no cached handles): the applied body entities redaction
+    // considers each end with a redaction event.
+    let audited: Vec<_> = applied
         .part::<Text>(&doc2.id())
         .ok()
-        .map(|part| part.entities())
-        .map(|v| v.to_vec())
+        .map(|part| part.unsuppressed().cloned().collect())
         .unwrap_or_default();
     assert!(
         !audited.is_empty(),

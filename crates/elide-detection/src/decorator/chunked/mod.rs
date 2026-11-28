@@ -252,7 +252,7 @@ mod tests {
     use elide_core::entity::{Birth, Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
-    use elide_core::primitive::{Confidence, LanguageClaim, LanguageTag};
+    use elide_core::primitive::{ComponentId, Confidence, LanguageClaim, LanguageTag};
     use elide_core::recognition::{Scope, Subject};
 
     use super::*;
@@ -293,9 +293,14 @@ mod tests {
         fn entity_at(&self, label: &str, span: Range<usize>) -> Entity<Text> {
             let location = TextLocation::inline(span.clone());
             let confidence = Confidence::new(self.confidence).unwrap();
-            let found = Model::new(LabelRef::new(label), location, ModelId::new("model"))
-                .with_recognized_range(span);
-            Entity::new(Birth::new("finds-substring", confidence, found))
+            let found = Model::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new(label),
+                location,
+                ModelId::new("model"),
+            )
+            .with_recognized_range(span);
+            Entity::new(Birth::new(confidence, found))
         }
     }
 

@@ -87,7 +87,7 @@ async fn catalog_with_neither_candidate_emits_the_most_specific() {
     // most-specific one: the recognizer always emits, so reconciliation can use
     // a strong out-of-catalog match to subsume a weak in-catalog one nested in
     // it. Restricting the output to the catalog is a downstream, post-reconcile
-    // concern (`LabelCatalog::retain_declared`), not the recognizer's job.
+    // concern (the analyzer's `CatalogFilter`), not the recognizer's job.
     let scope = Scope::new().with_catalog(catalog_of(&[&builtins::EMAIL_ADDRESS.to_ref()]));
     assert_eq!(
         emitted_label(&recognizer, &scope).await,

@@ -1,6 +1,7 @@
 //! [`ImageLocation`]: a 2-D region within image content.
 
 use std::cmp::Ordering;
+use std::num::NonZeroU32;
 
 use elide_core::modality::{ModalityLocation, Overlap};
 #[cfg(feature = "serde")]
@@ -32,7 +33,7 @@ pub struct ImageLocation {
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub page: Option<u32>,
+    pub page: Option<NonZeroU32>,
 }
 
 impl ImageLocation {
@@ -47,7 +48,7 @@ impl ImageLocation {
 
     /// Set the page number.
     #[must_use]
-    pub fn with_page(mut self, page: u32) -> Self {
+    pub fn with_page(mut self, page: NonZeroU32) -> Self {
         self.page = Some(page);
         self
     }
@@ -117,10 +118,10 @@ impl ModalityLocation for ImageLocation {
     }
 
     fn position_cmp(&self, other: &Self) -> Ordering {
-        // Reading order: page, then top-to-bottom, then left-to-right.
+        // Reading order: page (an unpaged region first), then top-to-bottom,
+        // then left-to-right.
         self.page
-            .unwrap_or(0)
-            .cmp(&other.page.unwrap_or(0))
+            .cmp(&other.page)
             .then(self.bounding_box.min.y.total_cmp(&other.bounding_box.min.y))
             .then(self.bounding_box.min.x.total_cmp(&other.bounding_box.min.x))
     }
@@ -146,7 +147,7 @@ impl ModalityLocation for ImageLocation {
         match self.page {
             Some(page) => {
                 bytes.push(1);
-                bytes.extend_from_slice(&page.to_le_bytes());
+                bytes.extend_from_slice(&page.get().to_le_bytes());
             }
             None => bytes.push(0),
         }
@@ -158,6 +159,10 @@ impl ModalityLocation for ImageLocation {
 mod tests {
     use super::*;
     use crate::primitive::{Dimensions, Point};
+
+    fn page(number: u32) -> NonZeroU32 {
+        NonZeroU32::new(number).unwrap()
+    }
 
     /// A location over the box at `(x, y)` sized `w` by `h`.
     fn loc([x, y, w, h]: [f64; 4]) -> ImageLocation {
@@ -172,7 +177,7 @@ mod tests {
         let a = loc([0.0, 0.0, 10.0, 10.0]);
         let b = loc([5.0, 5.0, 10.0, 10.0]);
         assert!(a.overlaps(&b));
-        let b_page2 = b.with_page(2);
+        let b_page2 = b.with_page(page(2));
         assert!(!a.overlaps(&b_page2));
     }
 
@@ -190,7 +195,7 @@ mod tests {
         assert!(
             !triangle
                 .clone()
-                .with_page(2)
+                .with_page(page(2))
                 .covers(&loc([1.0, 1.0, 2.0, 2.0]))
         );
     }

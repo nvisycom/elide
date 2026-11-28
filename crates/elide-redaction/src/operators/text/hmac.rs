@@ -123,7 +123,7 @@ mod tests {
     use elide_core::entity::Birth;
     use elide_core::entity::audit::{Pattern, PatternRule};
     use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{ComponentId, Confidence};
     use zeroize::Zeroizing;
 
     use super::*;
@@ -131,9 +131,13 @@ mod tests {
     fn entity(label: &str) -> Entity<Text> {
         let location = TextLocation::inline(0..5);
         Entity::new(Birth::new(
-            "t",
             Confidence::MAX,
-            Pattern::new(LabelRef::new(label), location, PatternRule::default()),
+            Pattern::new(
+                ComponentId::new("t", "1"),
+                LabelRef::new(label),
+                location,
+                PatternRule::default(),
+            ),
         ))
     }
 

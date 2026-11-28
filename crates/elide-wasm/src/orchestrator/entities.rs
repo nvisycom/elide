@@ -7,6 +7,7 @@
 //! holds and from the enrichment artifacts for what OCR or a transcript holds.
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 use elide::entity::Entity as RustEntity;
@@ -20,7 +21,7 @@ use elide::modality::text::{Text, TextLocation};
 use elide::primitive::Confidence;
 use elide::{AnalyzedDocument, Document, Orchestrator, PartId, Report};
 
-use super::report::{Entity, Location, Rect, Redaction, Rendered, Source, Span};
+use super::report::{Dropped, Entity, Location, Rect, Redaction, Rendered, Source, Span};
 
 /// What an entity matched, read before redaction.
 pub(super) struct Matched {
@@ -88,7 +89,7 @@ struct TextGroup<'r> {
     /// The part the text is in.
     part: PartId,
     /// The page the text is on, for a rendered part.
-    page: Option<u32>,
+    page: Option<NonZeroU32>,
     /// A location of one of the entities, to anchor the read on its page.
     anchor: &'r TextLocation,
     /// The entities and their spans, ascending by start.
@@ -104,7 +105,7 @@ impl Reader<'_> {
     /// of the UTF-16 units before each.
     async fn text(&mut self) {
         let mut groups: Vec<TextGroup<'_>> = Vec::new();
-        let mut index: HashMap<(PartId, Option<u32>), usize> = HashMap::new();
+        let mut index: HashMap<(PartId, Option<NonZeroU32>), usize> = HashMap::new();
         for (part, entity) in entities_of::<Text>(self.report) {
             // A hidden item flagged whole has no span of its own to read.
             let Some(span) = entity.location().range() else {
@@ -206,7 +207,7 @@ impl Reader<'_> {
 ///
 /// A page's text is read by its span and page; the `anchor` entity's regions
 /// only keep the location rendered, since a rendered location has at least one.
-fn prefix(anchor: &TextLocation, page: Option<u32>, end: usize) -> TextLocation {
+fn prefix(anchor: &TextLocation, page: Option<NonZeroU32>, end: usize) -> TextLocation {
     match page {
         Some(page) => TextLocation::rendered(0..end, page, anchor.rects().to_vec()),
         None => TextLocation::inline(0..end),
@@ -252,7 +253,7 @@ pub(super) fn to_entities(report: &Report, values: Values) -> Vec<Entity> {
     out.push::<Text>(|entity, utf16| {
         let span = entity.location().range().cloned().unwrap_or_default();
         let rendered = entity.location().page().map(|page| Rendered {
-            page,
+            page: page.get(),
             rects: entity.location().rects().iter().map(Rect::from).collect(),
         });
         Location::Text {
@@ -324,6 +325,7 @@ impl Collected<'_> {
                 coref: entity.coref().map(|coref| coref.as_str().to_owned()),
                 sources: sources(entity),
                 redaction: redaction(entity),
+                dropped: dropped(entity),
                 id,
             });
         }
@@ -336,16 +338,29 @@ fn sources<M: Modality>(entity: &RustEntity<M>) -> Vec<Source> {
         .audit()
         .events()
         .iter()
-        .filter(|event| event.is_recognition())
-        .map(|event| Source {
-            recognizer: event.source.to_string(),
-            model: match &event.kind {
-                AuditKind::Model(model) => Some(model.model.name.to_string()),
-                _ => None,
-            },
-            confidence: decimal(event.confidence),
+        .filter_map(|event| {
+            let (recognizer, model) = match &event.kind {
+                AuditKind::Pattern(pattern) => (&pattern.recognizer, None),
+                AuditKind::Model(model) => (&model.recognizer, Some(model.model.name.to_string())),
+                AuditKind::Flagged(flagged) => (&flagged.flagged_by, None),
+                _ => return None,
+            };
+            Some(Source {
+                recognizer: recognizer.name.to_string(),
+                version: recognizer.version.to_string(),
+                model,
+                confidence: decimal(event.confidence),
+            })
         })
         .collect()
+}
+
+/// Why detection left `entity` out, when it did.
+fn dropped<M: Modality>(entity: &RustEntity<M>) -> Option<Dropped> {
+    entity.audit().dropped().map(|dropped| Dropped {
+        by: dropped.by.name.to_string(),
+        superseded_by: dropped.superseded_by.map(|winner| winner.to_string()),
+    })
 }
 
 /// The redaction applied to `entity`: the operator the applied selection
